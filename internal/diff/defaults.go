@@ -11,7 +11,9 @@ import (
 	autoscalingv2 "k8s.io/api/autoscaling/v2"
 	batchv1 "k8s.io/api/batch/v1"
 	corev1 "k8s.io/api/core/v1"
+	discoveryv1 "k8s.io/api/discovery/v1"
 	networkingv1 "k8s.io/api/networking/v1"
+	rbacv1 "k8s.io/api/rbac/v1"
 	schedulingv1 "k8s.io/api/scheduling/v1"
 	storagev1 "k8s.io/api/storage/v1"
 	"k8s.io/apimachinery/pkg/api/resource"
@@ -50,6 +52,14 @@ func applyDefaults(obj runtime.Object) {
 		}
 	case *corev1.PersistentVolumeClaim:
 		defaultPVC(t)
+	case *corev1.PersistentVolume:
+		defaultPV(t)
+	case *corev1.LimitRange:
+		for i := range t.Spec.Limits {
+			defaultLimitRangeItem(&t.Spec.Limits[i])
+		}
+	case *corev1.ResourceQuota:
+		roundResourceList(t.Spec.Hard)
 	case *corev1.Namespace:
 		if t.Name != "" {
 			if t.Labels == nil {
@@ -106,6 +116,39 @@ func applyDefaults(obj runtime.Object) {
 			w := &t.Webhooks[i]
 			defaultWebhookV1beta1(&w.FailurePolicy, &w.MatchPolicy, &w.NamespaceSelector, &w.ObjectSelector, &w.SideEffects, &w.TimeoutSeconds, &w.AdmissionReviewVersions, w.Rules, &w.ClientConfig)
 		}
+	case *admissionregistrationv1.ValidatingAdmissionPolicy:
+		if t.Spec.FailurePolicy == nil {
+			t.Spec.FailurePolicy = ptr.To(admissionregistrationv1.Fail)
+		}
+		defaultMatchResources(t.Spec.MatchConstraints)
+	case *admissionregistrationv1.ValidatingAdmissionPolicyBinding:
+		defaultMatchResources(t.Spec.MatchResources)
+	case *admissionregistrationv1.MutatingAdmissionPolicy:
+		if t.Spec.FailurePolicy == nil {
+			t.Spec.FailurePolicy = ptr.To(admissionregistrationv1.Fail)
+		}
+		defaultMatchResources(t.Spec.MatchConstraints)
+	case *admissionregistrationv1.MutatingAdmissionPolicyBinding:
+		defaultMatchResources(t.Spec.MatchResources)
+	case *rbacv1.ClusterRoleBinding:
+		defaultRoleBinding(&t.RoleRef, t.Subjects)
+	case *rbacv1.RoleBinding:
+		defaultRoleBinding(&t.RoleRef, t.Subjects)
+	case *networkingv1.IngressClass:
+		if p := t.Spec.Parameters; p != nil && p.Scope == nil {
+			p.Scope = ptr.To(networkingv1.IngressClassParametersReferenceScopeCluster)
+		}
+	case *discoveryv1.EndpointSlice:
+		for i := range t.Ports {
+			if t.Ports[i].Name == nil {
+				t.Ports[i].Name = ptr.To("")
+			}
+			if t.Ports[i].Protocol == nil {
+				t.Ports[i].Protocol = ptr.To(corev1.ProtocolTCP)
+			}
+		}
+	case *storagev1.CSIDriver:
+		defaultCSIDriver(&t.Spec)
 	case *storagev1.StorageClass:
 		if t.ReclaimPolicy == nil {
 			t.ReclaimPolicy = ptr.To(corev1.PersistentVolumeReclaimDelete)
@@ -144,6 +187,84 @@ func defaultPod(p *corev1.Pod) {
 	if p.Spec.HostNetwork {
 		defaultHostNetworkPorts(p.Spec.Containers)
 		defaultHostNetworkPorts(p.Spec.InitContainers)
+	}
+	// Pod-level requests are defaulted after the container-level requests.
+	defaultPodLevelRequests(&p.Spec)
+}
+
+// defaultPodLevelRequests defaults pod-level requests when pod-level limits are set
+// (PodLevelResources, enabled by default since Kubernetes 1.34): CPU and memory default to
+// the effective requests of the containers, then any supported resource still missing
+// (CPU, memory, hugepages) defaults to its pod-level limit.
+func defaultPodLevelRequests(s *corev1.PodSpec) {
+	if s.Resources == nil || len(s.Resources.Limits) == 0 {
+		return
+	}
+	reqs := s.Resources.Requests
+	if reqs == nil {
+		reqs = corev1.ResourceList{}
+	}
+	for name, q := range effectiveContainerRequests(s) {
+		if _, ok := reqs[name]; !ok && (name == corev1.ResourceCPU || name == corev1.ResourceMemory) {
+			reqs[name] = q
+		}
+	}
+	for name, q := range s.Resources.Limits {
+		supported := name == corev1.ResourceCPU || name == corev1.ResourceMemory ||
+			strings.HasPrefix(string(name), corev1.ResourceHugePagesPrefix)
+		if _, ok := reqs[name]; !ok && supported {
+			reqs[name] = q.DeepCopy()
+		}
+	}
+	if len(reqs) > 0 {
+		s.Resources.Requests = reqs
+	}
+}
+
+// effectiveContainerRequests aggregates container requests the way the scheduler does: the
+// sum of regular and restartable init (sidecar) containers, or for each resource the largest
+// request of a regular init container plus the sidecars started before it, whichever is
+// greater.
+func effectiveContainerRequests(s *corev1.PodSpec) corev1.ResourceList {
+	reqs := corev1.ResourceList{}
+	for i := range s.Containers {
+		addResources(reqs, s.Containers[i].Resources.Requests)
+	}
+	sidecars, initMax := corev1.ResourceList{}, corev1.ResourceList{}
+	for i := range s.InitContainers {
+		c := &s.InitContainers[i]
+		var effective corev1.ResourceList
+		if c.RestartPolicy != nil && *c.RestartPolicy == corev1.ContainerRestartPolicyAlways {
+			addResources(reqs, c.Resources.Requests)
+			addResources(sidecars, c.Resources.Requests)
+			effective = sidecars
+		} else {
+			effective = corev1.ResourceList{}
+			addResources(effective, c.Resources.Requests)
+			addResources(effective, sidecars)
+		}
+		maxResources(initMax, effective)
+	}
+	maxResources(reqs, initMax)
+	return reqs
+}
+
+func addResources(dst, src corev1.ResourceList) {
+	for name, q := range src {
+		if cur, ok := dst[name]; ok {
+			cur.Add(q)
+			dst[name] = cur
+		} else {
+			dst[name] = q.DeepCopy()
+		}
+	}
+}
+
+func maxResources(dst, src corev1.ResourceList) {
+	for name, q := range src {
+		if cur, ok := dst[name]; !ok || q.Cmp(cur) > 0 {
+			dst[name] = q.DeepCopy()
+		}
 	}
 }
 
@@ -273,6 +394,9 @@ func defaultProbe(p *corev1.Probe) {
 		p.FailureThreshold = 3
 	}
 	defaultHTTPGet(p.HTTPGet)
+	if p.GRPC != nil && p.GRPC.Service == nil {
+		p.GRPC.Service = ptr.To("")
+	}
 }
 
 func defaultHTTPGet(h *corev1.HTTPGetAction) {
@@ -334,6 +458,54 @@ func defaultVolume(v *corev1.Volume) {
 	if v.Ephemeral != nil && v.Ephemeral.VolumeClaimTemplate != nil {
 		defaultPVCSpec(&v.Ephemeral.VolumeClaimTemplate.Spec)
 	}
+	if v.ISCSI != nil && v.ISCSI.ISCSIInterface == "" {
+		v.ISCSI.ISCSIInterface = "default"
+	}
+	if v.RBD != nil {
+		defaultRBD(&v.RBD.RBDPool, &v.RBD.RadosUser, &v.RBD.Keyring)
+	}
+	if v.AzureDisk != nil {
+		defaultAzureDisk(v.AzureDisk)
+	}
+	if v.ScaleIO != nil {
+		defaultScaleIO(&v.ScaleIO.StorageMode, &v.ScaleIO.FSType)
+	}
+}
+
+func defaultRBD(pool, user, keyring *string) {
+	if *pool == "" {
+		*pool = "rbd"
+	}
+	if *user == "" {
+		*user = "admin"
+	}
+	if *keyring == "" {
+		*keyring = "/etc/ceph/keyring"
+	}
+}
+
+func defaultAzureDisk(a *corev1.AzureDiskVolumeSource) {
+	if a.CachingMode == nil {
+		a.CachingMode = ptr.To(corev1.AzureDataDiskCachingReadWrite)
+	}
+	if a.Kind == nil {
+		a.Kind = ptr.To(corev1.AzureSharedBlobDisk)
+	}
+	if a.FSType == nil {
+		a.FSType = ptr.To("ext4")
+	}
+	if a.ReadOnly == nil {
+		a.ReadOnly = ptr.To(false)
+	}
+}
+
+func defaultScaleIO(storageMode, fsType *string) {
+	if *storageMode == "" {
+		*storageMode = "ThinProvisioned"
+	}
+	if *fsType == "" {
+		*fsType = "xfs"
+	}
 }
 
 func volumeSourceEmpty(vs *corev1.VolumeSource) bool {
@@ -360,6 +532,126 @@ func defaultPVCSpec(s *corev1.PersistentVolumeClaimSpec) {
 	}
 	roundResourceList(s.Resources.Limits)
 	roundResourceList(s.Resources.Requests)
+}
+
+func defaultPV(pv *corev1.PersistentVolume) {
+	if pv.Status.Phase == "" {
+		pv.Status.Phase = corev1.VolumePending
+	}
+	if pv.Spec.PersistentVolumeReclaimPolicy == "" {
+		pv.Spec.PersistentVolumeReclaimPolicy = corev1.PersistentVolumeReclaimRetain
+	}
+	if pv.Spec.VolumeMode == nil {
+		pv.Spec.VolumeMode = ptr.To(corev1.PersistentVolumeFilesystem)
+	}
+	roundResourceList(pv.Spec.Capacity)
+	src := &pv.Spec.PersistentVolumeSource
+	if src.HostPath != nil && src.HostPath.Type == nil {
+		src.HostPath.Type = ptr.To(corev1.HostPathUnset)
+	}
+	if src.ISCSI != nil && src.ISCSI.ISCSIInterface == "" {
+		src.ISCSI.ISCSIInterface = "default"
+	}
+	if src.RBD != nil {
+		defaultRBD(&src.RBD.RBDPool, &src.RBD.RadosUser, &src.RBD.Keyring)
+	}
+	if src.AzureDisk != nil {
+		defaultAzureDisk(src.AzureDisk)
+	}
+	if src.ScaleIO != nil {
+		defaultScaleIO(&src.ScaleIO.StorageMode, &src.ScaleIO.FSType)
+	}
+}
+
+// defaultLimitRangeItem: for container limits, the default limit falls back to max, the
+// default request to the default limit and then to min. All quantities are rounded.
+func defaultLimitRangeItem(item *corev1.LimitRangeItem) {
+	if item.Type == corev1.LimitTypeContainer {
+		if item.Default == nil {
+			item.Default = corev1.ResourceList{}
+		}
+		if item.DefaultRequest == nil {
+			item.DefaultRequest = corev1.ResourceList{}
+		}
+		for name, q := range item.Max {
+			if _, ok := item.Default[name]; !ok {
+				item.Default[name] = q.DeepCopy()
+			}
+		}
+		for name, q := range item.Default {
+			if _, ok := item.DefaultRequest[name]; !ok {
+				item.DefaultRequest[name] = q.DeepCopy()
+			}
+		}
+		for name, q := range item.Min {
+			if _, ok := item.DefaultRequest[name]; !ok {
+				item.DefaultRequest[name] = q.DeepCopy()
+			}
+		}
+	}
+	for _, rl := range []corev1.ResourceList{item.Max, item.Min, item.Default, item.DefaultRequest, item.MaxLimitRequestRatio} {
+		roundResourceList(rl)
+	}
+}
+
+// defaultRoleBinding defaults the role reference API group and the API group of User and
+// Group subjects to rbac.authorization.k8s.io.
+func defaultRoleBinding(ref *rbacv1.RoleRef, subjects []rbacv1.Subject) {
+	if ref.APIGroup == "" {
+		ref.APIGroup = rbacv1.GroupName
+	}
+	for i := range subjects {
+		if subjects[i].APIGroup == "" && (subjects[i].Kind == rbacv1.UserKind || subjects[i].Kind == rbacv1.GroupKind) {
+			subjects[i].APIGroup = rbacv1.GroupName
+		}
+	}
+}
+
+func defaultCSIDriver(s *storagev1.CSIDriverSpec) {
+	if s.AttachRequired == nil {
+		s.AttachRequired = ptr.To(true)
+	}
+	if s.PodInfoOnMount == nil {
+		s.PodInfoOnMount = ptr.To(false)
+	}
+	if s.StorageCapacity == nil {
+		s.StorageCapacity = ptr.To(false)
+	}
+	if s.FSGroupPolicy == nil {
+		s.FSGroupPolicy = ptr.To(storagev1.ReadWriteOnceWithFSTypeFSGroupPolicy)
+	}
+	if len(s.VolumeLifecycleModes) == 0 {
+		s.VolumeLifecycleModes = []storagev1.VolumeLifecycleMode{storagev1.VolumeLifecyclePersistent}
+	}
+	if s.RequiresRepublish == nil {
+		s.RequiresRepublish = ptr.To(false)
+	}
+	if s.SELinuxMount == nil {
+		s.SELinuxMount = ptr.To(false)
+	}
+}
+
+// defaultMatchResources applies the admission policy (and binding) match defaults.
+func defaultMatchResources(m *admissionregistrationv1.MatchResources) {
+	if m == nil {
+		return
+	}
+	if m.MatchPolicy == nil {
+		m.MatchPolicy = ptr.To(admissionregistrationv1.Equivalent)
+	}
+	if m.NamespaceSelector == nil {
+		m.NamespaceSelector = &metav1.LabelSelector{}
+	}
+	if m.ObjectSelector == nil {
+		m.ObjectSelector = &metav1.LabelSelector{}
+	}
+	for _, rules := range [][]admissionregistrationv1.NamedRuleWithOperations{m.ResourceRules, m.ExcludeResourceRules} {
+		for i := range rules {
+			if rules[i].Scope == nil {
+				rules[i].Scope = ptr.To(admissionregistrationv1.AllScopes)
+			}
+		}
+	}
 }
 
 // roundResourceList rounds quantities up to milli precision, like the API server does.
@@ -415,7 +707,9 @@ func defaultService(s *corev1.Service) {
 		}
 	}
 	t := s.Spec.Type
-	if (t == corev1.ServiceTypeNodePort || t == corev1.ServiceTypeLoadBalancer) && s.Spec.ExternalTrafficPolicy == "" {
+	externallyAccessible := t == corev1.ServiceTypeNodePort || t == corev1.ServiceTypeLoadBalancer ||
+		(t == corev1.ServiceTypeClusterIP && len(s.Spec.ExternalIPs) > 0)
+	if externallyAccessible && s.Spec.ExternalTrafficPolicy == "" {
 		s.Spec.ExternalTrafficPolicy = corev1.ServiceExternalTrafficPolicyCluster
 	}
 	if s.Spec.InternalTrafficPolicy == nil && (t == corev1.ServiceTypeNodePort || t == corev1.ServiceTypeLoadBalancer || t == corev1.ServiceTypeClusterIP) {

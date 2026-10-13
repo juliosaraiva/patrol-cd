@@ -112,7 +112,7 @@ func (s *githubService) Send(ctx context.Context, n Notification, _ Destination)
 		}
 	}
 	if gh.Deployment != nil {
-		if err := s.createDeployment(ctx, repoAPI, sha, gh.Deployment); err != nil {
+		if err := s.createDeployment(ctx, repoAPI, sha, n.Message, gh.Deployment); err != nil {
 			return err
 		}
 	}
@@ -161,7 +161,7 @@ func (s *githubService) createStatus(ctx context.Context, repoAPI, sha, message 
 	return err
 }
 
-func (s *githubService) createDeployment(ctx context.Context, repoAPI, sha string, d *GitHubDeployment) error {
+func (s *githubService) createDeployment(ctx context.Context, repoAPI, sha, message string, d *GitHubDeployment) error {
 	ref := firstNonEmpty(d.Reference, sha)
 	q := url.Values{}
 	q.Set("ref", ref)
@@ -202,6 +202,7 @@ func (s *githubService) createDeployment(ctx context.Context, repoAPI, sha strin
 		return fmt.Errorf("%w: github: deployment id missing in response", ErrDeliveryFailed)
 	}
 	status := map[string]any{"state": d.State}
+	setIf(status, "description", truncateRunes(message, githubMaxStatusDescription))
 	setIf(status, "log_url", d.LogURL)
 	setIf(status, "environment_url", d.EnvironmentURL)
 	setIf(status, "environment", d.Environment)

@@ -924,10 +924,12 @@ spec:
                       (unless HydrateTo is set) and synced from.
                     properties:
                       path:
-                        description: Path is the directory of hydrated manifests.
-                          It must not be the repository root.
+                        description: |-
+                          Path is the directory of hydrated manifests. It must not be the repository root: it must contain
+                          a character other than "." and "/" (Argo CD's pattern ^.{2,}|[^./]$ also accepts "./", "//" and
+                          "..").
                         minLength: 1
-                        pattern: ^.{2,}|[^./]$
+                        pattern: '[^./]'
                         type: string
                       repoURL:
                         description: RepoURL is the repository of hydrated manifests.
@@ -1408,7 +1410,9 @@ spec:
                   syncOptions:
                     description: SyncOptions are Application-wide sync options ("Key=Value").
                     items:
+                      maxLength: 256
                       type: string
+                    maxItems: 64
                     type: array
                 type: object
             required:
@@ -1424,6 +1428,9 @@ spec:
                 must be set
               rule: (has(self.destination.server) && self.destination.server != '')
                 != (has(self.destination.name) && self.destination.name != '')
+            - message: spec.syncPolicy.syncOptions entries must have the form Key=Value
+              rule: '!has(self.syncPolicy) || !has(self.syncPolicy.syncOptions) ||
+                self.syncPolicy.syncOptions.all(o, o.matches(''^[A-Za-z][A-Za-z0-9]*=[[:graph:]]+$''))'
           status:
             description: Status is the observed state of the Application, written
               by the controller.
@@ -3722,10 +3729,12 @@ spec:
                               committed (unless HydrateTo is set) and synced from.
                             properties:
                               path:
-                                description: Path is the directory of hydrated manifests.
-                                  It must not be the repository root.
+                                description: |-
+                                  Path is the directory of hydrated manifests. It must not be the repository root: it must contain
+                                  a character other than "." and "/" (Argo CD's pattern ^.{2,}|[^./]$ also accepts "./", "//" and
+                                  "..").
                                 minLength: 1
-                                pattern: ^.{2,}|[^./]$
+                                pattern: '[^./]'
                                 type: string
                               repoURL:
                                 description: RepoURL is the repository of hydrated
@@ -4173,10 +4182,12 @@ spec:
                               committed (unless HydrateTo is set) and synced from.
                             properties:
                               path:
-                                description: Path is the directory of hydrated manifests.
-                                  It must not be the repository root.
+                                description: |-
+                                  Path is the directory of hydrated manifests. It must not be the repository root: it must contain
+                                  a character other than "." and "/" (Argo CD's pattern ^.{2,}|[^./]$ also accepts "./", "//" and
+                                  "..").
                                 minLength: 1
-                                pattern: ^.{2,}|[^./]$
+                                pattern: '[^./]'
                                 type: string
                               repoURL:
                                 description: RepoURL is the repository of hydrated

@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"strings"
 
 	jsonpatch "github.com/evanphx/json-patch/v5"
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
@@ -284,12 +285,47 @@ func withTypedDefaults(data []byte, newTyped func() (runtime.Object, error)) ([]
 	return canonicalJSON(data)
 }
 
+// strategicPatch applies a defaults patch. When the patch introduces a whole structure that
+// data does not have, the strategic merge copies the patch value verbatim, including
+// directives such as $retainKeys; they are removed so they never surface as fields. Built-in
+// Kubernetes types have no field names starting with "$".
 func strategicPatch(data, patch []byte, schemaObj runtime.Object) ([]byte, error) {
 	out, err := strategicpatch.StrategicMergePatch(data, patch, schemaObj.DeepCopyObject())
 	if err != nil {
 		return nil, fmt.Errorf("apply defaults patch: %w", err)
 	}
+	if !bytes.Contains(out, []byte(`"$`)) {
+		return out, nil
+	}
+	m, err := decodeObject(out)
+	if err != nil {
+		return nil, err
+	}
+	stripPatchDirectives(m)
+	out, err = json.Marshal(m)
+	if err != nil {
+		return nil, fmt.Errorf("encode defaulted object: %w", err)
+	}
 	return out, nil
+}
+
+// stripPatchDirectives removes strategic-merge-patch directive keys ($retainKeys, $patch,
+// $setElementOrder/..., $deleteFromPrimitiveList/...) from v in place.
+func stripPatchDirectives(v any) {
+	switch t := v.(type) {
+	case map[string]any:
+		for k, child := range t {
+			if strings.HasPrefix(k, "$") {
+				delete(t, k)
+				continue
+			}
+			stripPatchDirectives(child)
+		}
+	case []any:
+		for _, child := range t {
+			stripPatchDirectives(child)
+		}
+	}
 }
 
 // defaultsPatch returns the strategic merge patch that turns obj into its defaulted form.

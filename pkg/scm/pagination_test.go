@@ -49,7 +49,7 @@ func TestCollectPagesProperties(t *testing.T) {
 		if err != nil {
 			t.Fatalf("unexpected error: %v", err)
 		}
-		if !slices.Equal(got, items) && !(len(got) == 0 && len(items) == 0) {
+		if !slices.Equal(got, items) && (len(got) != 0 || len(items) != 0) {
 			t.Fatalf("got %v, want %v", got, items)
 		}
 		if calls != pages {

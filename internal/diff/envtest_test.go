@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"os"
+	"sync"
 	"testing"
 	"time"
 
@@ -78,32 +79,72 @@ func (k *kubeDryRunner) create(ctx context.Context, u *unstructured.Unstructured
 	return ri.Create(ctx, u, metav1.CreateOptions{FieldManager: "kubectl-client-side-apply"})
 }
 
+// Shared envtest control plane: started lazily by the first test that needs it and stopped
+// in TestMain, so several envtest-backed tests pay the start-up cost once.
+var (
+	envOnce   sync.Once
+	testEnv   *envtest.Environment
+	envClient *kubeDryRunner
+	envParser *managedfields.GvkParser
+	envErr    error
+)
+
+// envtestClients returns a client for the shared envtest API server and a GvkParser built
+// from its OpenAPI document. The test is skipped when KUBEBUILDER_ASSETS is not set.
+func envtestClients(t *testing.T) (*kubeDryRunner, *managedfields.GvkParser) {
+	t.Helper()
+	if os.Getenv("KUBEBUILDER_ASSETS") == "" {
+		t.Skip("KUBEBUILDER_ASSETS not set; skipping envtest-backed test")
+	}
+	envOnce.Do(func() {
+		testEnv = &envtest.Environment{}
+		cfg, err := testEnv.Start()
+		if err != nil {
+			envErr = err
+			return
+		}
+		dc, err := discovery.NewDiscoveryClientForConfig(cfg)
+		if err != nil {
+			envErr = err
+			return
+		}
+		dyn, err := dynamic.NewForConfig(cfg)
+		if err != nil {
+			envErr = err
+			return
+		}
+		envClient = &kubeDryRunner{client: dyn, mapper: restmapper.NewDeferredDiscoveryRESTMapper(memory.NewMemCacheClient(dc))}
+		doc, err := dc.OpenAPISchema()
+		if err != nil {
+			envErr = err
+			return
+		}
+		models, err := openapiproto.NewOpenAPIData(doc)
+		if err != nil {
+			envErr = err
+			return
+		}
+		envParser, envErr = managedfields.NewGVKParser(models, false)
+	})
+	require.NoError(t, envErr)
+	return envClient, envParser
+}
+
+func TestMain(m *testing.M) {
+	code := m.Run()
+	if testEnv != nil {
+		_ = testEnv.Stop()
+	}
+	os.Exit(code)
+}
+
 // TestEnvtestStrategiesAgree applies manifests to a real kube-apiserver and checks that the
 // three strategies report no drift for freshly applied objects (with real server defaults)
 // and report drift for real changes.
 func TestEnvtestStrategiesAgree(t *testing.T) {
-	if os.Getenv("KUBEBUILDER_ASSETS") == "" {
-		t.Skip("KUBEBUILDER_ASSETS not set; skipping envtest-backed test")
-	}
-	env := &envtest.Environment{}
-	cfg, err := env.Start()
-	require.NoError(t, err)
-	t.Cleanup(func() { _ = env.Stop() })
-
+	k, p := envtestClients(t)
 	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Minute)
 	defer cancel()
-
-	dc, err := discovery.NewDiscoveryClientForConfig(cfg)
-	require.NoError(t, err)
-	dyn, err := dynamic.NewForConfig(cfg)
-	require.NoError(t, err)
-	k := &kubeDryRunner{client: dyn, mapper: restmapper.NewDeferredDiscoveryRESTMapper(memory.NewMemCacheClient(dc))}
-	doc, err := dc.OpenAPISchema()
-	require.NoError(t, err)
-	models, err := openapiproto.NewOpenAPIData(doc)
-	require.NoError(t, err)
-	p, err := managedfields.NewGVKParser(models, false)
-	require.NoError(t, err)
 
 	manifests := []string{deployConfig, serviceConfig, stsConfig, webhookConfig}
 	for i, m := range manifests {

@@ -2,6 +2,7 @@ package notifications
 
 import (
 	"bytes"
+	"errors"
 	"fmt"
 	"reflect"
 	"strings"
@@ -103,8 +104,19 @@ func applyTemplateDefaults(name string, n services.Notification) services.Notifi
 	return n
 }
 
+// validateTemplate reports definitions the baseline rejects when building templates.
+func validateTemplate(def services.Notification) error {
+	if gh := def.GitHub; gh != nil && gh.Status == nil && gh.Deployment == nil && gh.PullRequestComment == nil && gh.CheckRun == nil {
+		return errors.New("github: at least one of {status, deployment, pullRequestComment, checkRun} must be specified")
+	}
+	return nil
+}
+
 // compileTemplate parses every string of the template definition once.
 func compileTemplate(name string, def services.Notification) (*compiledTemplate, error) {
+	if err := validateTemplate(def); err != nil {
+		return nil, err
+	}
 	def = applyTemplateDefaults(name, def)
 	v := reflect.ValueOf(def)
 	ct := &compiledTemplate{name: name}

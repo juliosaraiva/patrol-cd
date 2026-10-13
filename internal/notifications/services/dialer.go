@@ -80,5 +80,30 @@ func addrAllowed(a netip.Addr, opts GuardOptions) bool {
 			return false
 		}
 	}
+	// IPv6 forms that embed an IPv4 destination (NAT64 well-known prefix, 6to4) are judged
+	// by the embedded address so that e.g. 64:ff9b::7f00:1 cannot reach 127.0.0.1 through a
+	// NAT64 gateway.
+	if v4, ok := embeddedIPv4(a); ok {
+		return addrAllowed(v4, opts)
+	}
 	return true
+}
+
+var (
+	nat64WellKnown = netip.MustParsePrefix("64:ff9b::/96")
+	sixToFour      = netip.MustParsePrefix("2002::/16")
+)
+
+func embeddedIPv4(a netip.Addr) (netip.Addr, bool) {
+	if !a.Is6() {
+		return netip.Addr{}, false
+	}
+	b := a.As16()
+	switch {
+	case nat64WellKnown.Contains(a):
+		return netip.AddrFrom4([4]byte{b[12], b[13], b[14], b[15]}), true
+	case sixToFour.Contains(a):
+		return netip.AddrFrom4([4]byte{b[2], b[3], b[4], b[5]}), true
+	}
+	return netip.Addr{}, false
 }

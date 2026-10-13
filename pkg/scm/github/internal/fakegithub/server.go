@@ -137,6 +137,8 @@ type Server struct {
 	faults        []*fault
 	requests      []Request
 	remaining     int
+	rejectTokens  bool
+	statusLimit   int
 	now           func() time.Time
 }
 
@@ -208,6 +210,14 @@ func (s *Server) AddInstallation(i Installation) {
 // RevokeTokens invalidates every issued installation token.
 func (s *Server) RevokeTokens() { s.mu.Lock(); s.tokens = map[string]issuedToken{}; s.mu.Unlock() }
 
+// RejectInstallationTokens makes every installation token (including newly minted ones)
+// fail authentication with 401 while reject is true.
+func (s *Server) RejectInstallationTokens(reject bool) {
+	s.mu.Lock()
+	s.rejectTokens = reject
+	s.mu.Unlock()
+}
+
 // InjectRateLimit makes the next n requests (n <= 0: all) fail with a primary rate-limit
 // 403 advertising a reset after d.
 func (s *Server) InjectRateLimit(d time.Duration, n int) {
@@ -236,6 +246,10 @@ func (s *Server) FailNext(n, status int) {
 	s.addFault(&fault{status: status, header: http.Header{}, remaining: n,
 		body: fmt.Sprintf(`{"message":%q}`, http.StatusText(status))})
 }
+
+// SetStatusLimit makes POST /statuses fail with GitHub's 422 "maximum number of
+// statuses" error once n statuses exist for a (SHA, context); 0 disables the limit.
+func (s *Server) SetStatusLimit(n int) { s.mu.Lock(); s.statusLimit = n; s.mu.Unlock() }
 
 // ClearFaults removes injected faults.
 func (s *Server) ClearFaults() { s.mu.Lock(); s.faults = nil; s.mu.Unlock() }
@@ -321,7 +335,7 @@ func (s *Server) authenticate(r *http.Request) authInfo {
 		return authInfo{kind: "jwt"}
 	}
 	if it, ok := s.tokens[tok]; ok {
-		if s.now().Before(it.expires) {
+		if s.now().Before(it.expires) && !s.rejectTokens {
 			return authInfo{kind: "installation", installationID: it.installationID}
 		}
 		return authInfo{kind: "invalid"}
@@ -690,6 +704,22 @@ func (s *Server) serveRepo(w http.ResponseWriter, r *http.Request, auth authInfo
 			return
 		}
 		k := strings.ToLower(owner+"/"+name) + "@" + rest[1]
+		if s.statusLimit > 0 {
+			n := 0
+			for _, st := range s.statuses[k] {
+				if st.Context == body.Context {
+					n++
+				}
+			}
+			if n >= s.statusLimit {
+				s.writeJSON(w, http.StatusUnprocessableEntity, map[string]any{
+					"message":           "Validation Failed",
+					"errors":            []map[string]any{{"resource": "Status", "code": "custom", "message": "This SHA and context has reached the maximum number of statuses."}},
+					"documentation_url": "https://docs.github.com/rest/commits/statuses#create-a-commit-status",
+				})
+				return
+			}
+		}
 		s.statuses[k] = append(s.statuses[k], body)
 		s.writeJSON(w, http.StatusCreated, map[string]any{"id": len(s.statuses[k]), "state": body.State, "context": body.Context, "description": body.Description, "target_url": body.TargetURL})
 	case len(rest) == 1 && rest[0] == "check-runs" && r.Method == http.MethodPost:

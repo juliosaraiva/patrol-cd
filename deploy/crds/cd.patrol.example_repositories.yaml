@@ -130,13 +130,15 @@ spec:
                       (default https://api.github.com).
                     type: string
                   installationID:
-                    description: InstallationID of the App in the repository's organization.
+                    description: |-
+                      InstallationID of the App installation. When unset, the installation is discovered from the
+                      organization (owner) in the repository URL, which lets one RepositoryCredential serve every
+                      organization the App is installed in.
                     format: int64
                     minimum: 1
                     type: integer
                 required:
                 - appID
-                - installationID
                 type: object
               insecure:
                 description: Insecure skips TLS certificate and SSH host key verification.
@@ -204,6 +206,12 @@ spec:
               useAzureWorkloadIdentity:
                 description: UseAzureWorkloadIdentity authenticates with Azure Workload
                   Identity.
+                type: boolean
+              webhookManifestCacheWarmDisabled:
+                description: |-
+                  WebhookManifestCacheWarmDisabled skips pre-rendering (manifest cache warming) of affected
+                  Applications when a webhook for this repository arrives; they are refreshed instead. Useful for
+                  large monorepos.
                 type: boolean
             required:
             - url

@@ -79,6 +79,13 @@ type Fixture interface {
 	CheckRuns(repo scm.RepoRef, sha string) []RecordedCheckRun
 }
 
+// StatusLimitFixture is optionally implemented by fixtures whose backend can emulate a
+// per-(commit, context) commit status limit (GitHub: 1000). When implemented, the suite
+// checks that exceeding the limit fails with KindInvalid wrapping scm.ErrStatusLimit.
+type StatusLimitFixture interface {
+	LimitStatuses(n int)
+}
+
 // NewFunc constructs a fresh provider and fixture. It is called once per check.
 type NewFunc func(t *testing.T) (scm.Provider, Fixture)
 
@@ -131,6 +138,7 @@ func Run(t *testing.T, newProvider NewFunc, opts Options) {
 		{"Webhooks/PullRequest", scm.CapabilityWebhooks, checkWebhookPR},
 		{"CommitStatuses/Set", scm.CapabilityCommitStatuses, checkStatus},
 		{"CommitStatuses/Invalid", scm.CapabilityCommitStatuses, checkStatusInvalid},
+		{"CommitStatuses/Limit", scm.CapabilityCommitStatuses, checkStatusLimit},
 		{"CheckRuns/IdempotentUpsert", scm.CapabilityCheckRuns, checkCheckRuns},
 		{"Credentials/Token", scm.CapabilityCredentials, checkToken},
 		{"Installations/ListAndFind", scm.CapabilityInstallations, checkInstallations},
@@ -675,6 +683,32 @@ func checkStatusInvalid(t *testing.T, ctx context.Context, p scm.Provider, f Fix
 	wantKind(t, err, scm.KindInvalid)
 	if n := len(f.CommitStatuses(d.Repo, d.StatusSHA)); n != 0 {
 		t.Fatalf("invalid status reached the backend (%d recorded)", n)
+	}
+}
+
+func checkStatusLimit(t *testing.T, ctx context.Context, p scm.Provider, f Fixture) {
+	lf, ok := f.(StatusLimitFixture)
+	if !ok {
+		t.Skip("fixture does not implement StatusLimitFixture")
+	}
+	d := f.Data()
+	lf.LimitStatuses(2)
+	csr := must[scm.CommitStatusReporter](t, p)
+	st := scm.CommitStatus{State: scm.CommitStatePending, Context: "patrol/limit"}
+	for i := range 2 {
+		if err := csr.SetCommitStatus(ctx, d.Repo, d.StatusSHA, st); err != nil {
+			t.Fatalf("status %d below the limit: %v", i, err)
+		}
+	}
+	err := csr.SetCommitStatus(ctx, d.Repo, d.StatusSHA, st)
+	wantKind(t, err, scm.KindInvalid)
+	if !errors.Is(err, scm.ErrStatusLimit) {
+		t.Fatalf("status above the limit: %v, want ErrStatusLimit", err)
+	}
+	other := st
+	other.Context = "patrol/other"
+	if err := csr.SetCommitStatus(ctx, d.Repo, d.StatusSHA, other); err != nil {
+		t.Fatalf("the limit is per context: %v", err)
 	}
 }
 

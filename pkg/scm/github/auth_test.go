@@ -100,7 +100,8 @@ func TestAppInstallationDiscovery(t *testing.T) {
 	missing := s.config(t, appDiscover)
 	missing.GitHubApp.Owner = "nobody"
 	_, err = newProvider(t, missing).Token(t.Context())
-	if !scm.IsNotFound(err) || !strings.Contains(err.Error(), "installation not found for org: nobody") {
+	const wantMsg = "failed to discover GitHub App installation ID for organization nobody: ensure the GitHub App (ID: 1234) is installed for this organization: installation not found for org: nobody"
+	if !scm.IsNotFound(err) || !strings.Contains(err.Error(), wantMsg) {
 		t.Fatalf("missing installation: %v", err)
 	}
 }
@@ -156,23 +157,67 @@ func TestAppTokenRefreshBeforeExpiry(t *testing.T) {
 
 func TestAppTokenRevokedIsReplaced(t *testing.T) {
 	t.Parallel()
+	for _, mode := range []authKind{appExplicit, appDiscover} {
+		t.Run(map[authKind]string{appExplicit: "explicit", appDiscover: "discovered"}[mode], func(t *testing.T) {
+			t.Parallel()
+			s := newSeed(t, "")
+			p := newProvider(t, s.config(t, mode))
+			ctx := t.Context()
+			if _, err := p.ListBranches(ctx, s.platformRepo, true); err != nil {
+				t.Fatal(err)
+			}
+			s.srv.RevokeTokens()
+			// The 401 invalidates the cached token and the request is replayed once with a
+			// freshly minted token, so the caller does not see the revocation.
+			if _, err := p.ListBranches(ctx, s.platformRepo, true); err != nil {
+				t.Fatalf("revoked token was not replaced transparently: %v", err)
+			}
+			if n := countTokenMints(s); n != 2 {
+				t.Fatalf("mints = %d, want 2", n)
+			}
+			if _, err := p.ListBranches(ctx, s.platformRepo, true); err != nil {
+				t.Fatalf("after replacement: %v", err)
+			}
+			if n := countTokenMints(s); n != 2 {
+				t.Fatalf("replacement token not cached: %d mints", n)
+			}
+		})
+	}
+}
+
+func TestAppTokenRejectedTwiceIsUnauthorized(t *testing.T) {
+	t.Parallel()
 	s := newSeed(t, "")
 	p := newProvider(t, s.config(t, appExplicit))
-	ctx := t.Context()
-	if _, err := p.ListBranches(ctx, s.platformRepo, true); err != nil {
-		t.Fatal(err)
-	}
-	s.srv.RevokeTokens()
-	_, err := p.ListBranches(ctx, s.platformRepo, true)
+	s.srv.RejectInstallationTokens(true)
+	_, err := p.ListBranches(t.Context(), s.platformRepo, true)
 	if scm.KindOf(err) != scm.KindUnauthorized {
-		t.Fatalf("revoked token: %v", err)
+		t.Fatalf("rejected tokens: %v, want Unauthorized", err)
 	}
-	// The rejected token was invalidated, so the next call mints a new one.
-	if _, err := p.ListBranches(ctx, s.platformRepo, true); err != nil {
-		t.Fatalf("after invalidation: %v", err)
-	}
+	// One mint for the first attempt and exactly one replacement: no retry loop.
 	if n := countTokenMints(s); n != 2 {
 		t.Fatalf("mints = %d, want 2", n)
+	}
+	if n := s.srv.CountRequests(http.MethodGet, "/repos/acme/platform/branches"); n != 2 {
+		t.Fatalf("branch requests = %d, want 2 (original + one replay)", n)
+	}
+	s.srv.RejectInstallationTokens(false)
+	if _, err := p.ListBranches(t.Context(), s.platformRepo, true); err != nil {
+		t.Fatalf("after recovery: %v", err)
+	}
+}
+
+func TestPATUnauthorizedIsNotReplayed(t *testing.T) {
+	t.Parallel()
+	s := newSeed(t, "")
+	cfg := s.config(t, pat)
+	cfg.Token = func(context.Context) (string, error) { return "ghp_revoked", nil }
+	_, err := newProvider(t, cfg).ListBranches(t.Context(), s.platformRepo, true)
+	if scm.KindOf(err) != scm.KindUnauthorized {
+		t.Fatalf("bad PAT: %v", err)
+	}
+	if n := s.srv.CountRequests(http.MethodGet, "/repos/acme/platform/branches"); n != 1 {
+		t.Fatalf("PAT 401 replayed: %d requests", n)
 	}
 }
 
@@ -263,8 +308,23 @@ func TestPATCredential(t *testing.T) {
 	}
 	cfg := s.config(t, pat)
 	cfg.Token = func(context.Context) (string, error) { return "", errors.New("secret not found") }
-	if _, err := newProvider(t, cfg).Token(t.Context()); scm.KindOf(err) != scm.KindUnauthorized {
+	broken := newProvider(t, cfg)
+	if _, err := broken.Token(t.Context()); scm.KindOf(err) != scm.KindUnauthorized {
 		t.Fatalf("token source error: %v", err)
+	}
+	// API calls report the same kind and never reach the server.
+	before := len(s.srv.Requests())
+	_, err = broken.ListBranches(t.Context(), s.platformRepo, true)
+	if scm.KindOf(err) != scm.KindUnauthorized || !strings.Contains(err.Error(), "secret not found") {
+		t.Fatalf("API call with failing token source: %v", err)
+	}
+	if after := len(s.srv.Requests()); after != before {
+		t.Fatalf("request sent without a token (%d)", after-before)
+	}
+	// Context errors from the token source stay context errors.
+	cfg.Token = func(ctx context.Context) (string, error) { return "", context.Canceled }
+	if _, err := newProvider(t, cfg).Token(t.Context()); !errors.Is(err, context.Canceled) || scm.KindOf(err) == scm.KindUnauthorized {
+		t.Fatalf("context error: %v", err)
 	}
 }
 

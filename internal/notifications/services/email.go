@@ -235,11 +235,12 @@ func (s *emailService) deliver(ctx context.Context, to []string, msg []byte) err
 	if err := w.Close(); err != nil {
 		return fmt.Errorf("%w: email: message rejected: %v", ErrDeliveryFailed, err)
 	}
-	if err := c.Quit(); err != nil && ctx.Err() == nil {
-		// The message was accepted; a failed QUIT is not a delivery failure.
+	// The server accepted the message: neither a failed QUIT nor a context that ends now is
+	// a delivery failure (reporting one would make the engine send the e-mail again).
+	if err := c.Quit(); err != nil {
 		s.deps.logger().Debug("email: QUIT failed", "error", err)
 	}
-	return ctx.Err()
+	return nil
 }
 
 // loginAuth implements the LOGIN SASL mechanism. Like smtp.PlainAuth it refuses to send

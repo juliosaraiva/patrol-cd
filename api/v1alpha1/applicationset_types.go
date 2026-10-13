@@ -49,6 +49,7 @@ type ApplicationSetSpec struct {
 	// +optional
 	GoTemplate bool `json:"goTemplate,omitempty"`
 	// Generators produce the parameter sets.
+	// +kubebuilder:validation:MaxItems=128
 	Generators []ApplicationSetGenerator `json:"generators"`
 	// Template is the Application template.
 	Template ApplicationSetTemplate `json:"template"`
@@ -112,6 +113,7 @@ const (
 
 // ApplicationSetStrategy controls how generated Applications are updated and deleted.
 // +kubebuilder:validation:XValidation:rule="!has(self.type) || self.type != 'RollingSync' || has(self.rollingSync)",message="strategy.rollingSync is required when strategy.type is RollingSync"
+// +kubebuilder:validation:XValidation:rule="!has(self.deletionOrder) || self.deletionOrder != 'Reverse' || (has(self.type) && self.type == 'RollingSync')",message="strategy.deletionOrder Reverse requires strategy.type RollingSync"
 type ApplicationSetStrategy struct {
 	// Type is AllAtOnce (default) or RollingSync.
 	// +optional
@@ -119,7 +121,9 @@ type ApplicationSetStrategy struct {
 	// RollingSync configures progressive sync steps.
 	// +optional
 	RollingSync *ApplicationSetRolloutStrategy `json:"rollingSync,omitempty"`
-	// DeletionOrder is AllAtOnce (default) or Reverse (only with RollingSync).
+	// DeletionOrder is AllAtOnce (default) or Reverse (only with RollingSync). Unlike Argo CD, which
+	// compares case-insensitively and ignores Reverse without RollingSync, both are rejected at
+	// admission.
 	// +optional
 	DeletionOrder ApplicationSetDeletionOrder `json:"deletionOrder,omitempty"`
 }
@@ -145,8 +149,9 @@ type ApplicationSetRolloutStep struct {
 type ApplicationMatchExpression struct {
 	// +optional
 	Key string `json:"key,omitempty"`
-	// Operator is In or NotIn.
+	// Operator is In or NotIn (the only operators Argo CD evaluates in rolling sync steps).
 	// +optional
+	// +kubebuilder:validation:Enum=In;NotIn
 	Operator string `json:"operator,omitempty"`
 	// +optional
 	Values []string `json:"values,omitempty"`
@@ -291,12 +296,15 @@ type ApplicationSetTerminalGenerator struct {
 // ApplicationSetTerminalGenerators is a list of terminal generators.
 type ApplicationSetTerminalGenerators []ApplicationSetTerminalGenerator
 
-// NestedMatrixGenerator is the decoded form of ApplicationSetNestedGenerator.Matrix.
+// NestedMatrixGenerator is the decoded form of ApplicationSetNestedGenerator.Matrix. Like
+// MatrixGenerator it has exactly two generators; ToNestedMatrixGenerator enforces this because the
+// CRD schema cannot see inside the raw JSON.
 type NestedMatrixGenerator struct {
 	Generators ApplicationSetTerminalGenerators `json:"generators"`
 }
 
-// NestedMergeGenerator is the decoded form of ApplicationSetNestedGenerator.Merge.
+// NestedMergeGenerator is the decoded form of ApplicationSetNestedGenerator.Merge. Like
+// MergeGenerator it has at least two generators; ToNestedMergeGenerator enforces this.
 type NestedMergeGenerator struct {
 	Generators ApplicationSetTerminalGenerators `json:"generators"`
 	MergeKeys  []string                         `json:"mergeKeys"`
@@ -309,7 +317,7 @@ type ListGenerator struct {
 	Elements []apiextensionsv1.JSON `json:"elements,omitempty"`
 	// Template overrides the ApplicationSet template for this generator.
 	// +optional
-	Template ApplicationSetTemplate `json:"template,omitempty"`
+	Template ApplicationSetTemplate `json:"template,omitempty,omitzero"`
 	// ElementsYaml is a YAML list of parameter sets (typically templated).
 	// +optional
 	ElementsYaml string `json:"elementsYaml,omitempty"`
@@ -317,26 +325,32 @@ type ListGenerator struct {
 
 // MatrixGenerator generates the cartesian product of two generators.
 type MatrixGenerator struct {
+	// Generators are exactly two child generators.
+	// +kubebuilder:validation:MinItems=2
+	// +kubebuilder:validation:MaxItems=2
 	Generators []ApplicationSetNestedGenerator `json:"generators"`
 	// +optional
-	Template ApplicationSetTemplate `json:"template,omitempty"`
+	Template ApplicationSetTemplate `json:"template,omitempty,omitzero"`
 }
 
 // MergeGenerator merges the parameter sets of generators on MergeKeys.
 type MergeGenerator struct {
+	// Generators are two or more child generators; the first is the base the others merge into.
+	// +kubebuilder:validation:MinItems=2
+	// +kubebuilder:validation:MaxItems=64
 	Generators []ApplicationSetNestedGenerator `json:"generators"`
 	MergeKeys  []string                        `json:"mergeKeys"`
 	// +optional
-	Template ApplicationSetTemplate `json:"template,omitempty"`
+	Template ApplicationSetTemplate `json:"template,omitempty,omitzero"`
 }
 
 // ClusterGenerator generates one parameter set per Cluster matching Selector.
 type ClusterGenerator struct {
 	// Selector matches Cluster labels.
 	// +optional
-	Selector metav1.LabelSelector `json:"selector,omitempty"`
+	Selector metav1.LabelSelector `json:"selector,omitempty,omitzero"`
 	// +optional
-	Template ApplicationSetTemplate `json:"template,omitempty"`
+	Template ApplicationSetTemplate `json:"template,omitempty,omitzero"`
 	// Values are passed to the template as parameters.
 	// +optional
 	Values map[string]string `json:"values,omitempty"`
@@ -358,9 +372,9 @@ type DuckTypeGenerator struct {
 	RequeueAfterSeconds *int64 `json:"requeueAfterSeconds,omitempty"`
 	// LabelSelector selects duck-typed resources.
 	// +optional
-	LabelSelector metav1.LabelSelector `json:"labelSelector,omitempty"`
+	LabelSelector metav1.LabelSelector `json:"labelSelector,omitempty,omitzero"`
 	// +optional
-	Template ApplicationSetTemplate `json:"template,omitempty"`
+	Template ApplicationSetTemplate `json:"template,omitempty,omitzero"`
 	// Values are passed to the template as parameters.
 	// +optional
 	Values map[string]string `json:"values,omitempty"`
@@ -377,7 +391,7 @@ type GitGenerator struct {
 	// +optional
 	RequeueAfterSeconds *int64 `json:"requeueAfterSeconds,omitempty"`
 	// +optional
-	Template ApplicationSetTemplate `json:"template,omitempty"`
+	Template ApplicationSetTemplate `json:"template,omitempty,omitzero"`
 	// PathParamPrefix prefixes the path parameters (useful with matrix of two git generators).
 	// +optional
 	PathParamPrefix string `json:"pathParamPrefix,omitempty"`
@@ -437,7 +451,7 @@ type SCMProviderGenerator struct {
 	// +optional
 	RequeueAfterSeconds *int64 `json:"requeueAfterSeconds,omitempty"`
 	// +optional
-	Template ApplicationSetTemplate `json:"template,omitempty"`
+	Template ApplicationSetTemplate `json:"template,omitempty,omitzero"`
 	// Values are passed to the template as parameters.
 	// +optional
 	Values map[string]string `json:"values,omitempty"`
@@ -635,7 +649,7 @@ type PullRequestGenerator struct {
 	// +optional
 	RequeueAfterSeconds *int64 `json:"requeueAfterSeconds,omitempty"`
 	// +optional
-	Template ApplicationSetTemplate `json:"template,omitempty"`
+	Template ApplicationSetTemplate `json:"template,omitempty,omitzero"`
 	// +optional
 	Bitbucket *PullRequestGeneratorBitbucket `json:"bitbucket,omitempty"`
 	// +optional
@@ -806,11 +820,11 @@ type PluginInput struct {
 type PluginGenerator struct {
 	ConfigMapRef PluginConfigMapRef `json:"configMapRef"`
 	// +optional
-	Input PluginInput `json:"input,omitempty"`
+	Input PluginInput `json:"input,omitempty,omitzero"`
 	// +optional
 	RequeueAfterSeconds *int64 `json:"requeueAfterSeconds,omitempty"`
 	// +optional
-	Template ApplicationSetTemplate `json:"template,omitempty"`
+	Template ApplicationSetTemplate `json:"template,omitempty,omitzero"`
 	// Values are passed to the template (not to the plugin).
 	// +optional
 	Values map[string]string `json:"values,omitempty"`

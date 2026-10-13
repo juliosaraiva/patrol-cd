@@ -110,7 +110,7 @@ func (a *appAuth) find(ctx context.Context, owner string) (scm.Installation, err
 			if err != nil {
 				if isStatus(resp, err, http.StatusNotFound) {
 					return cachedInstallation{}, &scm.Error{Kind: scm.KindNotFound, Provider: Type, Op: "FindInstallation", StatusCode: http.StatusNotFound,
-						Err: fmt.Errorf("installation not found for org: %s: ensure the GitHub App (ID: %d) is installed for this organization or user", lower, a.appID)}
+						Err: fmt.Errorf("failed to discover GitHub App installation ID for organization %s: ensure the GitHub App (ID: %d) is installed for this organization: installation not found for org: %s", lower, a.appID, lower)}
 				}
 				return cachedInstallation{}, mapError("FindInstallation", resp, err, now)
 			}
@@ -170,7 +170,7 @@ func (p *Provider) Token(ctx context.Context) (scm.Token, error) {
 	case authToken:
 		v, err := p.token(ctx)
 		if err != nil {
-			return scm.Token{}, &scm.Error{Kind: scm.KindUnauthorized, Provider: Type, Op: "Token", Err: err}
+			return scm.Token{}, err
 		}
 		if v == "" {
 			return scm.Token{}, &scm.Error{Kind: scm.KindUnauthorized, Provider: Type, Op: "Token", Err: errors.New("empty token")}

@@ -43,6 +43,8 @@ func (f *fixture) WebhookDelivery(t testing.TB, typ scm.EventType, id string, se
 
 func (f *fixture) SignatureHeaders() []string { return []string{fake.HeaderSignature} }
 
+func (f *fixture) LimitStatuses(n int) { f.p.SetStatusLimit(n) }
+
 func (f *fixture) InjectRateLimit(d time.Duration) { f.p.InjectRateLimit(d, 0) }
 
 func (f *fixture) CommitStatuses(r scm.RepoRef, sha string) []scm.CommitStatus {
@@ -232,5 +234,48 @@ func TestWebhookUnsupportedEvent(t *testing.T) {
 	_, err = p.VerifyAndParse(h, body, []byte("other"))
 	if !errors.Is(err, scm.ErrSignatureMismatch) {
 		t.Fatalf("err = %v", err)
+	}
+}
+
+func TestSeedingHelpers(t *testing.T) {
+	t.Parallel()
+	ctx := t.Context()
+	p, d := seeded(fake.Options{MaxStatusesPerContext: 1})
+	missing := scm.RepoRef{Owner: "nobody", Name: "x"}
+	if err := p.SetBranch(missing, "b", sha(1)); !scm.IsNotFound(err) {
+		t.Fatalf("SetBranch on missing repo: %v", err)
+	}
+	if err := p.SetBranch(d.Repo, "feature-a", sha(42)); err != nil {
+		t.Fatal(err)
+	}
+	if got, err := p.ResolveRevision(ctx, d.Repo, "refs/heads/feature-a"); err != nil || got != sha(42) {
+		t.Fatalf("moved branch resolves to %q, %v", got, err)
+	}
+	pr := scm.PullRequest{Number: 9, Title: "New", Branch: "feature-a", TargetBranch: "main", HeadSHA: sha(42), Labels: []string{"preview"}}
+	if err := p.AddPullRequest(missing, pr); !scm.IsNotFound(err) {
+		t.Fatalf("AddPullRequest on missing repo: %v", err)
+	}
+	if err := p.AddPullRequest(d.Repo, pr); err != nil {
+		t.Fatal(err)
+	}
+	pr.Labels[0] = "mutated"
+	got, err := p.ListPullRequests(ctx, d.Repo, scm.PRQuery{Labels: []string{"preview"}})
+	if err != nil || len(got) != 3 {
+		t.Fatalf("labeled PRs after AddPullRequest: %d, %v", len(got), err)
+	}
+	p.SetToken(scm.Token{Value: "rotated", Username: "u"})
+	if tok, err := p.Token(ctx); err != nil || tok.Value != "rotated" {
+		t.Fatalf("token = %v, %v", tok, err)
+	}
+	st := scm.CommitStatus{State: scm.CommitStateSuccess, Context: "ctx"}
+	if err := p.SetCommitStatus(ctx, d.Repo, sha(1), st); err != nil {
+		t.Fatal(err)
+	}
+	if err := p.SetCommitStatus(ctx, d.Repo, sha(1), st); !errors.Is(err, scm.ErrStatusLimit) || scm.KindOf(err) != scm.KindInvalid {
+		t.Fatalf("status limit: %v", err)
+	}
+	p.SetStatusLimit(0)
+	if err := p.SetCommitStatus(ctx, d.Repo, sha(1), st); err != nil {
+		t.Fatalf("limit disabled: %v", err)
 	}
 }

@@ -25,7 +25,7 @@ func toInstallation(i *gh.Installation) scm.Installation {
 // App JWT, every page).
 func (p *Provider) ListInstallations(ctx context.Context) ([]scm.Installation, error) {
 	const op = "ListInstallations"
-	if err := p.requireApp(op); err != nil {
+	if err := p.require(scm.CapabilityInstallations); err != nil {
 		return nil, err
 	}
 	insts, err := collect(ctx, p, op, func(ctx context.Context, lo gh.ListOptions) ([]*gh.Installation, *gh.Response, error) {
@@ -48,7 +48,7 @@ func (p *Provider) ListInstallations(ctx context.Context) ([]scm.Installation, e
 // (API URL, App ID, key, lowercase owner).
 func (p *Provider) FindInstallation(ctx context.Context, owner string) (scm.Installation, error) {
 	const op = "FindInstallation"
-	if err := p.requireApp(op); err != nil {
+	if err := p.require(scm.CapabilityInstallations); err != nil {
 		return scm.Installation{}, err
 	}
 	inst, err := p.app.find(ctx, owner)

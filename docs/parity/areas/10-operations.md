@@ -46,7 +46,7 @@ durations accept Go syntax and, as a fallback, day suffixes (`util/env/env.go`).
 - **Maturity**: GA
 - **Semantics**: `install.yaml` = `kustomize build manifests/cluster-install` = namespace-install base + `cluster-rbac`
   + `crds`. It ships: 3 CRDs (`applications`, `applicationsets`, `appprojects`.argoproj.io); ConfigMaps `argocd-cm`
-  (with default exclusions/ignoreResourceUpdates, see OPS-137), `argocd-cmd-params-cm` (empty), `argocd-gpg-keys-cm`,
+  (with default exclusions/ignoreResourceUpdates, see OPS-155), `argocd-cmd-params-cm` (empty), `argocd-gpg-keys-cm`,
   `argocd-notifications-cm`, `argocd-rbac-cm`, `argocd-ssh-known-hosts-cm`, `argocd-tls-certs-cm`; Secrets
   `argocd-secret` (empty, populated at runtime), `argocd-notifications-secret`; StatefulSet
   `argocd-application-controller` (replicas 1); Deployments `argocd-applicationset-controller`, `argocd-dex-server`,
@@ -104,7 +104,7 @@ durations accept Go syntax and, as a fallback, day suffixes (`util/env/env.go`).
 - **Semantics**: Built from `crds` + `cluster-rbac/application-controller` + `base/config` + application-controller +
   applicationset-controller + repo-server + redis. No `argocd-server`, no Dex, no notifications controller, no
   `argocd-notifications-cm/secret`, no server/appset ClusterRoles (only the controller ClusterRole). Users interact via
-  Kubernetes (Application/ApplicationSet CRs) or the CLI in core mode (OPS-114) / `argocd admin dashboard` (OPS-115).
+  Kubernetes (Application/ApplicationSet CRs) or the CLI in core mode (OPS-122) / `argocd admin dashboard` (OPS-123).
   Not available: Argo CD RBAC model, Argo CD API, notifications, OIDC authentication; UI/CLI partially available.
   Redis is included because the controller relies on it for caching (controller can technically run without it but it
   is not recommended).
@@ -116,7 +116,7 @@ durations accept Go syntax and, as a fallback, day suffixes (`util/env/env.go`).
   - Positive: golden inventory (ClusterRole only `argocd-application-controller`; no `argocd-server` Deployment).
   - Positive: an Application CR applied with kubectl is reconciled and synced.
   - Negative: no Service exposing an API (port 8080/443) exists.
-  - Positive: `argocd app list --core` works against this install (OPS-114).
+  - Positive: `argocd app list --core` works against this install (OPS-122).
 
 ### OPS-004 High-availability install bundles (`manifests/ha/install.yaml`, `manifests/ha/namespace-install.yaml`)
 - **Upstream**:
@@ -238,7 +238,7 @@ durations accept Go syntax and, as a fallback, day suffixes (`util/env/env.go`).
   - notifications-controller: `applications,appprojects` get/list/watch/update/patch; `configmaps,secrets` list/watch; `get` only on `configmaps/argocd-notifications-cm` and `secrets/argocd-notifications-secret`.
   - redis: `get` on `secrets/argocd-redis`; `create` on `secrets` (used by the `redis-initial-password` init container).
   - repo-server and commit-server: ServiceAccounts without Roles (no Kubernetes API privileges).
-- **Edge cases**: repo-server has no K8s privileges by design (security property; OPS-139). Notifications controller can
+- **Edge cases**: repo-server has no K8s privileges by design (security property; OPS-163). Notifications controller can
   only read its own named ConfigMap/Secret.
 - **Configuration surface**: Role rules.
 - **Exposure**: Install artifact.
@@ -274,7 +274,7 @@ durations accept Go syntax and, as a fallback, day suffixes (`util/env/env.go`).
 - **Edge cases**: The controller metrics listener always binds `0.0.0.0:<metrics-port>` (no address flag). The API
   server's HTTP port 80 maps to the same 8080 container port; non-TLS HTTP/1.1 requests are redirected to HTTPS when TLS
   is enabled (OPS-098).
-- **Configuration surface**: `--port`, `--metrics-port`, `--address`, `--metrics-address` flags per component (OPS-128..136).
+- **Configuration surface**: `--port`, `--metrics-port`, `--address`, `--metrics-address` flags per component (OPS-145..153).
 - **Exposure**: Install artifact; network.
 - **Tests required**:
   - Positive: each Service port reaches the intended listener (gRPC health / `/metrics` / `/healthz`).
@@ -341,7 +341,7 @@ durations accept Go syntax and, as a fallback, day suffixes (`util/env/env.go`).
 - **Tests required**:
   - Positive: each endpoint returns `ok`.
   - Negative: stop repo-server gRPC (simulate) → `?full=true` returns 503 while plain `/healthz` returns 200.
-  - Recovery: API server returns 503 during a settings-triggered restart (OPS-096/098) and 200 afterwards.
+  - Recovery: API server returns 503 during a settings-triggered restart (OPS-095/098) and 200 afterwards.
 
 ### OPS-012 Settings object discovery (namespace and `app.kubernetes.io/part-of=argocd` label)
 - **Upstream**:
@@ -358,7 +358,7 @@ durations accept Go syntax and, as a fallback, day suffixes (`util/env/env.go`).
   additionally filters by the part-of label (these provide `$<secret>:<key>` references). Well-known names: `argocd-cm`,
   `argocd-secret`, `argocd-notifications-cm`, `argocd-notifications-secret`, `argocd-rbac-cm`,
   `argocd-ssh-known-hosts-cm`, `argocd-tls-certs-cm`, `argocd-gpg-keys-cm`, `argocd-app-controller-shard-cm`,
-  `argocd-cmd-params-cm`. Changes propagate to subscribers without restart except where noted (OPS-017, OPS-096).
+  `argocd-cmd-params-cm`. Changes propagate to subscribers without restart except where noted (OPS-017, OPS-095).
 - **Edge cases**: An `argocd-cm` without the label is treated as missing (NotFound). `argocd-cmd-params-cm` is consumed
   only through env vars at pod start, so its label is irrelevant.
 - **Configuration surface**: label `app.kubernetes.io/part-of: argocd`.
@@ -383,7 +383,7 @@ durations accept Go syntax and, as a fallback, day suffixes (`util/env/env.go`).
 - **Edge cases**: If the Secret exists without key `auth`, the init container exits fatally ("key auth doesn't exist in
   secret argocd-redis"). Components fail to start until the Secret exists (secretKeyRef not optional).
 - **Configuration surface**: Secret `argocd-redis` key `auth`; env `REDIS_PASSWORD`.
-- **Exposure**: CLI `argocd admin redis-initial-password` (OPS-125); install artifact.
+- **Exposure**: CLI `argocd admin redis-initial-password` (OPS-141); install artifact.
 - **Tests required**:
   - Positive: fresh install creates `argocd-redis` with a 16-char password; Redis rejects unauthenticated clients.
   - Positive: idempotent — second run leaves the existing password unchanged.
@@ -492,7 +492,7 @@ durations accept Go syntax and, as a fallback, day suffixes (`util/env/env.go`).
   | `otlp.address` / `otlp.insecure` / `otlp.headers` / `otlp.attrs` | `ARGOCD_{APPLICATION_CONTROLLER,SERVER,REPO_SERVER}_OTLP_{ADDRESS,INSECURE,HEADERS,ATTRS}` | `""` / `true` / `{}` / `[]` (OPS-085) |
   | `application.namespaces` | `ARGOCD_APPLICATION_NAMESPACES` (controller, server, notifications) | empty (only control-plane namespace); comma list of globs |
   | `log.format.timestamp` | `ARGOCD_LOG_FORMAT_TIMESTAMP` (controller, repo-server, appset, dex, notifications, commit-server) | `""` = RFC3339 |
-  The notifications controller has no `--argocd-repo-server` env mapping (uses its compiled default, OPS-131).
+  The notifications controller has no `--argocd-repo-server` env mapping (uses its compiled default, OPS-150).
 - **Edge cases**: `redis.compression` invalid value → component fails at cache creation (`CompressionTypeFromString`
   error). `application.namespaces` must be identical across controller, server and notifications for consistent
   behaviour (owner of semantics: 07 / apps-in-any-namespace). The API server's `argocd-server` deployment does not map
@@ -812,13 +812,13 @@ durations accept Go syntax and, as a fallback, day suffixes (`util/env/env.go`).
 - **Semantics**: Every key in the reference `argocd-cm.yaml` plus code-only keys, with owner:
   | Key(s) | Owner |
   |---|---|
-  | `url`, `additionalUrls` | 07 (SSO/URLs; change restarts API server, OPS-096) |
+  | `url`, `additionalUrls` | 07 (SSO/URLs; change restarts API server, OPS-095) |
   | `statusbadge.enabled`, `statusbadge.url` | UI/API (badge) |
   | `users.anonymous.enabled`, `users.session.duration`, `passwordPattern`, `admin.enabled`, `accounts.<name>`, `accounts.<name>.enabled` | 07 |
   | `ga.trackingid`, `ga.anonymizeusers`, `help.chatUrl`, `help.chatText`, `help.download.{linux-amd64,linux-arm64,linux-ppc64le,linux-s390x,darwin-amd64,darwin-arm64,windows-amd64}` | UI |
   | `dex.config`, `oidc.config`, `oidc.tls.insecure.skip.verify` | 07 |
   | `resource.customizations.{ignoreDifferences,health,actions,knownTypeFields}.<group_kind>`, `resource.customizations.ignoreDifferences.all`, `resource.customizations` (legacy single key), `resource.compareoptions`, `resource.sensitive.mask.annotations` | 04 / 05 (actions) |
-  | `resource.ignoreResourceUpdatesEnabled`, `resource.customizations.ignoreResourceUpdates.{all,<group_kind>}` | **this file** (OPS-062/063) |
+  | `resource.ignoreResourceUpdatesEnabled`, `resource.customizations.ignoreResourceUpdates.{all,<group_kind>}` | **this file** (OPS-062..064) |
   | `resource.exclusions`, `resource.inclusions`, `resource.respectRBAC`, `resource.customLabels` | 04 |
   | `resource.includeEventLabelKeys`, `resource.excludeEventLabelKeys` | **this file** (OPS-092) |
   | `kustomize.enable`, `jsonnet.enable`, `helm.enable`, `kustomize.buildOptions`, `kustomize.path.<v>`, `kustomize.buildOptions.<v>`, `kustomize.version.<v>` (deprecated), `helm.valuesFileSchemes` | 02 |
@@ -863,7 +863,7 @@ durations accept Go syntax and, as a fallback, day suffixes (`util/env/env.go`).
 - **Edge cases**: Missing `server.secretkey` reported as incomplete settings until bootstrapped. Concurrent replicas:
   an update conflict is treated as "initialized by another replica" (warning) and settings are re-read. With admin
   disabled, no password is generated. A change to any of the five main webhook secrets restarts the API server
-  (OPS-096).
+  (OPS-095).
 - **Configuration surface**: Secret `argocd-secret`.
 - **Exposure**: Kubernetes Secret; API (indirect).
 - **Tests required**:
@@ -1105,7 +1105,7 @@ durations accept Go syntax and, as a fallback, day suffixes (`util/env/env.go`).
   but got: <h>" and shard 0. Computed shard **greater than** replicas → warning and shard 0 (shard == replicas is not
   caught). Mismatch between StatefulSet replicas and the env var leaves clusters unprocessed or duplicated.
 - **Configuration surface**: env `ARGOCD_CONTROLLER_REPLICAS`, `ARGOCD_CONTROLLER_SHARD`; StatefulSet replicas.
-- **Exposure**: Pod env; `argocd admin cluster shards/stats` (OPS-121/122).
+- **Exposure**: Pod env; `argocd admin cluster shards/stats` (OPS-133/134).
 - **Tests required**:
   - Positive: 2 replicas, 4 clusters → every cluster's apps reconciled by exactly one replica (log/metrics show `argocd_cluster_info` per pod).
   - Positive: `ARGOCD_CONTROLLER_SHARD=1` on pod 0 overrides hostname inference.
@@ -1452,3 +1452,635 @@ durations accept Go syntax and, as a fallback, day suffixes (`util/env/env.go`).
 - **Exposure**: Pod env.
 - **Tests required**:
   - Positive: Patrol components honour `GOMEMLIMIT` (Go runtime) — smoke test under memory pressure, or record divergence if Patrol uses a different runtime.
+
+---
+
+## D. Reconciliation scheduling and reconcile optimization
+
+### OPS-058 Periodic soft reconciliation (`timeout.reconciliation`, `--app-resync`)
+- **Upstream**:
+  https://github.com/argoproj/argo-cd/blob/a5038b0e2bbac1715754380ae0084df8e3d5b48c/cmd/argocd-application-controller/commands/argocd_application_controller.go#L44 ,
+  https://github.com/argoproj/argo-cd/blob/a5038b0e2bbac1715754380ae0084df8e3d5b48c/cmd/argocd-application-controller/commands/argocd_application_controller.go#L143 ,
+  https://github.com/argoproj/argo-cd/blob/a5038b0e2bbac1715754380ae0084df8e3d5b48c/cmd/argocd-application-controller/commands/argocd_application_controller.go#L259 ,
+  https://github.com/argoproj/argo-cd/blob/a5038b0e2bbac1715754380ae0084df8e3d5b48c/controller/appcontroller.go#L2194 ,
+  https://github.com/argoproj/argo-cd/blob/a5038b0e2bbac1715754380ae0084df8e3d5b48c/controller/appcontroller.go#L2250 ,
+  https://github.com/argoproj/argo-cd/blob/a5038b0e2bbac1715754380ae0084df8e3d5b48c/controller/appcontroller.go#L2683 ,
+  https://github.com/argoproj/argo-cd/blob/a5038b0e2bbac1715754380ae0084df8e3d5b48c/reposerver/cache/cache.go#L70 ,
+  https://github.com/argoproj/argo-cd/blob/a5038b0e2bbac1715754380ae0084df8e3d5b48c/manifests/base/application-controller/argocd-application-controller-statefulset.yaml#L37 ,
+  https://github.com/argoproj/argo-cd/blob/a5038b0e2bbac1715754380ae0084df8e3d5b48c/manifests/base/repo-server/argocd-repo-server-deployment.yaml#L38 ,
+  https://github.com/argoproj/argo-cd/blob/a5038b0e2bbac1715754380ae0084df8e3d5b48c/docs/operator-manual/argocd-cm.yaml#L331
+- **Maturity**: GA
+- **Semantics**: argocd-cm `timeout.reconciliation` (Go duration, e.g. `120s`) is projected into env
+  `ARGOCD_RECONCILIATION_TIMEOUT` of the application controller and the repo-server at pod start. Controller flag
+  `--app-resync` (integer **seconds**; default 120 = env value converted to seconds). Behaviour:
+  (1) the Application informer is created with a resync period equal to the soft timeout (or the hard timeout when that
+  is non-zero and smaller), so every app is periodically re-enqueued; (2) on each refresh the controller computes
+  `softExpired = timeout > 0 && status.reconciledAt + timeout < now` (an app with nil `reconciledAt` is always
+  soft-expired so it gets a first comparison); soft expiry triggers a **normal** refresh (resolves the latest revision of
+  the source and recomputes the diff) and logs `Refreshing app status (comparison expired, requesting refresh.
+  reconciledAt: <t>, expiry: <d>), level (<n>)`. Value `0` disables periodic reconciliation (internally the informer
+  resync becomes 100 years); apps are then refreshed only by watch events, webhooks, explicit refresh or spec changes.
+  On the repo-server the same env sets `--revision-cache-expiration` (TTL of resolved symbolic revisions; repo-server
+  compiled default **3m** when the key is absent, whereas the controller compiled default is **120s**).
+- **Edge cases**: A change of the key has no effect until the controller **and** repo-server are restarted (env read
+  at start). Unparseable values fall back to the compiled defaults (warning). With `timeout.reconciliation: 0s` the
+  repo-server revision cache TTL becomes 0 (per doc the default cache expiration then applies) so branch heads are
+  re-resolved on every request. User-requested refreshes (`argocd.argoproj.io/refresh` annotation) and spec/destination
+  changes take precedence over expiry when choosing the refresh reason.
+- **Configuration surface**: argocd-cm `timeout.reconciliation`; env `ARGOCD_RECONCILIATION_TIMEOUT`; flags
+  `--app-resync` (controller), `--revision-cache-expiration` (repo-server).
+- **Exposure**: ConfigMap; controller/repo-server flags. Effect visible via `status.reconciledAt` (CRD), app list/UI.
+- **Tests required**:
+  - Positive: `timeout.reconciliation: 30s` + restart → `status.reconciledAt` advances roughly every 30–90s (with default 60s jitter) without any Git/cluster change.
+  - Positive: new commit on a tracked branch (no webhook) is detected within timeout + jitter.
+  - Negative: `timeout.reconciliation: 0s` → no periodic refresh (reconciledAt frozen) while a watched-resource change still refreshes the app.
+  - Negative: invalid value `abc` → default 120s used, controller starts.
+  - Recovery: changing the key without restarting pods has no effect (parity), takes effect after restart.
+
+### OPS-059 Reconciliation jitter (`timeout.reconciliation.jitter`, `--app-resync-jitter`)
+- **Upstream**:
+  https://github.com/argoproj/argo-cd/blob/a5038b0e2bbac1715754380ae0084df8e3d5b48c/cmd/argocd-application-controller/commands/argocd_application_controller.go#L46 ,
+  https://github.com/argoproj/argo-cd/blob/a5038b0e2bbac1715754380ae0084df8e3d5b48c/cmd/argocd-application-controller/commands/argocd_application_controller.go#L261 ,
+  https://github.com/argoproj/argo-cd/blob/a5038b0e2bbac1715754380ae0084df8e3d5b48c/controller/appcontroller.go#L2791 ,
+  https://github.com/argoproj/argo-cd/blob/a5038b0e2bbac1715754380ae0084df8e3d5b48c/manifests/base/application-controller/argocd-application-controller-statefulset.yaml#L49 ,
+  https://github.com/argoproj/argo-cd/blob/a5038b0e2bbac1715754380ae0084df8e3d5b48c/docs/operator-manual/argocd-cm.yaml#L343
+- **Maturity**: GA
+- **Semantics**: argocd-cm `timeout.reconciliation.jitter` → env `ARGOCD_RECONCILIATION_JITTER` → `--app-resync-jitter`
+  (seconds, default 60). When the informer delivers a periodic resync (old and new Application have the **same
+  resourceVersion**) the refresh is enqueued after a uniformly random delay in `[0, jitter)`, spreading the load on the
+  refresh queue and repo-server; with a non-zero delay the app is also added to the operation queue. Real updates (new
+  resourceVersion) are enqueued immediately. `0` disables jitter.
+- **Edge cases**: Jitter only applies to informer resync events, not to watch-driven or user-requested refreshes. The
+  effective period is therefore `timeout` to `timeout + jitter` (doc wording). Restart required after change.
+- **Configuration surface**: argocd-cm `timeout.reconciliation.jitter`; env `ARGOCD_RECONCILIATION_JITTER`; flag `--app-resync-jitter`.
+- **Exposure**: ConfigMap; controller flag.
+- **Tests required**:
+  - Positive: 200 apps, timeout 60s, jitter 60s → refresh start times distributed over the 60s window (no single spike).
+  - Positive: jitter 0 → all resync refreshes enqueued immediately.
+  - Negative: a spec edit is processed immediately even with jitter configured.
+
+### OPS-060 Periodic hard reconciliation (`timeout.hard.reconciliation`, `--app-hard-resync`)
+- **Upstream**:
+  https://github.com/argoproj/argo-cd/blob/a5038b0e2bbac1715754380ae0084df8e3d5b48c/cmd/argocd-application-controller/commands/argocd_application_controller.go#L48 ,
+  https://github.com/argoproj/argo-cd/blob/a5038b0e2bbac1715754380ae0084df8e3d5b48c/cmd/argocd-application-controller/commands/argocd_application_controller.go#L260 ,
+  https://github.com/argoproj/argo-cd/blob/a5038b0e2bbac1715754380ae0084df8e3d5b48c/controller/appcontroller.go#L2224 ,
+  https://github.com/argoproj/argo-cd/blob/a5038b0e2bbac1715754380ae0084df8e3d5b48c/controller/appcontroller.go#L2018 ,
+  https://github.com/argoproj/argo-cd/blob/a5038b0e2bbac1715754380ae0084df8e3d5b48c/manifests/base/application-controller/argocd-application-controller-statefulset.yaml#L43
+- **Maturity**: GA
+- **Semantics**: argocd-cm `timeout.hard.reconciliation` → env `ARGOCD_HARD_RECONCILIATION_TIMEOUT` → `--app-hard-resync`
+  (seconds, default 0 = disabled). When `reconciledAt + hardTimeout < now` (or `reconciledAt` is nil and the hard timeout
+  is enabled) the refresh type is **hard**: the comparison is performed with `noCache=true`, so the repo-server bypasses
+  its manifest cache and regenerates manifests; log reason `comparison expired, requesting hard refresh`. Hard expiry
+  wins over soft expiry. If hardTimeout is non-zero and smaller than the soft timeout, the informer resync period uses
+  the hard timeout.
+- **Edge cases**: The key is consumed by the shipped manifests but is not listed in the reference `argocd-cm.yaml`
+  (Doc/implementation differences). Very low values cause continuous cache-bypassing manifest generation (repo-server
+  load). Restart required.
+- **Configuration surface**: argocd-cm `timeout.hard.reconciliation`; env `ARGOCD_HARD_RECONCILIATION_TIMEOUT`; flag `--app-hard-resync`.
+- **Exposure**: ConfigMap; controller flag.
+- **Tests required**:
+  - Positive: hard timeout 120s with a Helm chart re-published under the same version → regenerated manifests detected within ~120s (soft refresh alone would serve the cached manifests).
+  - Positive: hard timeout 0 → no hard refresh ever occurs automatically (repo-server cache hit counter grows).
+  - Positive: hard timeout < soft timeout → informer resync follows the hard timeout.
+
+### OPS-061 Refresh triggers and refresh-cause logging
+- **Upstream**:
+  https://github.com/argoproj/argo-cd/blob/a5038b0e2bbac1715754380ae0084df8e3d5b48c/controller/appcontroller.go#L436 ,
+  https://github.com/argoproj/argo-cd/blob/a5038b0e2bbac1715754380ae0084df8e3d5b48c/controller/appcontroller.go#L378 ,
+  https://github.com/argoproj/argo-cd/blob/a5038b0e2bbac1715754380ae0084df8e3d5b48c/controller/appcontroller.go#L499 ,
+  https://github.com/argoproj/argo-cd/blob/a5038b0e2bbac1715754380ae0084df8e3d5b48c/controller/appcontroller.go#L1053 ,
+  https://github.com/argoproj/argo-cd/blob/a5038b0e2bbac1715754380ae0084df8e3d5b48c/controller/appcontroller.go#L2202 ,
+  https://github.com/argoproj/argo-cd/blob/a5038b0e2bbac1715754380ae0084df8e3d5b48c/controller/cache/cache.go#L380 ,
+  https://github.com/argoproj/argo-cd/blob/a5038b0e2bbac1715754380ae0084df8e3d5b48c/docs/operator-manual/reconcile.md#L3 ,
+  https://github.com/argoproj/argo-cd/blob/a5038b0e2bbac1715754380ae0084df8e3d5b48c/docs/operator-manual/reconcile.md#L71
+- **Maturity**: GA
+- **Semantics**: Besides periodic expiry (OPS-058/060), an app refresh is requested by: user refresh annotation
+  (`argocd.argoproj.io/refresh: normal|hard`, highest precedence, forces revision re-resolution), `spec.source(s)` differing
+  from `status.sync.comparedTo`, destination / managedNamespaceMetadata / ignoreDifferences changes, automated-sync
+  enablement, and **watch events of live resources** in the cluster cache. For a changed live object the controller maps
+  it to owning apps; a change of a managed (tracked) resource requests level `CompareWithRecent` and logs at **info**
+  `Requesting app refresh caused by object update` with fields `comparison-level`, `namespace` (`(cluster-scoped)` for
+  cluster-scoped), `name`, `api-version`, `kind`, `server`, `cluster-name` plus the standard app fields; orphan/child
+  resource changes request `ComparisonWithNothing` (tree-only) and log the same message at **debug**. Every refresh
+  logs `Refreshing app status (<reason>), level (<n>)`. Updates to core `Endpoints` never requeue apps; an Application
+  whose watched object is itself (app-of-apps self reference) is not force-refreshed; apps of another shard or outside
+  allowed namespaces are skipped.
+- **Edge cases**: Pending refresh requests are coalesced (max comparison level wins). Missing project → "Unable to
+  determine project for app" error and no refresh.
+- **Configuration surface**: log level (`controller.log.level`); annotation `argocd.argoproj.io/refresh` (owner 01).
+- **Exposure**: Controller logs; CRD annotation.
+- **Tests required**:
+  - Positive: edit a managed Deployment's spec → info log with kind/api-version and a CompareWithRecent refresh.
+  - Positive: create a Pod owned by a managed ReplicaSet → debug-only log, tree refresh.
+  - Negative: Endpoints update → no app refresh.
+  - Positive: refresh annotation `hard` → noCache comparison and annotation removed after processing.
+
+### OPS-062 Ignore resource updates: global switch and skip semantics (`resource.ignoreResourceUpdatesEnabled`)
+- **Upstream**:
+  https://github.com/argoproj/argo-cd/blob/a5038b0e2bbac1715754380ae0084df8e3d5b48c/util/settings/settings.go#L485 ,
+  https://github.com/argoproj/argo-cd/blob/a5038b0e2bbac1715754380ae0084df8e3d5b48c/util/settings/settings.go#L1031 ,
+  https://github.com/argoproj/argo-cd/blob/a5038b0e2bbac1715754380ae0084df8e3d5b48c/controller/cache/cache.go#L390 ,
+  https://github.com/argoproj/argo-cd/blob/a5038b0e2bbac1715754380ae0084df8e3d5b48c/controller/cache/cache.go#L571 ,
+  https://github.com/argoproj/argo-cd/blob/a5038b0e2bbac1715754380ae0084df8e3d5b48c/controller/cache/cache.go#L606 ,
+  https://github.com/argoproj/argo-cd/blob/a5038b0e2bbac1715754380ae0084df8e3d5b48c/docs/operator-manual/reconcile.md#L12 ,
+  https://github.com/argoproj/argo-cd/blob/a5038b0e2bbac1715754380ae0084df8e3d5b48c/docs/operator-manual/reconcile.md#L95
+- **Maturity**: GA
+- **Semantics**: Default **enabled** (empty/missing key = `true`; any other value parsed with `strconv.ParseBool`).
+  When enabled, the cluster cache computes a manifest hash for every tracked resource (resources with an app tracking
+  id, any `argoproj.io/Application`, or untracked resources opted in via OPS-064) after applying the ignore-resource-
+  updates normalization (OPS-063). On a watch update, if both old and new hashes are non-empty and equal **and** the
+  health status is unchanged, the event is dropped: no app refresh is requested and the controller logs (debug)
+  `Ignoring change of object because none of the watched resource fields have changed` with server/namespace/name/
+  api-version/kind. Disabled (`'false'`) → no hashing, every update requests a refresh.
+- **Edge cases**: Health transitions always trigger a refresh even if all changed fields are ignored. Hash generation
+  errors are logged (`Failed to generate manifest hash`) and the update is not skipped. Invalid boolean → settings read
+  error. The setting is read live (settings informer), no restart needed.
+- **Configuration surface**: argocd-cm `resource.ignoreResourceUpdatesEnabled`.
+- **Exposure**: ConfigMap; controller debug logs.
+- **Tests required**:
+  - Positive: default config, status-only churn on a tracked Deployment (no health change) → no refresh, debug log present.
+  - Positive: same churn causing health Healthy→Progressing → refresh occurs.
+  - Negative: `resource.ignoreResourceUpdatesEnabled: "false"` → every status update triggers a refresh.
+
+### OPS-063 Ignore resource updates rules (`resource.customizations.ignoreResourceUpdates.*`)
+- **Upstream**:
+  https://github.com/argoproj/argo-cd/blob/a5038b0e2bbac1715754380ae0084df8e3d5b48c/util/settings/settings.go#L996 ,
+  https://github.com/argoproj/argo-cd/blob/a5038b0e2bbac1715754380ae0084df8e3d5b48c/util/settings/settings.go#L1185 ,
+  https://github.com/argoproj/argo-cd/blob/a5038b0e2bbac1715754380ae0084df8e3d5b48c/util/settings/settings.go#L1221 ,
+  https://github.com/argoproj/argo-cd/blob/a5038b0e2bbac1715754380ae0084df8e3d5b48c/docs/operator-manual/reconcile.md#L26 ,
+  https://github.com/argoproj/argo-cd/blob/a5038b0e2bbac1715754380ae0084df8e3d5b48c/docs/operator-manual/reconcile.md#L42 ,
+  https://github.com/argoproj/argo-cd/blob/a5038b0e2bbac1715754380ae0084df8e3d5b48c/docs/operator-manual/reconcile.md#L51 ,
+  https://github.com/argoproj/argo-cd/blob/a5038b0e2bbac1715754380ae0084df8e3d5b48c/docs/operator-manual/reconcile.md#L67
+- **Maturity**: GA
+- **Semantics**: Per group/kind rules in argocd-cm `resource.customizations.ignoreResourceUpdates.<group>_<Kind>`
+  (core group: `<Kind>`) or `resource.customizations.ignoreResourceUpdates.all`, each a YAML object with
+  `jsonPointers` (RFC 6902) and/or `jqPathExpressions`; also accepted inside the legacy `resource.customizations` block
+  under key `ignoreResourceUpdates`. Effective rule set = ignoreResourceUpdates rules **plus**, when
+  `resource.compareoptions.ignoreDifferencesOnResourceUpdates` is true (default true since 3.0), the system-level
+  `ignoreDifferences` jsonPointers/jqPathExpressions/managedFieldsManagers of the same key; plus, always,
+  `/metadata/resourceVersion`, `/metadata/generation`, `/metadata/managedFields` for `*/*`. The controller logs
+  `Using diffing customizations to ignore resource updates` when the ignoreDifferences merge is active. Rules are applied
+  only to tracked resources (or opted-in, OPS-064). The JQ timeout is `--ignore-normalizer-jq-execution-timeout-seconds`.
+- **Edge cases**: Application-level `spec.ignoreDifferences` are **not** used for resource-update skipping (system-level
+  only). Malformed YAML in a rule → resource overrides fail to load (settings error surfaced in controller logs). Ignoring
+  `/status` does not suppress refreshes caused by health changes (OPS-062).
+- **Configuration surface**: argocd-cm `resource.customizations.ignoreResourceUpdates.<gk>`, `.all`,
+  `resource.compareoptions` (`ignoreDifferencesOnResourceUpdates`); shipped defaults OPS-155.
+- **Exposure**: ConfigMap; `argocd admin settings resource-overrides ignore-resource-updates` (OPS-128).
+- **Tests required**:
+  - Positive: rule `external-secrets.io_ExternalSecret` ignoring `/status/refreshTime` → refreshTime churn produces no refresh.
+  - Positive: `.all` rule with `/status` applies to every tracked kind.
+  - Positive: system ignoreDifferences on `/spec/replicas` for Deployments → HPA-driven replica changes do not refresh the app; with `ignoreDifferencesOnResourceUpdates: false` they do.
+  - Positive: resourceVersion/generation/managedFields-only changes never refresh.
+
+### OPS-064 Opt-in for untracked resources (`argocd.argoproj.io/ignore-resource-updates`)
+- **Upstream**:
+  https://github.com/argoproj/argo-cd/blob/a5038b0e2bbac1715754380ae0084df8e3d5b48c/controller/cache/cache.go#L81 ,
+  https://github.com/argoproj/argo-cd/blob/a5038b0e2bbac1715754380ae0084df8e3d5b48c/controller/cache/cache.go#L402 ,
+  https://github.com/argoproj/argo-cd/blob/a5038b0e2bbac1715754380ae0084df8e3d5b48c/docs/operator-manual/reconcile.md#L127
+- **Maturity**: GA
+- **Semantics**: Untracked resources (no app tracking id, e.g. ReplicaSets/Pods/Jobs created by controllers) are not
+  hashed and every change refreshes the owning app's tree. Setting annotation
+  `argocd.argoproj.io/ignore-resource-updates: "true"` on such a resource (typically via pod/job templates) makes the
+  controller hash it with the ignore-resource-updates rules of its kind (e.g. `batch_Job`, `Pod` with `/status`), so
+  irrelevant updates are skipped as in OPS-062.
+- **Edge cases**: Value parsed with `strconv.ParseBool`; unparseable → treated as false. The annotation has no effect
+  when the global switch is disabled. It is ignored on tracked resources (they are always hashed).
+- **Configuration surface**: annotation on live resources.
+- **Exposure**: Kubernetes resource annotation.
+- **Tests required**:
+  - Positive: CronJob whose job/pod templates carry the annotation and `batch_Job`/`Pod` rules ignoring `/status` → status churn of Jobs/Pods does not refresh the app.
+  - Negative: annotation value `yes` → treated as false, updates refresh the app.
+
+---
+
+## E. Metrics
+
+### OPS-065 Metrics endpoints, registries and scraping
+- **Upstream**:
+  https://github.com/argoproj/argo-cd/blob/a5038b0e2bbac1715754380ae0084df8e3d5b48c/controller/appcontroller.go#L321 ,
+  https://github.com/argoproj/argo-cd/blob/a5038b0e2bbac1715754380ae0084df8e3d5b48c/controller/metrics/metrics.go#L187 ,
+  https://github.com/argoproj/argo-cd/blob/a5038b0e2bbac1715754380ae0084df8e3d5b48c/server/metrics/metrics.go#L74 ,
+  https://github.com/argoproj/argo-cd/blob/a5038b0e2bbac1715754380ae0084df8e3d5b48c/reposerver/metrics/metrics.go#L46 ,
+  https://github.com/argoproj/argo-cd/blob/a5038b0e2bbac1715754380ae0084df8e3d5b48c/cmd/argocd-repo-server/commands/argocd_repo_server.go#L188 ,
+  https://github.com/argoproj/argo-cd/blob/a5038b0e2bbac1715754380ae0084df8e3d5b48c/cmd/argocd-applicationset-controller/commands/applicationset_controller.go#L166 ,
+  https://github.com/argoproj/argo-cd/blob/a5038b0e2bbac1715754380ae0084df8e3d5b48c/cmd/argocd-notification/commands/argocd_notification.go#L149 ,
+  https://github.com/argoproj/argo-cd/blob/a5038b0e2bbac1715754380ae0084df8e3d5b48c/commitserver/metrics/metrics.go#L48 ,
+  https://github.com/argoproj/argo-cd/blob/a5038b0e2bbac1715754380ae0084df8e3d5b48c/docs/operator-manual/metrics.md#L1 ,
+  https://github.com/argoproj/argo-cd/blob/a5038b0e2bbac1715754380ae0084df8e3d5b48c/docs/operator-manual/metrics.md#L296
+- **Maturity**: GA
+- **Semantics**: Plain-HTTP, unauthenticated `GET /metrics` (Prometheus text format) per component:
+  controller `0.0.0.0:8082` (Service `argocd-metrics`; gathers the app registry plus the controller-runtime registry,
+  i.e. workqueue, Go and process metrics; also serves `/healthz` and pprof); API server `<listen host>:8083`
+  (`argocd-server-metrics`; own registry + Prometheus default gatherer incl. Go/process); repo-server
+  `<metrics-address>:8084` (`argocd-repo-server` port `metrics`; own registry with process and Go collectors; also
+  `/healthz` and pprof); ApplicationSet controller `:8080` (controller-runtime metrics server, `--metrics-addr`;
+  controller-runtime + workqueue + Go/process metrics); notifications controller `0.0.0.0:9001`
+  (`argocd-notifications-controller-metrics`; notifications registry + default gatherer); commit-server
+  `<metrics-address>:8087` (own registry with process/Go collectors); Dex `5558` (Dex's own metrics). Documented
+  Prometheus-Operator ServiceMonitors select `app.kubernetes.io/name` = `argocd-metrics`, `argocd-server-metrics`,
+  `argocd-repo-server`, `argocd-applicationset-controller`, `argocd-dex-server`, `argocd-redis-ha-haproxy`
+  (port `http-exporter-port`), `argocd-notifications-controller-metrics`, `argocd-commit-server`, endpoint port
+  `metrics`. With multiple controller replicas, scrapers must use pod/endpoint discovery (each replica exports only its
+  shard). An example Grafana dashboard is published (`examples/dashboard.json`).
+- **Edge cases**: No TLS or auth on any metrics endpoint (network policy only, OPS-010). Metric families are absent until
+  first observation (CounterVec/HistogramVec).
+- **Configuration surface**: per-component metrics port/address flags (OPS-145..153).
+- **Exposure**: HTTP endpoints; Services.
+- **Tests required**:
+  - Positive: each endpoint returns 200 with `go_goroutines` (where Go collectors are registered) and the component metric families listed in OPS-066..084.
+  - Positive: ServiceMonitor selectors from the doc match the shipped Service labels/ports.
+  - Positive: two controller replicas expose disjoint `argocd_app_info` series (shard filter).
+
+### OPS-066 `argocd_app_info` gauge
+- **Upstream**:
+  https://github.com/argoproj/argo-cd/blob/a5038b0e2bbac1715754380ae0084df8e3d5b48c/controller/metrics/metrics.go#L65 ,
+  https://github.com/argoproj/argo-cd/blob/a5038b0e2bbac1715754380ae0084df8e3d5b48c/controller/metrics/metrics.go#L395 ,
+  https://github.com/argoproj/argo-cd/blob/a5038b0e2bbac1715754380ae0084df8e3d5b48c/controller/metrics/metrics.go#L424 ,
+  https://github.com/argoproj/argo-cd/blob/a5038b0e2bbac1715754380ae0084df8e3d5b48c/docs/operator-manual/metrics.md#L11
+- **Maturity**: GA
+- **Semantics**: Collected at scrape time from the Application lister (only apps this replica can process). One series
+  per app, value 1, labels: `namespace`, `name`, `project`, `autosync_enabled` (`true|false`), `repo` (normalized Git URL
+  of the primary source), `dest_server` (resolved destination cluster URL, empty if resolution fails — warning logged),
+  `dest_namespace`, `sync_status` (`Synced|OutOfSync|Unknown`; empty → `Unknown`), `health_status` (empty → `Unknown`),
+  `operation` (`delete` when deletionTimestamp set, else `sync` when an operation is in progress, else empty).
+- **Edge cases**: Apps addressed by `destination.name` are resolved to the server URL. Replaces the removed
+  `argocd_app_sync_status`/`argocd_app_health_status`/`argocd_app_created_time` (OPS-156).
+- **Configuration surface**: none.
+- **Exposure**: `/metrics` (controller).
+- **Tests required**:
+  - Positive: golden label set for a synced healthy auto-sync app and for an app being deleted (`operation="delete"`).
+  - Positive: series disappears when the app is deleted (scrape-time collection).
+
+### OPS-067 `argocd_app_labels` gauge (`--metrics-application-labels`)
+- **Upstream**:
+  https://github.com/argoproj/argo-cd/blob/a5038b0e2bbac1715754380ae0084df8e3d5b48c/controller/metrics/metrics.go#L168 ,
+  https://github.com/argoproj/argo-cd/blob/a5038b0e2bbac1715754380ae0084df8e3d5b48c/util/metrics/metrics.go#L11 ,
+  https://github.com/argoproj/argo-cd/blob/a5038b0e2bbac1715754380ae0084df8e3d5b48c/cmd/argocd-application-controller/commands/argocd_application_controller.go#L285 ,
+  https://github.com/argoproj/argo-cd/blob/a5038b0e2bbac1715754380ae0084df8e3d5b48c/docs/operator-manual/metrics.md#L78
+- **Maturity**: GA
+- **Semantics**: Disabled unless `--metrics-application-labels` (repeatable / comma list) is set. Then one series per app
+  with labels `namespace`, `name`, `project` plus `label_<normalized key>` for each configured label key (characters
+  invalid in Prometheus label names replaced by `_`, e.g. `team-name` → `label_team_name`); missing labels yield empty
+  values; value 1.
+- **Edge cases**: The flag has **no env var and no cmd-params mapping** in code/manifests even though metrics.md shows
+  `controller.metrics.application.labels` in argocd-cmd-params-cm (Doc/implementation differences). Cardinality grows with
+  distinct label values.
+- **Configuration surface**: controller flag `--metrics-application-labels`.
+- **Exposure**: `/metrics` (controller).
+- **Tests required**:
+  - Positive: flag `team-name,business-unit` → `argocd_app_labels{label_business_unit=...,label_team_name=...}`.
+  - Negative: setting only the documented cmd-params key does not enable the metric (parity of the gap, or documented Patrol fix).
+
+### OPS-068 `argocd_app_condition` gauge (`--metrics-application-conditions`)
+- **Upstream**:
+  https://github.com/argoproj/argo-cd/blob/a5038b0e2bbac1715754380ae0084df8e3d5b48c/controller/metrics/metrics.go#L178 ,
+  https://github.com/argoproj/argo-cd/blob/a5038b0e2bbac1715754380ae0084df8e3d5b48c/controller/metrics/metrics.go#L462 ,
+  https://github.com/argoproj/argo-cd/blob/a5038b0e2bbac1715754380ae0084df8e3d5b48c/cmd/argocd-application-controller/commands/argocd_application_controller.go#L286 ,
+  https://github.com/argoproj/argo-cd/blob/a5038b0e2bbac1715754380ae0084df8e3d5b48c/docs/operator-manual/metrics.md#L116
+- **Maturity**: GA
+- **Semantics**: Disabled unless `--metrics-application-conditions` lists condition types (e.g.
+  `OrphanedResourceWarning`, `ExcludedResourceWarning`). Per app and per listed condition type present in
+  `status.conditions`, a series `argocd_app_condition{namespace,name,project,condition}` with value = number of
+  conditions of that type. Types not present produce no series (not 0).
+- **Edge cases**: No env/cmd-params mapping. Flag help text names the metric `argocd_application_conditions`
+  (cosmetic difference).
+- **Configuration surface**: controller flag `--metrics-application-conditions`.
+- **Exposure**: `/metrics` (controller).
+- **Tests required**:
+  - Positive: app with 2 `SyncError`-type conditions and the flag set to `SyncError` → value 2.
+  - Negative: condition type not in the flag list → no series.
+
+### OPS-069 Controller kubectl execution metrics (`argocd_kubectl_exec_total`, `argocd_kubectl_exec_pending`)
+- **Upstream**:
+  https://github.com/argoproj/argo-cd/blob/a5038b0e2bbac1715754380ae0084df8e3d5b48c/controller/metrics/metrics.go#L96 ,
+  https://github.com/argoproj/argo-cd/blob/a5038b0e2bbac1715754380ae0084df8e3d5b48c/controller/metrics/metrics.go#L101 ,
+  https://github.com/argoproj/argo-cd/blob/a5038b0e2bbac1715754380ae0084df8e3d5b48c/controller/appcontroller.go#L362 ,
+  https://github.com/argoproj/argo-cd/blob/a5038b0e2bbac1715754380ae0084df8e3d5b48c/docs/operator-manual/metrics.md#L29
+- **Maturity**: GA
+- **Semantics**: `argocd_kubectl_exec_total` (counter) and `argocd_kubectl_exec_pending` (gauge), labels `hostname`
+  (controller pod hostname), `command` (`apply`, `auth`, `create`, `replace`). The counter increments on every
+  kubectl-library operation; the pending gauge is incremented while waiting for/holding the parallelism semaphore and
+  decremented after (only when `--kubectl-parallelism-limit` ≥ 1, OPS-039).
+- **Edge cases**: Both reset by the metrics cache expiration cron (OPS-075).
+- **Configuration surface**: none (limit in OPS-039).
+- **Exposure**: `/metrics` (controller).
+- **Tests required**:
+  - Positive: sync of 3 resources with apply → `argocd_kubectl_exec_total{command="apply"}` ≥ 3.
+  - Positive: limit 1 under concurrent syncs → pending gauge observed > 0 and returns to 0.
+
+### OPS-070 `argocd_app_reconcile` histogram
+- **Upstream**:
+  https://github.com/argoproj/argo-cd/blob/a5038b0e2bbac1715754380ae0084df8e3d5b48c/controller/metrics/metrics.go#L106 ,
+  https://github.com/argoproj/argo-cd/blob/a5038b0e2bbac1715754380ae0084df8e3d5b48c/controller/metrics/metrics.go#L318 ,
+  https://github.com/argoproj/argo-cd/blob/a5038b0e2bbac1715754380ae0084df8e3d5b48c/docs/operator-manual/metrics.md#L16
+- **Maturity**: GA
+- **Semantics**: Histogram of app reconciliation (refresh) duration in seconds, labels `namespace` (app namespace),
+  `dest_server`; buckets `0.25, 0.5, 1, 2, 4, 8, 16`.
+- **Edge cases**: Per-app identity is intentionally not a label. Reset by OPS-075.
+- **Configuration surface**: none.
+- **Exposure**: `/metrics` (controller).
+- **Tests required**:
+  - Positive: after N refreshes `argocd_app_reconcile_count{namespace,dest_server}` increases by N; bucket boundaries match exactly.
+
+### OPS-071 Sync metrics (`argocd_app_sync_total`, `argocd_app_sync_duration_seconds_total`)
+- **Upstream**:
+  https://github.com/argoproj/argo-cd/blob/a5038b0e2bbac1715754380ae0084df8e3d5b48c/controller/metrics/metrics.go#L72 ,
+  https://github.com/argoproj/argo-cd/blob/a5038b0e2bbac1715754380ae0084df8e3d5b48c/controller/metrics/metrics.go#L80 ,
+  https://github.com/argoproj/argo-cd/blob/a5038b0e2bbac1715754380ae0084df8e3d5b48c/controller/metrics/metrics.go#L249 ,
+  https://github.com/argoproj/argo-cd/blob/a5038b0e2bbac1715754380ae0084df8e3d5b48c/controller/appcontroller.go#L1818 ,
+  https://github.com/argoproj/argo-cd/blob/a5038b0e2bbac1715754380ae0084df8e3d5b48c/docs/operator-manual/metrics.md#L17
+- **Maturity**: GA
+- **Semantics**: `argocd_app_sync_total` (counter) labels `namespace`, `name`, `project`, `dest_server`, `phase`
+  (`Succeeded|Failed|Error|...` completed phases only), `dry_run` (`true|false`); incremented once per completed
+  operation. `argocd_app_sync_duration_seconds_total` (counter) labels `namespace`, `name`, `project`, `dest_server`; adds
+  `finishedAt - startedAt` in whole seconds when `finishedAt` is set.
+- **Edge cases**: Running/Terminating phases are never counted. Unresolvable destination → `dest_server=""` with
+  warning "Unable to get destination cluster, setting dest_server label to empty string in sync metric".
+- **Configuration surface**: none.
+- **Exposure**: `/metrics` (controller).
+- **Tests required**:
+  - Positive: successful sync → `argocd_app_sync_total{phase="Succeeded",dry_run="false"}` +1 and duration counter grows by the operation duration.
+  - Positive: dry-run sync → `dry_run="true"`.
+  - Negative: failed sync → `phase="Failed"` or `"Error"` accordingly.
+
+### OPS-072 `argocd_app_k8s_request_total` counter
+- **Upstream**:
+  https://github.com/argoproj/argo-cd/blob/a5038b0e2bbac1715754380ae0084df8e3d5b48c/controller/metrics/metrics.go#L88 ,
+  https://github.com/argoproj/argo-cd/blob/a5038b0e2bbac1715754380ae0084df8e3d5b48c/controller/metrics/metrics.go#L287 ,
+  https://github.com/argoproj/argo-cd/blob/a5038b0e2bbac1715754380ae0084df8e3d5b48c/controller/metrics/transportwrapper.go#L1 ,
+  https://github.com/argoproj/argo-cd/blob/a5038b0e2bbac1715754380ae0084df8e3d5b48c/docs/operator-manual/metrics.md#L13
+- **Maturity**: GA
+- **Semantics**: Counter of Kubernetes API requests made on behalf of an application (sync/live-state lookups), labels
+  `namespace`, `name`, `project` (empty when not app-scoped), `server`, `response_code`, `verb`
+  (`Get|Watch|List|Create|Delete|Patch|Update`), `resource_kind`, `resource_namespace`, `dry_run`.
+- **Edge cases**: Requests outside an app context are counted with empty app labels. Reset by OPS-075.
+- **Configuration surface**: none.
+- **Exposure**: `/metrics` (controller).
+- **Tests required**:
+  - Positive: syncing a Deployment yields `verb="Patch"` (or `Create`) series with `resource_kind="Deployment"`.
+  - Positive: dry-run sync records `dry_run="true"`.
+
+### OPS-073 `argocd_app_orphaned_resources_count` gauge
+- **Upstream**:
+  https://github.com/argoproj/argo-cd/blob/a5038b0e2bbac1715754380ae0084df8e3d5b48c/controller/metrics/metrics.go#L138 ,
+  https://github.com/argoproj/argo-cd/blob/a5038b0e2bbac1715754380ae0084df8e3d5b48c/controller/metrics/metrics.go#L277 ,
+  https://github.com/argoproj/argo-cd/blob/a5038b0e2bbac1715754380ae0084df8e3d5b48c/docs/operator-manual/metrics.md#L15
+- **Maturity**: GA
+- **Semantics**: Gauge per app (`namespace`, `name`, `project`) set to the number of orphaned resources found in the
+  destination namespace when the project enables orphaned-resource monitoring (owner of orphan semantics: 07/04).
+- **Edge cases**: Not emitted for apps whose project does not monitor orphans; reset by OPS-075.
+- **Configuration surface**: AppProject `spec.orphanedResources` (owner 07).
+- **Exposure**: `/metrics` (controller).
+- **Tests required**:
+  - Positive: project with orphan monitoring and 2 unmanaged ConfigMaps in the namespace → gauge 2.
+
+### OPS-074 Cluster cache and event-processing metrics (incl. `argocd_cluster_labels`)
+- **Upstream**:
+  https://github.com/argoproj/argo-cd/blob/a5038b0e2bbac1715754380ae0084df8e3d5b48c/controller/metrics/clustercollector.go#L17 ,
+  https://github.com/argoproj/argo-cd/blob/a5038b0e2bbac1715754380ae0084df8e3d5b48c/controller/metrics/clustercollector.go#L26 ,
+  https://github.com/argoproj/argo-cd/blob/a5038b0e2bbac1715754380ae0084df8e3d5b48c/controller/metrics/clustercollector.go#L81 ,
+  https://github.com/argoproj/argo-cd/blob/a5038b0e2bbac1715754380ae0084df8e3d5b48c/controller/metrics/clustercollector.go#L169 ,
+  https://github.com/argoproj/argo-cd/blob/a5038b0e2bbac1715754380ae0084df8e3d5b48c/controller/metrics/metrics.go#L116 ,
+  https://github.com/argoproj/argo-cd/blob/a5038b0e2bbac1715754380ae0084df8e3d5b48c/controller/metrics/metrics.go#L146 ,
+  https://github.com/argoproj/argo-cd/blob/a5038b0e2bbac1715754380ae0084df8e3d5b48c/cmd/argocd-application-controller/commands/argocd_application_controller.go#L287 ,
+  https://github.com/argoproj/argo-cd/blob/a5038b0e2bbac1715754380ae0084df8e3d5b48c/docs/operator-manual/metrics.md#L19 ,
+  https://github.com/argoproj/argo-cd/blob/a5038b0e2bbac1715754380ae0084df8e3d5b48c/docs/operator-manual/metrics.md#L192
+- **Maturity**: GA
+- **Semantics**: Cluster collector refreshes cluster info every 30s (10s timeout) and emits at scrape:
+  `argocd_cluster_info{server,k8s_version,name}` = 1; `argocd_cluster_api_resource_objects{server}` = cached object count;
+  `argocd_cluster_api_resources{server}` = monitored API resource count; `argocd_cluster_cache_age_seconds{server}` =
+  seconds since last full cache sync (`-1` if never synced); `argocd_cluster_connection_status{server,k8s_version}` =
+  1 if no sync error else 0; optional `argocd_cluster_labels{server,name,label_<key>...}` = 1 when
+  `--metrics-cluster-labels` is set (only for clusters that have labels). Event metrics:
+  `argocd_cluster_events_total{server,group,kind}` (counter, every watch event); `argocd_resource_events_processing{server}`
+  (histogram, buckets 0.25..16 s, batch processing time); `argocd_resource_events_processed_in_batch{server}` (gauge,
+  events in last batch; OPS-049 batching).
+- **Edge cases**: Only clusters cached by this shard are reported. `k8s_version` uses the `vMajor.Minor.Patch` format
+  since 3.4 (OPS-160).
+- **Configuration surface**: controller flag `--metrics-cluster-labels` (no env).
+- **Exposure**: `/metrics` (controller).
+- **Tests required**:
+  - Positive: unreachable cluster → `argocd_cluster_connection_status=0`; reachable → 1.
+  - Positive: `--metrics-cluster-labels team` → `argocd_cluster_labels{label_team=...}` only for labelled clusters.
+  - Positive: creating 10 ConfigMaps increments `argocd_cluster_events_total{kind="ConfigMap"}` by ≥10.
+
+### OPS-075 Metrics cache expiration (`controller.metrics.cache.expiration`, `--metrics-cache-expiration`)
+- **Upstream**:
+  https://github.com/argoproj/argo-cd/blob/a5038b0e2bbac1715754380ae0084df8e3d5b48c/cmd/argocd-application-controller/commands/argocd_application_controller.go#L273 ,
+  https://github.com/argoproj/argo-cd/blob/a5038b0e2bbac1715754380ae0084df8e3d5b48c/controller/metrics/metrics.go#L328 ,
+  https://github.com/argoproj/argo-cd/blob/a5038b0e2bbac1715754380ae0084df8e3d5b48c/controller/appcontroller.go#L328 ,
+  https://github.com/argoproj/argo-cd/blob/a5038b0e2bbac1715754380ae0084df8e3d5b48c/docs/operator-manual/metrics.md#L69
+- **Maturity**: GA
+- **Semantics**: Duration (default `0` = disabled; env `ARGOCD_APPLICATION_CONTROLLER_METRICS_CACHE_EXPIRATION`). When
+  set, a cron `@every <duration>` resets (and logs `Reset Prometheus metrics based on existing expiration '<d>'`)
+  `argocd_app_sync_total`, `argocd_app_sync_duration_seconds_total`, `argocd_kubectl_exec_total`,
+  `argocd_kubectl_exec_pending`, `argocd_app_orphaned_resources_count`, `argocd_app_k8s_request_total`,
+  `argocd_cluster_events_total`, `argocd_redis_request_total`, `argocd_app_reconcile`, `argocd_redis_request_duration`,
+  `argocd_resource_events_processing`, `argocd_resource_events_processed_in_batch` and all client-go `argocd_kubectl_*`
+  metrics, removing series of deleted apps/projects (cardinality control). Scrape-time collectors (app_info,
+  cluster metrics) are unaffected.
+- **Edge cases**: Counters drop to zero at each reset (Prometheus `increase()` handles resets). Setting the expiration
+  twice errors "expiration is already set".
+- **Configuration surface**: `controller.metrics.cache.expiration`.
+- **Exposure**: ConfigMap; controller flag.
+- **Tests required**:
+  - Positive: expiration 1m → series for a deleted app disappear from `argocd_app_sync_total` after ≤1m.
+  - Negative: default 0 → series persist for the process lifetime.
+
+### OPS-076 Redis request metrics
+- **Upstream**:
+  https://github.com/argoproj/argo-cd/blob/a5038b0e2bbac1715754380ae0084df8e3d5b48c/controller/metrics/metrics.go#L121 ,
+  https://github.com/argoproj/argo-cd/blob/a5038b0e2bbac1715754380ae0084df8e3d5b48c/server/metrics/metrics.go#L30 ,
+  https://github.com/argoproj/argo-cd/blob/a5038b0e2bbac1715754380ae0084df8e3d5b48c/reposerver/metrics/metrics.go#L103 ,
+  https://github.com/argoproj/argo-cd/blob/a5038b0e2bbac1715754380ae0084df8e3d5b48c/docs/operator-manual/metrics.md#L25
+- **Maturity**: GA
+- **Semantics**: Per component (names/labels differ, parity must keep them exactly):
+  controller `argocd_redis_request_total{hostname,initiator="argocd-application-controller",command,failed}` and
+  histogram `argocd_redis_request_duration{hostname,initiator}` (buckets 0.01, 0.05, 0.1, 0.25, 0.5, 1);
+  API server `argocd_redis_request_total{initiator,command,failed}` and `argocd_redis_request_duration{initiator}`
+  (buckets 0.1, 0.25, 0.5, 1, 2); repo-server `argocd_redis_request_total{initiator,command,failed}` and
+  `argocd_redis_request_duration_seconds{initiator}` (buckets 0.1, 0.25, 0.5, 1, 2). `failed` is `true|false`;
+  manifest-rename cache misses are counted as `failed="false"`.
+- **Edge cases**: Cache misses are not failures. Redis outages increment `failed="true"` while components continue.
+- **Configuration surface**: none.
+- **Exposure**: `/metrics` (controller, server, repo-server).
+- **Tests required**:
+  - Positive: golden metric names/label sets per component.
+  - Negative: stop Redis → `failed="true"` increments in all three components.
+
+### OPS-077 Repo-server Git and OCI metrics
+- **Upstream**:
+  https://github.com/argoproj/argo-cd/blob/a5038b0e2bbac1715754380ae0084df8e3d5b48c/reposerver/metrics/metrics.go#L48 ,
+  https://github.com/argoproj/argo-cd/blob/a5038b0e2bbac1715754380ae0084df8e3d5b48c/reposerver/metrics/metrics.go#L57 ,
+  https://github.com/argoproj/argo-cd/blob/a5038b0e2bbac1715754380ae0084df8e3d5b48c/reposerver/metrics/metrics.go#L122 ,
+  https://github.com/argoproj/argo-cd/blob/a5038b0e2bbac1715754380ae0084df8e3d5b48c/reposerver/metrics/githandlers.go#L15 ,
+  https://github.com/argoproj/argo-cd/blob/a5038b0e2bbac1715754380ae0084df8e3d5b48c/reposerver/metrics/ocihandlers.go#L12 ,
+  https://github.com/argoproj/argo-cd/blob/a5038b0e2bbac1715754380ae0084df8e3d5b48c/docs/operator-manual/metrics.md#L259
+- **Maturity**: GA
+- **Semantics**: Git: `argocd_git_request_total{repo,request_type}` (counter; `request_type` ∈ `fetch`, `ls-remote`),
+  `argocd_git_request_duration_seconds{repo,request_type}` (histogram, buckets 0.1, 0.25, 0.5, 1, 2, 4, 10, 20),
+  `argocd_git_fetch_fail_total{repo,revision}`, `argocd_git_lsremote_fail_total{repo,revision}` (code-only, undocumented).
+  OCI: `argocd_oci_request_total{repo,request_type}` and `argocd_oci_request_duration_seconds{repo,request_type}`
+  (`request_type` ∈ `extract`, `resolve-revision`, `digest-metadata`, `get-tags`, `test-repo`; same buckets),
+  `argocd_oci_extract_fail_total{repo,revision}`, `argocd_oci_resolve_revision_fail_total{repo,revision}`,
+  `argocd_oci_digest_metadata_fail_total{repo,revision}`, `argocd_oci_get_tags_fail_total{repo}`,
+  `argocd_oci_test_repo_fail_total{repo}`.
+- **Edge cases**: `repo` is the repository URL (high cardinality with many repos).
+- **Configuration surface**: none.
+- **Exposure**: `/metrics` (repo-server).
+- **Tests required**:
+  - Positive: manifest generation for a new Git revision increments `fetch` and `ls-remote` counters.
+  - Negative: unreachable repo → `argocd_git_lsremote_fail_total` / `argocd_git_fetch_fail_total` increment.
+  - Positive: OCI app generation increments `argocd_oci_request_total{request_type="extract"}`.
+
+### OPS-078 Repo-server lock and parallelism metrics
+- **Upstream**:
+  https://github.com/argoproj/argo-cd/blob/a5038b0e2bbac1715754380ae0084df8e3d5b48c/reposerver/metrics/metrics.go#L85 ,
+  https://github.com/argoproj/argo-cd/blob/a5038b0e2bbac1715754380ae0084df8e3d5b48c/reposerver/metrics/metrics.go#L94 ,
+  https://github.com/argoproj/argo-cd/blob/a5038b0e2bbac1715754380ae0084df8e3d5b48c/reposerver/repository/repository.go#L684 ,
+  https://github.com/argoproj/argo-cd/blob/a5038b0e2bbac1715754380ae0084df8e3d5b48c/docs/operator-manual/metrics.md#L272
+- **Maturity**: GA
+- **Semantics**: `argocd_repo_pending_request_total{repo}` (gauge) = requests waiting for the per-repository lock
+  (serialized generation, OPS-035); `argocd_repo_parallelism_wait_duration_seconds` (histogram, no labels, buckets 0.1,
+  0.25, 0.5, 1, 2, 4, 10, 20, 60, 120) = time waiting on the `--parallelismlimit` semaphore, observed on every acquire
+  attempt including failed/cancelled ones.
+- **Edge cases**: With parallelism limit 0 the histogram records near-zero waits.
+- **Configuration surface**: `reposerver.parallelism.limit`.
+- **Exposure**: `/metrics` (repo-server).
+- **Tests required**:
+  - Positive: limit 1 + concurrent requests → wait histogram has observations > 0.1s.
+  - Positive: two concurrent Kustomize generations on one repo → pending gauge 1 during contention.
+
+### OPS-079 gRPC server metrics and `ARGOCD_ENABLE_GRPC_TIME_HISTOGRAM`
+- **Upstream**:
+  https://github.com/argoproj/argo-cd/blob/a5038b0e2bbac1715754380ae0084df8e3d5b48c/server/server.go#L181 ,
+  https://github.com/argoproj/argo-cd/blob/a5038b0e2bbac1715754380ae0084df8e3d5b48c/server/server.go#L916 ,
+  https://github.com/argoproj/argo-cd/blob/a5038b0e2bbac1715754380ae0084df8e3d5b48c/reposerver/server.go#L87 ,
+  https://github.com/argoproj/argo-cd/blob/a5038b0e2bbac1715754380ae0084df8e3d5b48c/common/common.go#L300 ,
+  https://github.com/argoproj/argo-cd/blob/a5038b0e2bbac1715754380ae0084df8e3d5b48c/docs/operator-manual/metrics.md#L220
+- **Maturity**: GA
+- **Semantics**: The API server and repo-server (and CMP server) always register go-grpc-middleware server metrics
+  (`grpc_server_started_total`, `grpc_server_handled_total`, `grpc_server_msg_received_total`,
+  `grpc_server_msg_sent_total`, labels `grpc_type`, `grpc_service`, `grpc_method` and `grpc_code` for handled). Env
+  `ARGOCD_ENABLE_GRPC_TIME_HISTOGRAM=true` additionally enables `grpc_server_handling_seconds` (histogram).
+- **Edge cases**: API server parses the env with `ParseBoolFromEnv`; repo-server requires the exact string `true`.
+  The docs state gRPC metrics only appear with the env set, but the counters are always exported (Doc/implementation
+  differences).
+- **Configuration surface**: env `ARGOCD_ENABLE_GRPC_TIME_HISTOGRAM`.
+- **Exposure**: `/metrics` (server 8083, repo-server 8084).
+- **Tests required**:
+  - Positive: default → `grpc_server_handled_total` present, `grpc_server_handling_seconds_bucket` absent.
+  - Positive: env true → histogram present.
+
+### OPS-080 ApplicationSet controller metrics
+- **Upstream**:
+  https://github.com/argoproj/argo-cd/blob/a5038b0e2bbac1715754380ae0084df8e3d5b48c/applicationset/metrics/metrics.go#L18 ,
+  https://github.com/argoproj/argo-cd/blob/a5038b0e2bbac1715754380ae0084df8e3d5b48c/applicationset/metrics/metrics.go#L45 ,
+  https://github.com/argoproj/argo-cd/blob/a5038b0e2bbac1715754380ae0084df8e3d5b48c/applicationset/metrics/metrics.go#L74 ,
+  https://github.com/argoproj/argo-cd/blob/a5038b0e2bbac1715754380ae0084df8e3d5b48c/applicationset/metrics/metrics.go#L113 ,
+  https://github.com/argoproj/argo-cd/blob/a5038b0e2bbac1715754380ae0084df8e3d5b48c/docs/operator-manual/metrics.md#L139
+- **Maturity**: GA
+- **Semantics**: Registered in the controller-runtime registry (`:8080/metrics`): `argocd_appset_info{namespace,name,
+  resource_update_status}` gauge = 1 (`resource_update_status` = reason of the `ResourcesUpToDate` condition, else
+  `Unknown`); `argocd_appset_owned_applications{namespace,name}` gauge = `len(status.resources)`;
+  `argocd_appset_reconcile{namespace,name}` histogram (default Prometheus buckets) of reconcile duration;
+  optional `argocd_appset_labels{namespace,name,label_<key>...}` when `--metrics-applicationset-labels` is set. Also
+  controller-runtime/workqueue metrics and the client-go `argocd_kubectl_*` metrics (OPS-083).
+- **Edge cases**: Only ApplicationSets passing the namespace filter are reported. `owned_applications` is capped by
+  `applicationsetcontroller.status.max.resources.count` (status truncation, owner 06). Flag help says
+  `argocd_applicationset_labels` (cosmetic).
+- **Configuration surface**: appset flag `--metrics-applicationset-labels` (no env).
+- **Exposure**: `/metrics` (appset controller).
+- **Tests required**:
+  - Positive: appset generating 3 apps → `argocd_appset_owned_applications=3`, `argocd_appset_info{resource_update_status="ApplicationSetUpToDate"}`.
+  - Positive: labels flag adds `label_*` labels.
+
+### OPS-081 ApplicationSet GitHub API metrics (`applicationsetcontroller.enable.github.api.metrics`)
+- **Upstream**:
+  https://github.com/argoproj/argo-cd/blob/a5038b0e2bbac1715754380ae0084df8e3d5b48c/applicationset/services/github_metrics.go#L52 ,
+  https://github.com/argoproj/argo-cd/blob/a5038b0e2bbac1715754380ae0084df8e3d5b48c/applicationset/services/github_metrics.go#L73 ,
+  https://github.com/argoproj/argo-cd/blob/a5038b0e2bbac1715754380ae0084df8e3d5b48c/docs/operator-manual/metrics.md#L166
+- **Maturity**: GA (disabled by default)
+- **Semantics**: When enabled (`--enable-github-api-metrics` / env `ARGOCD_APPLICATIONSET_CONTROLLER_ENABLE_GITHUB_API_METRICS`;
+  API server: `--appset-enable-github-api-metrics`), the GitHub HTTP client used by SCM-provider/PR generators is
+  instrumented: `argocd_github_api_requests_total{method,endpoint,status,appset_namespace,appset_name}`,
+  `argocd_github_api_request_duration_seconds{method,endpoint,appset_namespace,appset_name}` (default buckets),
+  gauges `argocd_github_api_rate_limit_remaining`, `_limit`, `_reset_seconds`, `_used` with labels
+  `{endpoint,appset_namespace,appset_name,resource}` from GitHub rate-limit headers.
+- **Edge cases**: Doc lists the labels as "name and namespace"; actual label names are `appset_namespace`/`appset_name`.
+- **Configuration surface**: cmd-params `applicationsetcontroller.enable.github.api.metrics`.
+- **Exposure**: `/metrics` (appset controller; API server for preview/generate calls).
+- **Tests required**:
+  - Positive: SCM generator against a mocked GitHub API returning rate-limit headers → counters and gauges populated with exact label names.
+  - Negative: disabled → no `argocd_github_api_*` families.
+
+### OPS-082 API server metrics (`argocd_info`, `argocd_login_request_total`, proxy-extension metrics)
+- **Upstream**:
+  https://github.com/argoproj/argo-cd/blob/a5038b0e2bbac1715754380ae0084df8e3d5b48c/server/metrics/metrics.go#L45 ,
+  https://github.com/argoproj/argo-cd/blob/a5038b0e2bbac1715754380ae0084df8e3d5b48c/server/metrics/metrics.go#L60 ,
+  https://github.com/argoproj/argo-cd/blob/a5038b0e2bbac1715754380ae0084df8e3d5b48c/server/metrics/metrics.go#L66 ,
+  https://github.com/argoproj/argo-cd/blob/a5038b0e2bbac1715754380ae0084df8e3d5b48c/server/session/session.go#L49 ,
+  https://github.com/argoproj/argo-cd/blob/a5038b0e2bbac1715754380ae0084df8e3d5b48c/docs/operator-manual/metrics.md#L216
+- **Maturity**: GA (proxy-extension metrics: Beta)
+- **Semantics**: `argocd_info{version}` gauge = 1 (code-only, not in the metrics table); `argocd_login_request_total{status}`
+  counter with `status` ∈ `success|failure` for `SessionService.Create` (local user login);
+  `argocd_proxy_extension_request_total{extension,status}` counter and
+  `argocd_proxy_extension_request_duration_seconds{extension}` histogram (buckets 0.1, 0.25, 0.5, 1, 2, 5, 10) for
+  requests proxied to proxy extensions (owner of extension semantics: 08). Plus Redis (OPS-076), gRPC (OPS-079) and
+  client-go (OPS-083) metrics.
+- **Edge cases**: SSO logins do not go through `SessionService.Create` and are not counted.
+- **Configuration surface**: none.
+- **Exposure**: `/metrics` (`argocd-server-metrics:8083`).
+- **Tests required**:
+  - Positive: one bad and one good password login → `failure` and `success` each +1.
+  - Positive: `argocd_info{version="v3.5.5"}`-equivalent version label equals the running version.
+
+### OPS-083 Client-go Kubernetes client metrics (`argocd_kubectl_*`)
+- **Upstream**:
+  https://github.com/argoproj/argo-cd/blob/a5038b0e2bbac1715754380ae0084df8e3d5b48c/util/metrics/kubectl/kubectl_metrics.go#L48 ,
+  https://github.com/argoproj/argo-cd/blob/a5038b0e2bbac1715754380ae0084df8e3d5b48c/util/metrics/kubectl/kubectl_metrics.go#L98 ,
+  https://github.com/argoproj/argo-cd/blob/a5038b0e2bbac1715754380ae0084df8e3d5b48c/util/metrics/kubectl/kubectl_metrics.go#L130 ,
+  https://github.com/argoproj/argo-cd/blob/a5038b0e2bbac1715754380ae0084df8e3d5b48c/docs/operator-manual/metrics.md#L31
+- **Maturity**: GA
+- **Semantics**: Registered with client-go's metrics hooks in controller, API server and ApplicationSet controller:
+  `argocd_kubectl_client_cert_rotation_age_seconds` (gauge, no labels); `argocd_kubectl_request_duration_seconds{host,verb}`,
+  `argocd_kubectl_rate_limiter_duration_seconds{host,verb}`, `argocd_kubectl_dns_resolution_duration_seconds{host}`
+  (histograms, buckets 0.005, 0.1, 0.5, 2, 8, 30); `argocd_kubectl_request_size_bytes{host,method}`,
+  `argocd_kubectl_response_size_bytes{host,method}` (histograms, buckets 64, 512, 4096, 65536, 1048576, 16777216);
+  `argocd_kubectl_requests_total{host,method,code}`; `argocd_kubectl_exec_plugin_call_total{code,call_status}`
+  (`call_status` ∈ `no_error|plugin_execution_error|plugin_not_found_error|client_internal_error`);
+  `argocd_kubectl_request_retries_total{host,method,code}`; `argocd_kubectl_transport_cache_entries` (gauge);
+  `argocd_kubectl_transport_create_calls_total{result}` (`hit|miss|unreachable`).
+- **Edge cases**: Reset by OPS-075 on the controller. `code` is the HTTP status (client-go), unlike Argo CD's own
+  `response_code`.
+- **Configuration surface**: none.
+- **Exposure**: `/metrics` (controller, server, appset controller).
+- **Tests required**:
+  - Positive: golden metric names, types, label names and bucket boundaries.
+  - Positive: low QPS (OPS-047) raises `argocd_kubectl_rate_limiter_duration_seconds` observations.
+
+### OPS-084 Commit-server and notifications-controller metrics
+- **Upstream**:
+  https://github.com/argoproj/argo-cd/blob/a5038b0e2bbac1715754380ae0084df8e3d5b48c/commitserver/metrics/metrics.go#L28 ,
+  https://github.com/argoproj/argo-cd/blob/a5038b0e2bbac1715754380ae0084df8e3d5b48c/commitserver/metrics/metrics.go#L53 ,
+  https://github.com/argoproj/argo-cd/blob/a5038b0e2bbac1715754380ae0084df8e3d5b48c/commitserver/metrics/metrics.go#L101 ,
+  https://github.com/argoproj/argo-cd/blob/a5038b0e2bbac1715754380ae0084df8e3d5b48c/cmd/argocd-notification/commands/argocd_notification.go#L149 ,
+  https://github.com/argoproj/argo-cd/blob/a5038b0e2bbac1715754380ae0084df8e3d5b48c/docs/operator-manual/metrics.md#L282 ,
+  https://github.com/argoproj/argo-cd/blob/a5038b0e2bbac1715754380ae0084df8e3d5b48c/docs/operator-manual/notifications/monitoring.md#L11
+- **Maturity**: Beta (commit-server, Source Hydrator); GA (notifications)
+- **Semantics**: Commit-server: `argocd_commitserver_commit_pending_request_total{repo}` (gauge),
+  `argocd_commitserver_git_request_total{repo,request_type}` (counter; `fetch|ls-remote|push`),
+  `argocd_commitserver_git_request_duration_seconds{repo,request_type}` (histogram, buckets 0.1..20),
+  `argocd_commitserver_commit_request_duration_seconds{repo,response_type}` (histogram; `success|failure`),
+  `argocd_commitserver_userinfo_request_duration_seconds{repo,credential_type}` (histogram),
+  `argocd_commitserver_commit_request_total{repo,response_type}` (counter), plus Go/process collectors.
+  Notifications controller (registry prefix `argocd`): `argocd_notifications_deliveries_total{trigger,service,succeeded}`
+  and `argocd_notifications_trigger_eval_total{name,triggered}` — semantics owned by `09-notifications.md`
+  (NOTIF-057/058).
+- **Edge cases**: Notifications metrics port changeable only by `--metrics-port` (no env/cmd-params key).
+- **Configuration surface**: commit-server `--metrics-address/--metrics-port`; notifications `--metrics-port`.
+- **Exposure**: `/metrics` (commit-server 8087, notifications 9001).
+- **Tests required**:
+  - Positive: one successful hydration commit → `argocd_commitserver_commit_request_total{response_type="success"}` +1 and a `push` git request recorded.
+  - Negative: push rejected → `response_type="failure"`.

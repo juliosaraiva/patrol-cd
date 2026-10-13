@@ -1,0 +1,10 @@
+# The Go server embeds ui/dist; only the placeholder is tracked.
+# The root .gitignore excludes /ui/dist/, so re-include the directory here first.
+!/dist/
+/dist/*
+!/dist/.keep
+node_modules/
+coverage/
+test-results/
+playwright-report/
+*.tsbuildinfo

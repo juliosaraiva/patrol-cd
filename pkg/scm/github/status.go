@@ -2,8 +2,11 @@ package github
 
 import (
 	"context"
+	"errors"
 	"fmt"
+	"net/http"
 	"regexp"
+	"strings"
 
 	gh "github.com/google/go-github/v88/github"
 
@@ -27,9 +30,13 @@ func (p *Provider) validateSHA(op, sha string) error {
 
 // SetCommitStatus implements scm.CommitStatusReporter via POST
 // /repos/{o}/{r}/statuses/{sha}. Descriptions are truncated to 140 characters. GitHub
-// rejects more than 1000 statuses per (sha, context) with 422, which maps to KindInvalid.
+// rejects more than 1000 statuses per (sha, context) with 422, which maps to KindInvalid
+// wrapping scm.ErrStatusLimit.
 func (p *Provider) SetCommitStatus(ctx context.Context, ref scm.RepoRef, sha string, st scm.CommitStatus) error {
 	const op = "SetCommitStatus"
+	if err := p.require(scm.CapabilityCommitStatuses); err != nil {
+		return err
+	}
 	if err := st.Validate(); err != nil {
 		var se *scm.Error
 		if asSCM(err, &se) {
@@ -55,9 +62,36 @@ func (p *Provider) SetCommitStatus(ctx context.Context, ref scm.RepoRef, sha str
 	}
 	_, resp, err := p.client.Repositories.CreateStatus(ctx, ref.Owner, ref.Name, sha, status)
 	if err != nil {
-		return p.mapErr(op, resp, err)
+		mapped := p.mapErr(op, resp, err)
+		var se *scm.Error
+		if isStatusLimit(err) && errors.As(mapped, &se) {
+			c := *se
+			c.Kind = scm.KindInvalid
+			c.Err = fmt.Errorf("%w: %w", scm.ErrStatusLimit, se.Err)
+			return &c
+		}
+		return mapped
 	}
 	return nil
+}
+
+// isStatusLimit recognizes GitHub's 422 "This SHA and context has reached the maximum
+// number of statuses." validation error.
+func isStatusLimit(err error) bool {
+	var er *gh.ErrorResponse
+	if !errors.As(err, &er) || er.Response == nil || er.Response.StatusCode != http.StatusUnprocessableEntity {
+		return false
+	}
+	const needle = "maximum number of statuses"
+	if strings.Contains(strings.ToLower(er.Message), needle) {
+		return true
+	}
+	for _, e := range er.Errors {
+		if strings.Contains(strings.ToLower(e.Message), needle) {
+			return true
+		}
+	}
+	return false
 }
 
 // UpsertCheckRun implements scm.CheckRunReporter. The existing run is looked up with
@@ -67,7 +101,7 @@ func (p *Provider) SetCommitStatus(ctx context.Context, ref scm.RepoRef, sha str
 // caller (GitHub has no conditional create).
 func (p *Provider) UpsertCheckRun(ctx context.Context, ref scm.RepoRef, sha string, run scm.CheckRun) (int64, error) {
 	const op = "UpsertCheckRun"
-	if err := p.requireApp(op); err != nil {
+	if err := p.require(scm.CapabilityCheckRuns); err != nil {
 		return 0, err
 	}
 	if err := run.Validate(); err != nil {

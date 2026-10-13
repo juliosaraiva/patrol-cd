@@ -25,6 +25,7 @@ type Application struct {
 	// Spec is the desired state of the Application.
 	// +kubebuilder:validation:XValidation:rule="(has(self.source) ? 1 : 0) + (has(self.sources) && size(self.sources) > 0 ? 1 : 0) + (has(self.sourceHydrator) ? 1 : 0) == 1",message="exactly one of spec.source, spec.sources or spec.sourceHydrator must be set"
 	// +kubebuilder:validation:XValidation:rule="(has(self.destination.server) && self.destination.server != '') != (has(self.destination.name) && self.destination.name != '')",message="exactly one of spec.destination.server or spec.destination.name must be set"
+	// +kubebuilder:validation:XValidation:rule="!has(self.syncPolicy) || !has(self.syncPolicy.syncOptions) || self.syncPolicy.syncOptions.all(o, o.matches('^[A-Za-z][A-Za-z0-9]*=[[:graph:]]+$'))",message="spec.syncPolicy.syncOptions entries must have the form Key=Value"
 	Spec ApplicationSpec `json:"spec"`
 	// Status is the observed state of the Application, written by the controller.
 	// +optional
@@ -45,8 +46,8 @@ func init() {
 }
 
 // ApplicationSpec is the desired state of an Application. The same type is used in ApplicationSet
-// templates, which is why the source/destination exclusivity rules are attached to Application.spec
-// and not to this type.
+// templates, which is why the source/destination exclusivity and sync option format rules are
+// attached to Application.spec and not to this type (template fields may hold template expressions).
 type ApplicationSpec struct {
 	// Source is the single source of the Application. Mutually exclusive with Sources and
 	// SourceHydrator.
@@ -223,9 +224,11 @@ type SyncSource struct {
 	// TargetBranch is the branch hydrated manifests are synced from (and committed to, unless
 	// HydrateTo is set).
 	TargetBranch string `json:"targetBranch"`
-	// Path is the directory of hydrated manifests. It must not be the repository root.
+	// Path is the directory of hydrated manifests. It must not be the repository root: it must contain
+	// a character other than "." and "/" (Argo CD's pattern ^.{2,}|[^./]$ also accepts "./", "//" and
+	// "..").
 	// +kubebuilder:validation:MinLength=1
-	// +kubebuilder:validation:Pattern=`^.{2,}|[^./]$`
+	// +kubebuilder:validation:Pattern=`[^./]`
 	Path string `json:"path"`
 	// RepoURL is the repository of hydrated manifests. Defaults to DrySource.RepoURL.
 	// +optional

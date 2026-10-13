@@ -5,7 +5,11 @@ import (
 	"strings"
 )
 
-// SyncOptions is a list of sync options. Most options have the form "Key=Value".
+// SyncOptions is a list of sync options of the form "Key=Value". Application.spec and Operation
+// spec.sync reject entries of another form at admission; ApplicationSet templates do not, because
+// their entries may be template expressions.
+// +kubebuilder:validation:MaxItems=64
+// +kubebuilder:validation:items:MaxLength=256
 type SyncOptions []string
 
 // Sync option keys and well-known values (spec.syncPolicy.syncOptions, Operation spec.sync.syncOptions

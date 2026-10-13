@@ -195,7 +195,8 @@ func (s *OrphanedResourcesMonitorSettings) IsWarn() bool {
 }
 
 // ToNestedMatrixGenerator decodes the raw JSON of a matrix generator nested inside a matrix or
-// merge generator. It returns nil for a nil input.
+// merge generator. It returns nil for a nil input, and an error when the JSON is malformed or does
+// not hold exactly two generators (the count the CRD schema enforces for MatrixGenerator).
 func ToNestedMatrixGenerator(j *apiextensionsv1.JSON) (*NestedMatrixGenerator, error) {
 	if j == nil {
 		return nil, nil
@@ -204,11 +205,15 @@ func ToNestedMatrixGenerator(j *apiextensionsv1.JSON) (*NestedMatrixGenerator, e
 	if err := json.Unmarshal(j.Raw, &g); err != nil {
 		return nil, fmt.Errorf("decode nested matrix generator: %w", err)
 	}
+	if len(g.Generators) != 2 {
+		return nil, fmt.Errorf("nested matrix generator has %d generators, want exactly 2", len(g.Generators))
+	}
 	return &g, nil
 }
 
 // ToNestedMergeGenerator decodes the raw JSON of a merge generator nested inside a matrix or merge
-// generator. It returns nil for a nil input.
+// generator. It returns nil for a nil input, and an error when the JSON is malformed or holds fewer
+// than two generators (the minimum the CRD schema enforces for MergeGenerator).
 func ToNestedMergeGenerator(j *apiextensionsv1.JSON) (*NestedMergeGenerator, error) {
 	if j == nil {
 		return nil, nil
@@ -216,6 +221,9 @@ func ToNestedMergeGenerator(j *apiextensionsv1.JSON) (*NestedMergeGenerator, err
 	var g NestedMergeGenerator
 	if err := json.Unmarshal(j.Raw, &g); err != nil {
 		return nil, fmt.Errorf("decode nested merge generator: %w", err)
+	}
+	if len(g.Generators) < 2 {
+		return nil, fmt.Errorf("nested merge generator has %d generators, want at least 2", len(g.Generators))
 	}
 	return &g, nil
 }

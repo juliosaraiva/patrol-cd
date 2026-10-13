@@ -104,6 +104,7 @@ func NewProvider(_ context.Context, cfg scm.Config) (*Provider, error) {
 		Provider: Type,
 		Logger:   cfg.Logger,
 		Limiter:  scm.NewLimiter(cfg.RateLimit),
+		Observer: cfg.Observer,
 		Retry:    cfg.Retry,
 		Clock:    cfg.Clock,
 	}
@@ -120,7 +121,7 @@ func NewProvider(_ context.Context, cfg scm.Config) (*Provider, error) {
 	}
 
 	p := &Provider{maxPages: cfg.MaxPages, now: cfg.Clock, logger: cfg.Logger}
-	var mainRT http.RoundTripper = limited
+	mainRT := limited
 	switch {
 	case cfg.GitHubApp != nil:
 		a := cfg.GitHubApp
@@ -138,7 +139,10 @@ func NewProvider(_ context.Context, cfg scm.Config) (*Provider, error) {
 			// The ghinstallation error never contains key material.
 			return nil, invalid(fmt.Errorf("failed to initialize GitHub App transport: %w", err))
 		}
-		appClient, err := newClient(scm.HostGuard(host.Host, jwtRT, limited))
+		// ghinstallation sets headers on the request it is given; hand it a clone so the
+		// JWT never lands on a request object owned by outer layers.
+		cloning := roundTripFunc(func(r *http.Request) (*http.Response, error) { return jwtRT.RoundTrip(r.Clone(r.Context())) })
+		appClient, err := newClient(scm.HostGuard(host.Host, cloning, limited))
 		if err != nil {
 			return nil, invalid(err)
 		}
@@ -147,8 +151,8 @@ func NewProvider(_ context.Context, cfg scm.Config) (*Provider, error) {
 		mainRT = scm.HostGuard(host.Host, scm.BearerTransport(limited, p.app.tokenValue, p.app.invalidate), limited)
 	case cfg.Token != nil:
 		p.mode = authToken
-		p.token = cfg.Token
-		mainRT = scm.HostGuard(host.Host, scm.BearerTransport(limited, cfg.Token, nil), limited)
+		p.token = tokenSource(cfg.Token)
+		mainRT = scm.HostGuard(host.Host, scm.BearerTransport(limited, p.token, nil), limited)
 	}
 	p.client, err = newClient(mainRT)
 	if err != nil {
@@ -175,6 +179,27 @@ func NewProvider(_ context.Context, cfg scm.Config) (*Provider, error) {
 	return p, nil
 }
 
+type roundTripFunc func(*http.Request) (*http.Response, error)
+
+func (f roundTripFunc) RoundTrip(r *http.Request) (*http.Response, error) { return f(r) }
+
+// tokenSource normalizes failures of a caller-supplied token function (for example a
+// missing Secret) to KindUnauthorized, keeping context errors and *scm.Error values as
+// they are, so API calls and Token() report the same kind.
+func tokenSource(tok scm.TokenFunc) scm.TokenFunc {
+	return func(ctx context.Context) (string, error) {
+		v, err := tok(ctx)
+		if err == nil {
+			return v, nil
+		}
+		var se *scm.Error
+		if errors.As(err, &se) || errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded) {
+			return "", err
+		}
+		return "", &scm.Error{Kind: scm.KindUnauthorized, Provider: Type, Op: "Token", Err: fmt.Errorf("token source failed: %w", err)}
+	}
+}
+
 // Info implements scm.Provider.
 func (p *Provider) Info() scm.Info {
 	i := p.info
@@ -187,11 +212,13 @@ func (p *Provider) Info() scm.Info {
 // authentication, rate limiting, retries and size caps.
 func (p *Provider) Client() *gh.Client { return p.client }
 
-// APIURLs derives the REST base URL and the uploads URL from a configured API URL.
-// Accepted forms: "" / "https://api.github.com" (github.com), "https://ghe.example.com"
-// or "https://ghe.example.com/api/v3" (GitHub Enterprise Server), and
-// "https://api.<tenant>.ghe.com" (GitHub Enterprise Cloud with data residency).
-// URLs with user info, query or fragment are rejected.
+// APIURLs derives the REST base URL and the uploads URL from a configured API URL, with
+// the same base-URL rules as go-github's WithEnterpriseURLs (which upstream uses):
+// "" / "https://api.github.com" select github.com; a path ending in "/api/v3" is kept;
+// hosts starting with "api." (GitHub Enterprise Cloud with data residency,
+// "https://api.<tenant>.ghe.com") or containing ".api." keep their path as is; any other
+// URL is a GitHub Enterprise Server root and gets "/api/v3/" appended. A trailing slash
+// is tolerated. URLs with user info, query or fragment are rejected.
 func APIURLs(apiURL string) (base, upload string, err error) {
 	apiURL = strings.TrimSpace(apiURL)
 	if apiURL == "" {
@@ -216,8 +243,10 @@ func APIURLs(apiURL string) (base, upload string, err error) {
 	case strings.HasSuffix(path, "/api/v3"):
 		prefix := strings.TrimSuffix(path, "/api/v3")
 		return origin + path + "/", origin + prefix + "/api/uploads/", nil
-	case strings.HasPrefix(host, "api.") && path == "":
-		return origin + "/", u.Scheme + "://uploads." + strings.TrimPrefix(u.Host, "api.") + "/", nil
+	case strings.HasPrefix(host, "api."):
+		return origin + path + "/", u.Scheme + "://uploads." + u.Host[len("api."):] + path + "/", nil
+	case strings.Contains(host, ".api."):
+		return origin + path + "/", origin + path + "/", nil
 	default:
 		return origin + path + "/api/v3/", origin + path + "/api/uploads/", nil
 	}
@@ -227,11 +256,11 @@ func (p *Provider) mapErr(op string, resp *gh.Response, err error) error {
 	return mapError(op, resp, err, p.now())
 }
 
-func (p *Provider) requireApp(op string) error {
-	if p.app == nil {
-		return &scm.UnsupportedError{Provider: Type, Name: p.info.Name, Capability: map[string]scm.Capability{
-			"UpsertCheckRun": scm.CapabilityCheckRuns, "ListInstallations": scm.CapabilityInstallations, "FindInstallation": scm.CapabilityInstallations,
-		}[op]}
+// require returns an *scm.UnsupportedError unless capability c is declared, so calling a
+// method directly (without scm.As) fails the same way for undeclared capabilities.
+func (p *Provider) require(c scm.Capability) error {
+	if !p.info.Has(c) {
+		return &scm.UnsupportedError{Provider: Type, Name: p.info.Name, Capability: c}
 	}
 	return nil
 }

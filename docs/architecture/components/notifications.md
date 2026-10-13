@@ -63,7 +63,8 @@ annotations, err = notifications.ApplyDeliveryState(annotations, eng.AnnotationP
 
 Other entry points: `RunTrigger` (`admin notifications trigger run`), `NotifyTemplate` +
 `services.NewConsole(os.Stdout)` via `WithServices` (`template notify`, default recipient
-`console:stdout`), `Render` (dry render), `WithDryRun(true)` (render, never send),
+`console:stdout`), `Render` (dry render), `WithDryRun(true)` (render, never send; `Process`
+returns the would-be state, which callers must not persist, and counts no delivery metrics),
 `ListServices/ListTriggers/ListTemplates` (API, sorted), `Destinations`, `Warnings`,
 `FailedResults`, `AnnotationDestinations`, `LegacyRecipientsDestinations`,
 `Config.GlobalDestinations`, `StateKey`.
@@ -134,12 +135,12 @@ default 2m).
 | `pagerdutyv2` | `POST /v2/enqueue` `event_action: trigger`, `routing_key = serviceKeys[recipient]`, required summary/severity/source. |
 | `newrelic` | `POST {apiURL}/v2/applications/<id>/deployments.json` (`X-Api-Key`). |
 | `alertmanager` | `POST {scheme}://{target}{apiPath}` JSON array to every target concurrently; success if any target accepts; basic auth wins over bearer; per-target timeout (default 3s). |
-| `webhook` | `webhook.<name>.method/path/body` (default `GET` base URL), static headers, basic auth, `retryMax`/`retryWaitMin`/`retryWaitMax`. |
-| `github` | GitHub App (ghinstallation) + REST: commit status (description ≤140, 422 status-limit ignored), deployment (reuses an existing one for ref+environment, `autoMerge` default true) + status, PR comment upsert by tag marker `<!-- patrol-notifications TAG -->` (also finds `argocd-notifications` markers), check run. |
+| `webhook` | `webhook.<name>.method/path/body` (default `GET` base URL); the rendered path is appended to `url` verbatim (baseline), so it may continue a query string, only a doubled `/` at the junction is collapsed; static headers, basic auth, `retryMax`/`retryWaitMin`/`retryWaitMax`. |
+| `github` | GitHub App (ghinstallation) + REST: commit status (description ≤140, 422 status-limit ignored), deployment (reuses an existing one for ref+environment, `autoMerge` default true) + status (description = message ≤140), PR comment upsert by tag marker `<!-- patrol-notifications TAG -->` (also finds `argocd-notifications` markers), check run. |
 | `awssqs` | aws-sdk-go-v2 SQS: `GetQueueUrl` (owner `account`) unless the queue is a URL, `SendMessage` with string attributes, group/dedup ids; static keys or default chain (IRSA). |
 | `gcppubsub` | REST `POST /v1/projects/{p}/topics/{t}:publish`, OAuth2 from `keyFile`/`keyJSON` (service_account only) or ADC. |
 | `nats` | Minimal NATS client: `INFO` → optional TLS → `CONNECT` (user/pass, token in URL, nkey seed signature) → `PUB`/`HPUB` → `PING`/`PONG`. |
-| `email` | `net/smtp`: implicit TLS on 465 (or `implicitTLS`), STARTTLS when offered, PLAIN/LOGIN/CRAM-MD5 (never cleartext to non-local hosts), quoted-printable body, RFC 2047 subject, CR/LF stripped from headers; recipient may be a comma list. |
+| `email` | `net/smtp`: implicit TLS on 465 (or `implicitTLS`), STARTTLS when offered, PLAIN/LOGIN/CRAM-MD5 (never cleartext to non-local hosts), quoted-printable body, RFC 2047 subject, CR/LF stripped from headers; recipient may be a comma list. Once the server accepts `DATA` the delivery is successful (a failed `QUIT` or an ending context does not cause a duplicate send). |
 
 `TypeConsole` (`services.NewConsole`) is a CLI-only pseudo service, not configurable.
 
@@ -169,6 +170,7 @@ default 2m).
   recipients; templates render webhook paths). Only http/https (plus smtp/nats for those
   services) are allowed; `Network.ValidateURL` is called for every endpoint and redirect;
   `NewGuardedDialer` blocks loopback, RFC1918, link-local (cloud metadata), CGNAT, ULA,
+  IPv6 addresses embedding a blocked IPv4 (NAT64 `64:ff9b::/96`, 6to4 `2002::/16`, mapped),
   multicast and reserved ranges at connect time (DNS-rebinding safe), with allow/block
   prefixes. The controller should install it unless the operator opts out (in-cluster
   Alertmanager targets need an allow prefix). With an HTTP proxy configured the guard
@@ -212,6 +214,10 @@ commands of NOTIF-104..108 and the UI editor NOTIF-109.
 - Context key `patrolUrl` is aliased to/from `argocdUrl`; the catalog uses `patrolUrl`.
 - Telegram positive numeric recipients are chat ids (baseline would prefix `@`).
 - Opsgenie messages are truncated to 130 runes instead of being rejected.
+- Alertmanager requires at least one `targets` entry (no implicit local default).
+- GitHub deployments are looked up by the deployment `reference` (falling back to the
+  revision) and environment, so a configured `reference` reuses its deployment.
+- Retries cover HTTP 408/429 in addition to network errors and 5xx (all services).
 - Patrol extensions: `apiURL` for telegram/webex/pushover/pagerduty/pagerdutyv2,
   `endpoint`/`keyJSON` for gcppubsub, `messageDeduplicationId` for awssqs (top-level
   `messageGroupId` is also accepted), `implicitTLS`/`requireTLS`/`helloName` for email,
@@ -225,6 +231,11 @@ commands of NOTIF-104..108 and the UI editor NOTIF-109.
   `<nil>`, history size 100, merge order, Slack thread policy for `Update` without a prior
   message = no-op, Opsgenie responder by `id`, deployment reuse) are re-implemented from
   documentation and recollection and are listed as unconfirmed in the parity area.
+  Among them: a `when` expression that fails to evaluate is treated as "not triggered"
+  (its non-`oncePer` key is cleared); if the baseline instead skips the whole trigger on an
+  evaluation error, a transient error could re-arm one notification here. Template-time
+  validation is limited to what is listed (e.g. a `github` section must define at least one
+  of `status`, `deployment`, `pullRequestComment`, `checkRun`).
 - Delivery-state keys use the condition hash format above; state written by Argo CD under
   `notified.notifications.argoproj.io` is not migrated.
 - Slack thread timestamps are in memory (lost on restart, as upstream); `channels` and
@@ -253,6 +264,10 @@ go vet ./internal/notifications/...
 go test -race -count=1 ./internal/notifications/...
 golangci-lint run ./internal/notifications/...
 ```
+
+`TestProcessDeliverySemanticsModel` (rapid) checks `Process` against a reference model
+of the delivery semantics (re-arm on false→true, once per `oncePer` value, failed
+deliveries retried, idempotent re-processing) over random state/failure sequences.
 
 Tests are hermetic: httptest servers, an in-test SMTP server (plain, STARTTLS, implicit
 TLS with a custom CA), an in-test NATS server (headers, nkey signature, `-ERR`), a fake SQS

@@ -98,7 +98,8 @@ func TestGitHub(t *testing.T) {
 		t.Fatalf("required_contexts must be an empty array: %v", dep["required_contexts"])
 	}
 	ds := byKey["POST /api/v3/repos/example/guestbook/deployments/77/statuses"].json(t)
-	if ds["state"] != "success" || ds["log_url"] != "https://cd.example.com/log" || ds["environment_url"] != "https://guestbook.example.com" {
+	if ds["state"] != "success" || ds["log_url"] != "https://cd.example.com/log" || ds["environment_url"] != "https://guestbook.example.com" ||
+		len([]rune(ds["description"].(string))) != 140 {
 		t.Fatalf("deployment status %v", ds)
 	}
 	patch := byKey["PATCH /api/v3/repos/example/guestbook/issues/comments/900"].json(t)

@@ -1,8 +1,11 @@
 package v1alpha1_test
 
 import (
+	"bytes"
 	"context"
+	"errors"
 	"fmt"
+	"io"
 	"os"
 	"path/filepath"
 	"strings"
@@ -12,11 +15,14 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 	corev1 "k8s.io/api/core/v1"
+	rbacv1 "k8s.io/api/rbac/v1"
 	apiextensionsv1 "k8s.io/apiextensions-apiserver/pkg/apis/apiextensions/v1"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
 	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/apimachinery/pkg/util/intstr"
+	utilyaml "k8s.io/apimachinery/pkg/util/yaml"
 	clientgoscheme "k8s.io/client-go/kubernetes/scheme"
 	"k8s.io/utils/ptr"
 	"sigs.k8s.io/controller-runtime/pkg/client"
@@ -25,11 +31,19 @@ import (
 	v1alpha1 "github.com/juliosaraiva/patrol-cd/api/v1alpha1"
 )
 
-// The admission tests run the generated CRDs (deploy/crds) in a real kube-apiserver via envtest and
-// check structural schemas, enums, defaults and CEL rules. They are skipped when KUBEBUILDER_ASSETS
-// is unset; `make test` sets it.
+// The admission tests run the generated CRDs and the Operation admission policy (deploy/crds) in a
+// real kube-apiserver via envtest and check structural schemas, enums, defaults, CEL rules and the
+// ValidatingAdmissionPolicy. They are skipped when KUBEBUILDER_ASSETS is unset, unless
+// PATROL_REQUIRE_ENVTEST=1 (set by `make test`, together with KUBEBUILDER_ASSETS), in which case the
+// test binary fails instead of silently testing nothing.
 
-var k8sClient client.Client
+var (
+	k8sClient client.Client
+	testEnv   *envtest.Environment
+)
+
+// crdDir holds the generated CRDs and the hand-written admission policy.
+var crdDir = filepath.Join("..", "..", "deploy", "crds")
 
 func TestMain(m *testing.M) {
 	os.Exit(runTests(m))
@@ -37,10 +51,14 @@ func TestMain(m *testing.M) {
 
 func runTests(m *testing.M) int {
 	if os.Getenv("KUBEBUILDER_ASSETS") == "" {
+		if os.Getenv("PATROL_REQUIRE_ENVTEST") == "1" {
+			fmt.Fprintln(os.Stderr, "PATROL_REQUIRE_ENVTEST=1 but KUBEBUILDER_ASSETS is not set: the admission tests cannot run")
+			return 1
+		}
 		return m.Run()
 	}
 	env := &envtest.Environment{
-		CRDDirectoryPaths:     []string{filepath.Join("..", "..", "deploy", "crds")},
+		CRDDirectoryPaths:     []string{crdDir},
 		ErrorIfCRDPathMissing: true,
 	}
 	cfg, err := env.Start()
@@ -68,7 +86,61 @@ func runTests(m *testing.M) int {
 		fmt.Fprintf(os.Stderr, "create client: %v\n", err)
 		return 1
 	}
+	testEnv = env
+	if err := installOperationAdmissionPolicy(); err != nil {
+		fmt.Fprintf(os.Stderr, "install operation admission policy: %v\n", err)
+		return 1
+	}
 	return m.Run()
+}
+
+// installOperationAdmissionPolicy applies the hand-written ValidatingAdmissionPolicy and binding from
+// deploy/crds (envtest installs only CRDs) and waits until the API server enforces them.
+func installOperationAdmissionPolicy() error {
+	ctx, cancel := context.WithTimeout(context.Background(), time.Minute)
+	defer cancel()
+
+	data, err := os.ReadFile(filepath.Join(crdDir, "operations-admission-policy.yaml"))
+	if err != nil {
+		return err
+	}
+	dec := utilyaml.NewYAMLOrJSONDecoder(bytes.NewReader(data), 4096)
+	for {
+		obj := &unstructured.Unstructured{}
+		if err := dec.Decode(&obj.Object); err != nil {
+			if errors.Is(err, io.EOF) {
+				break
+			}
+			return fmt.Errorf("decode: %w", err)
+		}
+		if len(obj.Object) == 0 {
+			continue
+		}
+		if err := k8sClient.Create(ctx, obj); err != nil {
+			return fmt.Errorf("create %s %s: %w", obj.GetKind(), obj.GetName(), err)
+		}
+	}
+
+	ns := &corev1.Namespace{ObjectMeta: metav1.ObjectMeta{GenerateName: "admission-policy-probe-"}}
+	if err := k8sClient.Create(ctx, ns); err != nil {
+		return err
+	}
+	// Policies take effect asynchronously: probe with a dry-run create the policy must reject.
+	probe := &v1alpha1.Operation{
+		ObjectMeta: metav1.ObjectMeta{Namespace: ns.Name, Name: "probe", Labels: map[string]string{v1alpha1.LabelKeyOperationApplication: "other"}},
+		Spec:       v1alpha1.OperationSpec{Application: "web", Sync: &v1alpha1.SyncOperation{}},
+	}
+	for {
+		err := k8sClient.Create(ctx, probe.DeepCopy(), client.DryRunAll)
+		if err != nil && strings.Contains(err.Error(), "must equal spec.application") {
+			return nil
+		}
+		select {
+		case <-ctx.Done():
+			return fmt.Errorf("policy %s not enforced; last probe result: %v", v1alpha1.OperationAdmissionPolicyName, err)
+		case <-time.After(200 * time.Millisecond):
+		}
+	}
 }
 
 // newNamespace skips the test without envtest and otherwise returns a fresh namespace.
@@ -92,6 +164,53 @@ func requireInvalid(t *testing.T, err error, fragments ...string) {
 	for _, f := range fragments {
 		assert.Contains(t, err.Error(), f)
 	}
+}
+
+// requireForbidden asserts that err is a Forbidden API error mentioning every fragment.
+func requireForbidden(t *testing.T, err error, fragments ...string) {
+	t.Helper()
+	require.Error(t, err, "expected the API server to reject the request")
+	require.Truef(t, apierrors.IsForbidden(err), "expected Forbidden, got %v", err)
+	for _, f := range fragments {
+		assert.Contains(t, err.Error(), f)
+	}
+}
+
+// userClient returns a client authenticated as a new envtest user without any permissions.
+func userClient(t *testing.T, name string) client.Client {
+	t.Helper()
+	u, err := testEnv.AddUser(envtest.User{Name: name}, nil)
+	require.NoError(t, err)
+	c, err := client.New(u.Config(), client.Options{Scheme: k8sClient.Scheme()})
+	require.NoError(t, err)
+	return c
+}
+
+// grantOperations gives user the verbs on operations.cd.patrol.example in namespace ns.
+func grantOperations(ctx context.Context, t *testing.T, ns, user string, verbs ...string) {
+	t.Helper()
+	role := &rbacv1.Role{
+		ObjectMeta: meta(ns, "operations-"+user),
+		Rules:      []rbacv1.PolicyRule{{APIGroups: []string{v1alpha1.GroupName}, Resources: []string{"operations"}, Verbs: verbs}},
+	}
+	require.NoError(t, k8sClient.Create(ctx, role))
+	binding := &rbacv1.RoleBinding{
+		ObjectMeta: meta(ns, "operations-"+user),
+		RoleRef:    rbacv1.RoleRef{APIGroup: rbacv1.GroupName, Kind: "Role", Name: role.Name},
+		Subjects:   []rbacv1.Subject{{APIGroup: rbacv1.GroupName, Kind: rbacv1.UserKind, Name: user}},
+	}
+	require.NoError(t, k8sClient.Create(ctx, binding))
+}
+
+// unstructuredOperation builds an Operation from raw spec fields, so tests can store explicit zero
+// and empty values that typed Go clients would omit.
+func unstructuredOperation(ns, name string, spec map[string]any) *unstructured.Unstructured {
+	u := &unstructured.Unstructured{Object: map[string]any{"spec": spec}}
+	u.SetGroupVersionKind(v1alpha1.GroupVersion.WithKind("Operation"))
+	u.SetNamespace(ns)
+	u.SetName(name)
+	u.SetLabels(map[string]string{v1alpha1.LabelKeyOperationApplication: "web"})
+	return u
 }
 
 func meta(ns, name string) metav1.ObjectMeta {
@@ -186,7 +305,7 @@ func TestAdmissionApplicationValid(t *testing.T) {
 	hydrated.Spec.Source = nil
 	hydrated.Spec.SourceHydrator = &v1alpha1.SourceHydrator{
 		DrySource:  v1alpha1.DrySource{RepoURL: "https://git.example.com/org/repo.git", TargetRevision: "main", Path: "env/prod"},
-		SyncSource: v1alpha1.SyncSource{TargetBranch: "env/prod", Path: "hydrated/prod"},
+		SyncSource: v1alpha1.SyncSource{TargetBranch: "env/prod", Path: "./hydrated/prod"},
 		HydrateTo:  &v1alpha1.HydrateTo{TargetBranch: "env/prod-next"},
 	}
 	require.NoError(t, k8sClient.Create(ctx, hydrated), "Application with a source hydrator")
@@ -238,7 +357,31 @@ func TestAdmissionApplicationRejected(t *testing.T) {
 			h := hydrator.DeepCopy()
 			h.SyncSource.Path = "."
 			a.Spec.SourceHydrator = h
-		}, message: "spec.sourceHydrator.syncSource.path"},
+		}, message: "spec.sourceHydrator.syncSource.path in body should match"},
+		{name: "hydrator sync path ./", mutate: func(a *v1alpha1.Application) {
+			a.Spec.Source = nil
+			h := hydrator.DeepCopy()
+			h.SyncSource.Path = "./"
+			a.Spec.SourceHydrator = h
+		}, message: "spec.sourceHydrator.syncSource.path in body should match"},
+		{name: "hydrator sync path //", mutate: func(a *v1alpha1.Application) {
+			a.Spec.Source = nil
+			h := hydrator.DeepCopy()
+			h.SyncSource.Path = "//"
+			a.Spec.SourceHydrator = h
+		}, message: "spec.sourceHydrator.syncSource.path in body should match"},
+		{name: "hydrator sync path ..", mutate: func(a *v1alpha1.Application) {
+			a.Spec.Source = nil
+			h := hydrator.DeepCopy()
+			h.SyncSource.Path = ".."
+			a.Spec.SourceHydrator = h
+		}, message: "spec.sourceHydrator.syncSource.path in body should match"},
+		{name: "sync option without value", mutate: func(a *v1alpha1.Application) {
+			a.Spec.SyncPolicy = &v1alpha1.SyncPolicy{SyncOptions: v1alpha1.SyncOptions{"CreateNamespace=true", "PruneLast"}}
+		}, message: "spec.syncPolicy.syncOptions entries must have the form Key=Value"},
+		{name: "sync option with spaces", mutate: func(a *v1alpha1.Application) {
+			a.Spec.SyncPolicy = &v1alpha1.SyncPolicy{SyncOptions: v1alpha1.SyncOptions{"Prune = false"}}
+		}, message: "spec.syncPolicy.syncOptions entries must have the form Key=Value"},
 		{name: "negative revision history limit", mutate: func(a *v1alpha1.Application) {
 			a.Spec.RevisionHistoryLimit = ptr.To[int64](-1)
 		}, message: "spec.revisionHistoryLimit"},
@@ -347,12 +490,71 @@ func TestAdmissionOperation(t *testing.T) {
 		requireInvalid(t, k8sClient.Patch(ctx, cur, patch), "spec.cancel cannot be unset once true")
 	})
 
+	// Operations written as YAML may carry explicit zero values that typed Go clients omit when they
+	// send a full update. Scalars of spec.sync are defaulted and spec.initiatedBy is compared field by
+	// field, so such updates are accepted.
+	t.Run("full update of an Operation with explicit zero scalars", func(t *testing.T) {
+		u := unstructuredOperation(ns, "explicit-zero", map[string]any{
+			"application": "web",
+			"sync": map[string]any{
+				"revision": "", "prune": false, "dryRun": false, "autoHealAttemptsCount": int64(0),
+				"syncStrategy": map[string]any{"hook": map[string]any{"force": false}},
+			},
+			"initiatedBy": map[string]any{"username": "", "automated": false},
+		})
+		require.NoError(t, k8sClient.Create(ctx, u))
+
+		cur := &v1alpha1.Operation{}
+		require.NoError(t, k8sClient.Get(ctx, client.ObjectKeyFromObject(u), cur))
+		cur.Labels[v1alpha1.LabelKeyOperationPhase] = string(v1alpha1.OperationPending)
+		require.NoError(t, k8sClient.Update(ctx, cur), "typed full update after a YAML create with explicit zero scalars")
+
+		// Omitted scalars are stored as their defaults, so both forms compare equal.
+		omitted := validOperation(ns, "omitted-zero")
+		omitted.Spec.Sync = &v1alpha1.SyncOperation{}
+		omitted.Spec.InitiatedBy = v1alpha1.OperationInitiator{}
+		require.NoError(t, k8sClient.Create(ctx, omitted))
+		stored := &unstructured.Unstructured{}
+		stored.SetGroupVersionKind(v1alpha1.GroupVersion.WithKind("Operation"))
+		require.NoError(t, k8sClient.Get(ctx, client.ObjectKeyFromObject(omitted), stored))
+		sync, _, err := unstructured.NestedMap(stored.Object, "spec", "sync")
+		require.NoError(t, err)
+		assert.Equal(t, map[string]any{"revision": "", "prune": false, "dryRun": false, "autoHealAttemptsCount": int64(0)}, sync)
+	})
+
+	// An explicit empty list or object is not defaulted: a typed full update omits it and is rejected
+	// as a spec change. Clients must patch Operations; the message says so.
+	t.Run("full update of an Operation with an explicit empty list needs a patch", func(t *testing.T) {
+		u := unstructuredOperation(ns, "explicit-empty", map[string]any{
+			"application": "web",
+			"sync":        map[string]any{"prune": true, "syncOptions": []any{}},
+		})
+		require.NoError(t, k8sClient.Create(ctx, u))
+
+		cur := &v1alpha1.Operation{}
+		require.NoError(t, k8sClient.Get(ctx, client.ObjectKeyFromObject(u), cur))
+		base := cur.DeepCopy()
+		cur.Labels[v1alpha1.LabelKeyOperationPhase] = string(v1alpha1.OperationPending)
+		requireInvalid(t, k8sClient.Update(ctx, cur), "spec.sync is immutable; change metadata and spec.cancel with a patch, not a full update")
+
+		require.NoError(t, k8sClient.Patch(ctx, cur, client.MergeFrom(base)), "merge patch of a label")
+		patch := client.MergeFrom(cur.DeepCopy())
+		cur.Spec.Cancel = true
+		require.NoError(t, k8sClient.Patch(ctx, cur, patch), "merge patch of spec.cancel")
+		assert.Equal(t, string(v1alpha1.OperationPending), cur.Labels[v1alpha1.LabelKeyOperationPhase])
+		assert.True(t, cur.Spec.Cancel)
+	})
+
 	rejected := []struct {
 		name    string
 		mutate  func(*v1alpha1.Operation)
 		message string
 	}{
-		{name: "empty application", mutate: func(o *v1alpha1.Operation) { o.Spec.Application = "" }, message: "spec.application"},
+		{name: "empty application", mutate: func(o *v1alpha1.Operation) {
+			o.Spec.Application = ""
+			o.Labels = nil
+		}, message: "spec.application in body should be at least 1 chars long"},
+		{name: "malformed sync option", mutate: func(o *v1alpha1.Operation) { o.Spec.Sync.SyncOptions = v1alpha1.SyncOptions{"PruneLast"} }, message: "spec.sync.syncOptions entries must have the form Key=Value"},
 		{name: "neither sync nor rollback", mutate: func(o *v1alpha1.Operation) { o.Spec.Sync = nil }, message: "one of spec.sync or spec.rollback must be set"},
 		{name: "rollback with explicit source", mutate: func(o *v1alpha1.Operation) {
 			o.Spec.Rollback = &v1alpha1.RollbackOperation{ID: 1}
@@ -388,6 +590,75 @@ func TestAdmissionOperation(t *testing.T) {
 		op := validOperation(ns, "manifests")
 		op.Spec.Sync.Manifests = []string{strings.Repeat("a", 400*1024), "apiVersion: v1\nkind: ConfigMap\nmetadata:\n  name: x\n"}
 		require.NoError(t, k8sClient.Create(ctx, op))
+	})
+}
+
+// TestAdmissionOperationPolicy covers the ValidatingAdmissionPolicy in deploy/crds: CRD rules cannot
+// see the requesting user or labels.
+func TestAdmissionOperationPolicy(t *testing.T) {
+	ctx, ns := newNamespace(t)
+
+	// alice is an ordinary user allowed to request syncs; patrol-server may also create Operations on
+	// behalf of others.
+	alice := userClient(t, "alice")
+	server := userClient(t, "patrol-server")
+	grantOperations(ctx, t, ns, "alice", "create", "get", "patch", "update")
+	grantOperations(ctx, t, ns, "patrol-server", "create", "get", v1alpha1.OperationInitiatorVerb)
+
+	op := func(name, username string, automated bool) *v1alpha1.Operation {
+		return &v1alpha1.Operation{
+			ObjectMeta: meta(ns, name),
+			Spec: v1alpha1.OperationSpec{
+				Application: "web",
+				Sync:        &v1alpha1.SyncOperation{Prune: true},
+				InitiatedBy: v1alpha1.OperationInitiator{Username: username, Automated: automated},
+			},
+		}
+	}
+	// RBAC bindings take effect asynchronously.
+	require.Eventually(t, func() bool { return alice.Create(ctx, op("rbac-alice", "alice", false), client.DryRunAll) == nil },
+		30*time.Second, 100*time.Millisecond, "alice's RBAC binding never took effect")
+	require.Eventually(t, func() bool { return server.Create(ctx, op("rbac-server", "bob", true), client.DryRunAll) == nil },
+		30*time.Second, 100*time.Millisecond, "patrol-server's RBAC binding never took effect")
+
+	const initiatorMessage = "spec.initiatedBy.username must be empty or the requesting user"
+	t.Run("user may leave initiator empty", func(t *testing.T) {
+		o := op("alice-empty", "", false)
+		require.NoError(t, alice.Create(ctx, o))
+		assert.Equal(t, v1alpha1.OperationInitiator{}, o.Spec.InitiatedBy)
+	})
+	t.Run("user may name themselves", func(t *testing.T) {
+		require.NoError(t, alice.Create(ctx, op("alice-self", "alice", false)))
+	})
+	t.Run("user cannot name someone else", func(t *testing.T) {
+		requireForbidden(t, alice.Create(ctx, op("alice-forged", "admin", false)), v1alpha1.OperationAdmissionPolicyName, initiatorMessage)
+	})
+	t.Run("user cannot claim an automated sync", func(t *testing.T) {
+		requireForbidden(t, alice.Create(ctx, op("alice-automated", "", true)), initiatorMessage)
+		requireForbidden(t, alice.Create(ctx, op("alice-automated-self", "alice", true)), initiatorMessage)
+	})
+	t.Run("impersonate verb allows initiating for others", func(t *testing.T) {
+		o := op("server-for-bob", "bob", true)
+		require.NoError(t, server.Create(ctx, o))
+
+		// The initiator check applies to creation only: alice may still change metadata.
+		cur := &v1alpha1.Operation{}
+		require.NoError(t, alice.Get(ctx, client.ObjectKeyFromObject(o), cur))
+		patch := client.MergeFrom(cur.DeepCopy())
+		cur.Labels = map[string]string{"team": "web"}
+		require.NoError(t, alice.Patch(ctx, cur, patch))
+	})
+	t.Run("application label must match spec.application", func(t *testing.T) {
+		o := op("label-mismatch", "", false)
+		o.Labels = map[string]string{v1alpha1.LabelKeyOperationApplication: "other"}
+		requireInvalid(t, k8sClient.Create(ctx, o), "label cd.patrol.example/application must equal spec.application")
+
+		o = op("label-match", "", false)
+		o.Labels = map[string]string{v1alpha1.LabelKeyOperationApplication: "web"}
+		require.NoError(t, k8sClient.Create(ctx, o))
+		patch := client.MergeFrom(o.DeepCopy())
+		o.Labels[v1alpha1.LabelKeyOperationApplication] = "other"
+		requireInvalid(t, k8sClient.Patch(ctx, o, patch), "label cd.patrol.example/application must equal spec.application")
 	})
 }
 
@@ -431,7 +702,7 @@ func TestAdmissionAppProject(t *testing.T) {
 	}{
 		{name: "sync window kind", mutate: func(p *v1alpha1.AppProject) { p.Spec.SyncWindows[0].Kind = "maybe" }, message: "spec.syncWindows[0].kind"},
 		{name: "sync window schedule", mutate: func(p *v1alpha1.AppProject) { p.Spec.SyncWindows[0].Schedule = "every night" }, message: "spec.syncWindows[0].schedule"},
-		{name: "gpg mode", mutate: func(p *v1alpha1.AppProject) { p.Spec.SourceIntegrity.Git.Policies[0].GPG.Mode = "lenient" }, message: "mode"},
+		{name: "gpg mode", mutate: func(p *v1alpha1.AppProject) { p.Spec.SourceIntegrity.Git.Policies[0].GPG.Mode = "lenient" }, message: "spec.sourceIntegrity.git.policies[0].gpg.mode: Unsupported value"},
 		{name: "description length", mutate: func(p *v1alpha1.AppProject) { p.Spec.Description = strings.Repeat("d", 256) }, message: "spec.description"},
 	}
 	for i, tt := range tests {
@@ -472,7 +743,7 @@ func validApplicationSet(ns, name string) *v1alpha1.ApplicationSet {
 				}}},
 				{Merge: &v1alpha1.MergeGenerator{MergeKeys: []string{"name"}, Generators: []v1alpha1.ApplicationSetNestedGenerator{
 					{SCMProvider: &v1alpha1.SCMProviderGenerator{Github: &v1alpha1.SCMProviderGeneratorGithub{Organization: "org", ProviderRef: &v1alpha1.SCMProviderReference{Name: "github"}}}},
-					{Merge: &apiextensionsv1.JSON{Raw: []byte(`{"mergeKeys":["name"],"generators":[{"list":{"elements":[]}}]}`)}},
+					{Merge: &apiextensionsv1.JSON{Raw: []byte(`{"mergeKeys":["name"],"generators":[{"list":{"elements":[]}},{"clusters":{}}]}`)}},
 				}}},
 				{SCMProvider: &v1alpha1.SCMProviderGenerator{
 					Gitlab:  &v1alpha1.SCMProviderGeneratorGitlab{Group: "42", TokenRef: &v1alpha1.SecretRef{SecretName: "gitlab", Key: "token"}},
@@ -559,7 +830,52 @@ func TestAdmissionApplicationSet(t *testing.T) {
 		{name: "pull request providerRef with basic auth", mutate: func(a *v1alpha1.ApplicationSet) {
 			a.Spec.Generators[7].PullRequest.BitbucketServer.ProviderRef = &v1alpha1.SCMProviderReference{Name: "bbs"}
 		}, message: "providerRef is mutually exclusive with basicAuth and bearerToken"},
-		{name: "missing generators", mutate: func(a *v1alpha1.ApplicationSet) { a.Spec.Generators = nil }, message: "spec.generators"},
+		{name: "missing generators", mutate: func(a *v1alpha1.ApplicationSet) { a.Spec.Generators = nil }, message: "spec.generators: Required value"},
+		{name: "too many generators", mutate: func(a *v1alpha1.ApplicationSet) {
+			for range 129 - len(a.Spec.Generators) {
+				a.Spec.Generators = append(a.Spec.Generators, v1alpha1.ApplicationSetGenerator{List: &v1alpha1.ListGenerator{}})
+			}
+		}, message: "spec.generators: Too many: 129: must have at most 128 items"},
+		{name: "matrix with one generator", mutate: func(a *v1alpha1.ApplicationSet) {
+			a.Spec.Generators[1].Matrix.Generators = a.Spec.Generators[1].Matrix.Generators[:1]
+		}, message: "spec.generators[1].matrix.generators in body should have at least 2 items"},
+		{name: "matrix with three generators", mutate: func(a *v1alpha1.ApplicationSet) {
+			m := a.Spec.Generators[1].Matrix
+			m.Generators = append(m.Generators, m.Generators[0])
+		}, message: "spec.generators[1].matrix.generators: Too many: 3: must have at most 2 items"},
+		{name: "merge with one generator", mutate: func(a *v1alpha1.ApplicationSet) {
+			a.Spec.Generators[2].Merge.Generators = a.Spec.Generators[2].Merge.Generators[:1]
+		}, message: "spec.generators[2].merge.generators in body should have at least 2 items"},
+		{name: "deletion order case", mutate: func(a *v1alpha1.ApplicationSet) { a.Spec.Strategy.DeletionOrder = "reverse" }, message: "spec.strategy.deletionOrder: Unsupported value"},
+		{name: "reverse deletion without rolling sync", mutate: func(a *v1alpha1.ApplicationSet) {
+			a.Spec.Strategy.Type = v1alpha1.ApplicationSetStrategyAllAtOnce
+		}, message: "strategy.deletionOrder Reverse requires strategy.type RollingSync"},
+		{name: "rolling sync operator", mutate: func(a *v1alpha1.ApplicationSet) {
+			a.Spec.Strategy.RollingSync.Steps[0].MatchExpressions[0].Operator = "Exists"
+		}, message: "spec.strategy.rollingSync.steps[0].matchExpressions[0].operator: Unsupported value"},
+		{name: "scm gitea providerRef with tokenRef", mutate: func(a *v1alpha1.ApplicationSet) {
+			a.Spec.Generators = append(a.Spec.Generators, v1alpha1.ApplicationSetGenerator{SCMProvider: &v1alpha1.SCMProviderGenerator{Gitea: &v1alpha1.SCMProviderGeneratorGitea{
+				Owner: "o", API: "https://gitea.example.com", TokenRef: &v1alpha1.SecretRef{SecretName: "s", Key: "k"}, ProviderRef: &v1alpha1.SCMProviderReference{Name: "gitea"},
+			}}})
+		}, message: "providerRef and tokenRef are mutually exclusive"},
+		{name: "scm gitlab providerRef with tokenRef", mutate: func(a *v1alpha1.ApplicationSet) {
+			a.Spec.Generators[3].SCMProvider.Gitlab.ProviderRef = &v1alpha1.SCMProviderReference{Name: "gitlab"}
+		}, message: "spec.generators[3].scmProvider.gitlab: Invalid value: providerRef and tokenRef are mutually exclusive"},
+		{name: "pull request gitea providerRef with tokenRef", mutate: func(a *v1alpha1.ApplicationSet) {
+			a.Spec.Generators = append(a.Spec.Generators, v1alpha1.ApplicationSetGenerator{PullRequest: &v1alpha1.PullRequestGenerator{Gitea: &v1alpha1.PullRequestGeneratorGitea{
+				Owner: "o", Repo: "r", API: "https://gitea.example.com", TokenRef: &v1alpha1.SecretRef{SecretName: "s", Key: "k"}, ProviderRef: &v1alpha1.SCMProviderReference{Name: "gitea"},
+			}}})
+		}, message: "spec.generators[10].pullRequest.gitea: Invalid value: providerRef and tokenRef are mutually exclusive"},
+		{name: "pull request gitlab providerRef with tokenRef", mutate: func(a *v1alpha1.ApplicationSet) {
+			a.Spec.Generators = append(a.Spec.Generators, v1alpha1.ApplicationSetGenerator{PullRequest: &v1alpha1.PullRequestGenerator{GitLab: &v1alpha1.PullRequestGeneratorGitLab{
+				Project: "42", TokenRef: &v1alpha1.SecretRef{SecretName: "s", Key: "k"}, ProviderRef: &v1alpha1.SCMProviderReference{Name: "gitlab"},
+			}}})
+		}, message: "spec.generators[10].pullRequest.gitlab: Invalid value: providerRef and tokenRef are mutually exclusive"},
+		{name: "pull request azure devops providerRef with tokenRef", mutate: func(a *v1alpha1.ApplicationSet) {
+			a.Spec.Generators = append(a.Spec.Generators, v1alpha1.ApplicationSetGenerator{PullRequest: &v1alpha1.PullRequestGenerator{AzureDevOps: &v1alpha1.PullRequestGeneratorAzureDevOps{
+				Organization: "o", Project: "p", Repo: "r", TokenRef: &v1alpha1.SecretRef{SecretName: "s", Key: "k"}, ProviderRef: &v1alpha1.SCMProviderReference{Name: "ado"},
+			}}})
+		}, message: "spec.generators[10].pullRequest.azuredevops: Invalid value: providerRef and tokenRef are mutually exclusive"},
 	}
 	for i, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
@@ -581,14 +897,18 @@ func TestAdmissionRepository(t *testing.T) {
 	full := &v1alpha1.Repository{ObjectMeta: meta(ns, "full"), Spec: v1alpha1.RepositorySpec{
 		URL: "git@github.com:org/repo.git", Type: v1alpha1.RepositoryTypeGit, Name: "repo", Project: "team-a",
 		Purpose: v1alpha1.RepositoryPurposeWrite, Insecure: true, InsecureIgnoreHostKey: true, EnableLFS: true, Depth: 1,
+		WebhookManifestCacheWarmDisabled: true,
 		RepositoryAccess: v1alpha1.RepositoryAccess{
 			ForceHTTPBasicAuth: true, Proxy: "http://proxy:3128", NoProxy: "localhost", UseAzureWorkloadIdentity: true,
-			GitHubApp:      &v1alpha1.RepositoryGitHubApp{AppID: 1, InstallationID: 2, EnterpriseBaseURL: "https://ghe.example.com/api/v3"},
+			GitHubApp:      &v1alpha1.RepositoryGitHubApp{AppID: 1, InstallationID: ptr.To[int64](2), EnterpriseBaseURL: "https://ghe.example.com/api/v3"},
 			CredentialsRef: &v1alpha1.LocalSecretReference{Name: "repo-creds"},
 			SCMProviderRef: &v1alpha1.SCMProviderReference{Name: "github"},
 		},
 	}}
 	require.NoError(t, k8sClient.Create(ctx, full))
+	require.NotNil(t, full.Spec.GitHubApp.InstallationID)
+	assert.Equal(t, int64(2), *full.Spec.GitHubApp.InstallationID)
+	assert.True(t, full.Spec.WebhookManifestCacheWarmDisabled)
 
 	now := metav1.Now()
 	full.Status = v1alpha1.RepositoryStatus{
@@ -635,20 +955,26 @@ func TestAdmissionRepositoryCredential(t *testing.T) {
 	assert.Equal(t, v1alpha1.RepositoryTypeGit, cred.Spec.Type, "type defaults to git")
 	assert.Equal(t, v1alpha1.RepositoryPurposeRead, cred.Spec.Purpose, "purpose defaults to read")
 
+	// An org-wide GitHub App template without installationID: the installation is discovered from the
+	// organization in each repository URL (as Argo CD does when githubAppInstallationID is 0).
 	write := &v1alpha1.RepositoryCredential{ObjectMeta: meta(ns, "write"), Spec: v1alpha1.RepositoryCredentialSpec{
 		URLPrefix: "https://github.com/org/", Purpose: v1alpha1.RepositoryPurposeWrite,
 		RepositoryAccess: v1alpha1.RepositoryAccess{
-			GitHubApp:             &v1alpha1.RepositoryGitHubApp{AppID: 10, InstallationID: 20},
+			GitHubApp:             &v1alpha1.RepositoryGitHubApp{AppID: 10},
 			AzureServicePrincipal: &v1alpha1.AzureServicePrincipal{ClientID: "c", TenantID: "t"},
 		},
 	}}
 	require.NoError(t, k8sClient.Create(ctx, write))
+	assert.Nil(t, write.Spec.GitHubApp.InstallationID)
 
 	requireInvalid(t, k8sClient.Create(ctx, &v1alpha1.RepositoryCredential{ObjectMeta: meta(ns, "no-prefix")}), "spec.urlPrefix")
 	requireInvalid(t, k8sClient.Create(ctx, &v1alpha1.RepositoryCredential{ObjectMeta: meta(ns, "bad-type"),
 		Spec: v1alpha1.RepositoryCredentialSpec{URLPrefix: "https://x/", Type: "svn"}}), "spec.type")
 	requireInvalid(t, k8sClient.Create(ctx, &v1alpha1.RepositoryCredential{ObjectMeta: meta(ns, "bad-app"),
 		Spec: v1alpha1.RepositoryCredentialSpec{URLPrefix: "https://x/", RepositoryAccess: v1alpha1.RepositoryAccess{GitHubApp: &v1alpha1.RepositoryGitHubApp{}}}}), "spec.githubApp.appID")
+	requireInvalid(t, k8sClient.Create(ctx, &v1alpha1.RepositoryCredential{ObjectMeta: meta(ns, "bad-installation"),
+		Spec: v1alpha1.RepositoryCredentialSpec{URLPrefix: "https://x/", RepositoryAccess: v1alpha1.RepositoryAccess{GitHubApp: &v1alpha1.RepositoryGitHubApp{AppID: 1, InstallationID: ptr.To[int64](0)}}}}),
+		"spec.githubApp.installationID")
 }
 
 func TestAdmissionCluster(t *testing.T) {

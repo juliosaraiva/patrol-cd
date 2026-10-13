@@ -6,8 +6,11 @@ Resume rule: read this file, then `docs/parity/matrix.md`, then `docs/verificati
 
 ## Current work
 
-- W1 parity research workflow (`docs/parity/areas/*.md`) — running
-- W2 CRD types foundation (`api/v1alpha1`, `deploy/crds`) — running
+- W1 parity research (`docs/parity/areas/*.md`): 9/10 areas done (1,289 features); ops area + completeness critic re-running (run wf_af0f5fae-226)
+- W2 CRD types: implemented + reviewed; review-fix re-running (run wf_3b816f38-c83)
+- W3 Phase 1a libraries (run wf_b4bb6ee9-d6b): done impl — sandbox, rbac, auth, lua+health, cache, scm-core, notifications; re-running — diff, git, helm/oci, scm-providers impl and all reviews/fixes
+- W4 UI foundation (run wf_20ba85e9-0a8): scaffold, design system, shell, API layer
+- Session limit interrupted W1–W3 on 2026-10-12; resumed 2026-10-13 via resumeFromRunId. Checkpoint commit cee7e81.
 
 ## Blockers
 
@@ -18,8 +21,8 @@ Resume rule: read this file, then `docs/parity/matrix.md`, then `docs/verificati
 - [x] T0.1 Inspect repo/tooling; git init; CLAUDE.md; ADRs 0001–0013; architecture overview
 - [x] T0.2 Pin baseline (`docs/parity/baseline.md`)
 - [x] T0.3 Go module + pinned deps (`hack/deps`), tools module (`tools/go.mod`: controller-gen v0.20.0, setup-envtest, kustomize v5.8.1), envtest 1.36.0 binaries
-- [~] T0.4 Parity inventory per area → `docs/parity/areas/*.md`
-- [ ] T0.5 Parity matrix `docs/parity/matrix.md` (generated from area files + Patrol columns)
+- [~] T0.4 Parity inventory per area (9/10 done) → `docs/parity/areas/*.md`
+- [x] T0.5 Parity matrix generator `hack/parity` (areas + `docs/parity/status/*.yaml` overlays → `matrix.md`)
 - [~] T0.6 CRD types + CEL + envtest admission tests
 - [ ] T0.7 Makefile, CI workflow, lint config, `verify-generated`
 

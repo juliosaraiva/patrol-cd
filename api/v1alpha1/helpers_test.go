@@ -298,13 +298,63 @@ func TestNestedGeneratorDecoding(t *testing.T) {
 	assert.JSONEq(t, `{"a":"1"}`, string(mg.Generators[0].List.Elements[0].Raw))
 	assert.Equal(t, "prod", mg.Generators[1].Clusters.Selector.MatchLabels["env"])
 
-	merge, err := ToNestedMergeGenerator(&apiextensionsv1.JSON{Raw: []byte(`{"mergeKeys":["server"],"generators":[{"git":{"repoURL":"r","revision":"HEAD"}}]}`)})
+	merge, err := ToNestedMergeGenerator(&apiextensionsv1.JSON{Raw: []byte(`{"mergeKeys":["server"],"generators":[{"git":{"repoURL":"r","revision":"HEAD"}},{"list":{"elements":[]}}]}`)})
 	require.NoError(t, err)
 	assert.Equal(t, []string{"server"}, merge.MergeKeys)
 	assert.Equal(t, "r", merge.Generators[0].Git.RepoURL)
 
 	_, err = ToNestedMergeGenerator(&apiextensionsv1.JSON{Raw: []byte(`{"generators":`)})
 	assert.Error(t, err)
+
+	// The CRD schema cannot see inside nested generators, so the decoders enforce the generator
+	// counts of MatrixGenerator (exactly 2) and MergeGenerator (at least 2).
+	one := `{"generators":[{"list":{"elements":[]}}]}`
+	three := `{"generators":[{"list":{"elements":[]}},{"list":{"elements":[]}},{"list":{"elements":[]}}]}`
+	_, err = ToNestedMatrixGenerator(&apiextensionsv1.JSON{Raw: []byte(one)})
+	assert.ErrorContains(t, err, "want exactly 2")
+	_, err = ToNestedMatrixGenerator(&apiextensionsv1.JSON{Raw: []byte(three)})
+	assert.ErrorContains(t, err, "want exactly 2")
+	_, err = ToNestedMergeGenerator(&apiextensionsv1.JSON{Raw: []byte(one)})
+	assert.ErrorContains(t, err, "want at least 2")
+	mergeOfThree, err := ToNestedMergeGenerator(&apiextensionsv1.JSON{Raw: []byte(three)})
+	require.NoError(t, err)
+	assert.Len(t, mergeOfThree.Generators, 3)
+}
+
+// Empty generator templates, selectors and plugin inputs must not be serialized: Go clients would
+// otherwise add `template: {metadata: {}, spec: {...}}` to every generator on update, which shows
+// up as drift against the manifest an ApplicationSet was applied from.
+func TestEmptyGeneratorFieldsAreOmitted(t *testing.T) {
+	t.Parallel()
+	gens := []ApplicationSetGenerator{
+		{List: &ListGenerator{}},
+		{Clusters: &ClusterGenerator{}},
+		{Git: &GitGenerator{RepoURL: "r", Revision: "HEAD"}},
+		{SCMProvider: &SCMProviderGenerator{}},
+		{ClusterDecisionResource: &DuckTypeGenerator{ConfigMapRef: "cm"}},
+		{PullRequest: &PullRequestGenerator{}},
+		{Matrix: &MatrixGenerator{}},
+		{Merge: &MergeGenerator{}},
+		{Plugin: &PluginGenerator{ConfigMapRef: PluginConfigMapRef{Name: "p"}}},
+	}
+	out, err := json.Marshal(gens)
+	require.NoError(t, err)
+	assert.JSONEq(t, `[
+		{"list":{}},
+		{"clusters":{}},
+		{"git":{"repoURL":"r","revision":"HEAD"}},
+		{"scmProvider":{}},
+		{"clusterDecisionResource":{"configMapRef":"cm"}},
+		{"pullRequest":{}},
+		{"matrix":{"generators":null}},
+		{"merge":{"generators":null,"mergeKeys":null}},
+		{"plugin":{"configMapRef":{"name":"p"}}}
+	]`, string(out))
+
+	// A non-empty template is still serialized.
+	withTemplate, err := json.Marshal(ListGenerator{Template: ApplicationSetTemplate{ApplicationSetTemplateMeta: ApplicationSetTemplateMeta{Name: "x"}}})
+	require.NoError(t, err)
+	assert.Contains(t, string(withTemplate), `"template":{"metadata":{"name":"x"}`)
 }
 
 func TestPluginParameterJSONRoundTrip(t *testing.T) {
@@ -357,4 +407,8 @@ func TestKeysUseGroupPrefix(t *testing.T) {
 	assert.Equal(t, "resources-finalizer.cd.patrol.example/background", FinalizerResourcesBackground)
 	assert.Equal(t, "post-delete-finalizer.cd.patrol.example/cleanup", FinalizerPostDeleteCleanup)
 	assert.Equal(t, "link.cd.patrol.example/", AnnotationKeyLinkPrefix)
+	assert.Equal(t, "notifications.cd.patrol.example/subscriptions", AnnotationKeyNotificationSubscriptions)
+	assert.Equal(t, "cd.patrol.example/managed-by", AnnotationKeyManagedBy)
+	assert.Equal(t, TrackingMethod("annotation+label"), TrackingMethodAnnotationAndLabel)
+	assert.Equal(t, "operations.cd.patrol.example", OperationAdmissionPolicyName)
 }

@@ -10,6 +10,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"net/url"
+	"slices"
 	"strconv"
 	"strings"
 	"sync"
@@ -137,6 +138,36 @@ func TestRetryTransport(t *testing.T) {
 				}
 			}
 		})
+	}
+}
+
+func TestRetryHonorsClassifiedInnerErrors(t *testing.T) {
+	t.Parallel()
+	tests := []struct {
+		kind      scm.ErrorKind
+		wantCalls int
+	}{
+		{scm.KindUnauthorized, 1},
+		{scm.KindNotFound, 1},
+		{scm.KindInvalid, 1},
+		{scm.KindUnavailable, 3},
+		{scm.KindRateLimited, 3},
+	}
+	for _, tc := range tests {
+		calls := 0
+		inner := roundTrip(func(*http.Request) (*http.Response, error) {
+			calls++
+			return nil, &scm.Error{Kind: tc.kind, Op: "Token", Err: errors.New("token source")}
+		})
+		sl := &sleeper{}
+		c := chain(inner, sl, scm.RetryPolicy{MaxAttempts: 3, BaseDelay: time.Millisecond})
+		_, err := c.Get("https://api.example/x")
+		if scm.KindOf(err) != tc.kind {
+			t.Errorf("%s: err = %v", tc.kind, err)
+		}
+		if calls != tc.wantCalls {
+			t.Errorf("%s: %d attempts, want %d", tc.kind, calls, tc.wantCalls)
+		}
 	}
 }
 
@@ -352,6 +383,156 @@ func TestHostGuardAndBearer(t *testing.T) {
 	req, _ := http.NewRequest(http.MethodGet, "https://api.example/x", nil)
 	if _, err := failing.RoundTrip(req); err == nil {
 		t.Fatal("token error must fail the request")
+	}
+}
+
+func TestBearerReplaysOnceWithFreshToken(t *testing.T) {
+	t.Parallel()
+	tests := []struct {
+		name       string
+		valid      map[string]bool // tokens the server accepts
+		tokens     []string        // successive values returned by the token func
+		body       bool
+		getBody    bool
+		wantStatus int
+		wantSent   []string
+		wantReject []string
+	}{
+		{name: "fresh token accepted", valid: map[string]bool{"new": true}, tokens: []string{"old", "new"}, body: true, getBody: true,
+			wantStatus: 200, wantSent: []string{"old", "new"}, wantReject: []string{"old"}},
+		{name: "fresh token rejected too", valid: map[string]bool{}, tokens: []string{"old", "new"},
+			wantStatus: 401, wantSent: []string{"old", "new"}, wantReject: []string{"old", "new"}},
+		{name: "same token is not replayed", valid: map[string]bool{}, tokens: []string{"old", "old"},
+			wantStatus: 401, wantSent: []string{"old"}, wantReject: []string{"old"}},
+		{name: "unreplayable body", valid: map[string]bool{"new": true}, tokens: []string{"old", "new"}, body: true,
+			wantStatus: 401, wantSent: []string{"old"}, wantReject: []string{"old"}},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+			var sent, bodies, rejected []string
+			next := roundTrip(func(r *http.Request) (*http.Response, error) {
+				tok := strings.TrimPrefix(r.Header.Get("Authorization"), "Bearer ")
+				sent = append(sent, tok)
+				if r.Body != nil {
+					b, _ := io.ReadAll(r.Body)
+					bodies = append(bodies, string(b))
+				}
+				if tc.valid[tok] {
+					return resp(r, 200, nil, "ok"), nil
+				}
+				return resp(r, 401, nil, `{"message":"Bad credentials"}`), nil
+			})
+			calls := 0
+			tokFn := func(context.Context) (string, error) {
+				v := tc.tokens[min(calls, len(tc.tokens)-1)]
+				calls++
+				return v, nil
+			}
+			rt := scm.BearerTransport(next, tokFn, func(tok string) { rejected = append(rejected, tok) })
+			var req *http.Request
+			switch {
+			case tc.body && tc.getBody:
+				req, _ = http.NewRequest(http.MethodPost, "https://api.example/x", strings.NewReader(`{"a":1}`))
+			case tc.body:
+				req, _ = http.NewRequest(http.MethodPost, "https://api.example/x", io.NopCloser(strings.NewReader(`{"a":1}`)))
+			default:
+				req, _ = http.NewRequest(http.MethodGet, "https://api.example/x", nil)
+			}
+			res, err := rt.RoundTrip(req)
+			if err != nil {
+				t.Fatal(err)
+			}
+			_ = res.Body.Close()
+			if res.StatusCode != tc.wantStatus {
+				t.Fatalf("status = %d, want %d", res.StatusCode, tc.wantStatus)
+			}
+			if !slices.Equal(sent, tc.wantSent) || !slices.Equal(rejected, tc.wantReject) {
+				t.Fatalf("sent %v rejected %v; want %v, %v", sent, rejected, tc.wantSent, tc.wantReject)
+			}
+			if tc.body && tc.getBody {
+				for _, b := range bodies {
+					if b != `{"a":1}` {
+						t.Fatalf("replayed body = %q", b)
+					}
+				}
+			}
+		})
+	}
+}
+
+func TestParseRateLimitHeaders(t *testing.T) {
+	t.Parallel()
+	tests := []struct {
+		name string
+		h    map[string]string
+		want scm.RateLimitInfo
+	}{
+		{"none", nil, scm.RateLimitInfo{Limit: -1, Remaining: -1, Used: -1}},
+		{"github", map[string]string{"X-RateLimit-Limit": "5000", "X-RateLimit-Remaining": "4990", "X-RateLimit-Used": "10", "X-RateLimit-Reset": "1760000000", "X-RateLimit-Resource": "core"},
+			scm.RateLimitInfo{Present: true, Limit: 5000, Remaining: 4990, Used: 10, Reset: time.Unix(1760000000, 0), Resource: "core"}},
+		{"gitlab", map[string]string{"RateLimit-Limit": "600", "RateLimit-Remaining": "0", "RateLimit-Reset": "1760000001"},
+			scm.RateLimitInfo{Present: true, Limit: 600, Remaining: 0, Used: -1, Reset: time.Unix(1760000001, 0)}},
+		{"garbage", map[string]string{"X-RateLimit-Limit": "lots", "X-RateLimit-Remaining": "-3"},
+			scm.RateLimitInfo{Limit: -1, Remaining: -1, Used: -1}},
+	}
+	for _, tc := range tests {
+		h := http.Header{}
+		for k, v := range tc.h {
+			h.Set(k, v)
+		}
+		got := scm.ParseRateLimitHeaders(h)
+		if got.Present != tc.want.Present || got.Limit != tc.want.Limit || got.Remaining != tc.want.Remaining ||
+			got.Used != tc.want.Used || !got.Reset.Equal(tc.want.Reset) || got.Resource != tc.want.Resource {
+			t.Errorf("%s: got %+v, want %+v", tc.name, got, tc.want)
+		}
+	}
+}
+
+func TestObserverSeesEveryAttempt(t *testing.T) {
+	t.Parallel()
+	var mu sync.Mutex
+	var seen []scm.RequestInfo
+	obs := func(_ context.Context, info scm.RequestInfo) {
+		mu.Lock()
+		seen = append(seen, info)
+		mu.Unlock()
+	}
+	transportErr := errors.New("connection reset")
+	rt := &scripted{responses: []func(*http.Request) (*http.Response, error){
+		status(502),
+		func(*http.Request) (*http.Response, error) { return nil, transportErr },
+		status(200, "X-RateLimit-Remaining", "41", "X-RateLimit-Limit", "60"),
+	}}
+	sl := &sleeper{}
+	c := &http.Client{Transport: scm.Chain(rt, scm.ChainOptions{
+		Provider: "test", Observer: obs, Sleep: sl.Sleep, Clock: func() time.Time { return fixedNow },
+		Retry: scm.RetryPolicy{MaxAttempts: 3, BaseDelay: time.Millisecond},
+	})}
+	res, err := c.Get("https://api.example/repos/o/r/branches?page=2&access_token=x")
+	if err != nil {
+		t.Fatal(err)
+	}
+	_ = res.Body.Close()
+	mu.Lock()
+	defer mu.Unlock()
+	if len(seen) != 3 {
+		t.Fatalf("observed %d attempts, want 3: %+v", len(seen), seen)
+	}
+	wantStatus := []int{502, 0, 200}
+	for i, info := range seen {
+		if info.Provider != "test" || info.Method != http.MethodGet || info.Host != "api.example" || info.Path != "/repos/o/r/branches" {
+			t.Errorf("attempt %d: %+v", i, info)
+		}
+		if info.StatusCode != wantStatus[i] {
+			t.Errorf("attempt %d: status %d, want %d", i, info.StatusCode, wantStatus[i])
+		}
+	}
+	if !errors.Is(seen[1].Err, transportErr) || seen[1].RateLimit.Present {
+		t.Errorf("failed attempt: %+v", seen[1])
+	}
+	if rl := seen[2].RateLimit; !rl.Present || rl.Remaining != 41 || rl.Limit != 60 {
+		t.Errorf("rate limit = %+v", rl)
 	}
 }
 

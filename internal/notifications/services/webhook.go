@@ -106,7 +106,7 @@ func (s *webhookService) Send(ctx context.Context, n Notification, dest Destinat
 			method = m
 		}
 		if wn.Path != "" {
-			target = joinURL(target, wn.Path)
+			target = appendWebhookPath(target, wn.Path)
 		}
 		if wn.Body != "" {
 			body = []byte(wn.Body)
@@ -129,6 +129,17 @@ func (s *webhookService) Send(ctx context.Context, n Notification, dest Destinat
 		return err
 	}
 	return s.http.expect2xx(method, target, resp)
+}
+
+// appendWebhookPath appends the rendered template path to the configured URL. Like the
+// baseline it concatenates verbatim, so a path may continue a query string
+// ("...?app=" + "{{.app.metadata.name}}") or a path segment; only the doubled slash of a
+// base ending in "/" and a path starting with "/" is collapsed.
+func appendWebhookPath(base, p string) string {
+	if strings.HasSuffix(base, "/") && strings.HasPrefix(p, "/") {
+		return base + p[1:]
+	}
+	return base + p
 }
 
 func validMethod(m string) bool {

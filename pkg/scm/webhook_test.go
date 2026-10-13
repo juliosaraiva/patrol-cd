@@ -160,7 +160,8 @@ func TestDeliveryCacheBasics(t *testing.T) {
 	if scm.DeliveryKey("github", "") != "" {
 		t.Fatal("empty delivery ID must give an empty key")
 	}
-	if c.Seen("") || c.Seen("") || c.Len() != 0 {
+	first, second := c.Seen(""), c.Seen("")
+	if first || second || c.Len() != 0 {
 		t.Fatal("empty keys must never be recorded")
 	}
 	if c.Seen(k) {

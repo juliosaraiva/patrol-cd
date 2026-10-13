@@ -194,6 +194,7 @@ func TestValidateReportsProblems(t *testing.T) {
 		"trigger.bad-expr":       "- when: app.status ==\n  send: [missing-template]",
 		"template.bad":           "message: '{{ .app.metadata.name '",
 		"template.env":           "message: '{{ env \"HOME\" }}'",
+		"template.gh-empty":      "github:\n  repoURLPath: '{{.app.spec.source.repoURL}}'",
 		"defaultTriggers":        "- nope",
 	}, nil)
 	if err != nil {
@@ -203,7 +204,7 @@ func TestValidateReportsProblems(t *testing.T) {
 	if err == nil {
 		t.Fatal("expected validation errors")
 	}
-	for _, want := range []string{`service type 'carrier-pigeon' is not supported`, `trigger "bad-expr"`, `undefined template "missing-template"`, `template "bad"`, `function "env" not defined`, `undefined trigger "nope"`} {
+	for _, want := range []string{`service type 'carrier-pigeon' is not supported`, `trigger "bad-expr"`, `undefined template "missing-template"`, `template "bad"`, `function "env" not defined`, `undefined trigger "nope"`, `at least one of {status, deployment, pullRequestComment, checkRun}`} {
 		if !strings.Contains(err.Error(), want) {
 			t.Fatalf("validation error %q missing %q", err, want)
 		}

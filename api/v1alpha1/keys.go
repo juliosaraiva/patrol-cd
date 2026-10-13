@@ -33,10 +33,11 @@ const (
 	// AnnotationKeyRefresh ("cd.patrol.example/refresh") requests a refresh. On an Application the value
 	// is RefreshTypeNormal or RefreshTypeHard and the controller removes the annotation once the refresh
 	// completed. On a Cluster the value is an RFC 3339 timestamp requesting invalidation of the
-	// controller's live-state cache for that cluster (Argo CD's Cluster.refreshRequestedAt, which Argo
-	// CD stores the same way in the cluster Secret); the controller removes it once the cache was
-	// rebuilt. It is deliberately not validated at admission so webhooks and clients can set it with a
-	// plain patch.
+	// controller's live-state cache for that cluster: Argo CD's Cluster.refreshRequestedAt, which Argo
+	// CD stores as this same annotation on the cluster Secret. As upstream, the controller invalidates
+	// the cache when status.info.cacheInfo.lastCacheSyncTime is older than the timestamp and leaves the
+	// annotation in place. It is deliberately not validated at admission so webhooks and clients can
+	// set it with a plain patch.
 	AnnotationKeyRefresh = Prefix + "refresh"
 	// AnnotationKeyHydrate ("cd.patrol.example/hydrate") requests source hydration. Values are
 	// HydrateTypeNormal or HydrateTypeHard. Removed by the controller after hydration.
@@ -225,10 +226,11 @@ const (
 	LabelKeyClusterKubernetesVersion = Prefix + "kubernetes-version"
 
 	// LabelKeyOperationApplication ("cd.patrol.example/application") is set on Operations to the name
-	// of their Application, so operations of one Application can be listed by label selector. Labels are
-	// client-writable and admission cannot tie this one to spec.application: patrol-server sets it, the
-	// controller corrects it, and decisions that must be correct (one non-terminal Operation per
-	// Application, retention) are keyed on spec.application, never on this label.
+	// of their Application, so operations of one Application can be listed by label selector.
+	// patrol-server sets it and the controller adds it when missing; when present it must equal
+	// spec.application (enforced by the OperationAdmissionPolicyName ValidatingAdmissionPolicy, since
+	// CRD rules cannot read labels). Because it may be absent, decisions that must be correct (one
+	// non-terminal Operation per Application, retention) are keyed on spec.application, never on it.
 	LabelKeyOperationApplication = Prefix + "application"
 	// LabelKeyOperationPhase ("cd.patrol.example/operation-phase") mirrors Operation.status.phase, so
 	// non-terminal operations can be found by label selector.

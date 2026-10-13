@@ -311,6 +311,96 @@ func RateLimitWait(h http.Header, now time.Time) (time.Duration, bool) {
 	return 0, true
 }
 
+// RequestInfo describes one HTTP attempt made by a provider. It carries no headers, bodies
+// or credentials.
+type RequestInfo struct {
+	Provider string
+	Method   string
+	Host     string
+	// Path is the URL path without query string. It may contain organization, repository
+	// and branch names, so it has unbounded cardinality as a metric label.
+	Path string
+	// StatusCode is 0 when the attempt failed without a response.
+	StatusCode int
+	// Duration is the time until response headers were received (or the attempt failed),
+	// excluding client-side pacing and retry waits.
+	Duration time.Duration
+	// Err is the transport error of a failed attempt.
+	Err error
+	// RateLimit is parsed from the response headers.
+	RateLimit RateLimitInfo
+}
+
+// RateLimitInfo is the provider rate-limit state advertised by response headers
+// (X-RateLimit-* as sent by GitHub and Gitea, or RateLimit-* as sent by GitLab).
+type RateLimitInfo struct {
+	// Present is false when the response carried none of the headers.
+	Present bool
+	// Limit, Remaining and Used are -1 when the corresponding header is absent or invalid.
+	Limit     int64
+	Remaining int64
+	Used      int64
+	// Reset is zero when unknown.
+	Reset time.Time
+	// Resource is the rate-limit bucket ("core", "search", "graphql"; GitHub only).
+	Resource string
+}
+
+// ParseRateLimitHeaders extracts rate-limit information from response headers.
+func ParseRateLimitHeaders(h http.Header) RateLimitInfo {
+	prefix := "X-RateLimit-"
+	if h.Get(prefix+"Limit") == "" && h.Get(prefix+"Remaining") == "" && (h.Get("RateLimit-Limit") != "" || h.Get("RateLimit-Remaining") != "") {
+		prefix = "RateLimit-"
+	}
+	num := func(k string) int64 {
+		v, err := strconv.ParseInt(strings.TrimSpace(h.Get(prefix+k)), 10, 64)
+		if err != nil || v < 0 {
+			return -1
+		}
+		return v
+	}
+	info := RateLimitInfo{
+		Limit:     num("Limit"),
+		Remaining: num("Remaining"),
+		Used:      num("Used"),
+		Resource:  h.Get(prefix + "Resource"),
+	}
+	if epoch := num("Reset"); epoch > 0 {
+		info.Reset = time.Unix(epoch, 0)
+	}
+	info.Present = info.Limit >= 0 || info.Remaining >= 0 || info.Used >= 0 || !info.Reset.IsZero()
+	return info
+}
+
+// RequestObserver is called synchronously after every HTTP attempt of a provider,
+// including retries, pagination and GitHub App token requests. It is the hook for API
+// metrics (requests by method/path/status, latency, remaining rate limit). It must be
+// fast, safe for concurrent use, and must not retain ctx.
+type RequestObserver func(ctx context.Context, info RequestInfo)
+
+func observeTransport(next http.RoundTripper, provider string, obs RequestObserver, clock func() time.Time) http.RoundTripper {
+	return roundTripperFunc(func(req *http.Request) (*http.Response, error) {
+		start := clock()
+		resp, err := next.RoundTrip(req)
+		info := RequestInfo{
+			Provider: provider,
+			Method:   req.Method,
+			Host:     req.URL.Host,
+			Path:     req.URL.Path,
+			Duration: clock().Sub(start),
+			Err:      err,
+		}
+		if err == nil && resp != nil {
+			info.StatusCode = resp.StatusCode
+			info.RateLimit = ParseRateLimitHeaders(resp.Header)
+		} else {
+			info.RateLimit = RateLimitInfo{Limit: -1, Remaining: -1, Used: -1}
+		}
+		obs(req.Context(), info)
+		return resp, err
+	})
+}
+
 // ChainOptions configures Chain.
 type ChainOptions struct {
 	// Provider labels log lines.
@@ -318,7 +408,9 @@ type ChainOptions struct {
 	Logger   *slog.Logger
 	// Limiter paces every attempt; nil disables pacing.
 	Limiter *rate.Limiter
-	Retry   RetryPolicy
+	// Observer, when set, is called after every attempt (see RequestObserver).
+	Observer RequestObserver
+	Retry    RetryPolicy
 	// Classifier defaults to DefaultRetryClassifier.
 	Classifier RetryClassifier
 	// Clock defaults to time.Now.
@@ -328,9 +420,10 @@ type ChainOptions struct {
 }
 
 // Chain wraps inner (normally an authenticating transport over BaseTransport and
-// LimitResponseBody) with request logging (redacted), bounded retries, and pacing:
+// LimitResponseBody) with request logging (redacted), bounded retries, pacing and the
+// optional per-attempt observer:
 //
-//	logging → retry → rate limit → inner
+//	logging → retry → rate limit → observer → inner
 func Chain(inner http.RoundTripper, o ChainOptions) http.RoundTripper {
 	if o.Logger == nil {
 		o.Logger = slog.New(slog.DiscardHandler)
@@ -345,7 +438,10 @@ func Chain(inner http.RoundTripper, o ChainOptions) http.RoundTripper {
 		o.Sleep = sleepCtx
 	}
 	o.Retry = o.Retry.WithDefaults()
-	var rt = inner
+	rt := inner
+	if o.Observer != nil {
+		rt = observeTransport(rt, o.Provider, o.Observer, o.Clock)
+	}
 	if o.Limiter != nil {
 		lim := o.Limiter
 		next := rt
@@ -409,6 +505,12 @@ func (t *retryTransport) RoundTrip(req *http.Request) (*http.Response, error) {
 		switch {
 		case err != nil:
 			if last || ctx.Err() != nil || errors.Is(err, ErrResponseTooLarge) || errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded) {
+				return nil, err
+			}
+			// Classified failures from inner layers (e.g. a token source that reports
+			// Unauthorized or NotFound) are final unless their kind is retryable.
+			var se *Error
+			if errors.As(err, &se) && !IsRetryable(se) {
 				return nil, err
 			}
 			wait = t.backoff(attempt)
@@ -503,21 +605,52 @@ func HostGuard(host string, authed, plain http.RoundTripper) http.RoundTripper {
 }
 
 // BearerTransport sets "Authorization: Bearer <token>" from tok on a clone of every
-// request. When the response is 401, onUnauthorized (if set) is called with the token
-// that was rejected so the caller can invalidate caches.
+// request. When the response is 401 and onUnauthorized is set, onUnauthorized is called
+// with the rejected token so the caller can invalidate its cache, and the request is sent
+// once more with a freshly obtained token, provided the body can be replayed and tok now
+// returns a different token. A 401 is an authentication failure that the server rejects
+// before acting, so the replay is safe for every method. When no fresh token can be
+// obtained, the original 401 response is returned.
 func BearerTransport(next http.RoundTripper, tok TokenFunc, onUnauthorized func(token string)) http.RoundTripper {
-	return roundTripperFunc(func(req *http.Request) (*http.Response, error) {
-		v, err := tok(req.Context())
-		if err != nil {
-			return nil, err
-		}
+	send := func(req *http.Request, v string, body io.ReadCloser) (*http.Response, error) {
 		r := req.Clone(req.Context())
+		if body != nil {
+			r.Body = body
+		}
 		if v != "" {
 			r.Header.Set("Authorization", "Bearer "+v)
 		}
-		resp, err := next.RoundTrip(r)
-		if err == nil && resp.StatusCode == http.StatusUnauthorized && onUnauthorized != nil && v != "" {
-			onUnauthorized(v)
+		return next.RoundTrip(r)
+	}
+	return roundTripperFunc(func(req *http.Request) (*http.Response, error) {
+		ctx := req.Context()
+		v, err := tok(ctx)
+		if err != nil {
+			return nil, err
+		}
+		resp, err := send(req, v, nil)
+		if err != nil || resp.StatusCode != http.StatusUnauthorized || onUnauthorized == nil || v == "" {
+			return resp, err
+		}
+		onUnauthorized(v)
+		canReplay := req.Body == nil || req.Body == http.NoBody || req.GetBody != nil
+		if !canReplay || ctx.Err() != nil {
+			return resp, nil
+		}
+		fresh, terr := tok(ctx)
+		if terr != nil || fresh == "" || fresh == v {
+			return resp, nil
+		}
+		var body io.ReadCloser
+		if req.GetBody != nil {
+			if body, terr = req.GetBody(); terr != nil {
+				return resp, nil
+			}
+		}
+		drainAndClose(resp)
+		resp, err = send(req, fresh, body)
+		if err == nil && resp.StatusCode == http.StatusUnauthorized {
+			onUnauthorized(fresh)
 		}
 		return resp, err
 	})

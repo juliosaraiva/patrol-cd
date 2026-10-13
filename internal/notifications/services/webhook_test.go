@@ -45,6 +45,36 @@ func TestWebhookRequestShape(t *testing.T) {
 	}
 }
 
+func TestAppendWebhookPath(t *testing.T) {
+	t.Parallel()
+	tests := []struct {
+		base, path, want string
+	}{
+		{"https://h/base", "/repos/a", "https://h/base/repos/a"},
+		{"https://h/base/", "/repos/a", "https://h/base/repos/a"},
+		{"https://h/base/", "repos/a", "https://h/base/repos/a"},
+		{"https://h/apps/", "guestbook", "https://h/apps/guestbook"},
+		{"https://h/hook?app=", "guestbook", "https://h/hook?app=guestbook"},
+		{"https://h/hook", "?app=guestbook", "https://h/hook?app=guestbook"},
+		{"https://h", "/x", "https://h/x"},
+	}
+	for _, tc := range tests {
+		if got := appendWebhookPath(tc.base, tc.path); got != tc.want {
+			t.Errorf("appendWebhookPath(%q, %q) = %q, want %q", tc.base, tc.path, got, tc.want)
+		}
+	}
+}
+
+func TestWebhookPathContinuesQuery(t *testing.T) {
+	t.Parallel()
+	srv, rec := newServer(t, func(w http.ResponseWriter, _ captured) { w.WriteHeader(204) })
+	svc := mustNew(t, TypeWebhook, map[string]any{"url": srv.URL + "/hook?app="}, testDeps())
+	mustSend(t, svc, Notification{Webhook: WebhookNotifications{"ci": {Method: "POST", Path: "guestbook"}}}, Destination{Service: "ci"})
+	if r := rec.all()[0]; r.Path != "/hook" || r.RawQuery != "app=guestbook" || r.Method != http.MethodPost {
+		t.Fatalf("got %s %s?%s", r.Method, r.Path, r.RawQuery)
+	}
+}
+
 func TestWebhookBasicAuth(t *testing.T) {
 	t.Parallel()
 	srv, rec := newServer(t, func(w http.ResponseWriter, _ captured) { w.WriteHeader(200) })

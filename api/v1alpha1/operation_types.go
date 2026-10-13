@@ -8,8 +8,16 @@ import (
 // It replaces Argo CD's Application.operation field and status.operationState.syncResult (ADR-0011).
 //
 // The spec is immutable after creation except spec.cancel, which may only change from false to true.
-// Clients must change it with a patch (merge or server-side apply): immutability is enforced by
-// comparing the stored spec, so a full update that drops explicitly-set zero values is rejected.
+// Clients should change metadata and spec.cancel with a patch (merge or server-side apply).
+// Immutability is enforced by comparing the stored spec, and Go clients omit empty values: scalar
+// fields of spec.sync and spec.initiatedBy are defaulted or compared as their zero value, so a full
+// update of an Operation written with explicit `false`/`""`/`0` works, but one written with an explicit
+// empty list or object (e.g. `syncOptions: []`) is rejected by a full update from a Go client.
+//
+// A ValidatingAdmissionPolicy shipped with the CRDs (OperationAdmissionPolicyName, in deploy/crds)
+// additionally requires spec.initiatedBy to name the requesting user (or be empty) and to not be
+// automated unless the requester holds the OperationInitiatorVerb on operations, and requires the
+// LabelKeyOperationApplication label, when present, to equal spec.application.
 //
 // +kubebuilder:object:root=true
 // +kubebuilder:subresource:status
@@ -44,15 +52,26 @@ func init() {
 	register(&Operation{}, &OperationList{})
 }
 
+const (
+	// OperationAdmissionPolicyName is the name of the ValidatingAdmissionPolicy (and its binding)
+	// shipped in deploy/crds that guards spec.initiatedBy and the application label of Operations.
+	OperationAdmissionPolicyName = "operations." + GroupName
+	// OperationInitiatorVerb is the RBAC verb on operations.cd.patrol.example that allows creating an
+	// Operation whose spec.initiatedBy names another user or is automated. Grant it only to
+	// patrol-server (which sets the user from verified token claims) and the application controller
+	// (automated syncs). Without it, spec.initiatedBy.username must be empty or equal the requesting
+	// Kubernetes user, and spec.initiatedBy.automated must be false.
+	OperationInitiatorVerb = "impersonate"
+)
+
 // OperationSpec is the requested operation.
 //
 // +kubebuilder:validation:XValidation:rule="has(self.sync) || has(self.rollback)",message="one of spec.sync or spec.rollback must be set"
 // +kubebuilder:validation:XValidation:rule="!has(self.rollback) || !has(self.sync) || (!has(self.sync.source) && !has(self.sync.sources))",message="spec.rollback is mutually exclusive with spec.sync.source and spec.sync.sources"
-// +kubebuilder:validation:XValidation:rule="has(self.sync) == has(oldSelf.sync) && (!has(self.sync) || self.sync == oldSelf.sync)",message="spec.sync is immutable"
-// +kubebuilder:validation:XValidation:rule="has(self.rollback) == has(oldSelf.rollback) && (!has(self.rollback) || self.rollback == oldSelf.rollback)",message="spec.rollback is immutable"
-// +kubebuilder:validation:XValidation:rule="has(self.initiatedBy) == has(oldSelf.initiatedBy) && (!has(self.initiatedBy) || self.initiatedBy == oldSelf.initiatedBy)",message="spec.initiatedBy is immutable"
-// +kubebuilder:validation:XValidation:rule="has(self.info) == has(oldSelf.info) && (!has(self.info) || self.info == oldSelf.info)",message="spec.info is immutable"
-// +kubebuilder:validation:XValidation:rule="has(self.retry) == has(oldSelf.retry) && (!has(self.retry) || self.retry == oldSelf.retry)",message="spec.retry is immutable"
+// +kubebuilder:validation:XValidation:rule="has(self.sync) == has(oldSelf.sync) && (!has(self.sync) || self.sync == oldSelf.sync)",message="spec.sync is immutable; change metadata and spec.cancel with a patch, not a full update"
+// +kubebuilder:validation:XValidation:rule="has(self.rollback) == has(oldSelf.rollback) && (!has(self.rollback) || self.rollback == oldSelf.rollback)",message="spec.rollback is immutable; change metadata and spec.cancel with a patch, not a full update"
+// +kubebuilder:validation:XValidation:rule="has(self.info) == has(oldSelf.info) && (!has(self.info) || self.info == oldSelf.info)",message="spec.info is immutable; change metadata and spec.cancel with a patch, not a full update"
+// +kubebuilder:validation:XValidation:rule="has(self.retry) == has(oldSelf.retry) && (!has(self.retry) || self.retry == oldSelf.retry)",message="spec.retry is immutable; change metadata and spec.cancel with a patch, not a full update"
 // +kubebuilder:validation:XValidation:rule="!has(oldSelf.cancel) || !oldSelf.cancel || (has(self.cancel) && self.cancel)",message="spec.cancel cannot be unset once true"
 type OperationSpec struct {
 	// Application is the name of the Application, in the Operation's namespace, to operate on.
@@ -66,9 +85,13 @@ type OperationSpec struct {
 	// Rollback requests a sync to the sources and revisions of a status.history entry.
 	// +optional
 	Rollback *RollbackOperation `json:"rollback,omitempty"`
-	// InitiatedBy records who requested the operation. Set by the API server or controller.
+	// InitiatedBy records who requested the operation. patrol-server sets it from verified token claims
+	// and the controller sets automated; other Kubernetes users may only leave it empty or name
+	// themselves (enforced by the OperationAdmissionPolicyName ValidatingAdmissionPolicy). Compared
+	// field by field, with absent fields as their zero value, so Go clients can update the Operation.
 	// +optional
 	// +kubebuilder:default={}
+	// +kubebuilder:validation:XValidation:rule="(has(self.username) ? self.username : '') == (has(oldSelf.username) ? oldSelf.username : '') && (has(self.automated) && self.automated) == (has(oldSelf.automated) && oldSelf.automated)",message="spec.initiatedBy is immutable"
 	InitiatedBy OperationInitiator `json:"initiatedBy,omitempty"`
 	// Info holds informational name/value pairs (e.g. the reason for a manual sync).
 	// +optional
@@ -100,22 +123,28 @@ type RollbackOperation struct {
 	ID int64 `json:"id"`
 }
 
-// SyncOperation is a sync request.
+// SyncOperation is a sync request. Its scalar fields have explicit defaults so that an omitted value
+// and an explicit zero value are stored identically and the spec.sync immutability rule does not
+// reject a full update from a Go client (which omits zero values).
 //
 // +kubebuilder:validation:XValidation:rule="!(has(self.source) && has(self.sources))",message="spec.sync.source and spec.sync.sources are mutually exclusive"
 // +kubebuilder:validation:XValidation:rule="!has(self.manifests) || self.manifests.map(m, size(m)).sum() <= 1048576",message="spec.sync.manifests must not exceed 1MiB in total"
+// +kubebuilder:validation:XValidation:rule="!has(self.syncOptions) || self.syncOptions.all(o, o.matches('^[A-Za-z][A-Za-z0-9]*=[[:graph:]]+$'))",message="spec.sync.syncOptions entries must have the form Key=Value"
 type SyncOperation struct {
 	// Revision overrides the target revision of a single-source Application.
 	// +optional
+	// +kubebuilder:default=""
 	Revision string `json:"revision,omitempty"`
 	// Revisions override the target revision of each source of a multi-source Application.
 	// +optional
 	Revisions []string `json:"revisions,omitempty"`
 	// Prune deletes resources that are no longer desired.
 	// +optional
+	// +kubebuilder:default=false
 	Prune bool `json:"prune,omitempty"`
 	// DryRun performs a server-side dry run without changing resources.
 	// +optional
+	// +kubebuilder:default=false
 	DryRun bool `json:"dryRun,omitempty"`
 	// SyncStrategy selects apply or hook strategy (hook is the default).
 	// +optional
@@ -140,6 +169,7 @@ type SyncOperation struct {
 	SyncOptions SyncOptions `json:"syncOptions,omitempty"`
 	// SelfHealAttemptsCount is the number of self-heal attempts that preceded this operation.
 	// +optional
+	// +kubebuilder:default=0
 	SelfHealAttemptsCount int64 `json:"autoHealAttemptsCount,omitempty"`
 }
 
@@ -167,6 +197,7 @@ type SyncStrategy struct {
 type SyncStrategyApply struct {
 	// Force deletes and re-creates resources when a patch fails.
 	// +optional
+	// +kubebuilder:default=false
 	Force bool `json:"force,omitempty"`
 }
 

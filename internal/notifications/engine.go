@@ -524,8 +524,10 @@ func (e *Engine) Process(ctx context.Context, app map[string]any, state Delivery
 					delete(newState, key)
 					res.Status = StatusFailed
 					res.Err = err
-					e.opts.metrics.IncDelivery(trigger, d.Service, false)
-					e.opts.logger.Warn("notifications: delivery failed", "trigger", trigger, "service", d.Service, "error", err)
+					if !e.opts.dryRun {
+						e.opts.metrics.IncDelivery(trigger, d.Service, false)
+					}
+					e.opts.logger.Warn("notifications: delivery failed", "trigger", trigger, "service", d.Service, "dryRun", e.opts.dryRun, "error", err)
 				} else {
 					res.Status = StatusSent
 					e.opts.metrics.IncDelivery(trigger, d.Service, true)

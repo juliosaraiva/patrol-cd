@@ -47,6 +47,11 @@ var (
 	ErrResponseTooLarge = errors.New("scm: response body exceeds size limit")
 	// ErrUnknownProviderType is returned by Registry.New for unregistered types.
 	ErrUnknownProviderType = errors.New("scm: unknown provider type")
+	// ErrStatusLimit means the provider refuses further commit statuses for the commit
+	// and context (GitHub: 1000 per SHA and context). It is the cause of a KindInvalid
+	// *Error; notifiers treat the status as delivered rather than retrying (upstream
+	// behavior).
+	ErrStatusLimit = errors.New("scm: commit status limit reached for this commit and context")
 )
 
 // Error is the normalized provider error.

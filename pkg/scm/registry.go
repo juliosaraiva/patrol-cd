@@ -141,6 +141,10 @@ type Config struct {
 	UserAgent string
 	// Logger receives debug request logs (redacted). Nil discards.
 	Logger *slog.Logger
+	// Observer, when set, is called after every HTTP attempt (API metrics such as
+	// upstream's GitHub API request counters and rate-limit gauges). Callers close over
+	// their own labels (e.g. the ApplicationSet namespace and name).
+	Observer RequestObserver
 	// Clock overrides time.Now (tests).
 	Clock func() time.Time
 }

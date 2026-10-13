@@ -647,7 +647,7 @@ spec:
                                       properties:
                                         path:
                                           minLength: 1
-                                          pattern: ^.{2,}|[^./]$
+                                          pattern: '[^./]'
                                           type: string
                                         repoURL:
                                           type: string
@@ -949,7 +949,9 @@ spec:
                                       type: object
                                     syncOptions:
                                       items:
+                                        maxLength: 256
                                         type: string
+                                      maxItems: 64
                                       type: array
                                   type: object
                               required:
@@ -1563,7 +1565,7 @@ spec:
                                       properties:
                                         path:
                                           minLength: 1
-                                          pattern: ^.{2,}|[^./]$
+                                          pattern: '[^./]'
                                           type: string
                                         repoURL:
                                           type: string
@@ -1865,7 +1867,9 @@ spec:
                                       type: object
                                     syncOptions:
                                       items:
+                                        maxLength: 256
                                         type: string
+                                      maxItems: 64
                                       type: array
                                   type: object
                               required:
@@ -2480,7 +2484,7 @@ spec:
                                       properties:
                                         path:
                                           minLength: 1
-                                          pattern: ^.{2,}|[^./]$
+                                          pattern: '[^./]'
                                           type: string
                                         repoURL:
                                           type: string
@@ -2782,7 +2786,9 @@ spec:
                                       type: object
                                     syncOptions:
                                       items:
+                                        maxLength: 256
                                         type: string
+                                      maxItems: 64
                                       type: array
                                   type: object
                               required:
@@ -3375,7 +3381,7 @@ spec:
                                       properties:
                                         path:
                                           minLength: 1
-                                          pattern: ^.{2,}|[^./]$
+                                          pattern: '[^./]'
                                           type: string
                                         repoURL:
                                           type: string
@@ -3677,7 +3683,9 @@ spec:
                                       type: object
                                     syncOptions:
                                       items:
+                                        maxLength: 256
                                         type: string
+                                      maxItems: 64
                                       type: array
                                   type: object
                               required:
@@ -4295,7 +4303,7 @@ spec:
                                                 properties:
                                                   path:
                                                     minLength: 1
-                                                    pattern: ^.{2,}|[^./]$
+                                                    pattern: '[^./]'
                                                     type: string
                                                   repoURL:
                                                     type: string
@@ -4597,7 +4605,9 @@ spec:
                                                 type: object
                                               syncOptions:
                                                 items:
+                                                  maxLength: 256
                                                   type: string
+                                                maxItems: 64
                                                 type: array
                                             type: object
                                         required:
@@ -5211,7 +5221,7 @@ spec:
                                                 properties:
                                                   path:
                                                     minLength: 1
-                                                    pattern: ^.{2,}|[^./]$
+                                                    pattern: '[^./]'
                                                     type: string
                                                   repoURL:
                                                     type: string
@@ -5513,7 +5523,9 @@ spec:
                                                 type: object
                                               syncOptions:
                                                 items:
+                                                  maxLength: 256
                                                   type: string
+                                                maxItems: 64
                                                 type: array
                                             type: object
                                         required:
@@ -6128,7 +6140,7 @@ spec:
                                                 properties:
                                                   path:
                                                     minLength: 1
-                                                    pattern: ^.{2,}|[^./]$
+                                                    pattern: '[^./]'
                                                     type: string
                                                   repoURL:
                                                     type: string
@@ -6430,7 +6442,9 @@ spec:
                                                 type: object
                                               syncOptions:
                                                 items:
+                                                  maxLength: 256
                                                   type: string
+                                                maxItems: 64
                                                 type: array
                                             type: object
                                         required:
@@ -7023,7 +7037,7 @@ spec:
                                                 properties:
                                                   path:
                                                     minLength: 1
-                                                    pattern: ^.{2,}|[^./]$
+                                                    pattern: '[^./]'
                                                     type: string
                                                   repoURL:
                                                     type: string
@@ -7325,7 +7339,9 @@ spec:
                                                 type: object
                                               syncOptions:
                                                 items:
+                                                  maxLength: 256
                                                   type: string
+                                                maxItems: 64
                                                 type: array
                                             type: object
                                         required:
@@ -7926,7 +7942,7 @@ spec:
                                                 properties:
                                                   path:
                                                     minLength: 1
-                                                    pattern: ^.{2,}|[^./]$
+                                                    pattern: '[^./]'
                                                     type: string
                                                   repoURL:
                                                     type: string
@@ -8228,7 +8244,9 @@ spec:
                                                 type: object
                                               syncOptions:
                                                 items:
+                                                  maxLength: 256
                                                   type: string
+                                                maxItems: 64
                                                 type: array
                                             type: object
                                         required:
@@ -9137,7 +9155,7 @@ spec:
                                                 properties:
                                                   path:
                                                     minLength: 1
-                                                    pattern: ^.{2,}|[^./]$
+                                                    pattern: '[^./]'
                                                     type: string
                                                   repoURL:
                                                     type: string
@@ -9439,7 +9457,9 @@ spec:
                                                 type: object
                                               syncOptions:
                                                 items:
+                                                  maxLength: 256
                                                   type: string
+                                                maxItems: 64
                                                 type: array
                                             type: object
                                         required:
@@ -10353,7 +10373,7 @@ spec:
                                                 properties:
                                                   path:
                                                     minLength: 1
-                                                    pattern: ^.{2,}|[^./]$
+                                                    pattern: '[^./]'
                                                     type: string
                                                   repoURL:
                                                     type: string
@@ -10655,7 +10675,9 @@ spec:
                                                 type: object
                                               syncOptions:
                                                 items:
+                                                  maxLength: 256
                                                   type: string
+                                                maxItems: 64
                                                 type: array
                                             type: object
                                         required:
@@ -10698,6 +10720,8 @@ spec:
                                 type: object
                                 x-kubernetes-map-type: atomic
                             type: object
+                          maxItems: 2
+                          minItems: 2
                           type: array
                         template:
                           properties:
@@ -11265,7 +11289,7 @@ spec:
                                       properties:
                                         path:
                                           minLength: 1
-                                          pattern: ^.{2,}|[^./]$
+                                          pattern: '[^./]'
                                           type: string
                                         repoURL:
                                           type: string
@@ -11567,7 +11591,9 @@ spec:
                                       type: object
                                     syncOptions:
                                       items:
+                                        maxLength: 256
                                         type: string
+                                      maxItems: 64
                                       type: array
                                   type: object
                               required:
@@ -12187,7 +12213,7 @@ spec:
                                                 properties:
                                                   path:
                                                     minLength: 1
-                                                    pattern: ^.{2,}|[^./]$
+                                                    pattern: '[^./]'
                                                     type: string
                                                   repoURL:
                                                     type: string
@@ -12489,7 +12515,9 @@ spec:
                                                 type: object
                                               syncOptions:
                                                 items:
+                                                  maxLength: 256
                                                   type: string
+                                                maxItems: 64
                                                 type: array
                                             type: object
                                         required:
@@ -13103,7 +13131,7 @@ spec:
                                                 properties:
                                                   path:
                                                     minLength: 1
-                                                    pattern: ^.{2,}|[^./]$
+                                                    pattern: '[^./]'
                                                     type: string
                                                   repoURL:
                                                     type: string
@@ -13405,7 +13433,9 @@ spec:
                                                 type: object
                                               syncOptions:
                                                 items:
+                                                  maxLength: 256
                                                   type: string
+                                                maxItems: 64
                                                 type: array
                                             type: object
                                         required:
@@ -14020,7 +14050,7 @@ spec:
                                                 properties:
                                                   path:
                                                     minLength: 1
-                                                    pattern: ^.{2,}|[^./]$
+                                                    pattern: '[^./]'
                                                     type: string
                                                   repoURL:
                                                     type: string
@@ -14322,7 +14352,9 @@ spec:
                                                 type: object
                                               syncOptions:
                                                 items:
+                                                  maxLength: 256
                                                   type: string
+                                                maxItems: 64
                                                 type: array
                                             type: object
                                         required:
@@ -14915,7 +14947,7 @@ spec:
                                                 properties:
                                                   path:
                                                     minLength: 1
-                                                    pattern: ^.{2,}|[^./]$
+                                                    pattern: '[^./]'
                                                     type: string
                                                   repoURL:
                                                     type: string
@@ -15217,7 +15249,9 @@ spec:
                                                 type: object
                                               syncOptions:
                                                 items:
+                                                  maxLength: 256
                                                   type: string
+                                                maxItems: 64
                                                 type: array
                                             type: object
                                         required:
@@ -15818,7 +15852,7 @@ spec:
                                                 properties:
                                                   path:
                                                     minLength: 1
-                                                    pattern: ^.{2,}|[^./]$
+                                                    pattern: '[^./]'
                                                     type: string
                                                   repoURL:
                                                     type: string
@@ -16120,7 +16154,9 @@ spec:
                                                 type: object
                                               syncOptions:
                                                 items:
+                                                  maxLength: 256
                                                   type: string
+                                                maxItems: 64
                                                 type: array
                                             type: object
                                         required:
@@ -17029,7 +17065,7 @@ spec:
                                                 properties:
                                                   path:
                                                     minLength: 1
-                                                    pattern: ^.{2,}|[^./]$
+                                                    pattern: '[^./]'
                                                     type: string
                                                   repoURL:
                                                     type: string
@@ -17331,7 +17367,9 @@ spec:
                                                 type: object
                                               syncOptions:
                                                 items:
+                                                  maxLength: 256
                                                   type: string
+                                                maxItems: 64
                                                 type: array
                                             type: object
                                         required:
@@ -18245,7 +18283,7 @@ spec:
                                                 properties:
                                                   path:
                                                     minLength: 1
-                                                    pattern: ^.{2,}|[^./]$
+                                                    pattern: '[^./]'
                                                     type: string
                                                   repoURL:
                                                     type: string
@@ -18547,7 +18585,9 @@ spec:
                                                 type: object
                                               syncOptions:
                                                 items:
+                                                  maxLength: 256
                                                   type: string
+                                                maxItems: 64
                                                 type: array
                                             type: object
                                         required:
@@ -18590,6 +18630,8 @@ spec:
                                 type: object
                                 x-kubernetes-map-type: atomic
                             type: object
+                          maxItems: 64
+                          minItems: 2
                           type: array
                         mergeKeys:
                           items:
@@ -19161,7 +19203,7 @@ spec:
                                       properties:
                                         path:
                                           minLength: 1
-                                          pattern: ^.{2,}|[^./]$
+                                          pattern: '[^./]'
                                           type: string
                                         repoURL:
                                           type: string
@@ -19463,7 +19505,9 @@ spec:
                                       type: object
                                     syncOptions:
                                       items:
+                                        maxLength: 256
                                         type: string
+                                      maxItems: 64
                                       type: array
                                   type: object
                               required:
@@ -20063,7 +20107,7 @@ spec:
                                       properties:
                                         path:
                                           minLength: 1
-                                          pattern: ^.{2,}|[^./]$
+                                          pattern: '[^./]'
                                           type: string
                                         repoURL:
                                           type: string
@@ -20365,7 +20409,9 @@ spec:
                                       type: object
                                     syncOptions:
                                       items:
+                                        maxLength: 256
                                         type: string
+                                      maxItems: 64
                                       type: array
                                   type: object
                               required:
@@ -21271,7 +21317,7 @@ spec:
                                       properties:
                                         path:
                                           minLength: 1
-                                          pattern: ^.{2,}|[^./]$
+                                          pattern: '[^./]'
                                           type: string
                                         repoURL:
                                           type: string
@@ -21573,7 +21619,9 @@ spec:
                                       type: object
                                     syncOptions:
                                       items:
+                                        maxLength: 256
                                         type: string
+                                      maxItems: 64
                                       type: array
                                   type: object
                               required:
@@ -22482,7 +22530,7 @@ spec:
                                       properties:
                                         path:
                                           minLength: 1
-                                          pattern: ^.{2,}|[^./]$
+                                          pattern: '[^./]'
                                           type: string
                                         repoURL:
                                           type: string
@@ -22784,7 +22832,9 @@ spec:
                                       type: object
                                     syncOptions:
                                       items:
+                                        maxLength: 256
                                         type: string
+                                      maxItems: 64
                                       type: array
                                   type: object
                               required:
@@ -22827,6 +22877,7 @@ spec:
                       type: object
                       x-kubernetes-map-type: atomic
                   type: object
+                maxItems: 128
                 type: array
               goTemplate:
                 type: boolean
@@ -22878,6 +22929,9 @@ spec:
                                   key:
                                     type: string
                                   operator:
+                                    enum:
+                                    - In
+                                    - NotIn
                                     type: string
                                   values:
                                     items:
@@ -22903,6 +22957,9 @@ spec:
                 - message: strategy.rollingSync is required when strategy.type is
                     RollingSync
                   rule: '!has(self.type) || self.type != ''RollingSync'' || has(self.rollingSync)'
+                - message: strategy.deletionOrder Reverse requires strategy.type RollingSync
+                  rule: '!has(self.deletionOrder) || self.deletionOrder != ''Reverse''
+                    || (has(self.type) && self.type == ''RollingSync'')'
               syncPolicy:
                 properties:
                   applicationsSync:
@@ -23481,7 +23538,7 @@ spec:
                             properties:
                               path:
                                 minLength: 1
-                                pattern: ^.{2,}|[^./]$
+                                pattern: '[^./]'
                                 type: string
                               repoURL:
                                 type: string
@@ -23783,7 +23840,9 @@ spec:
                             type: object
                           syncOptions:
                             items:
+                              maxLength: 256
                               type: string
+                            maxItems: 64
                             type: array
                         type: object
                     required:

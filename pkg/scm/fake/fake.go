@@ -57,6 +57,10 @@ type Options struct {
 	MaxPages int
 	// Clock overrides time.Now.
 	Clock func() time.Time
+	// MaxStatusesPerContext, when > 0, makes SetCommitStatus fail with a KindInvalid
+	// error wrapping scm.ErrStatusLimit once that many statuses exist for a (commit,
+	// context), like GitHub's limit of 1000.
+	MaxStatusesPerContext int
 }
 
 // Repo is a seeded repository.
@@ -240,6 +244,13 @@ func (p *Provider) InjectError(op string, err error, times int) {
 func (p *Provider) InjectRateLimit(retryAfter time.Duration, times int) {
 	p.InjectError("*", &scm.Error{Kind: scm.KindRateLimited, Provider: Type, StatusCode: http.StatusTooManyRequests,
 		RetryAfter: retryAfter, Err: fmt.Errorf("fake rate limit exceeded")}, times)
+}
+
+// SetStatusLimit changes Options.MaxStatusesPerContext (0 disables the limit).
+func (p *Provider) SetStatusLimit(n int) {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	p.opts.MaxStatusesPerContext = n
 }
 
 // SetLatency delays every op by d (honoring context cancellation).
@@ -679,6 +690,18 @@ func (p *Provider) SetCommitStatus(ctx context.Context, ref scm.RepoRef, sha str
 	}
 	st.Description = scm.TruncateRunes(st.Description, 140)
 	k := key(ref.Owner, ref.Name) + "@" + sha
+	if limit := p.opts.MaxStatusesPerContext; limit > 0 {
+		n := 0
+		for _, existing := range p.statuses[k] {
+			if existing.Context == st.Context {
+				n++
+			}
+		}
+		if n >= limit {
+			return &scm.Error{Kind: scm.KindInvalid, Provider: Type, Op: op, StatusCode: http.StatusUnprocessableEntity,
+				Err: fmt.Errorf("%w: %d statuses for context %q", scm.ErrStatusLimit, n, st.Context)}
+		}
+	}
 	p.statuses[k] = append(p.statuses[k], st)
 	return nil
 }

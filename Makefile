@@ -59,9 +59,11 @@ generate: $(CONTROLLER_GEN) ## Generate deepcopy code and CRD manifests (RBAC ge
 	$(CONTROLLER_GEN) object:headerFile="$(BOILERPLATE)" paths="$(API_PATHS)"
 	$(MAKE) --no-print-directory manifests
 
-# The ApplicationSet CRD embeds the Application spec in every generator template; with field
-# descriptions it would exceed the 1.5MiB object size limit of etcd. Like upstream, its descriptions
-# are dropped: it is generated a second time with maxDescLen=0 and that copy replaces the first.
+# The ApplicationSet CRD embeds the Application spec in every generator template. With field
+# descriptions it is about 1 MB as JSON, uncomfortably close to etcd's 1.5 MiB object limit, so, as
+# upstream does, its descriptions are dropped: it is generated a second time with maxDescLen=0 and that
+# copy replaces the first. deploy/crds also holds a hand-written admission policy that controller-gen
+# leaves untouched.
 .PHONY: manifests
 manifests: $(CONTROLLER_GEN) ## Generate CRD manifests into deploy/crds.
 	$(CONTROLLER_GEN) crd paths="$(API_PATHS)" output:crd:artifacts:config=$(CRD_DIR)
@@ -101,9 +103,12 @@ lint: vet ## Run go vet and golangci-lint (when installed); UI lint when ui/ exi
 		else echo "golangci-lint not installed; skipped"; fi
 	@if [ -f ui/package.json ]; then pnpm -C ui typecheck && pnpm -C ui lint; fi
 
+# PATROL_REQUIRE_ENVTEST makes envtest-backed tests fail instead of skip when KUBEBUILDER_ASSETS is
+# missing, so `make test` cannot pass without running them.
 .PHONY: test
 test: $(SETUP_ENVTEST) ## Run Go tests, including envtest-backed admission tests.
-	KUBEBUILDER_ASSETS="$$($(MAKE) --no-print-directory -s envtest)" $(GO) test $(GO_TEST_FLAGS) $(PKGS)
+	KUBEBUILDER_ASSETS="$$($(MAKE) --no-print-directory -s envtest)" PATROL_REQUIRE_ENVTEST=1 \
+		$(GO) test $(GO_TEST_FLAGS) $(PKGS)
 
 ##@ Build
 

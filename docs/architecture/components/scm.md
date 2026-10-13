@@ -56,20 +56,22 @@ transport (`internal/git`), Secret resolution and the SCMProvider CRD (`api/v1al
 | `CredentialSource.Token(ctx) (Token, error)` | `Token{Value, ExpiresAt, Username}`; `String`/`GoString`/`LogValue` redact the value. |
 | `InstallationLister{ListInstallations, FindInstallation(owner)}` | App installations. |
 | Data types | `RepoRef{Owner, Name}` (+`Validate`, `FullName`, `ParseFullName`), `Repository`, `Branch`, `PullRequest`, `Installation`, `InstallationRef`, `Event`, `EventRepo`. |
-| Errors | `Error`, `ErrorKind` (`NotFound`, `Unauthorized`, `Forbidden`, `RateLimited`, `Unavailable`, `Invalid`, `Conflict`), `KindOf`, `IsNotFound`, `IsRateLimited`, `IsRetryable`, `RetryAfter`, `NewError`; extra sentinels `ErrPageLimit`, `ErrPaginationLoop`, `ErrResponseTooLarge`, `ErrUnknownProviderType`, `ErrSignatureMissing`, `ErrSignatureMismatch`, `ErrPayloadTooLarge`, `ErrMalformedPayload`, `ErrUnsupportedEvent`. |
+| Errors | `Error`, `ErrorKind` (`NotFound`, `Unauthorized`, `Forbidden`, `RateLimited`, `Unavailable`, `Invalid`, `Conflict`), `KindOf`, `IsNotFound`, `IsRateLimited`, `IsRetryable`, `RetryAfter`, `NewError`; extra sentinels `ErrPageLimit`, `ErrPaginationLoop`, `ErrResponseTooLarge`, `ErrUnknownProviderType`, `ErrStatusLimit` (commit status limit per commit and context; notifiers treat it as delivered), `ErrSignatureMissing`, `ErrSignatureMismatch`, `ErrPayloadTooLarge`, `ErrMalformedPayload`, `ErrUnsupportedEvent`. |
 | Registry | `Factory func(ctx, Config) (Provider, error)`, `NewRegistry`, `(*Registry).Register/New/Types`, package-level `DefaultRegistry`, `Register`, `New`. `New` rejects providers reporting another contract version. Factories must not do network I/O. |
-| `Config` | `Type, Name, APIURL, Insecure, CAData, ProxyURL, NoProxy, Token TokenFunc, GitHubApp *GitHubAppConfig{AppID, InstallationID, PrivateKey, EnterpriseBaseURL, Owner}, HTTPClient, RateLimit{RPS, Burst}, Retry RetryPolicy{MaxAttempts, BaseDelay, MaxDelay, MaxWait}, MaxPages, MaxResponseBytes, Timeout, UserAgent, Logger, Clock`; `WithDefaults()`; `LogValue` and `GitHubAppConfig.String/LogValue` redact secrets. |
-| Transport helpers | `BaseTransport(cfg)`, `ProxyFunc(proxyURL, noProxy)`, `LimitResponseBody(rt, max)`, `NewLimiter(RateLimit)`, `Chain(inner, ChainOptions)` (logging → retry → pacing → inner), `DefaultRetryClassifier`, `ParseRetryAfter`, `RateLimitWait`, `HostGuard(host, authed, plain)`, `BearerTransport(next, TokenFunc, onUnauthorized)`, `RedactURL`, `RedactURLString`, `RedactHeaders`. |
+| `Config` | `Type, Name, APIURL, Insecure, CAData, ProxyURL, NoProxy, Token TokenFunc, GitHubApp *GitHubAppConfig{AppID, InstallationID, PrivateKey, EnterpriseBaseURL, Owner}, HTTPClient, RateLimit{RPS, Burst}, Retry RetryPolicy{MaxAttempts, BaseDelay, MaxDelay, MaxWait}, MaxPages, MaxResponseBytes, Timeout, UserAgent, Logger, Observer RequestObserver, Clock`; `WithDefaults()`; `LogValue` and `GitHubAppConfig.String/LogValue` redact secrets. |
+| Transport helpers | `BaseTransport(cfg)`, `ProxyFunc(proxyURL, noProxy)`, `LimitResponseBody(rt, max)`, `NewLimiter(RateLimit)`, `Chain(inner, ChainOptions)` (logging → retry → pacing → observer → inner), `DefaultRetryClassifier`, `ParseRetryAfter`, `RateLimitWait`, `HostGuard(host, authed, plain)`, `BearerTransport(next, TokenFunc, onUnauthorized)` (on 401 invalidates and replays once with a fresh token), `RedactURL`, `RedactURLString`, `RedactHeaders`. |
+| Metrics hook | `RequestObserver func(ctx, RequestInfo)` called after every HTTP attempt (retries, pagination and App token requests included) with `RequestInfo{Provider, Method, Host, Path, StatusCode (0 = no response), Duration, Err, RateLimit}`; `RateLimitInfo{Present, Limit, Remaining, Used, Reset, Resource}` from `ParseRateLimitHeaders` (`X-RateLimit-*` or GitLab `RateLimit-*`). No headers, bodies or credentials are exposed. |
 | Pagination | `PageFunc[T, C]`, `Pages(ctx, maxPages, fetch) iter.Seq2[[]T, error]`, `CollectPages` (no partial results on error). |
 | Webhook helpers | `ReadWebhookBody(r, max)`, `SignHMACSHA256`, `VerifyHMACSHA256(header, prefix, body, secret)`, `ParseRevision`, `NormalizeChangedFiles`, `DeliveryKey(provider, id)`, `NewDeliveryCache(capacity, ttl, WithDeliveryClock)` with `Seen`, `Forget`, `Len`, `WebhookSignatureError`. |
 | Utilities | `ShortSHA(sha, n)` (for `short_sha`/`head_short_sha`), `TruncateRunes`. |
 
 ### Reference provider (`pkg/scm/fake`)
 
-`fake.New(Options{Name, Capabilities, PageSize, MaxPages, Clock})`; seeding with `AddRepo`,
-`SetBranch`, `AddPullRequest`, `AddInstallation`, `SetToken`; fault injection with
-`InjectError(op, err, times)`, `InjectRateLimit(retryAfter, times)`, `SetLatency`,
-`SetFaultHook`, `ClearFaults`; observation with `Calls(op)`, `CommitStatuses`, `CheckRuns`;
+`fake.New(Options{Name, Capabilities, PageSize, MaxPages, Clock, MaxStatusesPerContext})`;
+seeding with `AddRepo`, `SetBranch`, `AddPullRequest`, `AddInstallation`, `SetToken`; fault
+injection with `InjectError(op, err, times)`, `InjectRateLimit(retryAfter, times)`,
+`SetLatency`, `SetFaultHook`, `ClearFaults`, `SetStatusLimit(n)` (emulates GitHub's
+per-context status limit with `ErrStatusLimit`); observation with `Calls(op)`, `CommitStatuses`, `CheckRuns`;
 webhooks with `SignedDelivery(Delivery, id, secret)` (headers `X-Fake-Event`,
 `X-Fake-Delivery`, `X-Fake-Signature: sha256=…`); `Factory()` / `Register(r, p)`.
 
@@ -77,14 +79,16 @@ webhooks with `SignedDelivery(Delivery, id, secret)` (headers `X-Fake-Event`,
 
 `Run(t, func(t) (scm.Provider, Fixture), Options{Skip, Timeout})`. The provider test supplies
 a `Fixture` (`Data()`, `WebhookDelivery`, `SignatureHeaders`, `InjectRateLimit`,
-`CommitStatuses`, `CheckRuns`). A fresh provider is built per check. Checks: info validity;
+`CommitStatuses`, `CheckRuns`), optionally also `StatusLimitFixture{LimitStatuses(n)}`. A
+fresh provider is built per check. Checks: info validity;
 undeclared capabilities return `ErrUnsupported`; repository pagination completeness, archived
 filter, default-branch SHA and empty-repository omission, all-branches expansion, `Match`
 pushdown, clone protocol and invalid protocol, not-found mapping; branch listing (all/default,
 not found); revision resolution (not found); path existence and traversal rejection; PR
 pagination, label AND-filter, not found; webhook valid signature, tampered body, wrong
 secret, missing signature, empty-secret policy, delivery dedup with `DeliveryCache`, PR event;
-commit status write and pre-validation; check run idempotent upsert; credential token;
+commit status write, pre-validation and (with `StatusLimitFixture`) the per-context limit
+mapped to `ErrStatusLimit`; check run idempotent upsert; credential token;
 installations; rate-limit mapping with `RetryAfter`.
 
 ### GitHub (`pkg/scm/github`)
@@ -92,8 +96,8 @@ installations; rate-limit mapping with `RetryAfter`.
 | Symbol | Purpose |
 |--------|---------|
 | `Type = "github"`, `New` (factory), `Register(*scm.Registry)`, `NewProvider(ctx, Config) (*Provider, error)` | Construction (no network I/O). |
-| `APIURLs(apiURL) (base, upload string, error)` | `""`/`https://api.github.com` → github.com; `https://host[/prefix]` or `…/api/v3` → GHES (`/api/v3/`, uploads `/api/uploads/`); `https://api.<tenant>.ghe.com` → GHE.com (uploads host `uploads.<tenant>.ghe.com`). User info, query and fragment are rejected. |
-| `(*Provider)` capability methods | All contract capabilities. Declared capabilities depend on auth: anonymous = read capabilities + webhooks; token = + `commitStatuses`, `credentials`; App = + `checkRuns`, `installations`. |
+| `APIURLs(apiURL) (base, upload string, error)` | Same base-URL rules as go-github `WithEnterpriseURLs` (used upstream): `""`/`https://api.github.com` → github.com; a path ending in `/api/v3` is kept; hosts starting with `api.` (GHE.com data residency `https://api.<tenant>.ghe.com`, uploads host `uploads.<tenant>.ghe.com`) or containing `.api.` keep their path; anything else is a GHES root and gets `/api/v3/` (uploads `/api/uploads/`). Trailing slashes are tolerated; user info, query and fragment are rejected. |
+| `(*Provider)` capability methods | All contract capabilities. Declared capabilities depend on auth: anonymous = read capabilities + webhooks; token = + `commitStatuses`, `credentials`; App = + `checkRuns`, `installations`. Calling a method of an undeclared capability directly also returns `*UnsupportedError` without any request. |
 | `(*Provider).Client() *github.Client` | go-github v88 client with the same auth/pacing/retries/caps, for GitHub-only operations (deployments, PR comments for notifications). |
 | `(*Provider).BotIdentity(ctx)` | `<slug>[bot]` and `<id>+<slug>[bot]@users.noreply.github.com` (hydrator author). |
 | `WebhookVerifier{}` | Stateless verifier usable without credentials (webhook ingestion). |
@@ -116,8 +120,9 @@ GitHub behavior:
 - Pull requests: `GET /repos/{o}/{r}/pulls?state=&base=`; labels filtered client-side
   (exact, all required); `merged` = `state=closed` + `merged_at`.
 - Commit statuses: `POST /repos/{o}/{r}/statuses/{sha}`; the SHA must be full hex;
-  description truncated to 140 characters; 422 (including the 1000-statuses limit) →
-  `KindInvalid`.
+  description truncated to 140 characters; 422 → `KindInvalid`; GitHub's "This SHA and
+  context has reached the maximum number of statuses" 422 additionally wraps
+  `scm.ErrStatusLimit` so notifications can treat it as delivered (NOTIF-076).
 - Check runs: `GET /repos/{o}/{r}/commits/{sha}/check-runs?check_name=&filter=all&app_id=<app>`
   then `PATCH …/check-runs/{id}` when `external_id` matches, otherwise `POST …/check-runs`.
   `completed_at` defaults to now for conclusions; output title/summary/text truncated to
@@ -128,17 +133,21 @@ GitHub behavior:
   `POST /app/installations/{id}/access_tokens`, cached process-wide per
   sha256(API URL, App ID, private key) and installation, refreshed when less than 5 minutes
   remain, minted once for concurrent callers (singleflight), and invalidated when the API
-  answers 401. When `InstallationID` is 0 the installation is discovered for
+  answers 401; the rejected request is then replayed once with a freshly minted token
+  (never in a loop; personal access tokens are not replayed). When `InstallationID` is 0 the installation is discovered for
   `GitHubApp.Owner` (case-insensitive) with `GET /orgs/{owner}/installation`, then
   `GET /users/{owner}/installation`, cached for 60 minutes; a miss returns `KindNotFound`
-  with `installation not found for org: <owner>: ensure the GitHub App (ID: <id>) is
-  installed …`. A missing owner fails with `installation ID is required for github`.
+  with upstream's text `failed to discover GitHub App installation ID for organization
+  <owner>: ensure the GitHub App (ID: <id>) is installed for this organization:
+  installation not found for org: <owner>`. A missing owner fails with `installation ID is required for github`.
 - Errors: `RateLimitError` (403/429 with `X-RateLimit-Remaining: 0`) → `RateLimited` with
   `RetryAfter` until `X-RateLimit-Reset`; secondary limits (`AbuseRateLimitError`, or a 403
   whose message mentions "rate limit") → `RateLimited` with `Retry-After` or 60s; 400/422 →
   `Invalid`, 401 → `Unauthorized`, 403 → `Forbidden`, 404/410 → `NotFound`, 409 →
   `Conflict`, 429 → `RateLimited`, 5xx/202/network/malformed JSON → `Unavailable`, `..` in a
-  path and oversize responses → `Invalid`. Context errors keep `errors.Is(err, ctx.Err())`.
+  path and oversize responses → `Invalid`. A failing caller-supplied token function →
+  `Unauthorized` (requests are not sent and not retried). Context errors keep
+  `errors.Is(err, ctx.Err())`.
 
 ### Webhook semantics (all providers)
 
@@ -198,7 +207,9 @@ GitHub behavior:
 - Every response body is size-capped; every listing is page-capped; retries are bounded in
   attempts and in honored wait (`MaxWait`, default 60s; longer waits surface as
   `RateLimited` with `RetryAfter`); only idempotent methods with replayable bodies are
-  retried.
+  retried, and classified inner failures (`Unauthorized`, `NotFound`, `Invalid`, …) are
+  never retried. The one exception is the single replay of a request rejected with 401
+  using a freshly minted App token (authentication failures have no side effects).
 - Credentials are attached only to requests whose host equals the configured API host
   (`HostGuard`), so redirects to other hosts never receive tokens.
 - Untrusted names (owner, repository, path, revision) are validated before URL
@@ -207,6 +218,9 @@ GitHub behavior:
 - Webhook signatures are verified on raw bytes before any parsing that depends on the event
   type; `Verified` is true only for a matching signature with a configured secret.
 - Factories never perform network I/O; App discovery and token minting are lazy.
+- The request observer and the debug log receive method, host, path, status, duration and
+  rate-limit numbers only, never headers, query strings, bodies or credentials. The JWT
+  transport (`ghinstallation`) only ever sees a clone of the request.
 - Provider instances are safe for concurrent use.
 
 ## Failure modes
@@ -216,7 +230,9 @@ GitHub behavior:
 | API down / 5xx / network error | Idempotent requests retried with jittered exponential backoff (default 4 attempts), then `KindUnavailable`. |
 | Primary rate limit | Waited out inside the call if the reset is within `MaxWait`; otherwise `KindRateLimited` with `RetryAfter`; go-github also stops sending requests until the known reset. |
 | Secondary rate limit | Waited out when `Retry-After` ≤ `MaxWait`; else `KindRateLimited` (`RetryAfter` from header or 60s). |
-| Token revoked / expired early | 401 → `KindUnauthorized`; the cached installation token is invalidated, the next call mints a new one. |
+| Token revoked / expired early | App: 401 invalidates the cached installation token and the request is replayed once with a new token (transparent to callers); a second 401 → `KindUnauthorized`. PAT: `KindUnauthorized`. |
+| Token function fails (Secret missing) | `KindUnauthorized` wrapping the cause; nothing is sent or retried. |
+| Commit status limit (1000 per SHA and context) | `KindInvalid` wrapping `ErrStatusLimit`. |
 | App not installed for owner | `KindNotFound` with the upstream-style message; nothing cached. |
 | Invalid App key | `NewProvider` fails with `KindInvalid` (message never contains key material). |
 | Oversized response | `ErrResponseTooLarge` (`KindInvalid`). |
@@ -260,16 +276,22 @@ GitHub behavior:
   (`allBranches`), ASET-044/045 (TLS, CA, proxy), ASET-046/047 (GitHub PR data), ASET-056
   (labels AND filter), ASET-057 (repository-not-found mapping), ASET-105/106 (normalized
   push and pull_request events with API URL, owner, repo and action).
-- Notifications GitHub service (commit statuses, check runs; deployments/comments through
-  `Client()`).
+- `06-applicationset`: ASET-129 building block (per-attempt `Observer` with rate-limit
+  headers for GitHub API metrics).
+- `09-notifications`: NOTIF-075 (App auth against github.com and GHES), NOTIF-076 (commit
+  status: description truncated to 140 characters, 422 status limit recognizable through
+  `ErrStatusLimit`), NOTIF-079 (check runs: completed requires a conclusion, started/
+  completed timestamps, output); NOTIF-077/078 (deployments, PR comments) use `Client()`.
 
 ## Known gaps and differences
 
 - Only the GitHub provider exists; GitLab, Gitea, Bitbucket Cloud/Server, Azure DevOps and
   AWS CodeCommit adapters (rest of T1.16) must implement the contract and pass
   `conformance.Run`.
-- GitHub API metrics (ASET-129) are not built in; callers can wrap `Config.HTTPClient`'s
-  transport (it sees every attempt, including rate-limit headers).
+- GitHub API metrics (ASET-129): the package provides the per-attempt hook
+  (`Config.Observer`, with method, path, status, duration and parsed `X-RateLimit-*`
+  values); the Prometheus collectors (`argocd_github_api_*`-equivalent names and the
+  ApplicationSet labels) belong to the ApplicationSet controller / `internal/metrics`.
 - Installation discovery uses the per-owner endpoints (organization, then user) instead of
   listing every installation; the repository endpoint (`/repos/{o}/{r}/installation`) is not
   used.
@@ -288,11 +310,20 @@ GitHub behavior:
 
 ## Verification
 
-Commands and results are recorded in the final task report and in
-`docs/verification/log.md` by the integrating agent:
+Run on 2026-10-13 (darwin/arm64, Go 1.27):
 
-```bash
-go build ./...
-go vet ./pkg/scm/...
-go test -race ./pkg/scm/...
-```
+| Command | Result |
+|---------|--------|
+| `go build ./pkg/...` | exit 0 |
+| `go build ./...` | exit 1, only in `internal/git` (another task's in-progress package: undefined `SignatureInfo`, `askpassExecutable`, `askpassPayload`); nothing outside `pkg/scm` imports `pkg/scm` yet |
+| `go vet ./pkg/scm/...` | exit 0 |
+| `golangci-lint run ./pkg/scm/...` | 0 issues |
+| `go test -race -count=1 ./pkg/scm/...` | exit 0; 94 top-level tests pass; 340 tests+subtests pass, 24 skipped (all conformance checks for capabilities the variant does not declare: anonymous GitHub, PAT without App, capability-subset fake) |
+| `go test -race -count=3 ./pkg/scm/...` | exit 0 (flakiness check) |
+
+Conformance runs: `fake` (all capabilities and a capability subset) and `github` (App with
+installation discovery on github.com-style URLs, App with explicit installation on a GHES
+`/api/v3` prefix, personal access token, anonymous). All GitHub tests use the in-process
+`internal/fakegithub` server (Link-header pagination, rate-limit headers, App JWT
+verification with a generated RSA key, expiring installation tokens) and authored webhook
+fixtures under `pkg/scm/github/testdata`; no network access.

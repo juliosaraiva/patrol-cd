@@ -46,8 +46,16 @@ spec:
           It replaces Argo CD's Application.operation field and status.operationState.syncResult (ADR-0011).
 
           The spec is immutable after creation except spec.cancel, which may only change from false to true.
-          Clients must change it with a patch (merge or server-side apply): immutability is enforced by
-          comparing the stored spec, so a full update that drops explicitly-set zero values is rejected.
+          Clients should change metadata and spec.cancel with a patch (merge or server-side apply).
+          Immutability is enforced by comparing the stored spec, and Go clients omit empty values: scalar
+          fields of spec.sync and spec.initiatedBy are defaulted or compared as their zero value, so a full
+          update of an Operation written with explicit `false`/`""`/`0` works, but one written with an explicit
+          empty list or object (e.g. `syncOptions: []`) is rejected by a full update from a Go client.
+
+          A ValidatingAdmissionPolicy shipped with the CRDs (OperationAdmissionPolicyName, in deploy/crds)
+          additionally requires spec.initiatedBy to name the requesting user (or be empty) and to not be
+          automated unless the requester holds the OperationInitiatorVerb on operations, and requires the
+          LabelKeyOperationApplication label, when present, to equal spec.application.
         properties:
           apiVersion:
             description: |-
@@ -103,8 +111,11 @@ spec:
                 type: array
               initiatedBy:
                 default: {}
-                description: InitiatedBy records who requested the operation. Set
-                  by the API server or controller.
+                description: |-
+                  InitiatedBy records who requested the operation. patrol-server sets it from verified token claims
+                  and the controller sets automated; other Kubernetes users may only leave it empty or name
+                  themselves (enforced by the OperationAdmissionPolicyName ValidatingAdmissionPolicy). Compared
+                  field by field, with absent fields as their zero value, so Go clients can update the Operation.
                 properties:
                   automated:
                     description: Automated is true if the controller requested the
@@ -114,6 +125,11 @@ spec:
                     description: Username of the user who requested the operation.
                     type: string
                 type: object
+                x-kubernetes-validations:
+                - message: spec.initiatedBy is immutable
+                  rule: '(has(self.username) ? self.username : '''') == (has(oldSelf.username)
+                    ? oldSelf.username : '''') && (has(self.automated) && self.automated)
+                    == (has(oldSelf.automated) && oldSelf.automated)'
               retry:
                 description: Retry controls retries of failed attempts. Defaults to
                   the Application's syncPolicy.retry.
@@ -163,11 +179,13 @@ spec:
                   a rollback.
                 properties:
                   autoHealAttemptsCount:
+                    default: 0
                     description: SelfHealAttemptsCount is the number of self-heal
                       attempts that preceded this operation.
                     format: int64
                     type: integer
                   dryRun:
+                    default: false
                     description: DryRun performs a server-side dry run without changing
                       resources.
                     type: boolean
@@ -181,6 +199,7 @@ spec:
                     maxItems: 1024
                     type: array
                   prune:
+                    default: false
                     description: Prune deletes resources that are no longer desired.
                     type: boolean
                   resources:
@@ -204,6 +223,7 @@ spec:
                       type: object
                     type: array
                   revision:
+                    default: ""
                     description: Revision overrides the target revision of a single-source
                       Application.
                     type: string
@@ -1002,7 +1022,9 @@ spec:
                     description: SyncOptions are per-operation sync options, merged
                       over the Application's.
                     items:
+                      maxLength: 256
                       type: string
+                    maxItems: 64
                     type: array
                   syncStrategy:
                     description: SyncStrategy selects apply or hook strategy (hook
@@ -1012,6 +1034,7 @@ spec:
                         description: Apply applies resources without running hooks.
                         properties:
                           force:
+                            default: false
                             description: Force deletes and re-creates resources when
                               a patch fails.
                             type: boolean
@@ -1021,6 +1044,7 @@ spec:
                           the default.
                         properties:
                           force:
+                            default: false
                             description: Force deletes and re-creates resources when
                               a patch fails.
                             type: boolean
@@ -1033,6 +1057,8 @@ spec:
                 - message: spec.sync.manifests must not exceed 1MiB in total
                   rule: '!has(self.manifests) || self.manifests.map(m, size(m)).sum()
                     <= 1048576'
+                - message: spec.sync.syncOptions entries must have the form Key=Value
+                  rule: '!has(self.syncOptions) || self.syncOptions.all(o, o.matches(''^[A-Za-z][A-Za-z0-9]*=[[:graph:]]+$''))'
             required:
             - application
             type: object
@@ -1043,19 +1069,20 @@ spec:
                 spec.sync.sources
               rule: '!has(self.rollback) || !has(self.sync) || (!has(self.sync.source)
                 && !has(self.sync.sources))'
-            - message: spec.sync is immutable
+            - message: spec.sync is immutable; change metadata and spec.cancel with
+                a patch, not a full update
               rule: has(self.sync) == has(oldSelf.sync) && (!has(self.sync) || self.sync
                 == oldSelf.sync)
-            - message: spec.rollback is immutable
+            - message: spec.rollback is immutable; change metadata and spec.cancel
+                with a patch, not a full update
               rule: has(self.rollback) == has(oldSelf.rollback) && (!has(self.rollback)
                 || self.rollback == oldSelf.rollback)
-            - message: spec.initiatedBy is immutable
-              rule: has(self.initiatedBy) == has(oldSelf.initiatedBy) && (!has(self.initiatedBy)
-                || self.initiatedBy == oldSelf.initiatedBy)
-            - message: spec.info is immutable
+            - message: spec.info is immutable; change metadata and spec.cancel with
+                a patch, not a full update
               rule: has(self.info) == has(oldSelf.info) && (!has(self.info) || self.info
                 == oldSelf.info)
-            - message: spec.retry is immutable
+            - message: spec.retry is immutable; change metadata and spec.cancel with
+                a patch, not a full update
               rule: has(self.retry) == has(oldSelf.retry) && (!has(self.retry) ||
                 self.retry == oldSelf.retry)
             - message: spec.cancel cannot be unset once true

@@ -9,11 +9,13 @@ import (
 var (
 	// ErrInvalidRevision reports a revision, branch, namespace or path argument that
 	// is rejected before reaching git (for example a value starting with '-', which
-	// git could parse as an option).
+	// git could parse as an option), or a non-SHA where a commit SHA is required.
 	ErrInvalidRevision = errors.New("git: invalid revision")
 	// ErrRevisionNotFound reports a revision that cannot be resolved to a commit.
+	// *RevisionNotFoundError matches it.
 	ErrRevisionNotFound = errors.New("git: revision not found")
-	// ErrAuthentication reports that the remote rejected or required credentials.
+	// ErrAuthentication reports that the remote rejected or required credentials,
+	// or that SSH host key verification failed.
 	ErrAuthentication = errors.New("git: authentication required")
 	// ErrNothingToCommit reports that CommitAll found no changes; the returned SHA is
 	// the unchanged HEAD.
@@ -31,6 +33,9 @@ var (
 	// ErrInvalidCredentials reports credential material that cannot be used (for
 	// example an unsafe SSH proxy URL).
 	ErrInvalidCredentials = errors.New("git: invalid credentials")
+	// ErrNotInitialized reports a working-copy operation on a root that holds no
+	// repository (call Init first).
+	ErrNotInitialized = errors.New("git: repository not initialized")
 )
 
 // CommandError reports a git command that failed. Message never contains
@@ -40,7 +45,11 @@ type CommandError struct {
 	Op string
 	// Message is the failure description including the (redacted) stderr tail.
 	Message string
-	// Err is the underlying error (sandbox error, *sandbox.ExitError, or a sentinel).
+	// Kind is a package sentinel classifying the failure (ErrAuthentication,
+	// ErrRevisionNotFound, ...) or nil when the failure is not classified.
+	Kind error
+	// Err is the underlying error (sandbox error such as *sandbox.ExitError,
+	// sandbox.ErrTimeout, or a context error).
 	Err error
 }
 
@@ -48,8 +57,32 @@ func (e *CommandError) Error() string {
 	return fmt.Sprintf("git %s: %s", e.Op, e.Message)
 }
 
-// Unwrap returns the underlying error.
-func (e *CommandError) Unwrap() error { return e.Err }
+// Unwrap returns the classification sentinel (if any) and the underlying error, so
+// errors.Is matches both (for example ErrAuthentication and sandbox.ErrTimeout).
+func (e *CommandError) Unwrap() []error {
+	out := make([]error, 0, 2)
+	if e.Kind != nil {
+		out = append(out, e.Kind)
+	}
+	if e.Err != nil {
+		out = append(out, e.Err)
+	}
+	return out
+}
+
+// RevisionNotFoundError reports a revision that could not be resolved. Its message
+// matches upstream ("unable to resolve '<rev>' to a commit SHA"). It matches
+// ErrRevisionNotFound.
+type RevisionNotFoundError struct {
+	Revision string
+}
+
+func (e *RevisionNotFoundError) Error() string {
+	return fmt.Sprintf("unable to resolve '%s' to a commit SHA", truncateForMessage(e.Revision))
+}
+
+// Is reports whether target is ErrRevisionNotFound.
+func (e *RevisionNotFoundError) Is(target error) bool { return target == ErrRevisionNotFound }
 
 // SignatureError reports a signature that was found but not accepted.
 // It unwraps to ErrSignatureInvalid.
@@ -62,10 +95,26 @@ type SignatureError struct {
 
 func (e *SignatureError) Error() string {
 	if e.Info.KeyID != "" {
-		return fmt.Sprintf("git: signature of %s: %s (key_id=%s)", e.Revision, e.Info.Result, e.Info.KeyID)
+		return fmt.Sprintf("git: signature of %s: %s (key_id=%s)", truncateForMessage(e.Revision), e.Info.Result, e.Info.KeyID)
 	}
-	return fmt.Sprintf("git: signature of %s: %s", e.Revision, e.Info.Result)
+	return fmt.Sprintf("git: signature of %s: %s", truncateForMessage(e.Revision), e.Info.Result)
 }
 
 // Unwrap returns ErrSignatureInvalid.
 func (e *SignatureError) Unwrap() error { return ErrSignatureInvalid }
+
+// maxMessageValue bounds untrusted values (revisions, ref names) echoed in errors.
+const maxMessageValue = 256
+
+func truncateForMessage(s string) string {
+	if len(s) <= maxMessageValue {
+		return s
+	}
+	cut := maxMessageValue
+	for cut > 0 && !isRuneStart(s[cut]) {
+		cut--
+	}
+	return s[:cut] + "..."
+}
+
+func isRuneStart(b byte) bool { return b&0xC0 != 0x80 }

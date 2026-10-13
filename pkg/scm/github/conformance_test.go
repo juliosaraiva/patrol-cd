@@ -36,6 +36,8 @@ func (f *ghFixture) SignatureHeaders() []string {
 
 func (f *ghFixture) InjectRateLimit(d time.Duration) { f.s.srv.InjectRateLimit(d, 0) }
 
+func (f *ghFixture) LimitStatuses(n int) { f.s.srv.SetStatusLimit(n) }
+
 func (f *ghFixture) CommitStatuses(r scm.RepoRef, sha string) []scm.CommitStatus {
 	var out []scm.CommitStatus
 	for _, s := range f.s.srv.Statuses(r.Owner, r.Name, sha) {

@@ -14,6 +14,8 @@ import (
 	"testing"
 	"time"
 
+	"pgregory.net/rapid"
+
 	"github.com/juliosaraiva/patrol-cd/pkg/scm"
 	"github.com/juliosaraiva/patrol-cd/pkg/scm/github"
 )
@@ -33,6 +35,9 @@ func TestAPIURLs(t *testing.T) {
 		{"https://ghe.example.com/api/v3/", "https://ghe.example.com/api/v3/", "https://ghe.example.com/api/uploads/", false},
 		{"https://example.com/github/api/v3", "https://example.com/github/api/v3/", "https://example.com/github/api/uploads/", false},
 		{"https://api.acme.ghe.com", "https://api.acme.ghe.com/", "https://uploads.acme.ghe.com/", false},
+		{"https://api.acme.ghe.com/", "https://api.acme.ghe.com/", "https://uploads.acme.ghe.com/", false},
+		{"https://API.example.com/github", "https://API.example.com/github/", "https://uploads.example.com/github/", false},
+		{"https://gh.api.example.com", "https://gh.api.example.com/", "https://gh.api.example.com/", false},
 		{"http://ghe.internal:8080", "http://ghe.internal:8080/api/v3/", "http://ghe.internal:8080/api/uploads/", false},
 		{"ghe.example.com", "", "", true},
 		{"ftp://ghe.example.com", "", "", true},
@@ -50,6 +55,42 @@ func TestAPIURLs(t *testing.T) {
 			t.Errorf("error leaks credentials: %v", err)
 		}
 	}
+}
+
+// TestAPIURLsProperties checks that normalization is idempotent (a derived base URL
+// configured again yields itself), always ends with "/", keeps scheme and host, and that
+// "/api/v3" is appended exactly for plain GitHub Enterprise Server roots.
+func TestAPIURLsProperties(t *testing.T) {
+	t.Parallel()
+	rapid.Check(t, func(t *rapid.T) {
+		scheme := rapid.SampledFrom([]string{"http", "https"}).Draw(t, "scheme")
+		host := rapid.SampledFrom([]string{"ghe.example.com", "api.example.com", "api.acme.ghe.com", "gh.api.example.com", "ghe.internal:8443", "API.Example.com"}).Draw(t, "host")
+		segs := rapid.SliceOfN(rapid.SampledFrom([]string{"github", "api", "v3", "x-y", "prefix"}), 0, 3).Draw(t, "segs")
+		path := ""
+		if len(segs) > 0 {
+			path = "/" + strings.Join(segs, "/")
+		}
+		in := scheme + "://" + host + path + rapid.SampledFrom([]string{"", "/"}).Draw(t, "slash")
+		base, upload, err := github.APIURLs(in)
+		if err != nil {
+			t.Fatalf("APIURLs(%q): %v", in, err)
+		}
+		if !strings.HasSuffix(base, "/") || !strings.HasSuffix(upload, "/") {
+			t.Fatalf("APIURLs(%q) = %q, %q: missing trailing slash", in, base, upload)
+		}
+		if !strings.HasPrefix(base, scheme+"://"+host+"/") {
+			t.Fatalf("APIURLs(%q) base %q changed scheme or host", in, base)
+		}
+		again, upload2, err := github.APIURLs(base)
+		if err != nil || again != base || upload2 != upload {
+			t.Fatalf("not idempotent: %q -> %q/%q -> %q/%q (%v)", in, base, upload, again, upload2, err)
+		}
+		lower := strings.ToLower(host)
+		plainGHES := !strings.HasPrefix(lower, "api.") && !strings.Contains(lower, ".api.") && !strings.HasSuffix(path, "/api/v3")
+		if plainGHES != (base == scheme+"://"+host+path+"/api/v3/") {
+			t.Fatalf("APIURLs(%q) = %q: /api/v3 handling wrong (plain GHES root: %v)", in, base, plainGHES)
+		}
+	})
 }
 
 func TestCapabilitiesByAuthentication(t *testing.T) {
@@ -78,6 +119,16 @@ func TestCapabilitiesByAuthentication(t *testing.T) {
 	anon := newProvider(t, s.config(t, anonymous))
 	if _, err := anon.Token(t.Context()); !errors.Is(err, scm.ErrUnsupported) {
 		t.Fatalf("anonymous Token: %v", err)
+	}
+	before := len(s.srv.Requests())
+	if err := anon.SetCommitStatus(t.Context(), s.platformRepo, sha(1), scm.CommitStatus{State: scm.CommitStateSuccess, Context: "c"}); !errors.Is(err, scm.ErrUnsupported) {
+		t.Fatalf("anonymous SetCommitStatus: %v", err)
+	}
+	if _, err := anon.FindInstallation(t.Context(), "acme"); !errors.Is(err, scm.ErrUnsupported) {
+		t.Fatalf("anonymous FindInstallation: %v", err)
+	}
+	if after := len(s.srv.Requests()); after != before {
+		t.Fatalf("undeclared capability reached the API (%d requests)", after-before)
 	}
 	patP := newProvider(t, s.config(t, pat))
 	if _, err := patP.UpsertCheckRun(t.Context(), s.platformRepo, sha(1), scm.CheckRun{Name: "n", ExternalID: "e", Status: scm.CheckStatusQueued}); !errors.Is(err, scm.ErrUnsupported) {
@@ -644,5 +695,69 @@ func TestClientExposesSameTransport(t *testing.T) {
 	repo, _, err := p.Client().Repositories.Get(t.Context(), "acme", "platform")
 	if err != nil || repo.GetName() != "platform" {
 		t.Fatalf("Client(): %v", err)
+	}
+}
+
+func TestObserverSeesAPIAndTokenRequests(t *testing.T) {
+	t.Parallel()
+	s := newSeed(t, "/api/v3")
+	var mu sync.Mutex
+	var seen []scm.RequestInfo
+	cfg := s.config(t, appDiscover)
+	cfg.Observer = func(_ context.Context, info scm.RequestInfo) {
+		mu.Lock()
+		seen = append(seen, info)
+		mu.Unlock()
+	}
+	p := newProvider(t, cfg)
+	if _, err := p.ListBranches(t.Context(), s.platformRepo, true); err != nil {
+		t.Fatal(err)
+	}
+	mu.Lock()
+	defer mu.Unlock()
+	type key struct{ method, path string }
+	got := map[key]scm.RequestInfo{}
+	for _, info := range seen {
+		if info.Provider != github.Type || info.Duration < 0 {
+			t.Errorf("observed %+v", info)
+		}
+		got[key{info.Method, info.Path}] = info
+	}
+	for _, want := range []key{
+		{http.MethodGet, "/api/v3/orgs/acme/installation"},
+		{http.MethodPost, "/api/v3/app/installations/77/access_tokens"},
+		{http.MethodGet, "/api/v3/repos/acme/platform/branches"},
+	} {
+		info, ok := got[want]
+		if !ok {
+			t.Fatalf("request %v not observed; saw %d requests", want, len(seen))
+		}
+		if info.StatusCode < 200 || info.StatusCode > 299 || !info.RateLimit.Present || info.RateLimit.Resource != "core" || info.RateLimit.Limit != 5000 {
+			t.Errorf("%v: %+v", want, info)
+		}
+	}
+}
+
+func TestCommitStatusLimit(t *testing.T) {
+	t.Parallel()
+	s := newSeed(t, "")
+	s.srv.SetStatusLimit(1)
+	p := newProvider(t, s.config(t, pat))
+	st := scm.CommitStatus{State: scm.CommitStateSuccess, Context: "continuous-delivery/app"}
+	if err := p.SetCommitStatus(t.Context(), s.platformRepo, sha(1), st); err != nil {
+		t.Fatal(err)
+	}
+	err := p.SetCommitStatus(t.Context(), s.platformRepo, sha(1), st)
+	if !errors.Is(err, scm.ErrStatusLimit) || scm.KindOf(err) != scm.KindInvalid {
+		t.Fatalf("limit: %v", err)
+	}
+	var se *scm.Error
+	if !errors.As(err, &se) || se.StatusCode != http.StatusUnprocessableEntity || se.Op != "SetCommitStatus" {
+		t.Fatalf("error details: %+v", se)
+	}
+	// Other validation failures are not mistaken for the limit.
+	err = p.SetCommitStatus(t.Context(), s.platformRepo, sha(77), scm.CommitStatus{State: scm.CommitStateSuccess, Context: "other"})
+	if scm.KindOf(err) != scm.KindInvalid || errors.Is(err, scm.ErrStatusLimit) {
+		t.Fatalf("unknown commit: %v", err)
 	}
 }
