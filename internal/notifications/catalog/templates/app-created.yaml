@@ -1,0 +1,8 @@
+# Derived from Argo CD v3.5.5 notifications_catalog/templates/app-created.yaml
+# Copyright The Argo Authors. Licensed under the Apache License, Version 2.0.
+# Modified for Patrol CD: context key argocdUrl renamed to patrolUrl.
+message: &message Application {{.app.metadata.name}} has been created.
+email:
+    subject: *message
+teams:
+    title: *message

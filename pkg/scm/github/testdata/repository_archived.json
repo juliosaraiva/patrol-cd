@@ -1,0 +1,19 @@
+{
+  "action": "archived",
+  "repository": {
+    "id": 7,
+    "name": "legacy",
+    "full_name": "acme/legacy",
+    "private": false,
+    "owner": { "login": "acme", "id": 1, "type": "Organization" },
+    "html_url": "https://github.com/acme/legacy",
+    "url": "https://api.github.com/repos/acme/legacy",
+    "clone_url": "https://github.com/acme/legacy.git",
+    "ssh_url": "git@github.com:acme/legacy.git",
+    "archived": true,
+    "default_branch": "main"
+  },
+  "organization": { "login": "acme", "id": 1 },
+  "sender": { "login": "admin", "id": 5, "type": "User" },
+  "installation": { "id": 77 }
+}

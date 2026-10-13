@@ -1,0 +1,28 @@
+{
+  "action": "closed",
+  "number": 3,
+  "pull_request": {
+    "id": 100003,
+    "html_url": "https://github.com/acme/platform/pull/3",
+    "number": 3,
+    "state": "closed",
+    "title": "Hotfix",
+    "user": { "login": "carol", "id": 4, "type": "User" },
+    "labels": [],
+    "merged_at": "2024-10-05T08:00:00Z",
+    "draft": false,
+    "head": { "ref": "hotfix", "sha": "0000000000000000000000000000000000000005" },
+    "base": { "ref": "release-1", "sha": "0000000000000000000000000000000000000004" },
+    "merged": true
+  },
+  "repository": {
+    "id": 42,
+    "name": "platform",
+    "full_name": "acme/platform",
+    "owner": { "login": "acme", "id": 1, "type": "Organization" },
+    "html_url": "https://github.com/acme/platform",
+    "url": "https://api.github.com/repos/acme/platform",
+    "default_branch": "main"
+  },
+  "sender": { "login": "carol", "id": 4, "type": "User" }
+}

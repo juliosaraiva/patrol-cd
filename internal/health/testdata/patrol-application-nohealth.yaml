@@ -1,0 +1,7 @@
+apiVersion: cd.patrol.example/v1alpha1
+kind: Application
+metadata:
+  name: child
+  namespace: patrol
+spec:
+  project: default

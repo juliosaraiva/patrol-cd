@@ -1,0 +1,16 @@
+{
+  "action": "added",
+  "installation": {
+    "id": 77,
+    "account": { "login": "acme", "id": 1, "type": "Organization" },
+    "repository_selection": "selected",
+    "app_id": 1234
+  },
+  "repository_selection": "selected",
+  "repositories_added": [
+    { "id": 1001, "node_id": "R_kgDOAAAD6Q", "name": "svc-01", "full_name": "acme/svc-01", "private": true }
+  ],
+  "repositories_removed": [],
+  "requester": null,
+  "sender": { "login": "admin", "id": 5, "type": "User" }
+}

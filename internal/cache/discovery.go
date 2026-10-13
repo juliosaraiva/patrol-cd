@@ -1,0 +1,223 @@
+package cache
+
+import (
+	"cmp"
+	"errors"
+	"fmt"
+	"slices"
+	"strings"
+
+	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/apimachinery/pkg/runtime/schema"
+	"k8s.io/apimachinery/pkg/util/version"
+	"k8s.io/client-go/discovery"
+)
+
+// discoveryResult is one snapshot of the cluster's served APIs. It is immutable once built.
+type discoveryResult struct {
+	serverVersion string
+	// all lists every served (group, version, resource) supporting list and watch,
+	// regardless of exclusions; returned by GetAPIResources.
+	all []APIResourceInfo
+	// byGVK indexes every served top-level resource of every version (used for GET).
+	byGVK map[schema.GroupVersionKind]APIResourceInfo
+	// namespaced records the scope of every served group/kind.
+	namespaced map[schema.GroupKind]bool
+	// watch lists the preferred version of each group/kind to cache (list+watch, not
+	// excluded), sorted by group/kind.
+	watch []APIResourceInfo
+	// failures lists group versions whose discovery failed.
+	failures []UnavailableAPI
+}
+
+// served reports whether gk is served by the cluster. A GroupKind with an empty Kind asks
+// whether any kind of the group is served.
+func (d *discoveryResult) served(gk schema.GroupKind) bool {
+	if gk.Kind == "" {
+		for k := range d.namespaced {
+			if k.Group == gk.Group {
+				return true
+			}
+		}
+		return false
+	}
+	_, ok := d.namespaced[gk]
+	return ok
+}
+
+// alwaysExcluded reports kinds that are never cached regardless of configuration, matching
+// upstream's core exclusions: high-churn objects that no application manages.
+func alwaysExcluded(gk schema.GroupKind) bool {
+	switch {
+	case gk.Group == "events.k8s.io", gk.Group == "metrics.k8s.io":
+		return true
+	case gk.Group == "" && gk.Kind == "Event":
+		return true
+	case gk.Group == "coordination.k8s.io" && gk.Kind == "Lease":
+		return true
+	}
+	return false
+}
+
+func discoverAPIs(disco discovery.DiscoveryInterface, s *Settings, server string) (*discoveryResult, error) {
+	info, err := disco.ServerVersion()
+	if err != nil {
+		return nil, fmt.Errorf("get server version: %w", err)
+	}
+	groups, lists, err := disco.ServerGroupsAndResources()
+	var failures []UnavailableAPI
+	if err != nil {
+		var gdf *discovery.ErrGroupDiscoveryFailed
+		if !errors.As(err, &gdf) || len(lists) == 0 {
+			return nil, fmt.Errorf("discover API resources: %w", err)
+		}
+		for gv, gerr := range gdf.Groups {
+			failures = append(failures, UnavailableAPI{
+				GroupKind: schema.GroupKind{Group: gv.Group},
+				Version:   gv.Version,
+				Reason:    ReasonDiscoveryFailed,
+				Message:   gerr.Error(),
+			})
+		}
+		slices.SortFunc(failures, func(a, b UnavailableAPI) int {
+			return cmp.Or(cmp.Compare(a.GroupKind.Group, b.GroupKind.Group), cmp.Compare(a.Version, b.Version))
+		})
+	}
+	d := buildDiscovery(groups, lists, s, server)
+	d.serverVersion = normalizeServerVersion(info.GitVersion)
+	d.failures = failures
+	return d, nil
+}
+
+// buildDiscovery derives the cache's API view from discovery documents. For each group the
+// preferred version of every resource is chosen (falling back to the first version serving
+// it), mirroring client-go's ServerPreferredResources.
+func buildDiscovery(groups []*metav1.APIGroup, lists []*metav1.APIResourceList, s *Settings, server string) *discoveryResult {
+	d := &discoveryResult{
+		byGVK:      map[schema.GroupVersionKind]APIResourceInfo{},
+		namespaced: map[schema.GroupKind]bool{},
+	}
+	byGV := make(map[string]*metav1.APIResourceList, len(lists))
+	for _, l := range lists {
+		if l == nil {
+			continue
+		}
+		byGV[l.GroupVersion] = l
+		gv, err := schema.ParseGroupVersion(l.GroupVersion)
+		if err != nil {
+			continue
+		}
+		for _, r := range l.APIResources {
+			if !topLevel(&r, gv) {
+				continue
+			}
+			info := apiInfo(gv, r)
+			if _, ok := d.byGVK[info.GroupVersionKind()]; !ok {
+				d.byGVK[info.GroupVersionKind()] = info
+			}
+			d.namespaced[info.GroupKind] = r.Namespaced
+			if listWatchable(&r) {
+				d.all = append(d.all, info)
+			}
+		}
+	}
+	slices.SortFunc(d.all, compareAPIInfo)
+
+	type choice struct {
+		info      APIResourceInfo
+		preferred bool
+	}
+	chosen := map[schema.GroupResource]choice{}
+	for _, g := range groups {
+		if g == nil {
+			continue
+		}
+		for _, v := range g.Versions {
+			l := byGV[v.GroupVersion]
+			if l == nil {
+				continue
+			}
+			gv, err := schema.ParseGroupVersion(v.GroupVersion)
+			if err != nil {
+				continue
+			}
+			isPreferred := v.Version == g.PreferredVersion.Version
+			for _, r := range l.APIResources {
+				if !topLevel(&r, gv) {
+					continue
+				}
+				gr := schema.GroupResource{Group: gv.Group, Resource: r.Name}
+				if c, ok := chosen[gr]; ok && (c.preferred || !isPreferred) {
+					continue
+				}
+				chosen[gr] = choice{info: apiInfo(gv, r), preferred: isPreferred}
+			}
+		}
+	}
+	byGK := map[schema.GroupKind]APIResourceInfo{}
+	for _, c := range chosen {
+		gk := c.info.GroupKind
+		if !listWatchable(&c.info.Meta) || alwaysExcluded(gk) || s.isExcluded(gk.Group, gk.Kind, server) {
+			continue
+		}
+		// Two resources of one group serving the same kind: keep the lexically first
+		// resource name so the choice is deterministic.
+		if prev, ok := byGK[c.info.GroupKind]; ok && prev.GroupVersionResource.Resource < c.info.GroupVersionResource.Resource {
+			continue
+		}
+		byGK[c.info.GroupKind] = c.info
+	}
+	for _, info := range byGK {
+		d.watch = append(d.watch, info)
+	}
+	slices.SortFunc(d.watch, compareAPIInfo)
+	return d
+}
+
+func topLevel(r *metav1.APIResource, gv schema.GroupVersion) bool {
+	if strings.Contains(r.Name, "/") || r.Kind == "" {
+		return false
+	}
+	return r.Group == "" || r.Group == gv.Group
+}
+
+func apiInfo(gv schema.GroupVersion, r metav1.APIResource) APIResourceInfo {
+	r.Group, r.Version = gv.Group, gv.Version
+	return APIResourceInfo{
+		GroupKind:            schema.GroupKind{Group: gv.Group, Kind: r.Kind},
+		GroupVersionResource: gv.WithResource(r.Name),
+		Meta:                 r,
+	}
+}
+
+func listWatchable(r *metav1.APIResource) bool {
+	return hasVerb(r.Verbs, "list") && hasVerb(r.Verbs, "watch")
+}
+
+func hasVerb(verbs []string, verb string) bool {
+	for _, v := range verbs {
+		if strings.EqualFold(v, verb) {
+			return true
+		}
+	}
+	return false
+}
+
+func compareAPIInfo(a, b APIResourceInfo) int {
+	return cmp.Or(
+		cmp.Compare(a.GroupKind.Group, b.GroupKind.Group),
+		cmp.Compare(a.GroupKind.Kind, b.GroupKind.Kind),
+		cmp.Compare(a.GroupVersionResource.Version, b.GroupVersionResource.Version),
+		cmp.Compare(a.GroupVersionResource.Resource, b.GroupVersionResource.Resource),
+	)
+}
+
+// normalizeServerVersion turns a git version such as "v1.30.2-eks-1234" into "v1.30.2",
+// the form Helm expects for capability checks.
+func normalizeServerVersion(gitVersion string) string {
+	v, err := version.ParseGeneric(gitVersion)
+	if err != nil {
+		return gitVersion
+	}
+	return "v" + v.String()
+}

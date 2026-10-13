@@ -1,0 +1,7 @@
+# Derived from Argo CD v3.5.5 notifications_catalog/triggers/on-deleted.yaml
+# Copyright The Argo Authors. Licensed under the Apache License, Version 2.0.
+# Unmodified.
+- when: app.metadata.deletionTimestamp != nil
+  description: Application is deleted.
+  send: [app-deleted]
+  oncePer: app.metadata.name

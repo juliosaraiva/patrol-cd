@@ -1,0 +1,26 @@
+{
+  "ref": "refs/tags/v1.2.0",
+  "before": "0000000000000000000000000000000000000000",
+  "after": "0000000000000000000000000000000000000004",
+  "repository": {
+    "id": 42,
+    "name": "platform",
+    "full_name": "acme/platform",
+    "private": true,
+    "owner": { "name": "acme", "login": "acme", "id": 1, "type": "Organization" },
+    "html_url": "https://github.com/acme/platform",
+    "url": "https://github.com/acme/platform",
+    "ssh_url": "git@github.com:acme/platform.git",
+    "clone_url": "https://github.com/acme/platform.git",
+    "created_at": 1700000000,
+    "pushed_at": 1728000000,
+    "default_branch": "main"
+  },
+  "sender": { "login": "release-bot[bot]", "id": 9, "type": "Bot" },
+  "created": true,
+  "deleted": false,
+  "forced": false,
+  "base_ref": "refs/heads/main",
+  "commits": [],
+  "head_commit": null
+}

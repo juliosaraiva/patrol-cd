@@ -1,0 +1,23 @@
+{
+  "action": "created",
+  "installation": {
+    "id": 77,
+    "account": { "login": "acme", "id": 1, "type": "Organization" },
+    "repository_selection": "selected",
+    "app_id": 1234,
+    "app_slug": "patrol-cd",
+    "target_id": 1,
+    "target_type": "Organization",
+    "permissions": { "contents": "read", "metadata": "read", "pull_requests": "read" },
+    "events": ["push", "pull_request"],
+    "created_at": "2024-10-01T00:00:00Z",
+    "updated_at": "2024-10-01T00:00:00Z",
+    "suspended_at": null
+  },
+  "repositories": [
+    { "id": 42, "node_id": "R_kgDOAAAAKg", "name": "platform", "full_name": "acme/platform", "private": true },
+    { "id": 1000, "node_id": "R_kgDOAAAD6A", "name": "svc-00", "full_name": "acme/svc-00", "private": false }
+  ],
+  "requester": null,
+  "sender": { "login": "admin", "id": 5, "type": "User" }
+}

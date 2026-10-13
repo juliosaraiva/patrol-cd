@@ -1,0 +1,65 @@
+{
+  "action": "opened",
+  "number": 1,
+  "pull_request": {
+    "url": "https://api.github.com/repos/acme/platform/pulls/1",
+    "id": 100001,
+    "node_id": "PR_kwDOAAAAKs4AAYah",
+    "html_url": "https://github.com/acme/platform/pull/1",
+    "number": 1,
+    "state": "open",
+    "locked": false,
+    "title": "Add a",
+    "user": { "login": "alice", "id": 2, "type": "User", "site_admin": false },
+    "body": "Adds service a",
+    "labels": [
+      { "id": 11, "node_id": "LA_1", "name": "preview", "color": "0e8a16", "default": false, "description": "Deploy a preview" }
+    ],
+    "created_at": "2024-10-04T09:00:00Z",
+    "updated_at": "2024-10-04T09:00:00Z",
+    "closed_at": null,
+    "merged_at": null,
+    "draft": false,
+    "head": {
+      "label": "acme:feature-a",
+      "ref": "feature-a",
+      "sha": "0000000000000000000000000000000000000002",
+      "user": { "login": "acme", "id": 1, "type": "Organization" },
+      "repo": { "id": 42, "name": "platform", "full_name": "acme/platform", "owner": { "login": "acme", "id": 1, "type": "Organization" } }
+    },
+    "base": {
+      "label": "acme:main",
+      "ref": "main",
+      "sha": "0000000000000000000000000000000000000001",
+      "user": { "login": "acme", "id": 1, "type": "Organization" },
+      "repo": { "id": 42, "name": "platform", "full_name": "acme/platform", "owner": { "login": "acme", "id": 1, "type": "Organization" } }
+    },
+    "author_association": "MEMBER",
+    "merged": false,
+    "mergeable": null,
+    "comments": 0,
+    "commits": 1,
+    "additions": 10,
+    "deletions": 0,
+    "changed_files": 1
+  },
+  "repository": {
+    "id": 42,
+    "node_id": "R_kgDOAAAAKg",
+    "name": "platform",
+    "full_name": "acme/platform",
+    "private": true,
+    "owner": { "login": "acme", "id": 1, "type": "Organization", "site_admin": false },
+    "html_url": "https://github.com/acme/platform",
+    "url": "https://api.github.com/repos/acme/platform",
+    "clone_url": "https://github.com/acme/platform.git",
+    "ssh_url": "git@github.com:acme/platform.git",
+    "created_at": "2023-11-14T22:13:20Z",
+    "pushed_at": "2024-10-04T09:00:00Z",
+    "default_branch": "main",
+    "topics": ["platform"]
+  },
+  "organization": { "login": "acme", "id": 1 },
+  "sender": { "login": "alice", "id": 2, "type": "User" },
+  "installation": { "id": 77, "node_id": "MDIzOkludGVncmF0aW9uSW5zdGFsbGF0aW9uNzc=" }
+}

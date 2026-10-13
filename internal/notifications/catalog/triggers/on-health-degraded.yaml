@@ -1,0 +1,7 @@
+# Derived from Argo CD v3.5.5 notifications_catalog/triggers/on-health-degraded.yaml
+# Copyright The Argo Authors. Licensed under the Apache License, Version 2.0.
+# Unmodified.
+- when: app.status.health.status == 'Degraded'
+  description: Application has degraded
+  send: [app-health-degraded]
+  oncePer: app.status.operationState?.syncResult?.revision

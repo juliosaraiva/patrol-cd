@@ -1,0 +1,22 @@
+{
+  "zen": "Design for failure.",
+  "hook_id": 123456,
+  "hook": {
+    "type": "Repository",
+    "id": 123456,
+    "name": "web",
+    "active": true,
+    "events": ["push", "pull_request"],
+    "config": { "content_type": "json", "insecure_ssl": "0", "url": "https://patrol.example/api/webhook" }
+  },
+  "repository": {
+    "id": 42,
+    "name": "platform",
+    "full_name": "acme/platform",
+    "owner": { "login": "acme", "id": 1, "type": "Organization" },
+    "html_url": "https://github.com/acme/platform",
+    "url": "https://api.github.com/repos/acme/platform",
+    "default_branch": "main"
+  },
+  "sender": { "login": "admin", "id": 5, "type": "User" }
+}

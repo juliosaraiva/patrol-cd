@@ -1,0 +1,2101 @@
+---
+apiVersion: apiextensions.k8s.io/v1
+kind: CustomResourceDefinition
+metadata:
+  annotations:
+    controller-gen.kubebuilder.io/version: v0.20.0
+  name: operations.cd.patrol.example
+spec:
+  group: cd.patrol.example
+  names:
+    categories:
+    - patrol
+    kind: Operation
+    listKind: OperationList
+    plural: operations
+    shortNames:
+    - pop
+    - pops
+    singular: operation
+  scope: Namespaced
+  versions:
+  - additionalPrinterColumns:
+    - jsonPath: .spec.application
+      name: Application
+      type: string
+    - jsonPath: .status.phase
+      name: Phase
+      type: string
+    - jsonPath: .spec.initiatedBy.username
+      name: Initiator
+      type: string
+    - jsonPath: .spec.initiatedBy.automated
+      name: Automated
+      type: boolean
+    - jsonPath: .status.syncResult.revision
+      name: Revision
+      type: string
+    - jsonPath: .metadata.creationTimestamp
+      name: Age
+      type: date
+    name: v1alpha1
+    schema:
+      openAPIV3Schema:
+        description: |-
+          Operation is one sync or rollback request for an Application and the record of its execution.
+          It replaces Argo CD's Application.operation field and status.operationState.syncResult (ADR-0011).
+
+          The spec is immutable after creation except spec.cancel, which may only change from false to true.
+          Clients must change it with a patch (merge or server-side apply): immutability is enforced by
+          comparing the stored spec, so a full update that drops explicitly-set zero values is rejected.
+        properties:
+          apiVersion:
+            description: |-
+              APIVersion defines the versioned schema of this representation of an object.
+              Servers should convert recognized schemas to the latest internal value, and
+              may reject unrecognized values.
+              More info: https://git.k8s.io/community/contributors/devel/sig-architecture/api-conventions.md#resources
+            type: string
+          kind:
+            description: |-
+              Kind is a string value representing the REST resource this object represents.
+              Servers may infer this from the endpoint the client submits requests to.
+              Cannot be updated.
+              In CamelCase.
+              More info: https://git.k8s.io/community/contributors/devel/sig-architecture/api-conventions.md#types-kinds
+            type: string
+          metadata:
+            type: object
+          spec:
+            description: Spec is the requested operation.
+            properties:
+              application:
+                description: Application is the name of the Application, in the Operation's
+                  namespace, to operate on.
+                maxLength: 253
+                minLength: 1
+                type: string
+                x-kubernetes-validations:
+                - message: spec.application is immutable
+                  rule: self == oldSelf
+              cancel:
+                description: |-
+                  Cancel requests cancellation: the operation moves to Terminating, running hooks are cleaned up
+                  per policy, no new tasks start, and it ends Cancelled. Can only change from false to true.
+                type: boolean
+              info:
+                description: Info holds informational name/value pairs (e.g. the reason
+                  for a manual sync).
+                items:
+                  description: Info is a name/value pair of informational metadata.
+                  properties:
+                    name:
+                      description: Name of the item.
+                      type: string
+                    value:
+                      description: Value of the item.
+                      type: string
+                  required:
+                  - name
+                  - value
+                  type: object
+                maxItems: 64
+                type: array
+              initiatedBy:
+                default: {}
+                description: InitiatedBy records who requested the operation. Set
+                  by the API server or controller.
+                properties:
+                  automated:
+                    description: Automated is true if the controller requested the
+                      operation (automated sync or self-heal).
+                    type: boolean
+                  username:
+                    description: Username of the user who requested the operation.
+                    type: string
+                type: object
+              retry:
+                description: Retry controls retries of failed attempts. Defaults to
+                  the Application's syncPolicy.retry.
+                properties:
+                  backoff:
+                    description: Backoff controls the delay between retries.
+                    properties:
+                      duration:
+                        description: Duration is the base delay, in seconds or as
+                          a Go duration ("5s", "2m"). Default "5s".
+                        type: string
+                      factor:
+                        description: Factor multiplies the delay after each failed
+                          attempt. Default 2.
+                        format: int64
+                        minimum: 1
+                        type: integer
+                      maxDuration:
+                        description: MaxDuration caps the delay, in seconds or as
+                          a Go duration. Default "3m".
+                        type: string
+                    type: object
+                  limit:
+                    description: Limit is the maximum number of retries; 0 disables
+                      retries and a negative value retries forever.
+                    format: int64
+                    type: integer
+                  refresh:
+                    description: Refresh retries with the latest revision instead
+                      of the originally resolved one.
+                    type: boolean
+                type: object
+              rollback:
+                description: Rollback requests a sync to the sources and revisions
+                  of a status.history entry.
+                properties:
+                  id:
+                    description: ID of the status.history entry of the Application.
+                    format: int64
+                    minimum: 0
+                    type: integer
+                required:
+                - id
+                type: object
+              sync:
+                description: Sync requests a sync. Also carries the sync options of
+                  a rollback.
+                properties:
+                  autoHealAttemptsCount:
+                    description: SelfHealAttemptsCount is the number of self-heal
+                      attempts that preceded this operation.
+                    format: int64
+                    type: integer
+                  dryRun:
+                    description: DryRun performs a server-side dry run without changing
+                      resources.
+                    type: boolean
+                  manifests:
+                    description: |-
+                      Manifests replace rendering with these YAML/JSON documents (local sync for development).
+                      Each document is at most 1MiB and the total at most 1MiB.
+                    items:
+                      maxLength: 1048576
+                      type: string
+                    maxItems: 1024
+                    type: array
+                  prune:
+                    description: Prune deletes resources that are no longer desired.
+                    type: boolean
+                  resources:
+                    description: Resources restricts the sync to these resources (selective
+                      sync). Empty means all.
+                    items:
+                      description: SyncOperationResource identifies a resource of
+                        a selective sync. "*" matches any value.
+                      properties:
+                        group:
+                          type: string
+                        kind:
+                          type: string
+                        name:
+                          type: string
+                        namespace:
+                          type: string
+                      required:
+                      - kind
+                      - name
+                      type: object
+                    type: array
+                  revision:
+                    description: Revision overrides the target revision of a single-source
+                      Application.
+                    type: string
+                  revisions:
+                    description: Revisions override the target revision of each source
+                      of a multi-source Application.
+                    items:
+                      type: string
+                    type: array
+                  source:
+                    description: Source overrides the Application source (single-source).
+                    properties:
+                      chart:
+                        description: Chart is the Helm chart name; required for sources
+                          in a Helm repository.
+                        type: string
+                      directory:
+                        description: Directory holds options for plain YAML/JSON or
+                          Jsonnet directories.
+                        properties:
+                          exclude:
+                            description: Exclude is a glob of paths excluded from
+                              manifest generation.
+                            type: string
+                          include:
+                            description: Include is a glob of paths included in manifest
+                              generation.
+                            type: string
+                          jsonnet:
+                            description: Jsonnet holds Jsonnet-specific options.
+                            properties:
+                              extVars:
+                                description: ExtVars are Jsonnet external variables.
+                                items:
+                                  description: JsonnetVar is a Jsonnet external variable
+                                    or top-level argument.
+                                  properties:
+                                    code:
+                                      description: Code evaluates Value as Jsonnet
+                                        code instead of a string.
+                                      type: boolean
+                                    name:
+                                      type: string
+                                    value:
+                                      type: string
+                                  required:
+                                  - name
+                                  - value
+                                  type: object
+                                type: array
+                              libs:
+                                description: Libs are additional library search directories.
+                                items:
+                                  type: string
+                                type: array
+                              tlas:
+                                description: TLAs are Jsonnet top-level arguments.
+                                items:
+                                  description: JsonnetVar is a Jsonnet external variable
+                                    or top-level argument.
+                                  properties:
+                                    code:
+                                      description: Code evaluates Value as Jsonnet
+                                        code instead of a string.
+                                      type: boolean
+                                    name:
+                                      type: string
+                                    value:
+                                      type: string
+                                  required:
+                                  - name
+                                  - value
+                                  type: object
+                                type: array
+                            type: object
+                          recurse:
+                            description: Recurse scans subdirectories for manifests.
+                            type: boolean
+                        type: object
+                      helm:
+                        description: Helm holds Helm-specific options.
+                        properties:
+                          apiVersions:
+                            description: |-
+                              APIVersions are the API versions passed to Helm ([group/]version/kind). Defaults to the
+                              destination's API versions.
+                            items:
+                              type: string
+                            type: array
+                          fileParameters:
+                            description: FileParameters are passed to helm template
+                              as --set-file values.
+                            items:
+                              description: HelmFileParameter is a Helm --set-file
+                                parameter.
+                              properties:
+                                name:
+                                  description: Name of the parameter.
+                                  type: string
+                                path:
+                                  description: Path of the file holding the value,
+                                    relative to the source path.
+                                  type: string
+                              type: object
+                            type: array
+                          ignoreMissingValueFiles:
+                            description: IgnoreMissingValueFiles skips value files
+                              that do not exist instead of failing.
+                            type: boolean
+                          kubeVersion:
+                            description: KubeVersion is the Kubernetes version passed
+                              to Helm. Defaults to the destination's version.
+                            type: string
+                          namespace:
+                            description: Namespace is the namespace to template with.
+                              Defaults to the destination namespace.
+                            type: string
+                          parameters:
+                            description: Parameters are passed to helm template as
+                              --set values.
+                            items:
+                              description: HelmParameter is a Helm --set parameter.
+                              properties:
+                                forceString:
+                                  description: ForceString passes the value with --set-string.
+                                  type: boolean
+                                name:
+                                  description: Name of the parameter.
+                                  type: string
+                                value:
+                                  description: Value of the parameter.
+                                  type: string
+                              type: object
+                            type: array
+                          passCredentials:
+                            description: PassCredentials passes credentials to all
+                              domains (helm --pass-credentials).
+                            type: boolean
+                          releaseName:
+                            description: ReleaseName is the Helm release name. Defaults
+                              to the Application name.
+                            type: string
+                          skipCrds:
+                            description: SkipCrds skips installing CRDs from the chart
+                              (helm --skip-crds).
+                            type: boolean
+                          skipSchemaValidation:
+                            description: SkipSchemaValidation skips JSON schema validation
+                              (helm --skip-schema-validation).
+                            type: boolean
+                          skipTests:
+                            description: SkipTests skips test manifests (helm --skip-tests).
+                            type: boolean
+                          valueFiles:
+                            description: ValueFiles is a list of Helm value files
+                              to use when generating a template.
+                            items:
+                              type: string
+                            type: array
+                          values:
+                            description: Values is a YAML block of Helm values. ValuesObject
+                              takes precedence when both are set.
+                            type: string
+                          valuesObject:
+                            description: ValuesObject holds Helm values as a structured
+                              object. Takes precedence over Values.
+                            type: object
+                            x-kubernetes-preserve-unknown-fields: true
+                          version:
+                            description: Version is the Helm major version to use
+                              for templating ("3").
+                            type: string
+                        type: object
+                      kustomize:
+                        description: Kustomize holds Kustomize-specific options.
+                        properties:
+                          apiVersions:
+                            description: APIVersions are the API versions passed to
+                              Helm charts inflated by Kustomize.
+                            items:
+                              type: string
+                            type: array
+                          commonAnnotations:
+                            additionalProperties:
+                              type: string
+                            description: CommonAnnotations are added to all rendered
+                              resources.
+                            type: object
+                          commonAnnotationsEnvsubst:
+                            description: CommonAnnotationsEnvsubst substitutes environment
+                              variables in CommonAnnotations values.
+                            type: boolean
+                          commonLabels:
+                            additionalProperties:
+                              type: string
+                            description: CommonLabels are added to all rendered resources.
+                            type: object
+                          components:
+                            description: Components are Kustomize components added
+                              to the kustomization.
+                            items:
+                              type: string
+                            type: array
+                          forceCommonAnnotations:
+                            description: ForceCommonAnnotations overwrites existing
+                              annotations with CommonAnnotations.
+                            type: boolean
+                          forceCommonLabels:
+                            description: ForceCommonLabels overwrites existing labels
+                              with CommonLabels.
+                            type: boolean
+                          ignoreMissingComponents:
+                            description: IgnoreMissingComponents skips components
+                              that do not exist instead of failing.
+                            type: boolean
+                          images:
+                            description: Images are image overrides.
+                            items:
+                              description: KustomizeImage is an image override in
+                                the form [old_image_name=]<image_name>:<image_tag>.
+                              type: string
+                            type: array
+                          kubeVersion:
+                            description: KubeVersion is the Kubernetes version passed
+                              to Helm charts inflated by Kustomize.
+                            type: string
+                          labelIncludeTemplates:
+                            description: LabelIncludeTemplates applies CommonLabels
+                              to resource templates (requires LabelWithoutSelector).
+                            type: boolean
+                          labelWithoutSelector:
+                            description: LabelWithoutSelector applies CommonLabels
+                              without adding them to selectors.
+                            type: boolean
+                          namePrefix:
+                            description: NamePrefix overrides the kustomization namePrefix.
+                            type: string
+                          nameSuffix:
+                            description: NameSuffix overrides the kustomization nameSuffix.
+                            type: string
+                          namespace:
+                            description: Namespace sets the namespace of all rendered
+                              resources.
+                            type: string
+                          patches:
+                            description: Patches are Kustomize patches added to the
+                              kustomization.
+                            items:
+                              description: KustomizePatch is a Kustomize patch (strategic
+                                merge or JSON 6902).
+                              properties:
+                                options:
+                                  additionalProperties:
+                                    type: boolean
+                                  description: Options are Kustomize patch options
+                                    (allowNameChange, allowKindChange).
+                                  type: object
+                                patch:
+                                  description: Patch is an inline patch.
+                                  type: string
+                                path:
+                                  description: Path of a patch file, relative to the
+                                    source path.
+                                  type: string
+                                target:
+                                  description: Target selects the resources to patch.
+                                  properties:
+                                    annotationSelector:
+                                      description: AnnotationSelector selects resources
+                                        by annotation.
+                                      type: string
+                                    group:
+                                      type: string
+                                    kind:
+                                      type: string
+                                    labelSelector:
+                                      description: LabelSelector selects resources
+                                        by label.
+                                      type: string
+                                    name:
+                                      description: Name of the resource.
+                                      type: string
+                                    namespace:
+                                      description: Namespace of the resource.
+                                      type: string
+                                    version:
+                                      type: string
+                                  type: object
+                              type: object
+                            type: array
+                          replicas:
+                            description: Replicas are replica count overrides.
+                            items:
+                              description: KustomizeReplica overrides the replica
+                                count of a Deployment or StatefulSet.
+                              properties:
+                                count:
+                                  anyOf:
+                                  - type: integer
+                                  - type: string
+                                  description: Count is the number of replicas.
+                                  x-kubernetes-int-or-string: true
+                                name:
+                                  description: Name of the Deployment or StatefulSet.
+                                  type: string
+                              required:
+                              - count
+                              - name
+                              type: object
+                            type: array
+                          version:
+                            description: Version selects a configured Kustomize version.
+                            type: string
+                        type: object
+                      name:
+                        description: Name identifies the source in the UI and CLI
+                          of multi-source Applications.
+                        type: string
+                      path:
+                        description: Path is a directory path within the repository.
+                          Only valid for Git and OCI sources.
+                        type: string
+                      plugin:
+                        description: Plugin holds Config Management Plugin options.
+                        properties:
+                          env:
+                            description: Env are environment variables passed to the
+                              plugin.
+                            items:
+                              description: EnvEntry is an environment variable passed
+                                to a plugin.
+                              properties:
+                                name:
+                                  description: Name of the variable, usually upper
+                                    case.
+                                  type: string
+                                value:
+                                  description: Value of the variable.
+                                  type: string
+                              required:
+                              - name
+                              - value
+                              type: object
+                            type: array
+                          name:
+                            description: Name of the plugin. If omitted the plugin
+                              is selected by discovery.
+                            type: string
+                          parameters:
+                            description: Parameters are passed to the plugin.
+                            items:
+                              description: |-
+                                ApplicationSourcePluginParameter is a plugin parameter of string, map or array type. Map and array
+                                are wrapped in pointers so "present but empty" can be distinguished from "absent".
+                              properties:
+                                array:
+                                  description: Array is the value of an array parameter.
+                                  items:
+                                    type: string
+                                  type: array
+                                map:
+                                  additionalProperties:
+                                    type: string
+                                  description: Map is the value of a map parameter.
+                                  type: object
+                                name:
+                                  description: Name of the parameter.
+                                  type: string
+                                string:
+                                  description: String is the value of a string parameter.
+                                  type: string
+                              type: object
+                            type: array
+                        type: object
+                      ref:
+                        description: |-
+                          Ref names this source so other sources of a multi-source Application can reference its files
+                          as "$<ref>/<path>". Ignored for single-source Applications.
+                        type: string
+                      repoURL:
+                        description: RepoURL is the URL of the repository (Git, Helm
+                          or OCI) that contains the application manifests.
+                        type: string
+                      tagPrefix:
+                        description: |-
+                          TagPrefix restricts git tags to those with this prefix before targetRevision is evaluated as a
+                          semver constraint. The prefix is stripped before comparison and re-added to the resolved tag.
+                        type: string
+                      targetRevision:
+                        description: |-
+                          TargetRevision is the revision to sync to: a commit, tag or branch for Git (HEAD if omitted), a
+                          semver constraint or version for Helm charts.
+                        type: string
+                    required:
+                    - repoURL
+                    type: object
+                  sources:
+                    description: Sources override the Application sources (multi-source).
+                    items:
+                      description: |-
+                        ApplicationSource is the location of an application's manifests or chart and the options used to
+                        render them.
+                      properties:
+                        chart:
+                          description: Chart is the Helm chart name; required for
+                            sources in a Helm repository.
+                          type: string
+                        directory:
+                          description: Directory holds options for plain YAML/JSON
+                            or Jsonnet directories.
+                          properties:
+                            exclude:
+                              description: Exclude is a glob of paths excluded from
+                                manifest generation.
+                              type: string
+                            include:
+                              description: Include is a glob of paths included in
+                                manifest generation.
+                              type: string
+                            jsonnet:
+                              description: Jsonnet holds Jsonnet-specific options.
+                              properties:
+                                extVars:
+                                  description: ExtVars are Jsonnet external variables.
+                                  items:
+                                    description: JsonnetVar is a Jsonnet external
+                                      variable or top-level argument.
+                                    properties:
+                                      code:
+                                        description: Code evaluates Value as Jsonnet
+                                          code instead of a string.
+                                        type: boolean
+                                      name:
+                                        type: string
+                                      value:
+                                        type: string
+                                    required:
+                                    - name
+                                    - value
+                                    type: object
+                                  type: array
+                                libs:
+                                  description: Libs are additional library search
+                                    directories.
+                                  items:
+                                    type: string
+                                  type: array
+                                tlas:
+                                  description: TLAs are Jsonnet top-level arguments.
+                                  items:
+                                    description: JsonnetVar is a Jsonnet external
+                                      variable or top-level argument.
+                                    properties:
+                                      code:
+                                        description: Code evaluates Value as Jsonnet
+                                          code instead of a string.
+                                        type: boolean
+                                      name:
+                                        type: string
+                                      value:
+                                        type: string
+                                    required:
+                                    - name
+                                    - value
+                                    type: object
+                                  type: array
+                              type: object
+                            recurse:
+                              description: Recurse scans subdirectories for manifests.
+                              type: boolean
+                          type: object
+                        helm:
+                          description: Helm holds Helm-specific options.
+                          properties:
+                            apiVersions:
+                              description: |-
+                                APIVersions are the API versions passed to Helm ([group/]version/kind). Defaults to the
+                                destination's API versions.
+                              items:
+                                type: string
+                              type: array
+                            fileParameters:
+                              description: FileParameters are passed to helm template
+                                as --set-file values.
+                              items:
+                                description: HelmFileParameter is a Helm --set-file
+                                  parameter.
+                                properties:
+                                  name:
+                                    description: Name of the parameter.
+                                    type: string
+                                  path:
+                                    description: Path of the file holding the value,
+                                      relative to the source path.
+                                    type: string
+                                type: object
+                              type: array
+                            ignoreMissingValueFiles:
+                              description: IgnoreMissingValueFiles skips value files
+                                that do not exist instead of failing.
+                              type: boolean
+                            kubeVersion:
+                              description: KubeVersion is the Kubernetes version passed
+                                to Helm. Defaults to the destination's version.
+                              type: string
+                            namespace:
+                              description: Namespace is the namespace to template
+                                with. Defaults to the destination namespace.
+                              type: string
+                            parameters:
+                              description: Parameters are passed to helm template
+                                as --set values.
+                              items:
+                                description: HelmParameter is a Helm --set parameter.
+                                properties:
+                                  forceString:
+                                    description: ForceString passes the value with
+                                      --set-string.
+                                    type: boolean
+                                  name:
+                                    description: Name of the parameter.
+                                    type: string
+                                  value:
+                                    description: Value of the parameter.
+                                    type: string
+                                type: object
+                              type: array
+                            passCredentials:
+                              description: PassCredentials passes credentials to all
+                                domains (helm --pass-credentials).
+                              type: boolean
+                            releaseName:
+                              description: ReleaseName is the Helm release name. Defaults
+                                to the Application name.
+                              type: string
+                            skipCrds:
+                              description: SkipCrds skips installing CRDs from the
+                                chart (helm --skip-crds).
+                              type: boolean
+                            skipSchemaValidation:
+                              description: SkipSchemaValidation skips JSON schema
+                                validation (helm --skip-schema-validation).
+                              type: boolean
+                            skipTests:
+                              description: SkipTests skips test manifests (helm --skip-tests).
+                              type: boolean
+                            valueFiles:
+                              description: ValueFiles is a list of Helm value files
+                                to use when generating a template.
+                              items:
+                                type: string
+                              type: array
+                            values:
+                              description: Values is a YAML block of Helm values.
+                                ValuesObject takes precedence when both are set.
+                              type: string
+                            valuesObject:
+                              description: ValuesObject holds Helm values as a structured
+                                object. Takes precedence over Values.
+                              type: object
+                              x-kubernetes-preserve-unknown-fields: true
+                            version:
+                              description: Version is the Helm major version to use
+                                for templating ("3").
+                              type: string
+                          type: object
+                        kustomize:
+                          description: Kustomize holds Kustomize-specific options.
+                          properties:
+                            apiVersions:
+                              description: APIVersions are the API versions passed
+                                to Helm charts inflated by Kustomize.
+                              items:
+                                type: string
+                              type: array
+                            commonAnnotations:
+                              additionalProperties:
+                                type: string
+                              description: CommonAnnotations are added to all rendered
+                                resources.
+                              type: object
+                            commonAnnotationsEnvsubst:
+                              description: CommonAnnotationsEnvsubst substitutes environment
+                                variables in CommonAnnotations values.
+                              type: boolean
+                            commonLabels:
+                              additionalProperties:
+                                type: string
+                              description: CommonLabels are added to all rendered
+                                resources.
+                              type: object
+                            components:
+                              description: Components are Kustomize components added
+                                to the kustomization.
+                              items:
+                                type: string
+                              type: array
+                            forceCommonAnnotations:
+                              description: ForceCommonAnnotations overwrites existing
+                                annotations with CommonAnnotations.
+                              type: boolean
+                            forceCommonLabels:
+                              description: ForceCommonLabels overwrites existing labels
+                                with CommonLabels.
+                              type: boolean
+                            ignoreMissingComponents:
+                              description: IgnoreMissingComponents skips components
+                                that do not exist instead of failing.
+                              type: boolean
+                            images:
+                              description: Images are image overrides.
+                              items:
+                                description: KustomizeImage is an image override in
+                                  the form [old_image_name=]<image_name>:<image_tag>.
+                                type: string
+                              type: array
+                            kubeVersion:
+                              description: KubeVersion is the Kubernetes version passed
+                                to Helm charts inflated by Kustomize.
+                              type: string
+                            labelIncludeTemplates:
+                              description: LabelIncludeTemplates applies CommonLabels
+                                to resource templates (requires LabelWithoutSelector).
+                              type: boolean
+                            labelWithoutSelector:
+                              description: LabelWithoutSelector applies CommonLabels
+                                without adding them to selectors.
+                              type: boolean
+                            namePrefix:
+                              description: NamePrefix overrides the kustomization
+                                namePrefix.
+                              type: string
+                            nameSuffix:
+                              description: NameSuffix overrides the kustomization
+                                nameSuffix.
+                              type: string
+                            namespace:
+                              description: Namespace sets the namespace of all rendered
+                                resources.
+                              type: string
+                            patches:
+                              description: Patches are Kustomize patches added to
+                                the kustomization.
+                              items:
+                                description: KustomizePatch is a Kustomize patch (strategic
+                                  merge or JSON 6902).
+                                properties:
+                                  options:
+                                    additionalProperties:
+                                      type: boolean
+                                    description: Options are Kustomize patch options
+                                      (allowNameChange, allowKindChange).
+                                    type: object
+                                  patch:
+                                    description: Patch is an inline patch.
+                                    type: string
+                                  path:
+                                    description: Path of a patch file, relative to
+                                      the source path.
+                                    type: string
+                                  target:
+                                    description: Target selects the resources to patch.
+                                    properties:
+                                      annotationSelector:
+                                        description: AnnotationSelector selects resources
+                                          by annotation.
+                                        type: string
+                                      group:
+                                        type: string
+                                      kind:
+                                        type: string
+                                      labelSelector:
+                                        description: LabelSelector selects resources
+                                          by label.
+                                        type: string
+                                      name:
+                                        description: Name of the resource.
+                                        type: string
+                                      namespace:
+                                        description: Namespace of the resource.
+                                        type: string
+                                      version:
+                                        type: string
+                                    type: object
+                                type: object
+                              type: array
+                            replicas:
+                              description: Replicas are replica count overrides.
+                              items:
+                                description: KustomizeReplica overrides the replica
+                                  count of a Deployment or StatefulSet.
+                                properties:
+                                  count:
+                                    anyOf:
+                                    - type: integer
+                                    - type: string
+                                    description: Count is the number of replicas.
+                                    x-kubernetes-int-or-string: true
+                                  name:
+                                    description: Name of the Deployment or StatefulSet.
+                                    type: string
+                                required:
+                                - count
+                                - name
+                                type: object
+                              type: array
+                            version:
+                              description: Version selects a configured Kustomize
+                                version.
+                              type: string
+                          type: object
+                        name:
+                          description: Name identifies the source in the UI and CLI
+                            of multi-source Applications.
+                          type: string
+                        path:
+                          description: Path is a directory path within the repository.
+                            Only valid for Git and OCI sources.
+                          type: string
+                        plugin:
+                          description: Plugin holds Config Management Plugin options.
+                          properties:
+                            env:
+                              description: Env are environment variables passed to
+                                the plugin.
+                              items:
+                                description: EnvEntry is an environment variable passed
+                                  to a plugin.
+                                properties:
+                                  name:
+                                    description: Name of the variable, usually upper
+                                      case.
+                                    type: string
+                                  value:
+                                    description: Value of the variable.
+                                    type: string
+                                required:
+                                - name
+                                - value
+                                type: object
+                              type: array
+                            name:
+                              description: Name of the plugin. If omitted the plugin
+                                is selected by discovery.
+                              type: string
+                            parameters:
+                              description: Parameters are passed to the plugin.
+                              items:
+                                description: |-
+                                  ApplicationSourcePluginParameter is a plugin parameter of string, map or array type. Map and array
+                                  are wrapped in pointers so "present but empty" can be distinguished from "absent".
+                                properties:
+                                  array:
+                                    description: Array is the value of an array parameter.
+                                    items:
+                                      type: string
+                                    type: array
+                                  map:
+                                    additionalProperties:
+                                      type: string
+                                    description: Map is the value of a map parameter.
+                                    type: object
+                                  name:
+                                    description: Name of the parameter.
+                                    type: string
+                                  string:
+                                    description: String is the value of a string parameter.
+                                    type: string
+                                type: object
+                              type: array
+                          type: object
+                        ref:
+                          description: |-
+                            Ref names this source so other sources of a multi-source Application can reference its files
+                            as "$<ref>/<path>". Ignored for single-source Applications.
+                          type: string
+                        repoURL:
+                          description: RepoURL is the URL of the repository (Git,
+                            Helm or OCI) that contains the application manifests.
+                          type: string
+                        tagPrefix:
+                          description: |-
+                            TagPrefix restricts git tags to those with this prefix before targetRevision is evaluated as a
+                            semver constraint. The prefix is stripped before comparison and re-added to the resolved tag.
+                          type: string
+                        targetRevision:
+                          description: |-
+                            TargetRevision is the revision to sync to: a commit, tag or branch for Git (HEAD if omitted), a
+                            semver constraint or version for Helm charts.
+                          type: string
+                      required:
+                      - repoURL
+                      type: object
+                    type: array
+                  syncOptions:
+                    description: SyncOptions are per-operation sync options, merged
+                      over the Application's.
+                    items:
+                      type: string
+                    type: array
+                  syncStrategy:
+                    description: SyncStrategy selects apply or hook strategy (hook
+                      is the default).
+                    properties:
+                      apply:
+                        description: Apply applies resources without running hooks.
+                        properties:
+                          force:
+                            description: Force deletes and re-creates resources when
+                              a patch fails.
+                            type: boolean
+                        type: object
+                      hook:
+                        description: Hook applies resources and runs hooks. This is
+                          the default.
+                        properties:
+                          force:
+                            description: Force deletes and re-creates resources when
+                              a patch fails.
+                            type: boolean
+                        type: object
+                    type: object
+                type: object
+                x-kubernetes-validations:
+                - message: spec.sync.source and spec.sync.sources are mutually exclusive
+                  rule: '!(has(self.source) && has(self.sources))'
+                - message: spec.sync.manifests must not exceed 1MiB in total
+                  rule: '!has(self.manifests) || self.manifests.map(m, size(m)).sum()
+                    <= 1048576'
+            required:
+            - application
+            type: object
+            x-kubernetes-validations:
+            - message: one of spec.sync or spec.rollback must be set
+              rule: has(self.sync) || has(self.rollback)
+            - message: spec.rollback is mutually exclusive with spec.sync.source and
+                spec.sync.sources
+              rule: '!has(self.rollback) || !has(self.sync) || (!has(self.sync.source)
+                && !has(self.sync.sources))'
+            - message: spec.sync is immutable
+              rule: has(self.sync) == has(oldSelf.sync) && (!has(self.sync) || self.sync
+                == oldSelf.sync)
+            - message: spec.rollback is immutable
+              rule: has(self.rollback) == has(oldSelf.rollback) && (!has(self.rollback)
+                || self.rollback == oldSelf.rollback)
+            - message: spec.initiatedBy is immutable
+              rule: has(self.initiatedBy) == has(oldSelf.initiatedBy) && (!has(self.initiatedBy)
+                || self.initiatedBy == oldSelf.initiatedBy)
+            - message: spec.info is immutable
+              rule: has(self.info) == has(oldSelf.info) && (!has(self.info) || self.info
+                == oldSelf.info)
+            - message: spec.retry is immutable
+              rule: has(self.retry) == has(oldSelf.retry) && (!has(self.retry) ||
+                self.retry == oldSelf.retry)
+            - message: spec.cancel cannot be unset once true
+              rule: '!has(oldSelf.cancel) || !oldSelf.cancel || (has(self.cancel)
+                && self.cancel)'
+          status:
+            description: Status is the execution record, written by the controller.
+            properties:
+              conditions:
+                description: Conditions are the current Operation conditions (Admitted,
+                  Planned, Completed, Retrying).
+                items:
+                  description: Condition contains details for one aspect of the current
+                    state of this API Resource.
+                  properties:
+                    lastTransitionTime:
+                      description: |-
+                        lastTransitionTime is the last time the condition transitioned from one status to another.
+                        This should be when the underlying condition changed.  If that is not known, then using the time when the API field changed is acceptable.
+                      format: date-time
+                      type: string
+                    message:
+                      description: |-
+                        message is a human readable message indicating details about the transition.
+                        This may be an empty string.
+                      maxLength: 32768
+                      type: string
+                    observedGeneration:
+                      description: |-
+                        observedGeneration represents the .metadata.generation that the condition was set based upon.
+                        For instance, if .metadata.generation is currently 12, but the .status.conditions[x].observedGeneration is 9, the condition is out of date
+                        with respect to the current state of the instance.
+                      format: int64
+                      minimum: 0
+                      type: integer
+                    reason:
+                      description: |-
+                        reason contains a programmatic identifier indicating the reason for the condition's last transition.
+                        Producers of specific condition types may define expected values and meanings for this field,
+                        and whether the values are considered a guaranteed API.
+                        The value should be a CamelCase string.
+                        This field may not be empty.
+                      maxLength: 1024
+                      minLength: 1
+                      pattern: ^[A-Za-z]([A-Za-z0-9_,:]*[A-Za-z0-9_])?$
+                      type: string
+                    status:
+                      description: status of the condition, one of True, False, Unknown.
+                      enum:
+                      - "True"
+                      - "False"
+                      - Unknown
+                      type: string
+                    type:
+                      description: type of condition in CamelCase or in foo.example.com/CamelCase.
+                      maxLength: 316
+                      pattern: ^([a-z0-9]([-a-z0-9]*[a-z0-9])?(\.[a-z0-9]([-a-z0-9]*[a-z0-9])?)*/)?(([A-Za-z0-9][-A-Za-z0-9_.]*)?[A-Za-z0-9])$
+                      type: string
+                  required:
+                  - lastTransitionTime
+                  - message
+                  - reason
+                  - status
+                  - type
+                  type: object
+                type: array
+                x-kubernetes-list-map-keys:
+                - type
+                x-kubernetes-list-type: map
+              finishedAt:
+                description: FinishedAt is when the operation reached a terminal phase.
+                format: date-time
+                type: string
+              message:
+                description: Message describes the current phase (typically an error).
+                type: string
+              observedGeneration:
+                description: ObservedGeneration is the metadata.generation the status
+                  reflects.
+                format: int64
+                type: integer
+              phase:
+                description: Phase of the operation.
+                enum:
+                - Pending
+                - Running
+                - Terminating
+                - Succeeded
+                - Failed
+                - Error
+                - Cancelled
+                - Rejected
+                type: string
+              plan:
+                description: Plan is the persisted execution plan; a restarted controller
+                  resumes from it.
+                properties:
+                  destination:
+                    description: Destination is the resolved destination (server URL
+                      resolved from a cluster name).
+                    properties:
+                      name:
+                        description: Name is the name of the target Cluster.
+                        type: string
+                      namespace:
+                        description: Namespace is the target namespace for namespaced
+                          resources without a namespace.
+                        type: string
+                      server:
+                        description: Server is the URL of the target cluster's API
+                          server.
+                        type: string
+                    type: object
+                  renderedInputDigest:
+                    description: RenderedInputDigest is a digest of every rendering
+                      input, used to detect drift on resume.
+                    type: string
+                  resolvedRevisions:
+                    description: ResolvedRevisions are the resolved revision of each
+                      source, persisted before any mutation.
+                    items:
+                      type: string
+                    type: array
+                  warnings:
+                    description: Warnings are planning warnings (e.g. destructive
+                      changes).
+                    items:
+                      type: string
+                    type: array
+                type: object
+              progress:
+                description: Progress is the execution progress, persisted after every
+                  wave.
+                properties:
+                  completedTasks:
+                    description: CompletedTasks is the number of completed tasks.
+                    format: int64
+                    type: integer
+                  startedAt:
+                    description: StartedAt is when the current wave started.
+                    format: date-time
+                    type: string
+                  syncPhase:
+                    description: SyncPhase is the phase being executed.
+                    type: string
+                  totalTasks:
+                    description: TotalTasks is the number of planned tasks.
+                    format: int64
+                    type: integer
+                  wave:
+                    description: Wave is the wave being executed.
+                    format: int64
+                    type: integer
+                type: object
+              retryCount:
+                description: RetryCount is the number of retries performed.
+                format: int64
+                type: integer
+              startedAt:
+                description: StartedAt is when execution started.
+                format: date-time
+                type: string
+              syncResult:
+                description: SyncResult holds per-resource results and the synced
+                  revisions/sources.
+                properties:
+                  managedNamespaceMetadata:
+                    description: ManagedNamespaceMetadata is the namespace metadata
+                      applied by the sync.
+                    properties:
+                      annotations:
+                        additionalProperties:
+                          type: string
+                        type: object
+                      labels:
+                        additionalProperties:
+                          type: string
+                        type: object
+                    type: object
+                  resources:
+                    description: Resources are the per-resource results.
+                    items:
+                      description: ResourceResult is the outcome of syncing one resource
+                        or running one hook.
+                      properties:
+                        group:
+                          type: string
+                        hookPhase:
+                          description: HookPhase is the state of the hook (or of a
+                            resource with a health-based phase).
+                          enum:
+                          - Pending
+                          - Running
+                          - Terminating
+                          - Succeeded
+                          - Failed
+                          - Error
+                          - Cancelled
+                          - Rejected
+                          type: string
+                        hookType:
+                          description: HookType is set for hooks.
+                          type: string
+                        images:
+                          description: Images used by the resource.
+                          items:
+                            type: string
+                          type: array
+                        kind:
+                          type: string
+                        message:
+                          description: Message is an informational or error message.
+                          type: string
+                        name:
+                          type: string
+                        namespace:
+                          type: string
+                        status:
+                          description: Status is the final result; empty while pending
+                            and for hooks.
+                          enum:
+                          - Synced
+                          - SyncFailed
+                          - Pruned
+                          - PruneSkipped
+                          type: string
+                        syncPhase:
+                          description: SyncPhase is the sync phase the result was
+                            recorded in.
+                          type: string
+                        version:
+                          type: string
+                      required:
+                      - group
+                      - kind
+                      - name
+                      - namespace
+                      - version
+                      type: object
+                    type: array
+                  revision:
+                    description: Revision is the revision synced (single-source).
+                    type: string
+                  revisions:
+                    description: Revisions are the revisions synced for each source
+                      (multi-source).
+                    items:
+                      type: string
+                    type: array
+                  source:
+                    description: Source is the source synced (single-source).
+                    properties:
+                      chart:
+                        description: Chart is the Helm chart name; required for sources
+                          in a Helm repository.
+                        type: string
+                      directory:
+                        description: Directory holds options for plain YAML/JSON or
+                          Jsonnet directories.
+                        properties:
+                          exclude:
+                            description: Exclude is a glob of paths excluded from
+                              manifest generation.
+                            type: string
+                          include:
+                            description: Include is a glob of paths included in manifest
+                              generation.
+                            type: string
+                          jsonnet:
+                            description: Jsonnet holds Jsonnet-specific options.
+                            properties:
+                              extVars:
+                                description: ExtVars are Jsonnet external variables.
+                                items:
+                                  description: JsonnetVar is a Jsonnet external variable
+                                    or top-level argument.
+                                  properties:
+                                    code:
+                                      description: Code evaluates Value as Jsonnet
+                                        code instead of a string.
+                                      type: boolean
+                                    name:
+                                      type: string
+                                    value:
+                                      type: string
+                                  required:
+                                  - name
+                                  - value
+                                  type: object
+                                type: array
+                              libs:
+                                description: Libs are additional library search directories.
+                                items:
+                                  type: string
+                                type: array
+                              tlas:
+                                description: TLAs are Jsonnet top-level arguments.
+                                items:
+                                  description: JsonnetVar is a Jsonnet external variable
+                                    or top-level argument.
+                                  properties:
+                                    code:
+                                      description: Code evaluates Value as Jsonnet
+                                        code instead of a string.
+                                      type: boolean
+                                    name:
+                                      type: string
+                                    value:
+                                      type: string
+                                  required:
+                                  - name
+                                  - value
+                                  type: object
+                                type: array
+                            type: object
+                          recurse:
+                            description: Recurse scans subdirectories for manifests.
+                            type: boolean
+                        type: object
+                      helm:
+                        description: Helm holds Helm-specific options.
+                        properties:
+                          apiVersions:
+                            description: |-
+                              APIVersions are the API versions passed to Helm ([group/]version/kind). Defaults to the
+                              destination's API versions.
+                            items:
+                              type: string
+                            type: array
+                          fileParameters:
+                            description: FileParameters are passed to helm template
+                              as --set-file values.
+                            items:
+                              description: HelmFileParameter is a Helm --set-file
+                                parameter.
+                              properties:
+                                name:
+                                  description: Name of the parameter.
+                                  type: string
+                                path:
+                                  description: Path of the file holding the value,
+                                    relative to the source path.
+                                  type: string
+                              type: object
+                            type: array
+                          ignoreMissingValueFiles:
+                            description: IgnoreMissingValueFiles skips value files
+                              that do not exist instead of failing.
+                            type: boolean
+                          kubeVersion:
+                            description: KubeVersion is the Kubernetes version passed
+                              to Helm. Defaults to the destination's version.
+                            type: string
+                          namespace:
+                            description: Namespace is the namespace to template with.
+                              Defaults to the destination namespace.
+                            type: string
+                          parameters:
+                            description: Parameters are passed to helm template as
+                              --set values.
+                            items:
+                              description: HelmParameter is a Helm --set parameter.
+                              properties:
+                                forceString:
+                                  description: ForceString passes the value with --set-string.
+                                  type: boolean
+                                name:
+                                  description: Name of the parameter.
+                                  type: string
+                                value:
+                                  description: Value of the parameter.
+                                  type: string
+                              type: object
+                            type: array
+                          passCredentials:
+                            description: PassCredentials passes credentials to all
+                              domains (helm --pass-credentials).
+                            type: boolean
+                          releaseName:
+                            description: ReleaseName is the Helm release name. Defaults
+                              to the Application name.
+                            type: string
+                          skipCrds:
+                            description: SkipCrds skips installing CRDs from the chart
+                              (helm --skip-crds).
+                            type: boolean
+                          skipSchemaValidation:
+                            description: SkipSchemaValidation skips JSON schema validation
+                              (helm --skip-schema-validation).
+                            type: boolean
+                          skipTests:
+                            description: SkipTests skips test manifests (helm --skip-tests).
+                            type: boolean
+                          valueFiles:
+                            description: ValueFiles is a list of Helm value files
+                              to use when generating a template.
+                            items:
+                              type: string
+                            type: array
+                          values:
+                            description: Values is a YAML block of Helm values. ValuesObject
+                              takes precedence when both are set.
+                            type: string
+                          valuesObject:
+                            description: ValuesObject holds Helm values as a structured
+                              object. Takes precedence over Values.
+                            type: object
+                            x-kubernetes-preserve-unknown-fields: true
+                          version:
+                            description: Version is the Helm major version to use
+                              for templating ("3").
+                            type: string
+                        type: object
+                      kustomize:
+                        description: Kustomize holds Kustomize-specific options.
+                        properties:
+                          apiVersions:
+                            description: APIVersions are the API versions passed to
+                              Helm charts inflated by Kustomize.
+                            items:
+                              type: string
+                            type: array
+                          commonAnnotations:
+                            additionalProperties:
+                              type: string
+                            description: CommonAnnotations are added to all rendered
+                              resources.
+                            type: object
+                          commonAnnotationsEnvsubst:
+                            description: CommonAnnotationsEnvsubst substitutes environment
+                              variables in CommonAnnotations values.
+                            type: boolean
+                          commonLabels:
+                            additionalProperties:
+                              type: string
+                            description: CommonLabels are added to all rendered resources.
+                            type: object
+                          components:
+                            description: Components are Kustomize components added
+                              to the kustomization.
+                            items:
+                              type: string
+                            type: array
+                          forceCommonAnnotations:
+                            description: ForceCommonAnnotations overwrites existing
+                              annotations with CommonAnnotations.
+                            type: boolean
+                          forceCommonLabels:
+                            description: ForceCommonLabels overwrites existing labels
+                              with CommonLabels.
+                            type: boolean
+                          ignoreMissingComponents:
+                            description: IgnoreMissingComponents skips components
+                              that do not exist instead of failing.
+                            type: boolean
+                          images:
+                            description: Images are image overrides.
+                            items:
+                              description: KustomizeImage is an image override in
+                                the form [old_image_name=]<image_name>:<image_tag>.
+                              type: string
+                            type: array
+                          kubeVersion:
+                            description: KubeVersion is the Kubernetes version passed
+                              to Helm charts inflated by Kustomize.
+                            type: string
+                          labelIncludeTemplates:
+                            description: LabelIncludeTemplates applies CommonLabels
+                              to resource templates (requires LabelWithoutSelector).
+                            type: boolean
+                          labelWithoutSelector:
+                            description: LabelWithoutSelector applies CommonLabels
+                              without adding them to selectors.
+                            type: boolean
+                          namePrefix:
+                            description: NamePrefix overrides the kustomization namePrefix.
+                            type: string
+                          nameSuffix:
+                            description: NameSuffix overrides the kustomization nameSuffix.
+                            type: string
+                          namespace:
+                            description: Namespace sets the namespace of all rendered
+                              resources.
+                            type: string
+                          patches:
+                            description: Patches are Kustomize patches added to the
+                              kustomization.
+                            items:
+                              description: KustomizePatch is a Kustomize patch (strategic
+                                merge or JSON 6902).
+                              properties:
+                                options:
+                                  additionalProperties:
+                                    type: boolean
+                                  description: Options are Kustomize patch options
+                                    (allowNameChange, allowKindChange).
+                                  type: object
+                                patch:
+                                  description: Patch is an inline patch.
+                                  type: string
+                                path:
+                                  description: Path of a patch file, relative to the
+                                    source path.
+                                  type: string
+                                target:
+                                  description: Target selects the resources to patch.
+                                  properties:
+                                    annotationSelector:
+                                      description: AnnotationSelector selects resources
+                                        by annotation.
+                                      type: string
+                                    group:
+                                      type: string
+                                    kind:
+                                      type: string
+                                    labelSelector:
+                                      description: LabelSelector selects resources
+                                        by label.
+                                      type: string
+                                    name:
+                                      description: Name of the resource.
+                                      type: string
+                                    namespace:
+                                      description: Namespace of the resource.
+                                      type: string
+                                    version:
+                                      type: string
+                                  type: object
+                              type: object
+                            type: array
+                          replicas:
+                            description: Replicas are replica count overrides.
+                            items:
+                              description: KustomizeReplica overrides the replica
+                                count of a Deployment or StatefulSet.
+                              properties:
+                                count:
+                                  anyOf:
+                                  - type: integer
+                                  - type: string
+                                  description: Count is the number of replicas.
+                                  x-kubernetes-int-or-string: true
+                                name:
+                                  description: Name of the Deployment or StatefulSet.
+                                  type: string
+                              required:
+                              - count
+                              - name
+                              type: object
+                            type: array
+                          version:
+                            description: Version selects a configured Kustomize version.
+                            type: string
+                        type: object
+                      name:
+                        description: Name identifies the source in the UI and CLI
+                          of multi-source Applications.
+                        type: string
+                      path:
+                        description: Path is a directory path within the repository.
+                          Only valid for Git and OCI sources.
+                        type: string
+                      plugin:
+                        description: Plugin holds Config Management Plugin options.
+                        properties:
+                          env:
+                            description: Env are environment variables passed to the
+                              plugin.
+                            items:
+                              description: EnvEntry is an environment variable passed
+                                to a plugin.
+                              properties:
+                                name:
+                                  description: Name of the variable, usually upper
+                                    case.
+                                  type: string
+                                value:
+                                  description: Value of the variable.
+                                  type: string
+                              required:
+                              - name
+                              - value
+                              type: object
+                            type: array
+                          name:
+                            description: Name of the plugin. If omitted the plugin
+                              is selected by discovery.
+                            type: string
+                          parameters:
+                            description: Parameters are passed to the plugin.
+                            items:
+                              description: |-
+                                ApplicationSourcePluginParameter is a plugin parameter of string, map or array type. Map and array
+                                are wrapped in pointers so "present but empty" can be distinguished from "absent".
+                              properties:
+                                array:
+                                  description: Array is the value of an array parameter.
+                                  items:
+                                    type: string
+                                  type: array
+                                map:
+                                  additionalProperties:
+                                    type: string
+                                  description: Map is the value of a map parameter.
+                                  type: object
+                                name:
+                                  description: Name of the parameter.
+                                  type: string
+                                string:
+                                  description: String is the value of a string parameter.
+                                  type: string
+                              type: object
+                            type: array
+                        type: object
+                      ref:
+                        description: |-
+                          Ref names this source so other sources of a multi-source Application can reference its files
+                          as "$<ref>/<path>". Ignored for single-source Applications.
+                        type: string
+                      repoURL:
+                        description: RepoURL is the URL of the repository (Git, Helm
+                          or OCI) that contains the application manifests.
+                        type: string
+                      tagPrefix:
+                        description: |-
+                          TagPrefix restricts git tags to those with this prefix before targetRevision is evaluated as a
+                          semver constraint. The prefix is stripped before comparison and re-added to the resolved tag.
+                        type: string
+                      targetRevision:
+                        description: |-
+                          TargetRevision is the revision to sync to: a commit, tag or branch for Git (HEAD if omitted), a
+                          semver constraint or version for Helm charts.
+                        type: string
+                    required:
+                    - repoURL
+                    type: object
+                  sources:
+                    description: Sources are the sources synced (multi-source).
+                    items:
+                      description: |-
+                        ApplicationSource is the location of an application's manifests or chart and the options used to
+                        render them.
+                      properties:
+                        chart:
+                          description: Chart is the Helm chart name; required for
+                            sources in a Helm repository.
+                          type: string
+                        directory:
+                          description: Directory holds options for plain YAML/JSON
+                            or Jsonnet directories.
+                          properties:
+                            exclude:
+                              description: Exclude is a glob of paths excluded from
+                                manifest generation.
+                              type: string
+                            include:
+                              description: Include is a glob of paths included in
+                                manifest generation.
+                              type: string
+                            jsonnet:
+                              description: Jsonnet holds Jsonnet-specific options.
+                              properties:
+                                extVars:
+                                  description: ExtVars are Jsonnet external variables.
+                                  items:
+                                    description: JsonnetVar is a Jsonnet external
+                                      variable or top-level argument.
+                                    properties:
+                                      code:
+                                        description: Code evaluates Value as Jsonnet
+                                          code instead of a string.
+                                        type: boolean
+                                      name:
+                                        type: string
+                                      value:
+                                        type: string
+                                    required:
+                                    - name
+                                    - value
+                                    type: object
+                                  type: array
+                                libs:
+                                  description: Libs are additional library search
+                                    directories.
+                                  items:
+                                    type: string
+                                  type: array
+                                tlas:
+                                  description: TLAs are Jsonnet top-level arguments.
+                                  items:
+                                    description: JsonnetVar is a Jsonnet external
+                                      variable or top-level argument.
+                                    properties:
+                                      code:
+                                        description: Code evaluates Value as Jsonnet
+                                          code instead of a string.
+                                        type: boolean
+                                      name:
+                                        type: string
+                                      value:
+                                        type: string
+                                    required:
+                                    - name
+                                    - value
+                                    type: object
+                                  type: array
+                              type: object
+                            recurse:
+                              description: Recurse scans subdirectories for manifests.
+                              type: boolean
+                          type: object
+                        helm:
+                          description: Helm holds Helm-specific options.
+                          properties:
+                            apiVersions:
+                              description: |-
+                                APIVersions are the API versions passed to Helm ([group/]version/kind). Defaults to the
+                                destination's API versions.
+                              items:
+                                type: string
+                              type: array
+                            fileParameters:
+                              description: FileParameters are passed to helm template
+                                as --set-file values.
+                              items:
+                                description: HelmFileParameter is a Helm --set-file
+                                  parameter.
+                                properties:
+                                  name:
+                                    description: Name of the parameter.
+                                    type: string
+                                  path:
+                                    description: Path of the file holding the value,
+                                      relative to the source path.
+                                    type: string
+                                type: object
+                              type: array
+                            ignoreMissingValueFiles:
+                              description: IgnoreMissingValueFiles skips value files
+                                that do not exist instead of failing.
+                              type: boolean
+                            kubeVersion:
+                              description: KubeVersion is the Kubernetes version passed
+                                to Helm. Defaults to the destination's version.
+                              type: string
+                            namespace:
+                              description: Namespace is the namespace to template
+                                with. Defaults to the destination namespace.
+                              type: string
+                            parameters:
+                              description: Parameters are passed to helm template
+                                as --set values.
+                              items:
+                                description: HelmParameter is a Helm --set parameter.
+                                properties:
+                                  forceString:
+                                    description: ForceString passes the value with
+                                      --set-string.
+                                    type: boolean
+                                  name:
+                                    description: Name of the parameter.
+                                    type: string
+                                  value:
+                                    description: Value of the parameter.
+                                    type: string
+                                type: object
+                              type: array
+                            passCredentials:
+                              description: PassCredentials passes credentials to all
+                                domains (helm --pass-credentials).
+                              type: boolean
+                            releaseName:
+                              description: ReleaseName is the Helm release name. Defaults
+                                to the Application name.
+                              type: string
+                            skipCrds:
+                              description: SkipCrds skips installing CRDs from the
+                                chart (helm --skip-crds).
+                              type: boolean
+                            skipSchemaValidation:
+                              description: SkipSchemaValidation skips JSON schema
+                                validation (helm --skip-schema-validation).
+                              type: boolean
+                            skipTests:
+                              description: SkipTests skips test manifests (helm --skip-tests).
+                              type: boolean
+                            valueFiles:
+                              description: ValueFiles is a list of Helm value files
+                                to use when generating a template.
+                              items:
+                                type: string
+                              type: array
+                            values:
+                              description: Values is a YAML block of Helm values.
+                                ValuesObject takes precedence when both are set.
+                              type: string
+                            valuesObject:
+                              description: ValuesObject holds Helm values as a structured
+                                object. Takes precedence over Values.
+                              type: object
+                              x-kubernetes-preserve-unknown-fields: true
+                            version:
+                              description: Version is the Helm major version to use
+                                for templating ("3").
+                              type: string
+                          type: object
+                        kustomize:
+                          description: Kustomize holds Kustomize-specific options.
+                          properties:
+                            apiVersions:
+                              description: APIVersions are the API versions passed
+                                to Helm charts inflated by Kustomize.
+                              items:
+                                type: string
+                              type: array
+                            commonAnnotations:
+                              additionalProperties:
+                                type: string
+                              description: CommonAnnotations are added to all rendered
+                                resources.
+                              type: object
+                            commonAnnotationsEnvsubst:
+                              description: CommonAnnotationsEnvsubst substitutes environment
+                                variables in CommonAnnotations values.
+                              type: boolean
+                            commonLabels:
+                              additionalProperties:
+                                type: string
+                              description: CommonLabels are added to all rendered
+                                resources.
+                              type: object
+                            components:
+                              description: Components are Kustomize components added
+                                to the kustomization.
+                              items:
+                                type: string
+                              type: array
+                            forceCommonAnnotations:
+                              description: ForceCommonAnnotations overwrites existing
+                                annotations with CommonAnnotations.
+                              type: boolean
+                            forceCommonLabels:
+                              description: ForceCommonLabels overwrites existing labels
+                                with CommonLabels.
+                              type: boolean
+                            ignoreMissingComponents:
+                              description: IgnoreMissingComponents skips components
+                                that do not exist instead of failing.
+                              type: boolean
+                            images:
+                              description: Images are image overrides.
+                              items:
+                                description: KustomizeImage is an image override in
+                                  the form [old_image_name=]<image_name>:<image_tag>.
+                                type: string
+                              type: array
+                            kubeVersion:
+                              description: KubeVersion is the Kubernetes version passed
+                                to Helm charts inflated by Kustomize.
+                              type: string
+                            labelIncludeTemplates:
+                              description: LabelIncludeTemplates applies CommonLabels
+                                to resource templates (requires LabelWithoutSelector).
+                              type: boolean
+                            labelWithoutSelector:
+                              description: LabelWithoutSelector applies CommonLabels
+                                without adding them to selectors.
+                              type: boolean
+                            namePrefix:
+                              description: NamePrefix overrides the kustomization
+                                namePrefix.
+                              type: string
+                            nameSuffix:
+                              description: NameSuffix overrides the kustomization
+                                nameSuffix.
+                              type: string
+                            namespace:
+                              description: Namespace sets the namespace of all rendered
+                                resources.
+                              type: string
+                            patches:
+                              description: Patches are Kustomize patches added to
+                                the kustomization.
+                              items:
+                                description: KustomizePatch is a Kustomize patch (strategic
+                                  merge or JSON 6902).
+                                properties:
+                                  options:
+                                    additionalProperties:
+                                      type: boolean
+                                    description: Options are Kustomize patch options
+                                      (allowNameChange, allowKindChange).
+                                    type: object
+                                  patch:
+                                    description: Patch is an inline patch.
+                                    type: string
+                                  path:
+                                    description: Path of a patch file, relative to
+                                      the source path.
+                                    type: string
+                                  target:
+                                    description: Target selects the resources to patch.
+                                    properties:
+                                      annotationSelector:
+                                        description: AnnotationSelector selects resources
+                                          by annotation.
+                                        type: string
+                                      group:
+                                        type: string
+                                      kind:
+                                        type: string
+                                      labelSelector:
+                                        description: LabelSelector selects resources
+                                          by label.
+                                        type: string
+                                      name:
+                                        description: Name of the resource.
+                                        type: string
+                                      namespace:
+                                        description: Namespace of the resource.
+                                        type: string
+                                      version:
+                                        type: string
+                                    type: object
+                                type: object
+                              type: array
+                            replicas:
+                              description: Replicas are replica count overrides.
+                              items:
+                                description: KustomizeReplica overrides the replica
+                                  count of a Deployment or StatefulSet.
+                                properties:
+                                  count:
+                                    anyOf:
+                                    - type: integer
+                                    - type: string
+                                    description: Count is the number of replicas.
+                                    x-kubernetes-int-or-string: true
+                                  name:
+                                    description: Name of the Deployment or StatefulSet.
+                                    type: string
+                                required:
+                                - count
+                                - name
+                                type: object
+                              type: array
+                            version:
+                              description: Version selects a configured Kustomize
+                                version.
+                              type: string
+                          type: object
+                        name:
+                          description: Name identifies the source in the UI and CLI
+                            of multi-source Applications.
+                          type: string
+                        path:
+                          description: Path is a directory path within the repository.
+                            Only valid for Git and OCI sources.
+                          type: string
+                        plugin:
+                          description: Plugin holds Config Management Plugin options.
+                          properties:
+                            env:
+                              description: Env are environment variables passed to
+                                the plugin.
+                              items:
+                                description: EnvEntry is an environment variable passed
+                                  to a plugin.
+                                properties:
+                                  name:
+                                    description: Name of the variable, usually upper
+                                      case.
+                                    type: string
+                                  value:
+                                    description: Value of the variable.
+                                    type: string
+                                required:
+                                - name
+                                - value
+                                type: object
+                              type: array
+                            name:
+                              description: Name of the plugin. If omitted the plugin
+                                is selected by discovery.
+                              type: string
+                            parameters:
+                              description: Parameters are passed to the plugin.
+                              items:
+                                description: |-
+                                  ApplicationSourcePluginParameter is a plugin parameter of string, map or array type. Map and array
+                                  are wrapped in pointers so "present but empty" can be distinguished from "absent".
+                                properties:
+                                  array:
+                                    description: Array is the value of an array parameter.
+                                    items:
+                                      type: string
+                                    type: array
+                                  map:
+                                    additionalProperties:
+                                      type: string
+                                    description: Map is the value of a map parameter.
+                                    type: object
+                                  name:
+                                    description: Name of the parameter.
+                                    type: string
+                                  string:
+                                    description: String is the value of a string parameter.
+                                    type: string
+                                type: object
+                              type: array
+                          type: object
+                        ref:
+                          description: |-
+                            Ref names this source so other sources of a multi-source Application can reference its files
+                            as "$<ref>/<path>". Ignored for single-source Applications.
+                          type: string
+                        repoURL:
+                          description: RepoURL is the URL of the repository (Git,
+                            Helm or OCI) that contains the application manifests.
+                          type: string
+                        tagPrefix:
+                          description: |-
+                            TagPrefix restricts git tags to those with this prefix before targetRevision is evaluated as a
+                            semver constraint. The prefix is stripped before comparison and re-added to the resolved tag.
+                          type: string
+                        targetRevision:
+                          description: |-
+                            TargetRevision is the revision to sync to: a commit, tag or branch for Git (HEAD if omitted), a
+                            semver constraint or version for Helm charts.
+                          type: string
+                      required:
+                      - repoURL
+                      type: object
+                    type: array
+                type: object
+            type: object
+        required:
+        - spec
+        type: object
+    served: true
+    storage: true
+    subresources:
+      status: {}

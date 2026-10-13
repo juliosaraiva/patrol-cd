@@ -1,0 +1,9 @@
+apiVersion: cd.patrol.example/v1alpha1
+kind: Application
+metadata:
+  name: child
+  namespace: patrol
+status:
+  health:
+    status: Degraded
+    message: one or more resources are degraded

@@ -1,0 +1,10 @@
+Patrol CD
+Copyright 2026 The Patrol CD Authors
+
+This product includes software developed as part of the Argo CD project
+(https://github.com/argoproj/argo-cd), licensed under the Apache License, Version 2.0:
+
+  - internal/lua/customizations/**  Lua health checks and resource actions derived from
+    argo-cd v3.5.5 resource_customizations/ (commit a5038b0e2bbac1715754380ae0084df8e3d5b48c).
+
+Patrol CD is not affiliated with or endorsed by the Argo Project or the CNCF.

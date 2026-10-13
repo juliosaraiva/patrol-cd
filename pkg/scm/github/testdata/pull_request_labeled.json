@@ -1,0 +1,34 @@
+{
+  "action": "labeled",
+  "number": 2,
+  "label": { "id": 12, "name": "team-a", "color": "1d76db" },
+  "pull_request": {
+    "url": "https://api.github.com/repos/acme/platform/pulls/2",
+    "id": 100002,
+    "html_url": "https://github.com/acme/platform/pull/2",
+    "number": 2,
+    "state": "open",
+    "title": "Add b",
+    "user": { "login": "bob", "id": 3, "type": "User" },
+    "labels": [
+      { "id": 11, "name": "preview", "color": "0e8a16" },
+      { "id": 12, "name": "team-a", "color": "1d76db" }
+    ],
+    "merged_at": null,
+    "draft": true,
+    "head": { "label": "acme:feature-b", "ref": "feature-b", "sha": "0000000000000000000000000000000000000003" },
+    "base": { "label": "acme:main", "ref": "main", "sha": "0000000000000000000000000000000000000001" },
+    "merged": false
+  },
+  "repository": {
+    "id": 42,
+    "name": "platform",
+    "full_name": "acme/platform",
+    "private": true,
+    "owner": { "login": "acme", "id": 1, "type": "Organization" },
+    "html_url": "https://github.com/acme/platform",
+    "url": "https://api.github.com/repos/acme/platform",
+    "default_branch": "main"
+  },
+  "sender": { "login": "bob", "id": 3, "type": "User" }
+}

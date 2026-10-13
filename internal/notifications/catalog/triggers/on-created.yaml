@@ -1,0 +1,7 @@
+# Derived from Argo CD v3.5.5 notifications_catalog/triggers/on-created.yaml
+# Copyright The Argo Authors. Licensed under the Apache License, Version 2.0.
+# Unmodified.
+- when: true
+  description: Application is created.
+  send: [app-created]
+  oncePer: app.metadata.name
