@@ -1,0 +1,34 @@
+## pnpm -C ui typecheck
+
+> @patrol-cd/ui@0.0.0 typecheck /Users/juliosaraiva/Developer/patrol-cd/ui
+> tsc -p tsconfig.json && tsc -p tsconfig.node.json
+
+exit=0
+## pnpm -C ui lint
+
+> @patrol-cd/ui@0.0.0 lint /Users/juliosaraiva/Developer/patrol-cd/ui
+> eslint . --max-warnings=0
+
+exit=0
+## pnpm -C ui test
+ ✓ scripts/api-routes.test.mjs (4 tests) 7ms
+ ✓ src/design/tokens.test.ts (42 tests) 36ms
+
+ Test Files  74 passed (74)
+      Tests  768 passed (768)
+   Start at  12:30:57
+   Duration  51.17s (transform 5.30s, setup 57.31s, collect 32.86s, tests 266.11s, environment 66.94s, prepare 9.56s)
+
+exit=0
+## pnpm -C ui build
+dist/assets/ProjectDetailsPage-xxEhaUpc.js          54.46 kB │ gzip:  17.11 kB
+dist/assets/ApplicationsListPage-0j2e64oI.js        73.05 kB │ gzip:  23.42 kB
+dist/assets/ResourceViews-CbJ8PEhl.js               78.81 kB │ gzip:  26.52 kB
+dist/assets/ApplicationDetailsPage-Cg3RWm1G.js      96.15 kB │ gzip:  29.20 kB
+dist/assets/public-api-Bw0Keo12.js                  97.37 kB │ gzip:  30.44 kB
+dist/assets/TerminalPanel-BpFZa8r-.js              335.14 kB │ gzip:  85.40 kB
+dist/assets/index-RnNN3g7o.js                      413.70 kB │ gzip: 131.94 kB
+✓ built in 3.13s
+exit=0
+## go run ./hack/parity -check
+exit=0

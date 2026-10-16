@@ -1,0 +1,48 @@
+# 2026-10-13T05:21:21Z go vet + go test -race -count=1 (Phase 1a packages)
+ok  	github.com/juliosaraiva/patrol-cd/internal/sandbox	25.522s
+ok  	github.com/juliosaraiva/patrol-cd/internal/git	55.290s
+ok  	github.com/juliosaraiva/patrol-cd/internal/helm	8.452s
+ok  	github.com/juliosaraiva/patrol-cd/internal/oci	5.052s
+?   	github.com/juliosaraiva/patrol-cd/internal/oci/ocitest	[no test files]
+ok  	github.com/juliosaraiva/patrol-cd/internal/rbac	29.596s
+ok  	github.com/juliosaraiva/patrol-cd/internal/auth	46.720s
+ok  	github.com/juliosaraiva/patrol-cd/internal/auth/oidc	13.161s
+ok  	github.com/juliosaraiva/patrol-cd/internal/auth/revocation	19.654s
+ok  	github.com/juliosaraiva/patrol-cd/internal/lua	43.837s
+ok  	github.com/juliosaraiva/patrol-cd/internal/health	3.307s
+2026/10/13 02:22:14 WARN cluster cache sync failed component=cluster-cache server=http://127.0.0.1:49912 duration=8.193708ms error="cluster http://127.0.0.1:49912 unreachable: get server version: Get \"http://127.0.0.1:49912/version?timeout=2s\": dial tcp 127.0.0.1:49912: connect: connection refused"
+2026/10/13 02:22:14 WARN cluster cache sync failed component=cluster-cache server=http://127.0.0.1:49907 duration=220.722709ms error="cluster http://127.0.0.1:49907 unreachable: get server version: the server is currently unable to handle the request"
+2026/10/13 02:22:14 WARN cluster cache sync failed component=cluster-cache server=http://127.0.0.1:49912 duration=4.597542ms error="cluster http://127.0.0.1:49912 unreachable: get server version: Get \"http://127.0.0.1:49912/version?timeout=2s\": dial tcp 127.0.0.1:49912: connect: connection refused"
+--- FAIL: TestEnsureSyncedOutlivesCallerContext (0.81s)
+    errors_test.go:155: 
+        	Error Trace:	/Users/juliosaraiva/Developer/patrol-cd/internal/cache/errors_test.go:155
+        	Error:      	Not equal: 
+        	            	expected: 1
+        	            	actual  : 0
+        	Test:       	TestEnsureSyncedOutlivesCallerContext
+        	Messages:   	callers share one sync
+FAIL
+FAIL	github.com/juliosaraiva/patrol-cd/internal/cache	38.287s
+ok  	github.com/juliosaraiva/patrol-cd/internal/diff	53.891s
+?   	github.com/juliosaraiva/patrol-cd/internal/diff/internal/gen/knowntypes	[no test files]
+?   	github.com/juliosaraiva/patrol-cd/internal/diff/internal/gen/openapifixture	[no test files]
+ok  	github.com/juliosaraiva/patrol-cd/pkg/scm	4.313s
+ok  	github.com/juliosaraiva/patrol-cd/pkg/scm/awscodecommit	3.798s
+ok  	github.com/juliosaraiva/patrol-cd/pkg/scm/azuredevops	3.726s
+ok  	github.com/juliosaraiva/patrol-cd/pkg/scm/bitbucketcloud	2.825s
+ok  	github.com/juliosaraiva/patrol-cd/pkg/scm/bitbucketserver	5.539s
+?   	github.com/juliosaraiva/patrol-cd/pkg/scm/conformance	[no test files]
+ok  	github.com/juliosaraiva/patrol-cd/pkg/scm/fake	7.006s
+ok  	github.com/juliosaraiva/patrol-cd/pkg/scm/gitea	4.152s
+ok  	github.com/juliosaraiva/patrol-cd/pkg/scm/github	7.817s
+?   	github.com/juliosaraiva/patrol-cd/pkg/scm/github/internal/fakegithub	[no test files]
+ok  	github.com/juliosaraiva/patrol-cd/pkg/scm/gitlab	3.502s
+ok  	github.com/juliosaraiva/patrol-cd/pkg/scm/gogs	1.652s
+ok  	github.com/juliosaraiva/patrol-cd/internal/notifications	12.235s
+?   	github.com/juliosaraiva/patrol-cd/internal/notifications/catalog	[no test files]
+ok  	github.com/juliosaraiva/patrol-cd/internal/notifications/services	4.378s
+FAIL
+exit=1
+# 2026-10-13T05:23:39Z rerun internal/cache after test-race fix
+ok  	github.com/juliosaraiva/patrol-cd/internal/cache	16.937s
+exit=0

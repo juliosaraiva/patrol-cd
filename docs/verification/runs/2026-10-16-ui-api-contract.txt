@@ -1,0 +1,54 @@
+# UI ↔ published API contract reconciliation (ui/), 2026-10-16
+# Host: Darwin arm64, node v22.22.3, pnpm 10.33.0
+# api/openapi/openapi.json sha256 7b641710472eacb09fee860b5a23b7273b8ed9c3c4ae5c760e1c60dae7bb86bc
+
+$ pnpm -C ui gen:api (run 1)
+
+> @patrol-cd/ui@0.0.0 gen:api /Users/juliosaraiva/Developer/patrol-cd/ui
+> node scripts/gen-api-types.mjs
+
+wrote src/api/schema.d.ts: 86 paths, 148 schemas (source: api/openapi/openapi.json)
+exit=0
+23445010d672fda729b9b9074afafeb11c2c95a2a333100bae60a3d0959c6654  ui/src/api/schema.d.ts
+$ pnpm -C ui gen:api (run 2)
+
+> @patrol-cd/ui@0.0.0 gen:api /Users/juliosaraiva/Developer/patrol-cd/ui
+> node scripts/gen-api-types.mjs
+
+wrote src/api/schema.d.ts: 86 paths, 148 schemas (source: api/openapi/openapi.json)
+exit=0
+23445010d672fda729b9b9074afafeb11c2c95a2a333100bae60a3d0959c6654  ui/src/api/schema.d.ts
+$ diff run1 run2
+no diff
+$ pnpm -C ui gen:api:check
+
+> @patrol-cd/ui@0.0.0 gen:api:check /Users/juliosaraiva/Developer/patrol-cd/ui
+> node scripts/gen-api-types.mjs --check
+
+src/api/schema.d.ts is up to date (source: api/openapi/openapi.json)
+exit=0
+
+$ pnpm -C ui typecheck
+
+> @patrol-cd/ui@0.0.0 typecheck /Users/juliosaraiva/Developer/patrol-cd/ui
+> tsc -p tsconfig.json && tsc -p tsconfig.node.json
+
+exit=0
+$ pnpm -C ui lint
+
+> @patrol-cd/ui@0.0.0 lint /Users/juliosaraiva/Developer/patrol-cd/ui
+> eslint . --max-warnings=0
+
+exit=0
+
+$ pnpm -C ui test
+ Test Files  76 passed (76)
+      Tests  911 passed (911)
+   Duration  31.44s (transform 4.30s, setup 37.84s, collect 22.58s, tests 154.95s, environment 38.31s, prepare 5.44s)
+exit=0
+
+$ pnpm -C ui build
+vite v7.3.6 building client environment for production...
+✓ 651 modules transformed.
+✓ built in 2.37s
+exit=0

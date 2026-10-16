@@ -1,0 +1,31 @@
+# 2026-10-16T18:52:17Z go vet + go test -race -count=1 (Phase 3a/3b packages), envtest 1.36.0
+vet-exit=0
+ok  	github.com/juliosaraiva/patrol-cd/internal/apiserver	17.210s
+?   	github.com/juliosaraiva/patrol-cd/internal/apiserver/cmd/genopenapi	[no test files]
+ok  	github.com/juliosaraiva/patrol-cd/internal/apiserver/core	57.521s
+ok  	github.com/juliosaraiva/patrol-cd/internal/apiserver/openapi	8.105s
+ok  	github.com/juliosaraiva/patrol-cd/internal/apiserver/rest	9.207s
+ok  	github.com/juliosaraiva/patrol-cd/internal/apiserver/services/applications	73.447s
+ok  	github.com/juliosaraiva/patrol-cd/internal/apiserver/services/applicationsets	35.630s
+ok  	github.com/juliosaraiva/patrol-cd/internal/apiserver/services/badge	17.944s
+ok  	github.com/juliosaraiva/patrol-cd/internal/apiserver/services/clusters	23.780s
+ok  	github.com/juliosaraiva/patrol-cd/internal/apiserver/services/extensions	17.067s
+?   	github.com/juliosaraiva/patrol-cd/internal/apiserver/services/internal/miscapitest	[no test files]
+ok  	github.com/juliosaraiva/patrol-cd/internal/apiserver/services/links	2.069s
+ok  	github.com/juliosaraiva/patrol-cd/internal/apiserver/services/notifications	2.741s
+ok  	github.com/juliosaraiva/patrol-cd/internal/apiserver/services/projects	25.855s
+ok  	github.com/juliosaraiva/patrol-cd/internal/apiserver/services/repositories	22.341s
+ok  	github.com/juliosaraiva/patrol-cd/pkg/apiclient	2.326s
+ok  	github.com/juliosaraiva/patrol-cd/internal/cli	48.155s
+ok  	github.com/juliosaraiva/patrol-cd/internal/cli/admin	36.621s
+ok  	github.com/juliosaraiva/patrol-cd/internal/cli/app	50.031s
+?   	github.com/juliosaraiva/patrol-cd/internal/cli/clitest	[no test files]
+ok  	github.com/juliosaraiva/patrol-cd/internal/cli/cmdutil	1.763s
+ok  	github.com/juliosaraiva/patrol-cd/internal/cli/config	1.538s
+ok  	github.com/juliosaraiva/patrol-cd/internal/cli/output	1.292s
+ok  	github.com/juliosaraiva/patrol-cd/internal/cli/sso	3.541s
+ok  	github.com/juliosaraiva/patrol-cd/internal/cli/transport	3.917s
+ok  	github.com/juliosaraiva/patrol-cd/cmd/patrol	2.482s
+ok  	github.com/juliosaraiva/patrol-cd/internal/rbac	13.137s
+ok  	github.com/juliosaraiva/patrol-cd/internal/webhook	21.747s
+exit=0

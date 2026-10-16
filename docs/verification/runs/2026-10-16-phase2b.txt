@@ -1,0 +1,6 @@
+# 2026-10-16T14:49:24Z go vet + go test -race -count=1 (Phase 2b packages), envtest 1.36.0
+ok  	github.com/juliosaraiva/patrol-cd/internal/notifications/controller	67.421s
+ok  	github.com/juliosaraiva/patrol-cd/internal/webhook	43.243s
+ok  	github.com/juliosaraiva/patrol-cd/internal/hydrator	47.734s
+ok  	github.com/juliosaraiva/patrol-cd/internal/commitserver	17.304s
+exit=0

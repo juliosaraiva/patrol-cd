@@ -1,0 +1,111 @@
+# Server wiring: reviewer findings fixed (TLS default, static assets confinement, strict Dex TLS,
+# root path base href, bounded drain, commit-server client timeout/TLS) — 2026-10-16
+# Host: macOS arm64; Go 1.27.2; envtest kube-apiserver 1.36.0
+# (KUBEBUILDER_ASSETS=bin/envtest/k8s/1.36.0-darwin-arm64). $SP is the session scratchpad.
+
+## 1. New regression tests against the pre-fix code (temporary local revert, then restored)
+
+$ go test ./internal/server -run TestRunGroup -count=1      # old runGroup (blocking receive)
+--- FAIL: TestRunGroup/the_drain_is_bounded_after_a_later_cancellation (5.05s)
+    runtime_test.go:97: runGroup did not return within the drain bound after cancellation
+exit=1
+
+$ PATROL_REQUIRE_ENVTEST=1 go test ./internal/server -run 'TestServerRunDefaultTLS|TestServerRunRootPath|TestStaticAssets' -count=1 -v
+# with the old cipher pass-through, BaseHRef pass-through and os.DirFS overlay:
+--- FAIL: TestServerRunDefaultTLS (60.32s)
+    api: http2: TLSConfig.CipherSuites is missing an HTTP/2-required AES_128_GCM_SHA256 cipher (need at least one of TLS_ECDHE_RSA_WITH_AES_128_GCM_SHA256 or TLS_ECDHE_ECDSA_WITH_AES_128_GCM_SHA256)
+--- FAIL: TestServerRunRootPath (1.33s)
+    page does not contain <base href="/patrol/" /> (got <base href="/" />); session cookie Path "/" (want "/patrol");
+    no conflict warning; /patrol/leak.txt answered 200 with the outside file's content
+--- FAIL: TestStaticAssets
+    "operator index" served instead of the embedded index; leak.txt content "outside-secret" disclosed
+exit=1
+
+## 2. Final verification (fixed code)
+
+$ go version
+go version go1.27.2 darwin/arm64
+exit=0
+
+$ go build ./...
+exit=0
+
+$ go build -o $SP/patrolcd ./cmd/patrolcd
+exit=0
+
+$ go vet ./...
+exit=0
+
+$ golangci-lint run ./internal/server/... ./internal/ui/... ./cmd/patrolcd/...
+0 issues.
+exit=0
+
+$ env PATROL_REQUIRE_ENVTEST=1 go test -race -count=1 ./internal/server/... ./internal/ui/... ./cmd/patrolcd/...
+ok  	github.com/juliosaraiva/patrol-cd/internal/server	18.187s
+ok  	github.com/juliosaraiva/patrol-cd/internal/ui	1.524s
+ok  	github.com/juliosaraiva/patrol-cd/cmd/patrolcd	13.584s
+exit=0
+
+$ env PATROL_REQUIRE_ENVTEST=1 go test -race -count=3 ./internal/server/
+ok  	github.com/juliosaraiva/patrol-cd/internal/server	30.441s
+exit=0
+
+$ env PATROL_REQUIRE_ENVTEST=1 go test -count=1 -v ./internal/server/... ./internal/ui/... ./cmd/patrolcd/... (PASS/FAIL/SKIP counts, new tests)
+exit=0
+PASS: 77  FAIL: 0  SKIP: 0
+--- PASS: TestServerRunDefaultTLS (0.39s)
+--- PASS: TestServerRunRootPath (1.39s)
+--- PASS: TestEffectiveBaseHRef (0.00s)
+--- PASS: TestAPICipherSuites (0.00s)
+--- PASS: TestStaticAssets (0.01s)
+--- PASS: TestCommitServerClientTLS (0.01s)
+--- PASS: TestDexConnection (0.00s)
+    --- PASS: TestDexConnection/no_Dex (0.00s)
+    --- PASS: TestDexConnection/plaintext (0.00s)
+    --- PASS: TestDexConnection/default:_TLS_without_verification (0.00s)
+    --- PASS: TestDexConnection/strict (0.01s)
+    --- PASS: TestRunGroup/the_drain_is_bounded_after_a_later_cancellation (0.25s)
+--- PASS: TestCommitServerClientTimeout (0.30s)
+--- PASS: TestHelpGolden (1.26s)
+    --- PASS: TestHelpGolden/notifications-controller (1.03s)
+    --- PASS: TestHelpGolden/commit-server (0.03s)
+    --- PASS: TestHelpGolden/version (0.03s)
+    --- PASS: TestHelpGolden/root (0.02s)
+    --- PASS: TestHelpGolden/server (0.02s)
+    --- PASS: TestHelpGolden/controller (0.03s)
+    --- PASS: TestHelpGolden/appset-controller (0.03s)
+    --- PASS: TestHelpGolden/cmp-server (0.03s)
+    --- PASS: TestHelpGolden/k8s-auth (0.02s)
+    --- PASS: TestHelpGolden/repo-server (0.03s)
+
+## 3. Real binary against an envtest kube-apiserver (namespace patrol, CRDs installed)
+
+# $SP/runsrv.sh runs: $SP/patrolcd server --kubeconfig $SP/kubeconfig --namespace patrol --port 28080
+#   --metrics-port 28083 --repo-server 127.0.0.1:28081 --internal-token-file $SP/token
+#   --controller-tree-api-url http://127.0.0.1:28090 --logformat json <extra flags>
+# (port 18080 was taken on 127.0.0.1 by Docker Desktop, hence 28080.)
+
+$ runsrv.sh run1.log        # default parameters: TLS, server.tls.ciphers=TLS_ECDHE_RSA_WITH_AES_256_GCM_SHA384
+log: "TLS cipher suites lack the suites HTTP/2 requires; added them" configured=TLS_ECDHE_RSA_WITH_AES_256_GCM_SHA384 added=TLS_ECDHE_ECDSA_WITH_AES_128_GCM_SHA256:TLS_ECDHE_RSA_WITH_AES_128_GCM_SHA256
+$ curl -sk --http2 https://127.0.0.1:28080/healthz                              -> 200 HTTP/2, TLSv1.3 / TLS_AES_128_GCM_SHA256, ALPN h2
+$ curl -sk --http2 --tlsv1.2 --tls-max 1.2 https://127.0.0.1:28080/healthz      -> 200 HTTP/2, TLSv1.2 / ECDHE-ECDSA-AES128-GCM-SHA256, ALPN h2
+$ curl -sk -H 'Accept: text/html' https://127.0.0.1:28080/                      -> 200
+$ pkill -TERM -x patrolcd                                                       -> exit=0 within 1 s
+
+$ runsrv.sh run2.log --insecure --rootpath /patrol --staticassets $SP/static
+#   static/custom.css (file), static/passwd.css -> /etc/passwd, static/leak.txt -> $SP/outside.txt
+$ curl -s -H 'Accept: text/html' http://127.0.0.1:28080/patrol/ | grep base     -> <base href="/patrol/" />
+log: "--basehref and --rootpath had conflict: basehref: / rootpath: /patrol"
+$ curl -s http://127.0.0.1:28080/patrol/custom.css                              -> 200 "body{}"
+$ curl -s http://127.0.0.1:28080/patrol/passwd.css                              -> 404, no "root:" in the body
+$ curl -s http://127.0.0.1:28080/patrol/leak.txt                                -> 404 "404 page not found"
+$ curl -s -H 'Accept: text/html' http://127.0.0.1:28080/patrol/leak.txt         -> index page, no "secret"
+$ pkill -TERM -x patrolcd                                                       -> exit=0
+
+$ runsrv.sh run3.log --insecure --dex-server-strict-tls      # no files at /app/config/dex/tls
+Error: strict TLS to Dex (--dex-server-strict-tls): the Dex CA certificate is needed: read CA bundle: open /app/config/dex/tls/ca.crt: no such file or directory
+exit=1
+
+$ runsrv.sh run4.log --insecure --dex-server-strict-tls --dex-server-ca-cert-path $SP/dex/ca.crt --dex-server-cert-path $SP/dex/tls.crt
+$ curl -s http://127.0.0.1:28080/healthz                                        -> 200
+$ pkill -TERM -x patrolcd                                                       -> exit=0

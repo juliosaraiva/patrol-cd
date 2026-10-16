@@ -1,0 +1,86 @@
+# UI workstream create-appsets-ext, 2026-10-16, host in docs/verification/log.md (load average > 50 from parallel agents)
+
+$ pnpm -C ui typecheck   -> exit 0
+$ pnpm -C ui lint        -> exit 0
+
+$ pnpm -C ui test        -> exit 1
+ ✓ src/pages/applications/resources/graph/GraphCanvas.test.tsx (4 tests) 7760ms
+ ✓ src/pages/applications/sync/SyncPanel.test.tsx (8 tests) 14413ms
+ ✓ src/pages/applications/parameters/AppDetailsPanel.test.tsx (9 tests) 15722ms
+ ✓ src/pages/applications/ApplicationDetailsPage.test.tsx (16 tests) 17184ms
+ ✓ src/pages/applications/ApplicationsListPage.test.tsx (18 tests) 17619ms
+ ✓ src/pages/settings/repositories/RepositoriesPage.test.tsx (16 tests) 19430ms
+ ❯ src/shell/shell.test.tsx (39 tests | 2 failed) 20434ms
+ ✓ src/pages/settings/scmproviders/SCMProvidersPage.test.tsx (9 tests) 10863ms
+ ✓ src/pages/settings/projects/ProjectDetails.test.tsx (21 tests) 22344ms
+ ✓ src/pages/create/ApplicationCreateForm.test.tsx (14 tests) 22590ms
+ ✓ src/pages/applications/history/HistoryPanel.test.tsx (4 tests) 8619ms
+ ✓ src/pages/applicationsets/ApplicationSetDetailsPage.test.tsx (11 tests) 14972ms
+ ✓ src/pages/auth/login.test.tsx (17 tests) 7810ms
+ ✓ src/pages/applicationsets/ApplicationSetsListPage.test.tsx (10 tests) 10076ms
+ ✓ src/pages/applications/resources/ResourceViews.test.tsx (15 tests) 13390ms
+ ✓ src/pages/applications/operations/OperationPanel.test.tsx (6 tests) 14294ms
+ ✓ src/pages/settings/repocreds/RepoCredsPage.test.tsx (6 tests) 9716ms
+ ✓ src/pages/settings/clusters/Clusters.test.tsx (12 tests) 11125ms
+ ✓ src/pages/applications/resources/details/ResourceDetailsDrawer.test.tsx (19 tests) 19925ms
+ ✓ src/pages/settings/certificates/CertificatesPage.test.tsx (6 tests) 5954ms
+ ✓ src/api/queries/applications.test.tsx (7 tests) 2968ms
+ ✓ src/pages/settings/accounts/Accounts.test.tsx (7 tests) 5001ms
+ ✓ src/pages/applications/details/Integrations.test.tsx (3 tests) 5281ms
+ ✓ src/pages/notifications/SubscriptionEditor.test.tsx (11 tests) 5447ms
+ ✓ src/design/components/Table.test.tsx (7 tests) 3358ms
+ ✓ src/pages/applications/resources/details/LogsViewer.test.tsx (9 tests) 3515ms
+ ✓ src/pages/settings/projects/ProjectsPage.test.tsx (7 tests) 4806ms
+ ✓ src/pages/settings/SettingsPages.test.tsx (4 tests) 2421ms
+ ✓ src/pages/applications/resources/views/AppDiffPanel.test.tsx (8 tests) 2986ms
+ ✓ src/pages/applications/resources/model/model.test.ts (27 tests) 706ms
+ ✓ src/pages/applications/resources/details/TerminalPanel.test.tsx (6 tests) 1162ms
+ ✓ src/extensions/slots.test.tsx (13 tests) 1208ms
+ ✓ src/pages/settings/gpgkeys/GPGKeysPage.test.tsx (5 tests) 3205ms
+ ✓ src/pages/help/HelpPage.test.tsx (8 tests) 2069ms
+ ✓ src/design/components/Overlay.test.tsx (4 tests) 871ms
+ ✓ src/pages/applicationsets/parts.test.tsx (1 test) 2297ms
+ ✓ src/design/components/Menu.test.tsx (3 tests) 779ms
+ ✓ src/design/components/Navigation.test.tsx (4 tests) 840ms
+ ✓ src/design/components/Feedback.test.tsx (9 tests) 1036ms
+ ✓ src/app/App.test.tsx (1 test) 869ms
+ ✓ src/pages/notifications/NotificationsPage.test.tsx (3 tests) 1111ms
+ ✓ src/design/components/Data.test.tsx (9 tests) 811ms
+ ✓ src/design/components/Button.test.tsx (5 tests) 518ms
+ ✓ src/design/components/Tabs.test.tsx (2 tests) 816ms
+ ✓ src/design/components/Form.test.tsx (5 tests) 772ms
+ ✓ src/api/client.test.ts (22 tests) 172ms
+ ✓ src/shell/errors.test.tsx (9 tests) 520ms
+ ✓ src/pages/applicationsets/model.test.ts (8 tests) 66ms
+ ✓ src/api/sse.test.ts (16 tests) 161ms
+ ✓ src/design/status/Status.test.tsx (8 tests) 130ms
+ ✓ src/extensions/loader.test.ts (7 tests) 33ms
+ ✓ src/pages/create/model.test.ts (13 tests) 163ms
+ ✓ src/pages/notifications/subscriptions.test.ts (14 tests) 66ms
+ ✓ src/pages/applications/parameters/specEdit.test.ts (11 tests) 83ms
+ ✓ src/api/endpoints/endpoints.test.ts (7 tests) 165ms
+ ✓ src/extensions/proxy.test.ts (3 tests) 31ms
+ ✓ src/pages/applicationsets/diff.test.ts (4 tests) 93ms
+ ✓ src/design/theme.test.ts (4 tests) 54ms
+ ✓ src/extensions/registry.test.ts (6 tests) 18ms
+ ✓ src/pages/applications/list/filters.test.ts (11 tests) 15ms
+ ✓ src/pages/settings/common/settingsLogic.test.ts (18 tests) 161ms
+ ✓ src/pages/applicationsets/previews.test.ts (13 tests) 25ms
+ ✓ src/api/queries/watch.test.ts (4 tests) 37ms
+ ✓ src/pages/applications/shared/shared.test.ts (14 tests) 71ms
+ ✓ src/extensions/glob.test.ts (24 tests) 14ms
+ ✓ src/design/tokens.test.ts (42 tests) 23ms
+ ✓ src/pages/applications/sync/syncOptions.test.ts (7 tests) 53ms
+ ❯ src/shell/shell.test.tsx:57:19
+ ❯ src/shell/shell.test.tsx:82:18
+ FAIL  src/shell/shell.test.tsx > app shell > navigates between sections and builds nested breadcrumbs
+ FAIL  src/shell/shell.test.tsx > app shell > renders the planned-area page at /settings/accounts/admin
+ Test Files  1 failed | 67 passed (68)
+      Tests  2 failed | 695 passed (697)
+   Duration  63.75s (transform 6.04s, setup 70.68s, collect 34.95s, tests 341.25s, environment 75.36s, prepare 12.51s)
+
+$ pnpm -C ui build       -> exit 0
+✓ built in 2.43s
+
+$ go run ./hack/parity  -> exit 0, no warnings
+$ go run ./hack/parity -check -> exit 1 (matrix differs between consecutive generator runs: alias merge iterates a Go map, e.g. APP-038 impl order)

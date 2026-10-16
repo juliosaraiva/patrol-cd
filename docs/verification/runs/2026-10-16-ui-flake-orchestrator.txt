@@ -1,0 +1,12 @@
+## pnpm -C ui typecheck
+exit=0
+## pnpm -C ui lint
+exit=0
+## pnpm -C ui build
+exit=0
+## pnpm -C ui test (run 1)
+exit=0  Tests 912 passed (912) 
+## pnpm -C ui test (run 2)
+exit=0  Tests 912 passed (912) 
+## pnpm -C ui test (run 3)
+exit=0  Tests 912 passed (912) 

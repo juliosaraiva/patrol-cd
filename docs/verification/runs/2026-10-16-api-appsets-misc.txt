@@ -1,0 +1,353 @@
+# API services appsets-misc: ApplicationSets, notifications, badge, proxy extensions
+# Date: 2026-10-16T15:56:59Z  Host: Darwin arm64  go version go1.27.2 darwin/arm64
+# KUBEBUILDER_ASSETS=$PWD/bin/envtest/k8s/1.36.0-darwin-arm64 (envtest kube-apiserver 1.36.0)
+
+$ go build ./...
+exit status: 0
+
+$ go vet ./pkg/apiclient/ ./internal/apiserver/services/applicationsets/ ./internal/apiserver/services/notifications/ ./internal/apiserver/services/badge/ ./internal/apiserver/services/extensions/ ./internal/apiserver/services/internal/...
+exit status: 0
+
+$ golangci-lint run ./internal/apiserver/services/applicationsets/... ./internal/apiserver/services/notifications/... ./internal/apiserver/services/badge/... ./internal/apiserver/services/extensions/... ./internal/apiserver/services/internal/...
+0 issues.
+exit status: 0
+
+$ go test -race -count=1 -v ./internal/apiserver/services/applicationsets/ ./internal/apiserver/services/notifications/ ./internal/apiserver/services/badge/ ./internal/apiserver/services/extensions/   (PASS/FAIL/SKIP lines only)
+--- PASS: TestContinueTokenRoundTrip (0.00s)
+--- PASS: TestMergeMaps (0.00s)
+--- PASS: TestBuildTreeAndStatuses (0.00s)
+--- PASS: TestSameDesiredState (0.00s)
+--- PASS: TestRBACObject (0.00s)
+--- PASS: TestNamespaceEnabled (0.00s)
+--- PASS: TestUnavailableWithoutDependencies (0.02s)
+--- PASS: TestDryRunAndGenerate (2.40s)
+--- PASS: TestProjectFilter (0.00s)
+--- PASS: TestCreateValidation (2.42s)
+    --- PASS: TestCreateValidation/templated_project (0.12s)
+    --- PASS: TestCreateValidation/templated_generator_project (0.03s)
+    --- PASS: TestCreateValidation/unrecognized_generator (0.00s)
+    --- PASS: TestCreateValidation/missing_project (0.01s)
+    --- PASS: TestCreateValidation/namespace_not_enabled (0.02s)
+    --- PASS: TestCreateValidation/project_does_not_trust_the_namespace (0.01s)
+    --- PASS: TestCreateValidation/no_name (0.00s)
+--- PASS: TestSanitizeForCreate (0.00s)
+--- PASS: TestResourceTreeAndEvents (2.42s)
+--- PASS: TestGetNoExistenceOracle (2.49s)
+--- PASS: TestDeletePropagation (2.50s)
+--- PASS: TestWatch (0.28s)
+--- PASS: TestGenerateBounds (2.79s)
+--- PASS: TestUpsertProjectChange (0.41s)
+--- PASS: TestListFiltering (2.85s)
+    --- PASS: TestListFiltering/reader_sees_enabled_namespaces (0.02s)
+    --- PASS: TestListFiltering/alice_sees_team-a (0.02s)
+    --- PASS: TestListFiltering/bob_sees_team-b (0.01s)
+    --- PASS: TestListFiltering/tenant_user_sees_its_namespace (0.03s)
+    --- PASS: TestListFiltering/nobody_sees_nothing (0.02s)
+    --- PASS: TestListFiltering/project_filter (0.02s)
+    --- PASS: TestListFiltering/namespace_filter (0.04s)
+    --- PASS: TestListFiltering/disabled_namespace_filter (0.01s)
+    --- PASS: TestListFiltering/selector (0.08s)
+    --- PASS: TestListFiltering/sso_group (0.05s)
+--- PASS: TestUpsertAndIdempotentCreate (2.96s)
+--- PASS: TestCreateGetListDelete (0.49s)
+--- PASS: TestCreateAuthorization (0.56s)
+    --- PASS: TestCreateAuthorization/own_project (0.01s)
+    --- PASS: TestCreateAuthorization/other_project (0.04s)
+    --- PASS: TestCreateAuthorization/generator_template_escalates_to_another_project (0.09s)
+    --- PASS: TestCreateAuthorization/empty_project_is_default (0.01s)
+    --- PASS: TestCreateAuthorization/no_role (0.04s)
+    --- PASS: TestCreateAuthorization/read-only (0.03s)
+    --- PASS: TestCreateAuthorization/project_role_token (0.13s)
+    --- PASS: TestCreateAuthorization/project_role_token,_other_project (0.02s)
+    --- PASS: TestCreateAuthorization/tenant_user_in_its_namespace (0.09s)
+    --- PASS: TestCreateAuthorization/tenant_user_in_the_control_plane (0.01s)
+    --- PASS: TestCreateAuthorization/anonymous (0.01s)
+--- PASS: TestWatchPerEventAuthorization (3.37s)
+--- PASS: TestWatchRevokedPermissionStopsEvents (3.87s)
+ok  	github.com/juliosaraiva/patrol-cd/internal/apiserver/services/applicationsets	19.641s
+--- PASS: TestUnavailableWithoutSettings (0.03s)
+--- PASS: TestMissingConfigMapIsEmpty (0.05s)
+--- PASS: TestDisableDefaultCatalog (0.15s)
+--- PASS: TestListsConfiguredNamesWithCatalog (0.23s)
+--- PASS: TestNeverReturnsServiceConfigurationOrSecrets (0.26s)
+--- PASS: TestAuthorization (0.37s)
+--- PASS: TestInvalidConfigurationIs500AndRecovers (0.39s)
+ok  	github.com/juliosaraiva/patrol-cd/internal/apiserver/services/notifications	2.668s
+--- PASS: TestRenderEscapesAndStaysWellFormed (0.00s)
+--- PASS: TestRenderColorsAndGeometry (0.01s)
+--- PASS: TestBadgeUnavailableWithoutSettings (0.01s)
+--- PASS: TestBadgeValidation (0.10s)
+--- PASS: TestBadgeIsPublicAndIgnoresCredentials (0.16s)
+--- PASS: TestBadgeDisabledIs404WithoutLookup (0.16s)
+--- PASS: TestBadgeProjects (0.39s)
+    --- PASS: TestBadgeProjects/project=alpha (0.01s)
+    --- PASS: TestBadgeProjects/project=alpha&project=beta (0.02s)
+    --- PASS: TestBadgeProjects/project=gamma (0.01s)
+    --- PASS: TestBadgeProjects/project=ALPHA (0.01s)
+    --- PASS: TestBadgeProjects/project=alpha&appNamespace=apps-5d16e16d (0.01s)
+    --- PASS: TestBadgeProjects/name=a1&project=beta (0.01s)
+--- PASS: TestBadgeApplication (0.55s)
+    --- PASS: TestBadgeApplication/name=guestbook&revision=true (0.01s)
+    --- PASS: TestBadgeApplication/name=guestbook&revision=TRUE&keepFullRevision=true (0.01s)
+    --- PASS: TestBadgeApplication/name=guestbook&width=300 (0.01s)
+    --- PASS: TestBadgeApplication/name=guestbook&width=abc (0.01s)
+    --- PASS: TestBadgeApplication/name=guestbook&width=999999 (0.02s)
+    --- PASS: TestBadgeApplication/name=guestbook&showAppName=true (0.03s)
+    --- PASS: TestBadgeApplication/name=broken&revision=true (0.11s)
+    --- PASS: TestBadgeApplication/name=missing (0.06s)
+    --- PASS: TestBadgeApplication/name=tenant-app&appNamespace=apps-a7d4eced (0.02s)
+    --- PASS: TestBadgeApplication/name=tenant-app&namespace=apps-a7d4eced (0.01s)
+    --- PASS: TestBadgeApplication/name=hidden&appNamespace=off-d5652e04 (0.00s)
+    --- PASS: TestBadgeApplication/name=missing&showAppName=true&revision=true (0.00s)
+ok  	github.com/juliosaraiva/patrol-cd/internal/apiserver/services/badge	15.664s
+--- PASS: TestUnavailableWithoutDependencies (0.01s)
+--- PASS: TestProxyDisabled (2.42s)
+--- PASS: TestProxyForwardsWithHeaderContract (2.45s)
+--- PASS: TestProxyGoClientAndSSOIdentity (2.49s)
+--- PASS: TestProxyAuthorizationIsUniform (2.50s)
+    --- PASS: TestProxyAuthorizationIsUniform/no_extensions_invoke (0.00s)
+    --- PASS: TestProxyAuthorizationIsUniform/no_applications_get (0.00s)
+    --- PASS: TestProxyAuthorizationIsUniform/no_role_at_all (0.00s)
+    --- PASS: TestProxyAuthorizationIsUniform/missing_application (0.03s)
+    --- PASS: TestProxyAuthorizationIsUniform/project_mismatch (0.01s)
+    --- PASS: TestProxyAuthorizationIsUniform/header_project_differs_from_the_application (0.02s)
+    --- PASS: TestProxyAuthorizationIsUniform/destination_not_permitted (0.04s)
+    --- PASS: TestProxyAuthorizationIsUniform/namespace_not_permitted_by_the_project (0.01s)
+    --- PASS: TestProxyAuthorizationIsUniform/namespace_not_enabled (0.00s)
+    --- PASS: TestProxyAuthorizationIsUniform/project_token_cannot_invoke (0.00s)
+--- PASS: TestProxyCookieRequiresCSRFHeader (2.50s)
+--- PASS: TestProxyHeaderValidationAndUnknownExtension (2.54s)
+    --- PASS: TestProxyHeaderValidationAndUnknownExtension/missing_application_header (0.01s)
+    --- PASS: TestProxyHeaderValidationAndUnknownExtension/no_namespace_separator (0.01s)
+    --- PASS: TestProxyHeaderValidationAndUnknownExtension/too_many_separators (0.00s)
+    --- PASS: TestProxyHeaderValidationAndUnknownExtension/invalid_namespace (0.00s)
+    --- PASS: TestProxyHeaderValidationAndUnknownExtension/empty_namespace (0.00s)
+    --- PASS: TestProxyHeaderValidationAndUnknownExtension/invalid_name (0.00s)
+    --- PASS: TestProxyHeaderValidationAndUnknownExtension/missing_project (0.00s)
+    --- PASS: TestProxyHeaderValidationAndUnknownExtension/invalid_project (0.00s)
+--- PASS: TestProxyWebSocket (2.54s)
+--- PASS: TestProxyRoutesByDestination (2.58s)
+    --- PASS: TestProxyRoutesByDestination/guestbook (0.05s)
+    --- PASS: TestProxyRoutesByDestination/edge-app (0.04s)
+    --- PASS: TestProxyRoutesByDestination/edge-by-server (0.05s)
+--- PASS: TestProxyConfigReloadWithoutRestart (2.62s)
+--- PASS: TestProxyLimitsAndFailures (2.88s)
+ok  	github.com/juliosaraiva/patrol-cd/internal/apiserver/services/extensions	18.094s
+exit status: 0
+
+$ go test -race -count=1 ./pkg/apiclient/
+ok  	github.com/juliosaraiva/patrol-cd/pkg/apiclient	2.018s
+exit status: 0
+
+$ go run ./internal/apiserver/cmd/genopenapi -out <scratchpad>/openapi.json   (document generation with every registered service; the checked-in file is not touched)
+exit status: 0
+
+$ go test -count=1 ./internal/apiserver/   (expected: only TestOpenAPIUpToDate fails until the orchestrator regenerates api/openapi/openapi.json)
+--- FAIL: TestOpenAPIUpToDate (0.35s)
+    server_test.go:56: api/openapi/openapi.json is stale; run: go run ./internal/apiserver/cmd/genopenapi
+FAIL
+FAIL	github.com/juliosaraiva/patrol-cd/internal/apiserver	3.033s
+FAIL
+exit status: 1
+
+$ go run ./hack/parity
+exit status: 0
+
+================================================================================
+Review follow-up (2026-10-16): bounded generation, every-project RBAC on existing
+ApplicationSets, badge aggregation on a controller-runtime cache.
+Env: macOS arm64, go1.27.2, envtest kube-apiserver 1.36.0
+================================================================================
+
+$ go build ./...
+exit status: 0
+
+$ go vet ./pkg/apiclient/ ./internal/apiserver/services/{applicationsets,notifications,badge,extensions}/ ./internal/apiserver/services/internal/...
+exit status: 0
+
+$ golangci-lint run ./internal/apiserver/services/{applicationsets,notifications,badge,extensions,internal}/...
+0 issues.
+exit status: 0
+
+$ KUBEBUILDER_ASSETS=$PWD/bin/envtest/k8s/1.36.0-darwin-arm64 go test -race -count=1 -v ./internal/apiserver/services/{applicationsets,notifications,badge,extensions}/ ./pkg/apiclient/
+    generator_internal_test.go:159: application limit: 2.692767166s, 306 MB allocated
+--- PASS: TestBoundedGeneratorStopsAtApplicationLimit (2.72s)
+    generator_internal_test.go:177: deadline: 488.27475ms, 70 MB allocated
+--- PASS: TestBoundedGeneratorHonorsDeadline (0.52s)
+--- PASS: TestSanitizeForCreate (0.00s)
+--- PASS: TestDryRunAndGenerate (0.20s)
+--- PASS: TestContinueTokenRoundTrip (0.00s)
+--- PASS: TestProjectFilter (0.00s)
+--- PASS: TestRBACObject (0.00s)
+--- PASS: TestNamespaceEnabled (0.00s)
+--- PASS: TestCreateValidation (0.20s)
+    --- PASS: TestCreateValidation/templated_project (0.08s)
+    --- PASS: TestCreateValidation/templated_generator_project (0.00s)
+    --- PASS: TestCreateValidation/unrecognized_generator (0.00s)
+    --- PASS: TestCreateValidation/missing_project (0.01s)
+    --- PASS: TestCreateValidation/namespace_not_enabled (0.00s)
+    --- PASS: TestCreateValidation/project_does_not_trust_the_namespace (0.01s)
+    --- PASS: TestCreateValidation/no_name (0.00s)
+--- PASS: TestCreateGetListDelete (0.20s)
+--- PASS: TestUpsertProjectChange (0.21s)
+--- PASS: TestResourceTreeAndEvents (0.22s)
+--- PASS: TestGetNoExistenceOracle (0.22s)
+--- PASS: TestUnavailableWithoutDependencies (0.01s)
+--- PASS: TestMergeMaps (0.00s)
+--- PASS: TestBuildTreeAndStatuses (0.00s)
+--- PASS: TestBoundedBuffer (0.00s)
+--- PASS: TestSameDesiredState (0.00s)
+--- PASS: TestRBACObjects (0.00s)
+--- PASS: TestCreateAuthorization (0.24s)
+    --- PASS: TestCreateAuthorization/own_project (0.12s)
+    --- PASS: TestCreateAuthorization/other_project (0.00s)
+    --- PASS: TestCreateAuthorization/generator_template_escalates_to_another_project (0.00s)
+    --- PASS: TestCreateAuthorization/empty_project_is_default (0.01s)
+    --- PASS: TestCreateAuthorization/no_role (0.00s)
+    --- PASS: TestCreateAuthorization/read-only (0.00s)
+    --- PASS: TestCreateAuthorization/project_role_token (0.01s)
+    --- PASS: TestCreateAuthorization/project_role_token,_other_project (0.00s)
+    --- PASS: TestCreateAuthorization/tenant_user_in_its_namespace (0.01s)
+    --- PASS: TestCreateAuthorization/tenant_user_in_the_control_plane (0.01s)
+    --- PASS: TestCreateAuthorization/anonymous (0.00s)
+--- PASS: TestDeletePropagation (0.24s)
+--- PASS: TestWatchPerEventAuthorization (0.06s)
+--- PASS: TestUpsertAndIdempotentCreate (0.27s)
+--- PASS: TestWatch (0.08s)
+--- PASS: TestBoundedGeneratorMatchesAppset (0.00s)
+    --- PASS: TestBoundedGeneratorMatchesAppset/patched (0.01s)
+    --- PASS: TestBoundedGeneratorMatchesAppset/broken (0.00s)
+    --- PASS: TestBoundedGeneratorMatchesAppset/merge (0.00s)
+    --- PASS: TestBoundedGeneratorMatchesAppset/gotemplate (0.02s)
+    --- PASS: TestBoundedGeneratorMatchesAppset/selected (0.03s)
+    --- PASS: TestBoundedGeneratorMatchesAppset/fanout (0.08s)
+--- PASS: TestActionsOnExistingNeedEveryProject (0.15s)
+--- PASS: TestGenerateBounds (0.35s)
+--- PASS: TestListFiltering (0.18s)
+    --- PASS: TestListFiltering/reader_sees_enabled_namespaces (0.01s)
+    --- PASS: TestListFiltering/alice_sees_team-a (0.02s)
+    --- PASS: TestListFiltering/bob_sees_team-b (0.01s)
+    --- PASS: TestListFiltering/tenant_user_sees_its_namespace (0.01s)
+    --- PASS: TestListFiltering/nobody_sees_nothing (0.01s)
+    --- PASS: TestListFiltering/project_filter (0.01s)
+    --- PASS: TestListFiltering/namespace_filter (0.00s)
+    --- PASS: TestListFiltering/disabled_namespace_filter (0.00s)
+    --- PASS: TestListFiltering/selector (0.01s)
+    --- PASS: TestListFiltering/sso_group (0.00s)
+--- PASS: TestBoundedGeneratorLimits (0.20s)
+    --- PASS: TestBoundedGeneratorLimits/bytes (0.00s)
+    --- PASS: TestBoundedGeneratorLimits/applications (0.00s)
+    --- PASS: TestBoundedGeneratorLimits/parameter_sets_across_entries (0.14s)
+--- PASS: TestWatchRevokedPermissionStopsEvents (0.58s)
+--- PASS: TestGenerateBoundsRealGenerator (1.55s)
+ok  	github.com/juliosaraiva/patrol-cd/internal/apiserver/services/applicationsets	13.159s
+--- PASS: TestUnavailableWithoutSettings (0.02s)
+--- PASS: TestMissingConfigMapIsEmpty (0.03s)
+--- PASS: TestDisableDefaultCatalog (0.07s)
+--- PASS: TestNeverReturnsServiceConfigurationOrSecrets (0.12s)
+--- PASS: TestListsConfiguredNamesWithCatalog (0.13s)
+--- PASS: TestAuthorization (0.20s)
+--- PASS: TestInvalidConfigurationIs500AndRecovers (0.21s)
+ok  	github.com/juliosaraiva/patrol-cd/internal/apiserver/services/notifications	1.861s
+--- PASS: TestBadgeUnavailableWithoutSettings (0.01s)
+--- PASS: TestRenderColorsAndGeometry (0.01s)
+--- PASS: TestRenderEscapesAndStaysWellFormed (0.01s)
+--- PASS: TestBadgeValidation (0.12s)
+--- PASS: TestBadgeIsPublicAndIgnoresCredentials (0.15s)
+--- PASS: TestBadgeDisabledIs404WithoutLookup (0.18s)
+--- PASS: TestBadgeProjects (0.23s)
+    --- PASS: TestBadgeProjects/project=alpha (0.01s)
+    --- PASS: TestBadgeProjects/project=alpha&project=beta (0.01s)
+    --- PASS: TestBadgeProjects/project=gamma (0.00s)
+    --- PASS: TestBadgeProjects/project=ALPHA (0.01s)
+    --- PASS: TestBadgeProjects/project=alpha&appNamespace=apps-d3cea331 (0.00s)
+    --- PASS: TestBadgeProjects/name=a1&project=beta (0.01s)
+--- PASS: TestBadgeApplication (0.29s)
+    --- PASS: TestBadgeApplication/name=guestbook&revision=true (0.01s)
+    --- PASS: TestBadgeApplication/name=guestbook&revision=TRUE&keepFullRevision=true (0.00s)
+    --- PASS: TestBadgeApplication/name=guestbook&width=300 (0.01s)
+    --- PASS: TestBadgeApplication/name=guestbook&width=abc (0.00s)
+    --- PASS: TestBadgeApplication/name=guestbook&width=999999 (0.00s)
+    --- PASS: TestBadgeApplication/name=guestbook&showAppName=true (0.00s)
+    --- PASS: TestBadgeApplication/name=broken&revision=true (0.00s)
+    --- PASS: TestBadgeApplication/name=missing (0.02s)
+    --- PASS: TestBadgeApplication/name=tenant-app&appNamespace=apps-028258f9 (0.01s)
+    --- PASS: TestBadgeApplication/name=tenant-app&namespace=apps-028258f9 (0.01s)
+    --- PASS: TestBadgeApplication/name=hidden&appNamespace=off-2fd7dc67 (0.02s)
+    --- PASS: TestBadgeApplication/name=missing&showAppName=true&revision=true (0.01s)
+--- PASS: TestBadgeProjectsPaging (0.01s)
+    --- PASS: TestBadgeProjectsPaging/uncached (0.51s)
+    --- PASS: TestBadgeProjectsPaging/cache (0.83s)
+ok  	github.com/juliosaraiva/patrol-cd/internal/apiserver/services/badge	9.061s
+--- PASS: TestUnavailableWithoutDependencies (0.02s)
+--- PASS: TestProxyDisabled (2.18s)
+--- PASS: TestProxyAuthorizationIsUniform (2.23s)
+    --- PASS: TestProxyAuthorizationIsUniform/no_extensions_invoke (0.00s)
+    --- PASS: TestProxyAuthorizationIsUniform/no_applications_get (0.00s)
+    --- PASS: TestProxyAuthorizationIsUniform/no_role_at_all (0.00s)
+    --- PASS: TestProxyAuthorizationIsUniform/missing_application (0.00s)
+    --- PASS: TestProxyAuthorizationIsUniform/project_mismatch (0.00s)
+    --- PASS: TestProxyAuthorizationIsUniform/header_project_differs_from_the_application (0.00s)
+    --- PASS: TestProxyAuthorizationIsUniform/destination_not_permitted (0.02s)
+    --- PASS: TestProxyAuthorizationIsUniform/namespace_not_permitted_by_the_project (0.00s)
+    --- PASS: TestProxyAuthorizationIsUniform/namespace_not_enabled (0.00s)
+    --- PASS: TestProxyAuthorizationIsUniform/project_token_cannot_invoke (0.00s)
+--- PASS: TestProxyCookieRequiresCSRFHeader (2.24s)
+--- PASS: TestProxyGoClientAndSSOIdentity (2.24s)
+--- PASS: TestProxyHeaderValidationAndUnknownExtension (2.24s)
+    --- PASS: TestProxyHeaderValidationAndUnknownExtension/missing_application_header (0.00s)
+    --- PASS: TestProxyHeaderValidationAndUnknownExtension/no_namespace_separator (0.00s)
+    --- PASS: TestProxyHeaderValidationAndUnknownExtension/too_many_separators (0.00s)
+    --- PASS: TestProxyHeaderValidationAndUnknownExtension/invalid_namespace (0.00s)
+    --- PASS: TestProxyHeaderValidationAndUnknownExtension/empty_namespace (0.00s)
+    --- PASS: TestProxyHeaderValidationAndUnknownExtension/invalid_name (0.00s)
+    --- PASS: TestProxyHeaderValidationAndUnknownExtension/missing_project (0.00s)
+    --- PASS: TestProxyHeaderValidationAndUnknownExtension/invalid_project (0.00s)
+--- PASS: TestProxyForwardsWithHeaderContract (2.24s)
+--- PASS: TestProxyWebSocket (2.33s)
+--- PASS: TestProxyConfigReloadWithoutRestart (2.35s)
+--- PASS: TestProxyRoutesByDestination (2.33s)
+    --- PASS: TestProxyRoutesByDestination/guestbook (0.05s)
+    --- PASS: TestProxyRoutesByDestination/edge-app (0.09s)
+    --- PASS: TestProxyRoutesByDestination/edge-by-server (0.01s)
+--- PASS: TestProxyLimitsAndFailures (2.66s)
+ok  	github.com/juliosaraiva/patrol-cd/internal/apiserver/services/extensions	11.502s
+--- PASS: TestApplicationClientRequests (0.01s)
+--- PASS: TestApplicationWatchStream (0.00s)
+--- PASS: TestNewClientOptions (0.00s)
+--- PASS: TestInvokeExtensionClient (0.00s)
+--- PASS: TestProblemErrors (0.01s)
+--- PASS: TestDoBuildsRequests (0.02s)
+--- PASS: TestWatchApplicationSetsQuery (0.02s)
+--- PASS: TestBadgeClient (0.03s)
+--- PASS: TestStream (0.03s)
+--- PASS: TestNotificationClient (0.03s)
+--- PASS: TestApplicationSetClientRequests (0.03s)
+--- PASS: TestRepositoryClientRequests (0.03s)
+--- PASS: TestCoreMethods (0.03s)
+--- PASS: TestTimeout (0.05s)
+--- PASS: TestRetriesAndRenewal (0.76s)
+ok  	github.com/juliosaraiva/patrol-cd/pkg/apiclient	1.982s
+exit status: 0
+(73 top-level and 78 subtests passed, none failed or skipped)
+
+$ go test -overlay <scratchpad overlay> -run TestScratchUnboundedBaseline ./internal/apiserver/services/applicationsets/   (baseline: appset.NewAPIGenerator, same 12 x Matrix(141x141) input; overlay only, no repo file)
+    unbounded_internal_test.go:19: unbounded: 238572 apps, 5.809079041s, 4683 MB allocated
+exit status: 0
+
+$ go test -overlay <scratchpad overlay: badge/service.go from the index (pre-fix aggregation) + PageSize> -run TestBadgeProjectsPaging ./internal/apiserver/services/badge/   (new test against the old code)
+    WARN status badge: application list failed ... error="continue list option is not supported by the cache"
+    --- FAIL: TestBadgeProjectsPaging/cache (22.27s)  Condition never satisfied: project=alpha
+exit status: 1 (expected: the regression test detects the old behavior)
+
+$ go run ./internal/apiserver/cmd/genopenapi -out <scratchpad>/openapi.json
+exit status: 0
+
+$ go test -count=1 ./internal/apiserver/   (expected: only TestOpenAPIUpToDate fails until api/openapi/openapi.json is regenerated)
+--- FAIL: TestOpenAPIUpToDate
+    server_test.go:56: api/openapi/openapi.json is stale; run: go run ./internal/apiserver/cmd/genopenapi
+FAIL	github.com/juliosaraiva/patrol-cd/internal/apiserver
+exit status: 1
+
+$ go run ./hack/parity
+exit status: 0

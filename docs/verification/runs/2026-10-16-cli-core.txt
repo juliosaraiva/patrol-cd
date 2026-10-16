@@ -1,0 +1,247 @@
+# V-CLICORE-01 (2026-10-16) CLI core workstream
+# host: Darwin arm64; go version go1.27.2 darwin/arm64
+$ go build ./...
+exit=0
+$ go vet ./cmd/patrol ./internal/cli ./internal/cli/clitest ./internal/cli/cmdutil ./internal/cli/config ./internal/cli/output ./internal/cli/sso ./internal/cli/transport
+exit=0
+$ golangci-lint run ./cmd/patrol/... ./internal/cli ./internal/cli/clitest/... ./internal/cli/cmdutil/... ./internal/cli/config/... ./internal/cli/output/... ./internal/cli/sso/... ./internal/cli/transport/...
+0 issues.
+exit=0
+$ PATROL_REQUIRE_ENVTEST=1 KUBEBUILDER_ASSETS=bin/envtest/k8s/1.36.0-darwin-arm64 go test -race -count=1 -v -timeout 20m ./cmd/patrol ./internal/cli ./internal/cli/clitest ./internal/cli/cmdutil ./internal/cli/config ./internal/cli/output ./internal/cli/sso ./internal/cli/transport
+=== RUN   TestRegisteredGroups
+=== RUN   TestAdaptAdminErrors
+--- PASS: TestAdaptAdminErrors (0.00s)
+--- PASS: TestRegisteredGroups (0.07s)
+PASS
+ok  	github.com/juliosaraiva/patrol-cd/cmd/patrol	2.232s
+=== RUN   TestAccountCommands
+=== RUN   TestAccountAuthorization
+=== RUN   TestAccountUpdatePassword
+=== RUN   TestAccountBcrypt
+=== RUN   TestAccountSessionTokenWithoutLogin
+=== RUN   TestCertCommands
+=== RUN   TestGPGCommands
+=== RUN   TestClusterLifecycle
+=== RUN   TestDynamicCompletion
+=== RUN   TestPortForward
+=== RUN   TestProjectRoles
+=== RUN   TestProjectSyncWindows
+=== RUN   TestProjectSourceIntegrity
+=== RUN   TestProjectCreateGetListDelete
+=== RUN   TestProjectModifiers
+=== RUN   TestProjectEdit
+=== RUN   TestProjectAuthorization
+=== RUN   TestRepoCommands
+=== RUN   TestRepoAuthorization
+=== RUN   TestRepoCredsCommands
+=== RUN   TestHelpGolden
+=== RUN   TestInvalidInvocations
+=== RUN   TestVersionClient
+=== RUN   TestCompletionScripts
+=== RUN   TestPluginDispatch
+=== RUN   TestPluginRelativePathRefused
+--- PASS: TestPluginRelativePathRefused (0.00s)
+=== RUN   TestLoginContextsLogout
+=== RUN   TestLoginFailures
+=== RUN   TestLoginTLS
+=== RUN   TestServerAndTokenSources
+=== RUN   TestSSOLoginAndRefresh
+=== RUN   TestNoSecretsInLogs
+=== RUN   TestHarnessSmoke
+=== RUN   TestRootPath
+=== RUN   TestHTTPRetriesAndHeaders
+=== RUN   TestVersionServer
+--- PASS: TestDynamicCompletion (2.84s)
+--- PASS: TestProjectEdit (3.02s)
+--- PASS: TestGPGCommands (3.19s)
+--- PASS: TestRepoCommands (3.27s)
+--- PASS: TestProjectAuthorization (3.78s)
+--- PASS: TestCertCommands (3.85s)
+--- PASS: TestAccountCommands (3.88s)
+--- PASS: TestHTTPRetriesAndHeaders (3.96s)
+--- PASS: TestAccountSessionTokenWithoutLogin (0.00s)
+--- PASS: TestRepoAuthorization (1.41s)
+--- PASS: TestProjectSyncWindows (1.83s)
+--- PASS: TestPortForward (5.13s)
+--- PASS: TestProjectRoles (2.44s)
+--- PASS: TestAccountAuthorization (1.86s)
+--- PASS: TestProjectCreateGetListDelete (2.73s)
+--- PASS: TestProjectModifiers (6.04s)
+--- PASS: TestProjectSourceIntegrity (2.40s)
+--- PASS: TestVersionServer (1.96s)
+--- PASS: TestClusterLifecycle (3.76s)
+=== RUN   TestHelpGolden/cluster-add
+=== RUN   TestHelpGolden/configure
+=== RUN   TestHelpGolden/account-gen-token
+=== RUN   TestHelpGolden/logout
+=== RUN   TestHelpGolden/account
+=== RUN   TestHelpGolden/account-can-i
+=== RUN   TestHelpGolden/cert
+=== RUN   TestHelpGolden/gpg
+=== RUN   TestHelpGolden/repo
+=== RUN   TestHelpGolden/proj-windows
+=== RUN   TestHelpGolden/proj-source-integ
+=== RUN   TestHelpGolden/context
+=== RUN   TestHelpGolden/repo-add
+=== RUN   TestHelpGolden/repocreds-add
+=== RUN   TestHelpGolden/cluster
+=== RUN   TestHelpGolden/proj-windows-add
+=== RUN   TestHelpGolden/completion
+=== RUN   TestHelpGolden/proj-role-new-token
+=== RUN   TestHelpGolden/version
+=== RUN   TestHelpGolden/proj
+=== RUN   TestHelpGolden/proj-create
+=== RUN   TestHelpGolden/proj-role
+=== RUN   TestHelpGolden/root
+=== RUN   TestHelpGolden/login
+=== RUN   TestCompletionScripts/zsh
+=== RUN   TestCompletionScripts/fish
+=== RUN   TestCompletionScripts/powershell
+=== RUN   TestCompletionScripts/bash
+--- PASS: TestVersionClient (0.01s)
+=== RUN   TestInvalidInvocations/unknown_command
+=== RUN   TestInvalidInvocations/unknown_flag
+=== RUN   TestInvalidInvocations/bad_flag_value
+=== RUN   TestInvalidInvocations/missing_args_prints_help
+=== RUN   TestInvalidInvocations/missing_server
+=== RUN   TestInvalidInvocations/core_mode
+=== RUN   TestInvalidInvocations/client_cert_without_key
+=== RUN   TestInvalidInvocations/bad_header
+=== RUN   TestInvalidInvocations/bad_log_level
+=== RUN   TestInvalidInvocations/bad_log_format
+=== RUN   TestInvalidInvocations/PATROL_OPTS_unbalanced_quote
+=== RUN   TestInvalidInvocations/PATROL_OPTS_not_a_flag
+=== RUN   TestInvalidInvocations/undefined_context
+=== RUN   TestInvalidInvocations/bad_version_output
+=== RUN   TestInvalidInvocations/completion_shell
+--- PASS: TestPluginDispatch (0.27s)
+--- PASS: TestServerAndTokenSources (3.29s)
+--- PASS: TestHarnessSmoke (4.83s)
+--- PASS: TestHelpGolden (0.00s)
+    --- PASS: TestHelpGolden/cluster-add (0.00s)
+    --- PASS: TestHelpGolden/login (0.00s)
+    --- PASS: TestHelpGolden/root (0.00s)
+    --- PASS: TestHelpGolden/proj-create (0.00s)
+    --- PASS: TestHelpGolden/proj-role (0.00s)
+    --- PASS: TestHelpGolden/proj (0.00s)
+    --- PASS: TestHelpGolden/proj-role-new-token (0.00s)
+    --- PASS: TestHelpGolden/completion (0.00s)
+    --- PASS: TestHelpGolden/version (0.00s)
+    --- PASS: TestHelpGolden/cluster (0.02s)
+    --- PASS: TestHelpGolden/repocreds-add (0.00s)
+    --- PASS: TestHelpGolden/proj-windows-add (0.01s)
+    --- PASS: TestHelpGolden/repo-add (0.00s)
+    --- PASS: TestHelpGolden/context (0.00s)
+    --- PASS: TestHelpGolden/proj-windows (0.00s)
+    --- PASS: TestHelpGolden/proj-source-integ (0.00s)
+    --- PASS: TestHelpGolden/repo (0.00s)
+    --- PASS: TestHelpGolden/cert (0.00s)
+    --- PASS: TestHelpGolden/account-can-i (0.00s)
+    --- PASS: TestHelpGolden/gpg (0.00s)
+    --- PASS: TestHelpGolden/account (0.00s)
+    --- PASS: TestHelpGolden/logout (0.00s)
+    --- PASS: TestHelpGolden/account-gen-token (0.00s)
+    --- PASS: TestHelpGolden/configure (0.00s)
+--- PASS: TestCompletionScripts (0.00s)
+    --- PASS: TestCompletionScripts/zsh (0.00s)
+    --- PASS: TestCompletionScripts/bash (0.02s)
+    --- PASS: TestCompletionScripts/powershell (0.00s)
+    --- PASS: TestCompletionScripts/fish (0.00s)
+--- PASS: TestInvalidInvocations (0.00s)
+    --- PASS: TestInvalidInvocations/missing_server (0.00s)
+    --- PASS: TestInvalidInvocations/bad_version_output (0.00s)
+    --- PASS: TestInvalidInvocations/completion_shell (0.00s)
+    --- PASS: TestInvalidInvocations/undefined_context (0.01s)
+    --- PASS: TestInvalidInvocations/PATROL_OPTS_unbalanced_quote (0.00s)
+    --- PASS: TestInvalidInvocations/bad_log_format (0.00s)
+    --- PASS: TestInvalidInvocations/bad_log_level (0.00s)
+    --- PASS: TestInvalidInvocations/PATROL_OPTS_not_a_flag (0.00s)
+    --- PASS: TestInvalidInvocations/bad_header (0.00s)
+    --- PASS: TestInvalidInvocations/client_cert_without_key (0.00s)
+    --- PASS: TestInvalidInvocations/core_mode (0.00s)
+    --- PASS: TestInvalidInvocations/missing_args_prints_help (0.02s)
+    --- PASS: TestInvalidInvocations/bad_flag_value (0.01s)
+    --- PASS: TestInvalidInvocations/unknown_flag (0.00s)
+    --- PASS: TestInvalidInvocations/unknown_command (0.01s)
+--- PASS: TestRootPath (6.36s)
+--- PASS: TestSSOLoginAndRefresh (6.60s)
+--- PASS: TestAccountBcrypt (9.07s)
+--- PASS: TestRepoCredsCommands (4.05s)
+--- PASS: TestLoginContextsLogout (9.66s)
+--- PASS: TestLoginTLS (8.24s)
+--- PASS: TestLoginFailures (9.38s)
+--- PASS: TestNoSecretsInLogs (11.80s)
+--- PASS: TestAccountUpdatePassword (15.53s)
+PASS
+ok  	github.com/juliosaraiva/patrol-cd/internal/cli	32.956s
+=== RUN   TestParseOpts
+=== RUN   TestExitCodes
+=== RUN   TestPrompter
+=== RUN   TestDebugTransportRedacts
+--- PASS: TestParseOpts (0.00s)
+--- PASS: TestPrompter (0.00s)
+--- PASS: TestExitCodes (0.00s)
+--- PASS: TestDebugTransportRedacts (0.02s)
+PASS
+ok  	github.com/juliosaraiva/patrol-cd/internal/cli/cmdutil	1.764s
+=== RUN   TestWriteReadRoundTrip
+=== RUN   TestReadErrors
+=== RUN   TestContextOperations
+=== RUN   TestUserRedaction
+=== RUN   TestDefaultPath
+--- PASS: TestUserRedaction (0.00s)
+--- PASS: TestContextOperations (0.00s)
+--- PASS: TestDefaultPath (0.01s)
+--- PASS: TestWriteReadRoundTrip (0.06s)
+--- PASS: TestReadErrors (0.11s)
+PASS
+ok  	github.com/juliosaraiva/patrol-cd/internal/cli/config	1.475s
+=== RUN   TestSanitize
+=== RUN   TestPrinters
+=== RUN   TestTableAndPrint
+--- PASS: TestSanitize (0.00s)
+--- PASS: TestTableAndPrint (0.00s)
+--- PASS: TestPrinters (0.00s)
+PASS
+ok  	github.com/juliosaraiva/patrol-cd/internal/cli/output	1.324s
+=== RUN   TestLoginAndRefresh
+=== RUN   TestLoginWithoutBrowser
+=== RUN   TestLoginCallbackErrors
+=== RUN   TestLoginTimeoutAndCancel
+=== RUN   TestProviderFromSettings
+=== RUN   TestSameHost
+--- PASS: TestSameHost (0.00s)
+--- PASS: TestProviderFromSettings (0.00s)
+--- PASS: TestLoginWithoutBrowser (0.05s)
+=== RUN   TestLoginCallbackErrors/provider_error
+=== RUN   TestLoginCallbackErrors/bad_code
+=== RUN   TestLoginCallbackErrors/wrong_state
+=== RUN   TestLoginCallbackErrors/missing_code
+--- PASS: TestLoginCallbackErrors (0.29s)
+    --- PASS: TestLoginCallbackErrors/wrong_state (0.00s)
+    --- PASS: TestLoginCallbackErrors/provider_error (0.01s)
+    --- PASS: TestLoginCallbackErrors/missing_code (0.01s)
+    --- PASS: TestLoginCallbackErrors/bad_code (0.02s)
+--- PASS: TestLoginAndRefresh (0.32s)
+--- PASS: TestLoginTimeoutAndCancel (0.46s)
+PASS
+ok  	github.com/juliosaraiva/patrol-cd/internal/cli/sso	2.554s
+=== RUN   TestDirectAndUnavailable
+=== RUN   TestSelectReadyPod
+--- PASS: TestDirectAndUnavailable (0.00s)
+--- PASS: TestSelectReadyPod (0.92s)
+PASS
+ok  	github.com/juliosaraiva/patrol-cd/internal/cli/transport	2.815s
+(exit status of the filtered -v run not captured by the pipeline; see the rerun below)
+$ PATROL_REQUIRE_ENVTEST=1 KUBEBUILDER_ASSETS=bin/envtest/k8s/1.36.0-darwin-arm64 go test -race -count=1 -timeout 20m ./cmd/patrol ./internal/cli/...  # rerun, includes other workstreams app and admin packages
+ok  	github.com/juliosaraiva/patrol-cd/cmd/patrol	1.917s
+ok  	github.com/juliosaraiva/patrol-cd/internal/cli	28.981s
+ok  	github.com/juliosaraiva/patrol-cd/internal/cli/admin	27.876s
+ok  	github.com/juliosaraiva/patrol-cd/internal/cli/app	42.218s
+?   	github.com/juliosaraiva/patrol-cd/internal/cli/clitest	[no test files]
+ok  	github.com/juliosaraiva/patrol-cd/internal/cli/cmdutil	1.417s
+ok  	github.com/juliosaraiva/patrol-cd/internal/cli/config	1.193s
+ok  	github.com/juliosaraiva/patrol-cd/internal/cli/output	1.110s
+ok  	github.com/juliosaraiva/patrol-cd/internal/cli/sso	2.040s
+ok  	github.com/juliosaraiva/patrol-cd/internal/cli/transport	2.161s
+exit=0

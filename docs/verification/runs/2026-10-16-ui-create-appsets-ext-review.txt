@@ -1,0 +1,57 @@
+# UI workstream create-appsets-ext, review fixes, 2026-10-16 (host shared with parallel UI workstreams)
+
+$ pnpm -C ui typecheck   -> exit 0
+
+$ pnpm -C ui lint        -> exit 1
+ui/src/pages/applications/ApplicationLogsPage.tsx
+  28:57  error  Prefer using nullish coalescing operator (`??`) instead of a logical or (`||`), as it is a safer operator  @typescript-eslint/prefer-nullish-coalescing
+ui/src/pages/applications/parameters/specEdit.ts
+  246:5  error  Unsafe assignment of an `any` value  @typescript-eslint/no-unsafe-assignment
+✖ 2 problems (2 errors, 0 warnings)
+
+$ pnpm -C ui exec eslint src/pages/create src/pages/applicationsets src/pages/notifications src/pages/help src/extensions e2e/create-appsets-ext.spec.ts --max-warnings=0   -> exit 0
+
+$ pnpm -C ui test        -> exit 1
+ ✓ src/pages/applicationsets/ApplicationSetDetailsPage.test.tsx (11 tests)
+ ✓ src/pages/create/ApplicationCreateForm.test.tsx (15 tests)
+ ✓ src/pages/applicationsets/PreviewPanel.test.tsx (3 tests)
+ ❯ src/shell/shell.test.tsx (39 tests | 3 failed)
+ ✓ src/pages/applicationsets/ApplicationSetsListPage.test.tsx (10 tests)
+ ✓ src/pages/notifications/SubscriptionEditor.test.tsx (11 tests)
+ ✓ src/pages/applicationsets/parts.test.tsx (1 test)
+ ✓ src/pages/help/HelpPage.test.tsx (8 tests)
+ ✓ src/extensions/slots.test.tsx (13 tests)
+ ✓ src/pages/notifications/NotificationsCatalog.test.tsx (3 tests)
+ ✓ src/shell/errors.test.tsx (9 tests)
+ ✓ src/pages/applicationsets/diff.test.ts (6 tests)
+ ✓ src/extensions/loader.test.ts (7 tests)
+ ✓ src/pages/create/model.test.ts (25 tests)
+ ✓ src/pages/applicationsets/model.test.ts (8 tests)
+ ✓ src/pages/applicationsets/previews.test.ts (13 tests)
+ ✓ src/extensions/proxy.test.ts (3 tests)
+ ✓ src/extensions/registry.test.ts (6 tests)
+ ✓ src/pages/notifications/subscriptions.test.ts (14 tests)
+ ✓ src/extensions/glob.test.ts (24 tests)
+ FAIL  src/shell/shell.test.tsx > app shell > navigates between sections and builds nested breadcrumbs
+ ❯ src/shell/shell.test.tsx:57:19
+ FAIL  src/shell/shell.test.tsx > app shell > renders the planned-area page at /applications/guestbook/default/app/logs
+ ❯ shellReady src/shell/shell.test.tsx:24:17
+ ❯ src/shell/shell.test.tsx:82:18
+ FAIL  src/shell/shell.test.tsx > app shell > renders the planned-area page at /settings/accounts/admin
+ ❯ shellReady src/shell/shell.test.tsx:24:17
+ ❯ src/shell/shell.test.tsx:82:18
+⎯⎯⎯⎯⎯⎯⎯ Failed Tests 3 ⎯⎯⎯⎯⎯⎯⎯
+ Test Files  1 failed | 71 passed (72)
+      Tests  3 failed | 739 passed (742)
+
+$ pnpm -C ui build       -> exit 0
+✓ built in 2.47s
+
+$ go run ./hack/parity   -> exit 0 (regenerated matrix.md; only this overlay's rows changed: ASET-126, API-091, API-111, API-120, API-122, API-123, area 08 counts)
+$ go run ./hack/parity -check -> exit 0
+
+Failure causes (not this workstream's code):
+- shell.test.tsx expects the placeholder headings "Cluster list is planned", "Logs: guestbook" and
+  "Account"; the settings and applications workstreams replaced those placeholders with real pages.
+- lint errors are in ui/src/pages/applications (apps-core workstream files edited during this run).
+This workstream: 18 files / 181 tests passed (vitest + Testing Library + MSW mocks).

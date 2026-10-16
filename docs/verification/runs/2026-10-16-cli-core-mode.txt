@@ -1,0 +1,182 @@
+# CLI core mode (API-055) verification run, 2026-10-16. Commands run from the repository root
+# with PATROL_REQUIRE_ENVTEST=1 and KUBEBUILDER_ASSETS=bin/envtest/k8s/1.36.0-darwin-arm64 for the go test steps.
+
+date: 2026-10-16T21:56:40Z; go version go1.27.2 darwin/arm64; envtest kube-apiserver 1.36.0
+$ go build ./...
+exit=0
+
+$ go vet ./internal/cli/core/... ./internal/cli/transport/... ./internal/cli/cmdutil/... ./internal/server/... ./cmd/patrol/...
+exit=0
+
+$ golangci-lint run ./internal/cli/core/... ./internal/cli/transport/... ./internal/cli/cmdutil/... ./internal/server/... ./cmd/patrol/...
+0 issues.
+exit=0
+
+$ go test -race -count=1 ./internal/cli/... ./internal/server/... ./cmd/patrol/...
+ok  	github.com/juliosaraiva/patrol-cd/internal/cli	24.415s
+ok  	github.com/juliosaraiva/patrol-cd/internal/cli/admin	29.016s
+ok  	github.com/juliosaraiva/patrol-cd/internal/cli/app	39.834s
+?   	github.com/juliosaraiva/patrol-cd/internal/cli/clitest	[no test files]
+ok  	github.com/juliosaraiva/patrol-cd/internal/cli/cmdutil	1.452s
+ok  	github.com/juliosaraiva/patrol-cd/internal/cli/config	1.220s
+ok  	github.com/juliosaraiva/patrol-cd/internal/cli/core	21.569s
+ok  	github.com/juliosaraiva/patrol-cd/internal/cli/output	1.194s
+ok  	github.com/juliosaraiva/patrol-cd/internal/cli/sso	2.182s
+ok  	github.com/juliosaraiva/patrol-cd/internal/cli/transport	2.287s
+ok  	github.com/juliosaraiva/patrol-cd/internal/server	24.914s
+ok  	github.com/juliosaraiva/patrol-cd/cmd/patrol	2.215s
+exit=0
+
+$ go test -race -count=1 -v -run TestCore|TestDiagnosticWriter|TestConflicting|TestUnsupported|TestRegistrar|TestHandlerTransport|TestPodRouter|TestPortForwardRouting|TestEndpoint|TestNamespaceAnd|TestPodDialer ./internal/cli/core/ ./internal/cli/transport/ ./internal/server/
+=== RUN   TestEndpointValidation
+=== PAUSE TestEndpointValidation
+=== RUN   TestEndpointsFromEnvNeedsTheGate
+=== PAUSE TestEndpointsFromEnvNeedsTheGate
+=== RUN   TestNamespaceAndDestinations
+=== PAUSE TestNamespaceAndDestinations
+=== RUN   TestPodRouterRepoServer
+=== PAUSE TestPodRouterRepoServer
+=== RUN   TestPodRouterController
+=== PAUSE TestPodRouterController
+=== RUN   TestPortForwardRouting
+=== PAUSE TestPortForwardRouting
+=== RUN   TestCoreAppLifecycle
+--- PASS: TestCoreAppLifecycle (6.03s)
+=== RUN   TestCoreKubernetesRBACIsTheAuthorization
+--- PASS: TestCoreKubernetesRBACIsTheAuthorization (0.54s)
+=== RUN   TestHandlerTransportServesRequests
+=== PAUSE TestHandlerTransportServesRequests
+=== RUN   TestHandlerTransportStreams
+=== PAUSE TestHandlerTransportStreams
+=== RUN   TestHandlerTransportCancel
+=== PAUSE TestHandlerTransportCancel
+=== RUN   TestHandlerTransportWebSocket
+=== PAUSE TestHandlerTransportWebSocket
+=== RUN   TestConflictingFlags
+=== PAUSE TestConflictingFlags
+=== RUN   TestUnsupportedCommands
+=== PAUSE TestUnsupportedCommands
+=== RUN   TestRegistrarKeepsAnExistingProvider
+=== PAUSE TestRegistrarKeepsAnExistingProvider
+=== RUN   TestCoreConnectionInProcessAndCleanShutdown
+--- PASS: TestCoreConnectionInProcessAndCleanShutdown (0.30s)
+=== CONT  TestEndpointValidation
+=== CONT  TestHandlerTransportServesRequests
+=== CONT  TestPodRouterController
+=== CONT  TestHandlerTransportStreams
+=== CONT  TestConflictingFlags
+=== CONT  TestRegistrarKeepsAnExistingProvider
+=== CONT  TestUnsupportedCommands
+=== CONT  TestHandlerTransportWebSocket
+=== CONT  TestHandlerTransportCancel
+=== CONT  TestPortForwardRouting
+--- PASS: TestEndpointValidation (0.00s)
+=== CONT  TestNamespaceAndDestinations
+--- PASS: TestHandlerTransportWebSocket (0.00s)
+=== CONT  TestPodRouterRepoServer
+--- PASS: TestRegistrarKeepsAnExistingProvider (0.00s)
+=== CONT  TestEndpointsFromEnvNeedsTheGate
+--- PASS: TestHandlerTransportServesRequests (0.00s)
+--- PASS: TestNamespaceAndDestinations (0.01s)
+--- PASS: TestEndpointsFromEnvNeedsTheGate (0.00s)
+--- PASS: TestHandlerTransportStreams (0.01s)
+--- PASS: TestConflictingFlags (0.03s)
+--- PASS: TestPortForwardRouting (0.04s)
+--- PASS: TestUnsupportedCommands (0.05s)
+--- PASS: TestHandlerTransportCancel (0.10s)
+--- PASS: TestPodRouterController (0.55s)
+--- PASS: TestPodRouterRepoServer (0.55s)
+PASS
+ok  	github.com/juliosaraiva/patrol-cd/internal/cli/core	18.032s
+=== RUN   TestPodDialerArgumentsAndClose
+=== PAUSE TestPodDialerArgumentsAndClose
+=== CONT  TestPodDialerArgumentsAndClose
+--- PASS: TestPodDialerArgumentsAndClose (0.00s)
+PASS
+ok  	github.com/juliosaraiva/patrol-cd/internal/cli/transport	1.452s
+=== RUN   TestCoreConfigValidate
+=== PAUSE TestCoreConfigValidate
+=== RUN   TestCoreDialTargets
+=== PAUSE TestCoreDialTargets
+=== RUN   TestCoreHandlerEnvtest
+--- PASS: TestCoreHandlerEnvtest (3.15s)
+=== RUN   TestCoreHandlerDegrades
+--- PASS: TestCoreHandlerDegrades (1.57s)
+=== RUN   TestCoreRoutesMatchTheServer
+--- PASS: TestCoreRoutesMatchTheServer (0.05s)
+=== RUN   TestDiagnosticWriter
+=== PAUSE TestDiagnosticWriter
+=== CONT  TestCoreConfigValidate
+=== CONT  TestCoreDialTargets
+=== CONT  TestDiagnosticWriter
+--- PASS: TestCoreConfigValidate (0.00s)
+--- PASS: TestCoreDialTargets (0.00s)
+--- PASS: TestDiagnosticWriter (0.00s)
+PASS
+ok  	github.com/juliosaraiva/patrol-cd/internal/server	12.769s
+exit=0
+
+$ go run ./hack/parity
+exit=0
+
+$ go run ./hack/parity -check
+exit=0
+
+DONE
+
+# After renaming internal/cli/core/kubeconfig.go to kubecontexts.go (the .gitignore pattern kubeconfig* excluded it; content unchanged):
+$ go build ./...
+exit=0
+$ go vet ./internal/cli/core/...
+exit=0
+$ golangci-lint run ./internal/cli/core/...
+0 issues.
+exit=0
+$ PATROL_REQUIRE_ENVTEST=1 KUBEBUILDER_ASSETS=bin/envtest/k8s/1.36.0-darwin-arm64 go test -race -count=1 ./internal/cli/core/ ./cmd/patrol/
+ok  	github.com/juliosaraiva/patrol-cd/internal/cli/core	17.981s
+ok  	github.com/juliosaraiva/patrol-cd/cmd/patrol	2.541s
+exit=0
+
+# Review round (V-CLICOREMODE-02): cluster connector with the caller's credentials; kubectl flags persistent on the command groups; ApplicationSet lists scoped to the Patrol namespace.
+# Regression checks before the fix (temporary revert, restored afterwards):
+#  - internal/server/core.go with clustersvc.NewConnector: TestCoreClusterConnectionsUseCallerCredentials FAILED; the stand-in destination received
+#    "GET /version auth=Bearer <stored service-account token>" on a rename and "GET /api/v1/namespaces/kube-system/secrets/patrol-manager-token-abcde auth=Bearer <stored token>" on rotate-auth.
+#  - internal/cli/cmdutil/kube.go as committed (local flags): TestKubectlFlagsOnSubcommands FAILED with "unknown shorthand flag: 'n' in -n".
+#  - TestCoreNamespaceFlag first run: `appset list -n <ns>` failed with "cannot list resource \"applicationsets\" ... at the cluster scope" for a namespace-scoped user; fixed by coreNamespaceScoped.
+$ go test -count=1 -run TestHelpGolden ./internal/cli/ -update   (11 golden files: kubectl flags now listed under Global Flags of subcommands)
+$ go run ./hack/parity
+exit=0
+$ go run ./hack/parity -check
+exit=0
+$ go build ./...
+exit=0
+$ go vet ./internal/cli/... ./internal/server/... ./cmd/patrol/...
+exit=0
+$ golangci-lint run ./internal/cli/core/... ./internal/cli/cmdutil/... ./internal/server/...
+0 issues.
+exit=0
+$ KUBEBUILDER_ASSETS=/Users/juliosaraiva/Developer/patrol-cd/bin/envtest/k8s/1.36.0-darwin-arm64 go test -race -count=1 ./internal/cli/... ./internal/server/... ./cmd/patrol/...
+ok  	github.com/juliosaraiva/patrol-cd/internal/cli	29.710s
+ok  	github.com/juliosaraiva/patrol-cd/internal/cli/admin	32.539s
+ok  	github.com/juliosaraiva/patrol-cd/internal/cli/app	44.340s
+?   	github.com/juliosaraiva/patrol-cd/internal/cli/clitest	[no test files]
+ok  	github.com/juliosaraiva/patrol-cd/internal/cli/cmdutil	1.609s
+ok  	github.com/juliosaraiva/patrol-cd/internal/cli/config	1.313s
+ok  	github.com/juliosaraiva/patrol-cd/internal/cli/core	24.611s
+ok  	github.com/juliosaraiva/patrol-cd/internal/cli/output	1.351s
+ok  	github.com/juliosaraiva/patrol-cd/internal/cli/sso	2.970s
+ok  	github.com/juliosaraiva/patrol-cd/internal/cli/transport	3.897s
+ok  	github.com/juliosaraiva/patrol-cd/internal/server	25.446s
+ok  	github.com/juliosaraiva/patrol-cd/cmd/patrol	2.562s
+exit=0
+$ PATROL_REQUIRE_ENVTEST=1 KUBEBUILDER_ASSETS=... go test -race -count=1 -v -run 'TestCoreClusterConnectionsUseCallerCredentials|TestCoreNamespaceFlag|TestCoreClusterCommandsUseCallerCredentials|TestKubectlFlagsOnSubcommands|TestHelpGolden' ./internal/server/ ./internal/cli/core/ ./internal/cli/
+--- PASS: TestCoreClusterConnectionsUseCallerCredentials (2.22s)
+--- PASS: TestCoreNamespaceFlag (6.65s)
+--- PASS: TestCoreClusterCommandsUseCallerCredentials (0.34s)
+--- PASS: TestKubectlFlagsOnSubcommands (0.04s)
+--- PASS: TestHelpGolden (0.00s)
+exit=0
+# Built binary (env -i HOME=<scratch> KUBECONFIG=<missing>): `patrol --core app list -n foo`, `patrol --core -n patrol-staging app get web`, `patrol --core proj list -n foo`,
+# `patrol --core repo list --namespace foo`, `patrol --core app list --kubeconfig <missing>` -> "core mode: load kubeconfig: invalid configuration: no configuration has been provided ..." (exit 20);
+# `patrol --core app list --context x` -> "core mode: load kubeconfig: context \"x\" does not exist" (exit 20). No "unknown flag" errors.
+DONE

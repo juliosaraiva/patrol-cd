@@ -1,0 +1,39 @@
+## pnpm -C ui gen:api:check
+
+> @patrol-cd/ui@0.0.0 gen:api:check /Users/juliosaraiva/Developer/patrol-cd/ui
+> node scripts/gen-api-types.mjs --check
+
+src/api/schema.d.ts is up to date (source: api/openapi/openapi.json)
+exit=0
+## pnpm -C ui typecheck
+
+> @patrol-cd/ui@0.0.0 typecheck /Users/juliosaraiva/Developer/patrol-cd/ui
+> tsc -p tsconfig.json && tsc -p tsconfig.node.json
+
+exit=0
+## pnpm -C ui lint
+
+> @patrol-cd/ui@0.0.0 lint /Users/juliosaraiva/Developer/patrol-cd/ui
+> eslint . --max-warnings=0
+
+exit=0
+## pnpm -C ui test
+      Tests  911 passed (911)
+     Errors  1 error
+   Start at  16:40:11
+   Duration  29.71s (transform 4.35s, setup 36.95s, collect 20.82s, tests 146.19s, environment 35.86s, prepare 5.32s)
+
+ ELIFECYCLE  Test failed. See above for more details.
+exit=1
+## pnpm -C ui build
+dist/assets/ResourceViews-CRgf5wbr.js               78.76 kB │ gzip:  26.49 kB
+dist/assets/ApplicationDetailsPage-bp3wR2Om.js      97.09 kB │ gzip:  29.51 kB
+dist/assets/public-api-Bw0Keo12.js                  97.37 kB │ gzip:  30.44 kB
+dist/assets/TerminalPanel-CjYz0afQ.js              335.16 kB │ gzip:  85.40 kB
+dist/assets/index-B9jv0fLH.js                      414.85 kB │ gzip: 132.29 kB
+✓ built in 2.16s
+exit=0
+## go run ./hack/parity -check
+exit=0
+## genopenapi -check
+exit=0

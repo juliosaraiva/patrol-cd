@@ -1,0 +1,33 @@
+# 2026-10-16T17:28:02Z go vet + go test -race -count=1 (Phase 1b + 2a packages), envtest 1.36.0
+vet-exit=0
+ok  	github.com/juliosaraiva/patrol-cd/internal/repository	17.957s
+ok  	github.com/juliosaraiva/patrol-cd/internal/render	14.918s
+ok  	github.com/juliosaraiva/patrol-cd/internal/render/cmpwire	1.862s
+ok  	github.com/juliosaraiva/patrol-cd/internal/render/jsonnet	5.483s
+ok  	github.com/juliosaraiva/patrol-cd/internal/cmp	48.433s
+ok  	github.com/juliosaraiva/patrol-cd/internal/reposerver	43.015s
+ok  	github.com/juliosaraiva/patrol-cd/internal/reposerver/apiclient	1.608s
+ok  	github.com/juliosaraiva/patrol-cd/internal/compare	20.513s
+?   	github.com/juliosaraiva/patrol-cd/internal/controller	[no test files]
+ok  	github.com/juliosaraiva/patrol-cd/internal/controller/app	7.863s
+ok  	github.com/juliosaraiva/patrol-cd/internal/controller/core	7.424s
+ok  	github.com/juliosaraiva/patrol-cd/internal/controller/integration	118.638s
+ok  	github.com/juliosaraiva/patrol-cd/internal/controller/operation	6.064s
+ok  	github.com/juliosaraiva/patrol-cd/internal/controller/retention	6.307s
+ok  	github.com/juliosaraiva/patrol-cd/internal/controller/sharding	75.944s
+ok  	github.com/juliosaraiva/patrol-cd/internal/controller/treeapi	2.457s
+ok  	github.com/juliosaraiva/patrol-cd/internal/appset	47.836s
+ok  	github.com/juliosaraiva/patrol-cd/internal/appset/generators	9.790s
+ok  	github.com/juliosaraiva/patrol-cd/internal/appset/template	61.486s
+ok  	github.com/juliosaraiva/patrol-cd/internal/apiserver/rest	15.772s
+ok  	github.com/juliosaraiva/patrol-cd/internal/apiserver/core	87.131s
+ok  	github.com/juliosaraiva/patrol-cd/internal/apiserver/openapi	11.835s
+ok  	github.com/juliosaraiva/patrol-cd/internal/settings	25.278s
+ok  	github.com/juliosaraiva/patrol-cd/internal/project	27.814s
+ok  	github.com/juliosaraiva/patrol-cd/internal/tracking	12.053s
+ok  	github.com/juliosaraiva/patrol-cd/internal/clusters	20.347s
+?   	github.com/juliosaraiva/patrol-cd/internal/clusters/internal/fakecloud	[no test files]
+ok  	github.com/juliosaraiva/patrol-cd/internal/clusters/k8sauth	2.484s
+ok  	github.com/juliosaraiva/patrol-cd/internal/sync	17.216s
+ok  	github.com/juliosaraiva/patrol-cd/pkg/apiclient	2.309s
+exit=0

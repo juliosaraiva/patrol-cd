@@ -1,0 +1,43 @@
+# 2026-10-16T21:41:28Z PATROL_INTEGRATION=1 go test -count=1 -timeout 60m ./test/integration/... (harness: lifecycle + recovery + stack self-test)
+=== RUN   TestGuestbookLifecycle
+--- PASS: TestGuestbookLifecycle (22.03s)
+=== RUN   TestPruneOnlyTrackedResources
+--- PASS: TestPruneOnlyTrackedResources (10.73s)
+=== RUN   TestSyncOptions
+=== RUN   TestSyncOptions/CreateNamespace_with_managed_namespace_metadata
+=== RUN   TestSyncOptions/ServerSideApply
+=== RUN   TestSyncOptions/Replace
+=== RUN   TestSyncOptions/Force
+=== RUN   TestSyncOptions/PruneLast
+=== RUN   TestSyncOptions/ApplyOutOfSyncOnly
+=== RUN   TestSyncOptions/Validate=false
+--- PASS: TestSyncOptions (23.35s)
+=== RUN   TestSyncWavesOrdering
+--- PASS: TestSyncWavesOrdering (14.14s)
+=== RUN   TestFailedSyncRetryAndRecovery
+--- PASS: TestFailedSyncRetryAndRecovery (19.30s)
+=== RUN   TestTerminateOperation
+--- PASS: TestTerminateOperation (6.41s)
+=== RUN   TestRollbackAndHistoryLimit
+--- PASS: TestRollbackAndHistoryLimit (9.15s)
+=== RUN   TestDeletion
+--- PASS: TestDeletion (9.68s)
+=== RUN   TestOnboardingThroughAPI
+--- PASS: TestOnboardingThroughAPI (9.06s)
+=== RUN   TestControllerRestartMidSync
+--- PASS: TestControllerRestartMidSync (14.67s)
+=== RUN   TestCacheLossMidOperation
+--- PASS: TestCacheLossMidOperation (9.54s)
+=== RUN   TestDestinationUnreachable
+--- PASS: TestDestinationUnreachable (66.60s)
+=== RUN   TestRepoServerDown
+--- PASS: TestRepoServerDown (13.09s)
+=== RUN   TestAPIConflictInjection
+--- PASS: TestAPIConflictInjection (49.24s)
+=== RUN   TestStackStarts
+--- PASS: TestStackStarts (5.39s)
+=== RUN   TestEveryDestinationKind
+--- PASS: TestEveryDestinationKind (8.72s)
+PASS
+ok  	github.com/juliosaraiva/patrol-cd/test/integration	294.365s
+exit=0

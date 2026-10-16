@@ -1,0 +1,40 @@
+## pnpm -C ui typecheck
+
+> @patrol-cd/ui@0.0.0 typecheck /Users/juliosaraiva/Developer/patrol-cd/ui
+> tsc -p tsconfig.json && tsc -p tsconfig.node.json
+
+exit=0
+## pnpm -C ui lint
+
+> @patrol-cd/ui@0.0.0 lint /Users/juliosaraiva/Developer/patrol-cd/ui
+> eslint . --max-warnings=0
+
+exit=0
+## pnpm -C ui test
+ ✓ src/pages/notifications/subscriptions.test.ts (14 tests) 15ms
+ ✓ src/extensions/loader.test.ts (7 tests) 40ms
+ ✓ src/api/queries/watch.test.ts (4 tests) 13ms
+ ✓ src/design/tokens.test.ts (42 tests) 67ms
+ ✓ src/pages/applications/list/filters.test.ts (11 tests) 17ms
+ ✓ scripts/api-routes.test.mjs (4 tests) 4ms
+
+ Test Files  73 passed (73)
+      Tests  756 passed (756)
+   Start at  12:07:22
+   Duration  54.80s (transform 5.98s, setup 71.21s, collect 36.38s, tests 259.12s, environment 77.58s, prepare 11.59s)
+
+exit=0
+## pnpm -C ui build
+dist/assets/SyncOptionsFields-AqrWp0BI.js           17.78 kB │ gzip:   6.81 kB
+dist/assets/SCMProvidersPage-ChRIM9ZZ.js            19.77 kB │ gzip:   6.59 kB
+dist/assets/RepositoryForm-OBTFK0pk.js              20.74 kB │ gzip:   6.95 kB
+dist/assets/ApplicationSetDetailsPage-Cmme1o5u.js   39.92 kB │ gzip:  13.07 kB
+dist/assets/ProjectDetailsPage-B7pYi_1_.js          54.46 kB │ gzip:  17.11 kB
+dist/assets/ApplicationsListPage-BL_yCQnj.js        73.05 kB │ gzip:  23.42 kB
+dist/assets/ResourceViews-DYJWg558.js               78.81 kB │ gzip:  26.52 kB
+dist/assets/public-api-Bw0Keo12.js                  97.37 kB │ gzip:  30.44 kB
+dist/assets/ApplicationDetailsPage-CtdYvtBs.js     107.79 kB │ gzip:  33.35 kB
+dist/assets/TerminalPanel-D6xp9MFI.js              335.14 kB │ gzip:  85.40 kB
+dist/assets/index-DL5k29jv.js                      400.89 kB │ gzip: 127.81 kB
+✓ built in 2.63s
+exit=0

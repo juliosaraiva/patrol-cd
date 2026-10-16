@@ -1,0 +1,10 @@
+# 2026-10-16T22:54:10Z re-verify after lint fixes
+0 issues.
+lint-full-exit=0
+ok  	github.com/juliosaraiva/patrol-cd/internal/sandbox	5.896s
+ok  	github.com/juliosaraiva/patrol-cd/internal/appset	17.342s
+ok  	github.com/juliosaraiva/patrol-cd/internal/appset/generators	5.012s
+ok  	github.com/juliosaraiva/patrol-cd/internal/appset/template	15.036s
+ok  	github.com/juliosaraiva/patrol-cd/internal/git	14.999s
+test-exit=0
+parity-exit=0

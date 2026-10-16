@@ -1,0 +1,136 @@
+# 2026-10-16T22:36:35Z FULL-TREE Phase 3 verification (orchestrator)
+## gofmt
+gofmt-exit=0
+## go build ./...
+build-exit=0
+## go vet ./...
+vet-exit=0
+## genopenapi -check
+genopenapi-exit=0
+## parity -check
+parity-exit=0
+## make verify-generated
+generated files are up to date
+verify-generated-exit=0
+## golangci-lint run ./...
+				return ctrl.Result{Requeue: true}, nil
+				                   ^
+internal/appset/reconciler_test.go:332:17: SA1019: (sigs.k8s.io/controller-runtime.Result).Requeue is deprecated: Use `RequeueAfter` instead. (staticcheck)
+	assert.True(t, res.Requeue, "a conflict requeues")
+	               ^
+internal/appset/reconciler_test.go:343:18: SA1019: (sigs.k8s.io/controller-runtime.Result).Requeue is deprecated: Use `RequeueAfter` instead. (staticcheck)
+	assert.False(t, res.Requeue)
+	                ^
+internal/git/repo.go:160:19: QF1001: could apply De Morgan's law (staticcheck)
+		if e.IsDir() || !(strings.HasPrefix(name, "tmp_pack_") || strings.HasPrefix(name, "tmp_idx_") ||
+		                ^
+6 issues:
+* errcheck: 1
+* ineffassign: 1
+* staticcheck: 4
+lint-exit=1
+## go test -race -p 4 ./... (envtest + example tools required)
+ok  	github.com/juliosaraiva/patrol-cd/api/v1alpha1	11.493s
+ok  	github.com/juliosaraiva/patrol-cd/cmd/patrol	1.976s
+ok  	github.com/juliosaraiva/patrol-cd/cmd/patrolcd	25.355s
+?   	github.com/juliosaraiva/patrol-cd/hack/parity	[no test files]
+ok  	github.com/juliosaraiva/patrol-cd/internal/apiserver	6.872s
+?   	github.com/juliosaraiva/patrol-cd/internal/apiserver/cmd/genopenapi	[no test files]
+ok  	github.com/juliosaraiva/patrol-cd/internal/apiserver/core	25.880s
+ok  	github.com/juliosaraiva/patrol-cd/internal/apiserver/openapi	8.210s
+ok  	github.com/juliosaraiva/patrol-cd/internal/apiserver/rest	7.307s
+ok  	github.com/juliosaraiva/patrol-cd/internal/apiserver/services/applications	50.506s
+ok  	github.com/juliosaraiva/patrol-cd/internal/apiserver/services/applicationsets	12.702s
+ok  	github.com/juliosaraiva/patrol-cd/internal/apiserver/services/badge	10.405s
+ok  	github.com/juliosaraiva/patrol-cd/internal/apiserver/services/clusters	11.110s
+ok  	github.com/juliosaraiva/patrol-cd/internal/apiserver/services/extensions	9.806s
+?   	github.com/juliosaraiva/patrol-cd/internal/apiserver/services/internal/miscapitest	[no test files]
+ok  	github.com/juliosaraiva/patrol-cd/internal/apiserver/services/links	1.753s
+ok  	github.com/juliosaraiva/patrol-cd/internal/apiserver/services/notifications	1.965s
+ok  	github.com/juliosaraiva/patrol-cd/internal/apiserver/services/projects	13.419s
+ok  	github.com/juliosaraiva/patrol-cd/internal/apiserver/services/repositories	9.405s
+ok  	github.com/juliosaraiva/patrol-cd/internal/apiserver/services/webhooks	2.337s
+ok  	github.com/juliosaraiva/patrol-cd/internal/appset	12.415s
+ok  	github.com/juliosaraiva/patrol-cd/internal/appset/generators	4.639s
+ok  	github.com/juliosaraiva/patrol-cd/internal/appset/template	8.748s
+ok  	github.com/juliosaraiva/patrol-cd/internal/auth	4.499s
+ok  	github.com/juliosaraiva/patrol-cd/internal/auth/oidc	2.155s
+ok  	github.com/juliosaraiva/patrol-cd/internal/auth/revocation	2.567s
+ok  	github.com/juliosaraiva/patrol-cd/internal/cache	9.153s
+ok  	github.com/juliosaraiva/patrol-cd/internal/cli	26.418s
+ok  	github.com/juliosaraiva/patrol-cd/internal/cli/admin	25.141s
+ok  	github.com/juliosaraiva/patrol-cd/internal/cli/app	41.788s
+?   	github.com/juliosaraiva/patrol-cd/internal/cli/clitest	[no test files]
+ok  	github.com/juliosaraiva/patrol-cd/internal/cli/cmdutil	1.455s
+ok  	github.com/juliosaraiva/patrol-cd/internal/cli/config	1.232s
+ok  	github.com/juliosaraiva/patrol-cd/internal/cli/core	18.387s
+ok  	github.com/juliosaraiva/patrol-cd/internal/cli/output	1.238s
+ok  	github.com/juliosaraiva/patrol-cd/internal/cli/sso	2.109s
+ok  	github.com/juliosaraiva/patrol-cd/internal/cli/transport	2.175s
+ok  	github.com/juliosaraiva/patrol-cd/internal/clusters	13.974s
+?   	github.com/juliosaraiva/patrol-cd/internal/clusters/internal/fakecloud	[no test files]
+ok  	github.com/juliosaraiva/patrol-cd/internal/clusters/k8sauth	1.771s
+ok  	github.com/juliosaraiva/patrol-cd/internal/cmp	10.936s
+ok  	github.com/juliosaraiva/patrol-cd/internal/commitserver	7.908s
+ok  	github.com/juliosaraiva/patrol-cd/internal/compare	8.166s
+?   	github.com/juliosaraiva/patrol-cd/internal/controller	[no test files]
+ok  	github.com/juliosaraiva/patrol-cd/internal/controller/app	2.408s
+ok  	github.com/juliosaraiva/patrol-cd/internal/controller/core	2.359s
+ok  	github.com/juliosaraiva/patrol-cd/internal/controller/integration	87.110s
+ok  	github.com/juliosaraiva/patrol-cd/internal/controller/operation	2.321s
+ok  	github.com/juliosaraiva/patrol-cd/internal/controller/retention	2.385s
+ok  	github.com/juliosaraiva/patrol-cd/internal/controller/sharding	23.057s
+ok  	github.com/juliosaraiva/patrol-cd/internal/controller/treeapi	1.756s
+ok  	github.com/juliosaraiva/patrol-cd/internal/diff	19.577s
+?   	github.com/juliosaraiva/patrol-cd/internal/diff/internal/gen/knowntypes	[no test files]
+?   	github.com/juliosaraiva/patrol-cd/internal/diff/internal/gen/openapifixture	[no test files]
+ok  	github.com/juliosaraiva/patrol-cd/internal/git	18.066s
+ok  	github.com/juliosaraiva/patrol-cd/internal/health	1.610s
+ok  	github.com/juliosaraiva/patrol-cd/internal/helm	2.754s
+ok  	github.com/juliosaraiva/patrol-cd/internal/hydrator	20.053s
+ok  	github.com/juliosaraiva/patrol-cd/internal/lua	7.862s
+ok  	github.com/juliosaraiva/patrol-cd/internal/notifications	2.505s
+?   	github.com/juliosaraiva/patrol-cd/internal/notifications/catalog	[no test files]
+ok  	github.com/juliosaraiva/patrol-cd/internal/notifications/controller	50.657s
+ok  	github.com/juliosaraiva/patrol-cd/internal/notifications/services	1.670s
+ok  	github.com/juliosaraiva/patrol-cd/internal/oci	1.611s
+?   	github.com/juliosaraiva/patrol-cd/internal/oci/ocitest	[no test files]
+ok  	github.com/juliosaraiva/patrol-cd/internal/project	10.977s
+ok  	github.com/juliosaraiva/patrol-cd/internal/rbac	3.243s
+ok  	github.com/juliosaraiva/patrol-cd/internal/render	8.600s
+ok  	github.com/juliosaraiva/patrol-cd/internal/render/cmpwire	1.431s
+ok  	github.com/juliosaraiva/patrol-cd/internal/render/jsonnet	3.707s
+ok  	github.com/juliosaraiva/patrol-cd/internal/reposerver	9.055s
+ok  	github.com/juliosaraiva/patrol-cd/internal/reposerver/apiclient	1.353s
+ok  	github.com/juliosaraiva/patrol-cd/internal/repository	9.817s
+ok  	github.com/juliosaraiva/patrol-cd/internal/sandbox	5.445s
+ok  	github.com/juliosaraiva/patrol-cd/internal/server	22.176s
+ok  	github.com/juliosaraiva/patrol-cd/internal/settings	7.076s
+ok  	github.com/juliosaraiva/patrol-cd/internal/sync	7.740s
+ok  	github.com/juliosaraiva/patrol-cd/internal/tracking	4.374s
+ok  	github.com/juliosaraiva/patrol-cd/internal/ui	1.330s
+ok  	github.com/juliosaraiva/patrol-cd/internal/webhook	13.708s
+ok  	github.com/juliosaraiva/patrol-cd/pkg/apiclient	2.090s
+ok  	github.com/juliosaraiva/patrol-cd/pkg/scm	1.640s
+ok  	github.com/juliosaraiva/patrol-cd/pkg/scm/awscodecommit	1.488s
+ok  	github.com/juliosaraiva/patrol-cd/pkg/scm/azuredevops	1.442s
+ok  	github.com/juliosaraiva/patrol-cd/pkg/scm/bitbucketcloud	1.674s
+ok  	github.com/juliosaraiva/patrol-cd/pkg/scm/bitbucketserver	1.493s
+?   	github.com/juliosaraiva/patrol-cd/pkg/scm/conformance	[no test files]
+ok  	github.com/juliosaraiva/patrol-cd/pkg/scm/fake	1.806s
+ok  	github.com/juliosaraiva/patrol-cd/pkg/scm/gitea	1.606s
+ok  	github.com/juliosaraiva/patrol-cd/pkg/scm/github	2.584s
+?   	github.com/juliosaraiva/patrol-cd/pkg/scm/github/internal/fakegithub	[no test files]
+ok  	github.com/juliosaraiva/patrol-cd/pkg/scm/gitlab	1.518s
+ok  	github.com/juliosaraiva/patrol-cd/pkg/scm/gogs	1.355s
+ok  	github.com/juliosaraiva/patrol-cd/test/examples	13.866s
+ok  	github.com/juliosaraiva/patrol-cd/test/integration	636.331s
+?   	github.com/juliosaraiva/patrol-cd/test/integration/stack	[no test files]
+test-exit=0
+## ui
+ui gen:api:check exit=0 
+ui typecheck exit=0 
+ui lint exit=0 
+ui test exit=0  Tests 912 passed (912)
+ui build exit=0 
+DONE
