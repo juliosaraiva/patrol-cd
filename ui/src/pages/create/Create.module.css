@@ -1,0 +1,168 @@
+.form {
+  display: grid;
+  gap: var(--space-8);
+  min-width: 0;
+}
+
+.modeBar {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-4);
+}
+
+.fieldset,
+.sourceFieldset,
+.subFieldset {
+  display: grid;
+  gap: var(--space-6);
+  min-width: 0;
+  margin: 0;
+  padding: 0;
+  border: 0;
+}
+
+.sourceFieldset {
+  position: relative;
+  padding: var(--space-6);
+  border: var(--border-width) solid var(--color-border);
+  border-radius: var(--radius-md);
+}
+
+.subFieldset {
+  gap: var(--space-5);
+}
+
+.legend {
+  margin-bottom: var(--space-5);
+  padding: 0;
+  font-size: var(--text-lg);
+  font-weight: var(--weight-semibold);
+}
+
+.subLegend,
+.label {
+  margin-bottom: var(--space-3);
+  padding: 0;
+  font-size: var(--text-sm);
+  font-weight: var(--weight-semibold);
+}
+
+.row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-5);
+  min-width: 0;
+}
+
+.row > * {
+  flex: 1 1 180px;
+  min-width: 0;
+}
+
+.row > .grow {
+  flex: 3 1 280px;
+}
+
+.stack {
+  display: grid;
+  gap: var(--space-5);
+  min-width: 0;
+}
+
+.checks {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(260px, 1fr));
+  gap: var(--space-4) var(--space-6);
+}
+
+.checkGroup {
+  display: grid;
+  gap: var(--space-3);
+  margin: 0;
+  padding: 0;
+  border: 0;
+}
+
+.switches {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-6);
+}
+
+.sourceActions {
+  position: absolute;
+  top: var(--space-4);
+  right: var(--space-4);
+}
+
+.paramTable {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(240px, 1fr));
+  gap: var(--space-4) var(--space-5);
+}
+
+.inlineRow {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-4);
+  grid-column: 1 / -1;
+}
+
+.inlineRow > * {
+  flex: 1 1 160px;
+  min-width: 0;
+}
+
+.inlineRow > .alignEnd {
+  flex: 0 0 auto;
+  align-self: flex-end;
+}
+
+.inline {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-3);
+}
+
+.yaml {
+  min-height: 420px;
+  font-size: var(--text-xs);
+  line-height: 1.5;
+}
+
+.muted {
+  margin: 0;
+  color: var(--color-text-muted);
+  font-size: var(--text-sm);
+}
+
+.error {
+  margin: 0;
+  color: var(--color-danger);
+  font-size: var(--text-sm);
+}
+
+.summary {
+  display: grid;
+  gap: var(--space-4);
+}
+
+.summary:focus {
+  outline: none;
+}
+
+.summary:focus-visible {
+  outline: var(--focus-ring-width) solid var(--color-focus);
+  outline-offset: var(--focus-ring-offset);
+}
+
+.errorList {
+  margin: 0;
+  padding-left: var(--space-7);
+}
+
+.inlineActions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-4);
+}

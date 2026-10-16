@@ -1,0 +1,87 @@
+.status {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-3);
+  min-width: 0;
+  font-size: var(--text-sm);
+  line-height: var(--leading-tight);
+  color: var(--color-text);
+  white-space: nowrap;
+  vertical-align: middle;
+}
+
+.glyph {
+  display: inline-flex;
+  flex: none;
+}
+
+.label {
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+/* Sync: comparison glyph inside a bordered square. */
+.syncBox {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  flex: none;
+  width: 16px;
+  height: 16px;
+  border: var(--border-width) solid currentColor;
+  border-radius: var(--radius-sm);
+}
+
+/* Operation: glyph and label together in a bordered tag. */
+.operation {
+  padding: 1px var(--space-3) 1px var(--space-2);
+  border: var(--border-width) solid var(--color-border);
+  border-radius: var(--radius-md);
+  background: var(--color-surface);
+  font-size: var(--text-xs);
+  font-weight: var(--weight-medium);
+  gap: var(--space-2);
+}
+
+.healthHealthy,
+.syncSynced,
+.opSucceeded,
+.connSuccessful {
+  --status-color: var(--status-healthy);
+}
+
+.healthProgressing,
+.opRunning {
+  --status-color: var(--status-progressing);
+}
+
+.healthDegraded,
+.opFailed,
+.opError,
+.connFailed {
+  --status-color: var(--status-degraded);
+}
+
+.healthSuspended {
+  --status-color: var(--status-suspended);
+}
+
+.healthMissing,
+.syncOutOfSync,
+.opTerminating,
+.opRejected {
+  --status-color: var(--status-missing);
+}
+
+.healthUnknown,
+.syncUnknown,
+.opPending,
+.opCancelled,
+.connUnknown {
+  --status-color: var(--status-unknown);
+}
+
+.status .glyph,
+.status .syncBox {
+  color: var(--status-color);
+}

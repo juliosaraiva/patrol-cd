@@ -1,0 +1,303 @@
+/* Shared layout for the Settings pages. Tokens only; no new colors. */
+
+.stack {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-7);
+  min-width: 0;
+}
+
+.stackTight {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-4);
+  min-width: 0;
+}
+
+.toolbar {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: flex-end;
+  gap: var(--space-4);
+}
+
+.toolbarGrow {
+  flex: 1 1 220px;
+  min-width: 0;
+}
+
+.toolbarField {
+  flex: 0 1 180px;
+  min-width: 140px;
+}
+
+.actions {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--space-3);
+}
+
+.section {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-5);
+  min-width: 0;
+}
+
+.sectionHeader {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: var(--space-4);
+}
+
+.sectionTitle {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+  min-width: 0;
+}
+
+.muted {
+  color: var(--color-text-muted);
+  font-size: var(--text-sm);
+}
+
+.small {
+  font-size: var(--text-xs);
+  color: var(--color-text-muted);
+}
+
+.form {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-6);
+  min-width: 0;
+}
+
+.formGrid {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr);
+  gap: var(--space-6);
+}
+
+@media (min-width: 640px) {
+  .formGrid {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
+  .span2 {
+    grid-column: 1 / -1;
+  }
+}
+
+.fieldset {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-4);
+  min-width: 0;
+  margin: 0;
+  padding: 0;
+  border: 0;
+}
+
+.legend {
+  padding: 0;
+  margin-bottom: var(--space-2);
+  font-size: var(--text-sm);
+  font-weight: var(--weight-medium);
+}
+
+.listRows {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-3);
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.listRow {
+  display: flex;
+  align-items: flex-start;
+  gap: var(--space-3);
+  min-width: 0;
+}
+
+.listRowFields {
+  display: grid;
+  flex: 1;
+  grid-template-columns: minmax(0, 1fr);
+  gap: var(--space-3);
+  min-width: 0;
+}
+
+@media (min-width: 560px) {
+  .listRowFields[data-columns='2'] {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
+  .listRowFields[data-columns='3'] {
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+  }
+}
+
+/* Visible field labels of multi-field rows: a header row on wide screens, per-input labels when
+   the fields stack (narrow screens). */
+.listHead {
+  display: none;
+  gap: var(--space-3);
+  color: var(--color-text-muted);
+  font-size: var(--text-xs);
+  font-weight: var(--weight-medium);
+}
+
+.listHeadSpacer {
+  flex: none;
+  width: var(--control-height-sm);
+}
+
+.columnLabel,
+.cellLabel {
+  overflow-wrap: anywhere;
+}
+
+.listCell {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+  min-width: 0;
+}
+
+.cellLabel {
+  color: var(--color-text-muted);
+  font-size: var(--text-xs);
+  font-weight: var(--weight-medium);
+}
+
+@media (min-width: 560px) {
+  .listHead {
+    display: flex;
+  }
+
+  .listHead > .listRowFields {
+    flex: 1;
+  }
+
+  .cellLabel {
+    display: none;
+  }
+}
+
+.rowError {
+  margin: 0;
+  color: var(--color-danger);
+  font-size: var(--text-xs);
+}
+
+/* Wide tables keep readable columns and scroll inside their bordered wrapper on small screens. */
+.wideTable table {
+  min-width: 960px;
+}
+
+.extraWideTable table {
+  min-width: 1080px;
+}
+
+.widestTable table {
+  min-width: 1240px;
+}
+
+.mediumTable table {
+  min-width: 560px;
+}
+
+.summary {
+  outline: none;
+}
+
+.summary ul {
+  margin: var(--space-2) 0 0;
+  padding-left: var(--space-7);
+}
+
+.summary a {
+  color: inherit;
+}
+
+.tokenValue {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-3);
+}
+
+.tagList {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-2);
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.preview {
+  margin: 0;
+  padding: 0;
+  list-style: none;
+  font-size: var(--text-sm);
+}
+
+.preview li + li {
+  margin-top: var(--space-2);
+}
+
+.truncate {
+  display: block;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.inlineStatus {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-3);
+  min-width: 0;
+  max-width: 100%;
+}
+
+.inlineStatus > :first-child {
+  flex: none;
+}
+
+.inlineStatus > :last-child:not(:first-child) {
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.loading {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-4);
+}
+
+.details {
+  border: var(--border-width) solid var(--color-border);
+  border-radius: var(--radius-md);
+  padding: var(--space-4) var(--space-5);
+}
+
+.details > summary {
+  cursor: pointer;
+  font-weight: var(--weight-medium);
+}
+
+.details[open] > summary {
+  margin-bottom: var(--space-4);
+}
+
+.methodTabs {
+  min-width: 0;
+}

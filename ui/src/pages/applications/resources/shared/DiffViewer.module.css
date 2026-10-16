@@ -1,0 +1,131 @@
+.root {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-3);
+  min-width: 0;
+}
+
+.stats {
+  margin: 0;
+  font-size: var(--text-sm);
+  font-weight: var(--weight-medium);
+}
+
+.added {
+  color: var(--color-success);
+}
+
+.removed {
+  color: var(--color-danger);
+}
+
+.scroll {
+  overflow: auto;
+  border: var(--border-width) solid var(--color-border);
+  border-radius: var(--radius-md);
+  background: var(--color-surface);
+}
+
+.scroll:focus-visible {
+  outline: var(--focus-ring-width) solid var(--color-focus);
+  outline-offset: 2px;
+}
+
+.table {
+  width: 100%;
+  border-collapse: collapse;
+  font-family: var(--font-mono);
+  font-size: 12px;
+  line-height: 20px;
+}
+
+.split {
+  table-layout: fixed;
+  min-width: 720px;
+}
+
+.table th {
+  position: sticky;
+  top: 0;
+  z-index: 1;
+  padding: var(--space-2) var(--space-4);
+  border-bottom: var(--border-width) solid var(--color-border);
+  background: var(--color-surface-subtle);
+  font-family: var(--font-sans);
+  font-size: var(--text-xs);
+  font-weight: var(--weight-semibold);
+  text-align: start;
+}
+
+.table td {
+  height: 20px;
+  padding: 0 var(--space-3);
+  vertical-align: top;
+  white-space: pre;
+}
+
+.split .num {
+  width: 52px;
+}
+
+.inline .num {
+  width: 48px;
+}
+
+.num {
+  color: var(--color-text-muted);
+  text-align: end;
+  user-select: none;
+}
+
+.marker {
+  width: 20px;
+  text-align: center;
+  user-select: none;
+}
+
+.code {
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.split .code {
+  white-space: pre;
+}
+
+.text {
+  margin-left: var(--space-2);
+}
+
+.insert {
+  background: var(--color-success-subtle);
+}
+
+.delete {
+  background: var(--color-danger-subtle);
+}
+
+.empty {
+  background: var(--color-surface-subtle);
+}
+
+.skipRow td {
+  padding: var(--space-1) var(--space-3);
+  background: var(--color-surface-subtle);
+}
+
+.skipButton {
+  padding: 0;
+  border: 0;
+  background: none;
+  color: var(--color-accent);
+  font-family: var(--font-sans);
+  font-size: var(--text-xs);
+  text-decoration: underline;
+  cursor: pointer;
+}
+
+.skipButton:focus-visible {
+  outline: var(--focus-ring-width) solid var(--color-focus);
+  outline-offset: 2px;
+}

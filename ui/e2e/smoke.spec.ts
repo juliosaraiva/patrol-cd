@@ -20,5 +20,15 @@ test('local login reaches the applications list', async ({ page }) => {
   await page.getByLabel('Password').fill(password ?? '');
   await page.getByRole('button', { name: 'Sign in' }).click();
   await expect(page.getByRole('heading', { name: 'Applications', level: 1 })).toBeVisible();
-  await expect(page.getByRole('navigation', { name: 'Main' })).toBeVisible();
+
+  // Below 768 px (the "mobile" project) the sidebar is hidden and the navigation lives in a
+  // drawer opened from the menu button; wider viewports show it in the sidebar.
+  const narrow = (page.viewportSize()?.width ?? 1280) < 768;
+  if (narrow) {
+    await page.getByRole('button', { name: 'Open navigation' }).click();
+    const drawer = page.getByRole('dialog', { name: 'Patrol CD' });
+    await expect(drawer.getByRole('navigation', { name: 'Main' })).toBeVisible();
+  } else {
+    await expect(page.getByRole('navigation', { name: 'Main' })).toBeVisible();
+  }
 });

@@ -1,0 +1,185 @@
+/*
+ * Patrol CD design tokens. Light is the default; dark applies when the OS prefers dark and the
+ * user has not chosen light, or when the user chose dark ([data-theme] on <html>).
+ * Contrast pairs are verified by src/design/tokens.test.ts (WCAG 2.2 AA).
+ */
+:root {
+  color-scheme: light;
+
+  /* Type: compact UI scale. Monospace is reserved for identifiers and code (<Code>, <Mono>). */
+  --font-sans: Inter, ui-sans-serif, system-ui, -apple-system, 'Segoe UI', Roboto, 'Helvetica Neue', Arial, sans-serif;
+  --font-mono: ui-monospace, SFMono-Regular, 'SF Mono', Menlo, Consolas, 'Liberation Mono', monospace;
+  --text-xs: 12px;
+  --text-sm: 13px;
+  --text-md: 14px;
+  --text-lg: 16px;
+  --text-xl: 20px;
+  --text-2xl: 24px;
+  --leading-tight: 1.25;
+  --leading-normal: 1.45;
+  --weight-regular: 400;
+  --weight-medium: 500;
+  --weight-semibold: 600;
+
+  /* Space (4px grid). */
+  --space-1: 2px;
+  --space-2: 4px;
+  --space-3: 6px;
+  --space-4: 8px;
+  --space-5: 12px;
+  --space-6: 16px;
+  --space-7: 20px;
+  --space-8: 24px;
+  --space-9: 32px;
+  --space-10: 40px;
+  --space-11: 48px;
+
+  /* Shape: 4px is the maximum radius for controls. */
+  --radius-sm: 2px;
+  --radius-md: 4px;
+  --border-width: 1px;
+  --control-height-sm: 28px;
+  --control-height-md: 32px;
+  --focus-ring-width: 2px;
+  --focus-ring-offset: 2px;
+
+  /* Motion (zeroed under prefers-reduced-motion). */
+  --duration-fast: 120ms;
+  --duration-normal: 180ms;
+  --easing-standard: cubic-bezier(0.2, 0, 0, 1);
+
+  /* Layers. */
+  --z-sticky: 10;
+  --z-nav: 50;
+  --z-dropdown: 100;
+  --z-overlay: 200;
+  --z-toast: 300;
+  --z-tooltip: 400;
+
+  /* Layout. */
+  --sidebar-width: 224px;
+  --topbar-height: 48px;
+  --content-max-width: 1440px;
+
+  /* Color: neutral surfaces, one accent (deep teal). */
+  --color-bg: #ffffff;
+  --color-surface: #ffffff;
+  --color-surface-subtle: #f4f5f7;
+  --color-surface-hover: #eef0f3;
+  --color-surface-selected: #e5f2f1;
+  --color-border: #d6d9de;
+  --color-border-strong: #868d98;
+  --color-text: #16191d;
+  --color-text-muted: #545b66;
+  --color-text-placeholder: #6a717c;
+  --color-text-inverse: #ffffff;
+  --color-accent: #0b6b66;
+  --color-accent-hover: #085752;
+  --color-accent-subtle: #e5f2f1;
+  --color-on-accent: #ffffff;
+  --color-focus: #0b6b66;
+  --color-danger: #b42318;
+  --color-danger-hover: #912018;
+  --color-danger-subtle: #fdeceb;
+  --color-on-danger: #ffffff;
+  --color-warning: #8f5500;
+  --color-warning-subtle: #fff4e0;
+  --color-success: #1b7339;
+  --color-success-subtle: #e8f5ec;
+  --color-info: #1d5cb8;
+  --color-info-subtle: #e8f0fc;
+  --color-suspended: #5f4fae;
+  --color-unknown: #5f6670;
+  --color-backdrop: rgb(15 17 20 / 0.45);
+  --shadow-sm: 0 1px 2px rgb(15 17 20 / 0.06);
+  --shadow-overlay: 0 8px 24px rgb(15 17 20 / 0.14), 0 1px 3px rgb(15 17 20 / 0.08);
+
+  /* Status semantics (glyph color; labels always use --color-text). */
+  --status-healthy: var(--color-success);
+  --status-progressing: var(--color-info);
+  --status-degraded: var(--color-danger);
+  --status-suspended: var(--color-suspended);
+  --status-missing: var(--color-warning);
+  --status-unknown: var(--color-unknown);
+  --status-synced: var(--color-success);
+  --status-outofsync: var(--color-warning);
+}
+
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme='light']) {
+    color-scheme: dark;
+    --color-bg: #0f1114;
+    --color-surface: #16191d;
+    --color-surface-subtle: #1d2126;
+    --color-surface-hover: #23282e;
+    --color-surface-selected: #13302d;
+    --color-border: #2c3138;
+    --color-border-strong: #6f7782;
+    --color-text: #e7e9ec;
+    --color-text-muted: #a3aab4;
+    --color-text-placeholder: #8d949e;
+    --color-text-inverse: #0f1114;
+    --color-accent: #45bdb2;
+    --color-accent-hover: #63cbc1;
+    --color-accent-subtle: #13302d;
+    --color-on-accent: #062321;
+    --color-focus: #45bdb2;
+    --color-danger: #f2887d;
+    --color-danger-hover: #f6a39a;
+    --color-danger-subtle: #3a1714;
+    --color-on-danger: #1a0705;
+    --color-warning: #e2a640;
+    --color-warning-subtle: #33240b;
+    --color-success: #5fc488;
+    --color-success-subtle: #12301d;
+    --color-info: #7eaaf2;
+    --color-info-subtle: #15233b;
+    --color-suspended: #a99cf0;
+    --color-unknown: #a3aab4;
+    --color-backdrop: rgb(0 0 0 / 0.6);
+    --shadow-sm: 0 1px 2px rgb(0 0 0 / 0.4);
+    --shadow-overlay: 0 8px 24px rgb(0 0 0 / 0.5), 0 1px 3px rgb(0 0 0 / 0.4);
+  }
+}
+
+:root[data-theme='dark'] {
+  color-scheme: dark;
+  --color-bg: #0f1114;
+  --color-surface: #16191d;
+  --color-surface-subtle: #1d2126;
+  --color-surface-hover: #23282e;
+  --color-surface-selected: #13302d;
+  --color-border: #2c3138;
+  --color-border-strong: #6f7782;
+  --color-text: #e7e9ec;
+  --color-text-muted: #a3aab4;
+  --color-text-placeholder: #8d949e;
+  --color-text-inverse: #0f1114;
+  --color-accent: #45bdb2;
+  --color-accent-hover: #63cbc1;
+  --color-accent-subtle: #13302d;
+  --color-on-accent: #062321;
+  --color-focus: #45bdb2;
+  --color-danger: #f2887d;
+  --color-danger-hover: #f6a39a;
+  --color-danger-subtle: #3a1714;
+  --color-on-danger: #1a0705;
+  --color-warning: #e2a640;
+  --color-warning-subtle: #33240b;
+  --color-success: #5fc488;
+  --color-success-subtle: #12301d;
+  --color-info: #7eaaf2;
+  --color-info-subtle: #15233b;
+  --color-suspended: #a99cf0;
+  --color-unknown: #a3aab4;
+  --color-backdrop: rgb(0 0 0 / 0.6);
+  --shadow-sm: 0 1px 2px rgb(0 0 0 / 0.4);
+  --shadow-overlay: 0 8px 24px rgb(0 0 0 / 0.5), 0 1px 3px rgb(0 0 0 / 0.4);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  :root {
+    --duration-fast: 0ms;
+    --duration-normal: 0ms;
+  }
+}

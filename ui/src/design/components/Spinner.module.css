@@ -1,0 +1,29 @@
+.spinner {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-3);
+  color: var(--color-text-muted);
+  font-size: var(--text-sm);
+}
+
+.ring {
+  flex: none;
+  animation: spin 0.9s linear infinite;
+}
+
+.track {
+  opacity: 0.25;
+}
+
+@keyframes spin {
+  to {
+    transform: rotate(360deg);
+  }
+}
+
+/* Static arc plus the text label when motion is reduced. */
+@media (prefers-reduced-motion: reduce) {
+  .ring {
+    animation: none;
+  }
+}

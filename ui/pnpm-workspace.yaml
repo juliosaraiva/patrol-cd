@@ -1,0 +1,7 @@
+# Single-package workspace; holds pnpm settings.
+onlyBuiltDependencies:
+  - esbuild
+# msw's postinstall only copies its worker into a configured public dir; Patrol serves the
+# worker from node_modules in dev mock mode instead (see vite.config.ts).
+ignoredBuiltDependencies:
+  - msw

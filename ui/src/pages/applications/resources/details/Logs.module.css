@@ -1,0 +1,105 @@
+.root {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-4);
+  min-width: 0;
+}
+
+.controls {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: flex-end;
+  gap: var(--space-4);
+}
+
+.field {
+  flex: 0 1 180px;
+  min-width: 140px;
+}
+
+.filterField {
+  flex: 1 1 220px;
+  min-width: 0;
+}
+
+.toggles,
+.actions {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--space-4) var(--space-6);
+}
+
+.actions {
+  gap: var(--space-3);
+}
+
+.status,
+.note {
+  margin: 0;
+  color: var(--color-text-muted);
+  font-size: var(--text-sm);
+}
+
+.output {
+  height: 420px;
+  overflow: auto;
+  padding: var(--space-3) 0;
+  border: var(--border-width) solid var(--color-border);
+  border-radius: var(--radius-md);
+  background: var(--color-surface-subtle);
+  font-family: var(--font-mono);
+  font-size: 12px;
+  line-height: 18px;
+}
+
+.fullscreen .output {
+  height: calc(100vh - 320px);
+  min-height: 320px;
+}
+
+.output:focus-visible {
+  outline: var(--focus-ring-width) solid var(--color-focus);
+  outline-offset: 2px;
+}
+
+.line {
+  height: 18px;
+  padding: 0 var(--space-4);
+  white-space: pre;
+}
+
+.wrap .line {
+  height: auto;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+
+.timestamp,
+.pod {
+  color: var(--color-text-muted);
+}
+
+.empty {
+  margin: 0;
+  padding: var(--space-4);
+  font-family: var(--font-sans);
+  color: var(--color-text-muted);
+}
+
+.earlier {
+  margin: 0 var(--space-4) var(--space-3);
+  padding: 0;
+  border: 0;
+  background: none;
+  color: var(--color-accent);
+  font-family: var(--font-sans);
+  font-size: var(--text-sm);
+  text-decoration: underline;
+  cursor: pointer;
+}
+
+.earlier:focus-visible {
+  outline: var(--focus-ring-width) solid var(--color-focus);
+  outline-offset: 2px;
+}

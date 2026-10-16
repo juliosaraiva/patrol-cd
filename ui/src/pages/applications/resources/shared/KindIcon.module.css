@@ -1,0 +1,15 @@
+.icon {
+  flex: none;
+  color: var(--color-text-muted);
+  overflow: visible;
+}
+
+.initialsCircle {
+  fill: var(--color-unknown);
+}
+
+.initialsText {
+  fill: var(--color-surface);
+  font-family: var(--font-sans);
+  font-weight: var(--weight-semibold);
+}
