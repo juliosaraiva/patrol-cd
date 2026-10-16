@@ -1,0 +1,19 @@
+# 2026/10/13 02:02:56.203018 [TestSameURLArbitraryInputProperties] [rapid] draw a: "? #"
+# 2026/10/13 02:02:56.203038 [TestSameURLArbitraryInputProperties] [rapid] draw b: ""
+# 2026/10/13 02:02:56.203045 [TestSameURLArbitraryInputProperties] not idempotent: "? #" -> "? " -> ""
+# 
+v0.4.8#3218702473386856632
+0x5555555555555
+0x0
+0x38e38e38e38e4
+0x2
+0x5555555555555
+0x24
+0x0
+0x0
+0x5555555555555
+0x1c
+0x3723723723724
+0x2
+0x0
+0x0

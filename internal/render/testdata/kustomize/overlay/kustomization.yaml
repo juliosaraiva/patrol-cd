@@ -1,0 +1,15 @@
+# A comment that `kustomize edit` would drop in the shared checkout.
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+resources:
+- ../base
+commonAnnotations:
+  note: from-overlay
+patches:
+- target:
+    kind: Deployment
+    name: guestbook-ui
+  patch: |-
+    - op: add
+      path: /metadata/annotations/patched-by
+      value: overlay

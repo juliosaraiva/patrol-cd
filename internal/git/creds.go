@@ -403,21 +403,52 @@ func appendGitConfig(env []string, entries ...gitConfig) []string {
 	return append(out, "GIT_CONFIG_COUNT="+strconv.Itoa(count))
 }
 
-// scopeExtraHeaders rewrites unscoped http.extraHeader entries returned by Creds to
-// http.<origin>/.extraHeader, so the header is only sent to the repository's own
-// origin (never to submodules or redirects on other hosts).
-func scopeExtraHeaders(env []string, origin string) []string {
-	if origin == "" {
-		return env
-	}
-	out := slices.Clone(env)
-	for i, kv := range out {
-		k, v, ok := strings.Cut(kv, "=")
-		if ok && strings.HasPrefix(k, "GIT_CONFIG_KEY_") && strings.EqualFold(v, "http.extraHeader") {
-			out[i] = k + "=http." + origin + "/.extraHeader"
+// scopeHeaders confines the http.extraHeader entries returned by Creds to the
+// repository origin. Unscoped http.extraHeader entries are rewritten to
+// http.<origin>/.extraHeader, so they are never sent to submodules on other
+// hosts; without an http(s) origin (ssh, git or file repositories) they are
+// dropped, since they could only reach other hosts. For every remaining header
+// scope, redirects are disabled (http.<scope>.followRedirects=false): git's
+// default (initial) rebases later requests onto the redirect target while still
+// sending the headers loaded for the original URL. Other entries are kept.
+func scopeHeaders(cfg []gitConfig, origin string) []gitConfig {
+	out := make([]gitConfig, 0, len(cfg)+1)
+	var guards []gitConfig
+	guarded := map[string]bool{}
+	for _, e := range cfg {
+		scope, isHeader := extraHeaderScope(e.key)
+		if !isHeader {
+			out = append(out, e)
+			continue
+		}
+		if scope == "" {
+			if origin == "" {
+				continue
+			}
+			scope = origin + "/"
+			e.key = "http." + scope + ".extraHeader"
+		}
+		out = append(out, e)
+		if lower := strings.ToLower(scope); !guarded[lower] {
+			guarded[lower] = true
+			guards = append(guards, gitConfig{"http." + scope + ".followRedirects", "false"})
 		}
 	}
-	return out
+	return append(out, guards...)
+}
+
+// extraHeaderScope reports whether key is an http.extraHeader configuration key
+// (keys are case-insensitive) and returns its URL scope ("" when unscoped).
+func extraHeaderScope(key string) (string, bool) {
+	const prefix, suffix = "http.", ".extraheader"
+	lower := strings.ToLower(key)
+	if !strings.HasPrefix(lower, prefix) || !strings.HasSuffix(lower, suffix) {
+		return "", false
+	}
+	if len(key) <= len(prefix)+len(suffix) {
+		return "", true // "http.extraHeader" (or an empty "http..extraHeader" scope)
+	}
+	return key[len(prefix) : len(key)-len(suffix)], true
 }
 
 var fingerprintKey = func() []byte {

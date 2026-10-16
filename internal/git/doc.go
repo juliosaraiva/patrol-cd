@@ -14,7 +14,10 @@
 //     repository's own origin;
 //   - bearer tokens and forced basic-auth headers are passed as http.extraHeader
 //     through GIT_CONFIG_COUNT/GIT_CONFIG_KEY_n/GIT_CONFIG_VALUE_n, scoped to the
-//     repository's origin;
+//     repository's origin, with HTTP redirects disabled for that origin
+//     (http.<origin>/.followRedirects=false) because git keeps sending the header
+//     after rebasing requests onto a redirect target; for repositories without an
+//     http(s) origin the header is dropped;
 //   - SSH private keys, known_hosts data, TLS client certificates and CA bundles are
 //     written to 0600 files in the same per-call directory, which is removed when the
 //     command returns.

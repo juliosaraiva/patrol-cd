@@ -1,0 +1,42 @@
+# 2026/10/13 02:02:35.386623 [TestNormalizeURLProperties] [rapid] draw host: "0"
+# 2026/10/13 02:02:35.386630 [TestNormalizeURLProperties] [rapid] draw user: "a"
+# 2026/10/13 02:02:35.386632 [TestNormalizeURLProperties] [rapid] draw password: "!!!"
+# 2026/10/13 02:02:35.386634 [TestNormalizeURLProperties] [rapid] draw segments: []string{"0"}
+# 2026/10/13 02:02:35.386663 [TestNormalizeURLProperties] [rapid] draw hostCase: (func(string) string)(0x100b9e6d0)
+# 2026/10/13 02:02:35.386777 [TestNormalizeURLProperties] [rapid] draw suffix: ".git/"
+# 2026/10/13 02:02:35.386800 [TestNormalizeURLProperties] RepoKey("ssh://a@0/0") == RepoKey("a@0:0.git/") is false, want true
+# 
+v0.4.8#18182492769564953573
+0x0
+0x0
+0x0
+0x0
+0x0
+0x0
+0x0
+0x0
+0x0
+0x0
+0x0
+0x0
+0x0
+0x0
+0x0
+0x0
+0x0
+0x0
+0x0
+0x0
+0x0
+0x0
+0x0
+0x0
+0x0
+0x0
+0x0
+0x0
+0x0
+0x0
+0x0
+0x38e38e38e38e4
+0x3

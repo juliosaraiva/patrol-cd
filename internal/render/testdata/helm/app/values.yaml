@@ -1,0 +1,9 @@
+key: chart-default
+fromA: chart-default
+fromB: chart-default
+envName: none
+flag: true
+fileContent: ""
+list: []
+nested:
+  inner: chart-default

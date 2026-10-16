@@ -1,0 +1,42 @@
+# 2026/10/13 02:02:07.166833 [TestNormalizeURLProperties] [rapid] draw host: "0"
+# 2026/10/13 02:02:07.166838 [TestNormalizeURLProperties] [rapid] draw user: "a"
+# 2026/10/13 02:02:07.166839 [TestNormalizeURLProperties] [rapid] draw password: "!!!"
+# 2026/10/13 02:02:07.166842 [TestNormalizeURLProperties] [rapid] draw segments: []string{"0"}
+# 2026/10/13 02:02:07.166877 [TestNormalizeURLProperties] [rapid] draw hostCase: (func(string) string)(0x1030a66d0)
+# 2026/10/13 02:02:07.166903 [TestNormalizeURLProperties] [rapid] draw suffix: ""
+# 2026/10/13 02:02:07.166922 [TestNormalizeURLProperties] "ssh://a@0:22/0.git" and "a@0:0" should be the same location
+# 
+v0.4.8#11491366495670867531
+0x0
+0x0
+0x0
+0x0
+0x0
+0x0
+0x0
+0x0
+0x0
+0x0
+0x0
+0x0
+0x0
+0x0
+0x0
+0x0
+0x0
+0x0
+0x0
+0x0
+0x0
+0x0
+0x0
+0x0
+0x0
+0x0
+0x0
+0x0
+0x0
+0x0
+0x0
+0x0
+0x0

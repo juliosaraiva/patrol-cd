@@ -5,6 +5,7 @@ import (
 	"net/http"
 
 	"oras.land/oras-go/v2/errdef"
+	"oras.land/oras-go/v2/registry/remote/auth"
 	"oras.land/oras-go/v2/registry/remote/errcode"
 )
 
@@ -69,6 +70,9 @@ func classify(err error) error {
 	}
 	if errors.Is(err, errdef.ErrNotFound) {
 		return tag(ErrNotFound, err)
+	}
+	if errors.Is(err, auth.ErrBasicCredentialNotFound) {
+		return tag(ErrUnauthorized, err)
 	}
 	var resp *errcode.ErrorResponse
 	if errors.As(err, &resp) {

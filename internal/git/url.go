@@ -7,6 +7,7 @@ import (
 	"net/url"
 	"regexp"
 	"strings"
+	"unicode"
 )
 
 var (
@@ -79,7 +80,11 @@ func hasPrefixFold(s, prefix string) bool {
 //
 // The output is idempotent (NormalizeURL(NormalizeURL(u)) == NormalizeURL(u)) but,
 // as upstream warns, not a stable format across releases.
-func NormalizeURL(raw string) string {
+func NormalizeURL(raw string) string { return normalizeURL(raw, true) }
+
+// normalizeURL implements NormalizeURL; stripGit controls the removal of ".git"
+// suffixes (RepoKey keeps them).
+func normalizeURL(raw string, stripGit bool) string {
 	s := strings.TrimSpace(raw)
 	if s == "" || strings.ContainsFunc(s, isControl) {
 		return ""
@@ -119,7 +124,7 @@ func NormalizeURL(raw string) string {
 	for {
 		prev := p
 		p = strings.TrimRight(p, "/")
-		if len(p) >= 4 && strings.EqualFold(p[len(p)-4:], ".git") {
+		if stripGit && len(p) >= 4 && strings.EqualFold(p[len(p)-4:], ".git") {
 			p = p[:len(p)-4]
 		}
 		if p == prev {
@@ -131,6 +136,9 @@ func NormalizeURL(raw string) string {
 	u.Fragment = ""
 	u.RawFragment = ""
 	u.ForceQuery = false
+	// Input is trimmed, so trailing whitespace kept in the (unescaped) query would
+	// make the output normalize differently.
+	u.RawQuery = strings.TrimRightFunc(u.RawQuery, unicode.IsSpace)
 	return u.String()
 }
 
@@ -175,20 +183,63 @@ func SameURL(a, b string) bool {
 	na, nb := NormalizeURL(a), NormalizeURL(b)
 	if na == "" || nb == "" {
 		ta, tb := strings.TrimSpace(a), strings.TrimSpace(b)
-		return ta != "" && ta == tb
+		return ta != "" && strings.EqualFold(ta, tb)
 	}
 	return strings.EqualFold(na, nb)
 }
 
-// RepoKey returns a file-system safe key for a repository URL (40 lowercase hex
-// characters), suitable for naming the persistent checkout directory. URLs for which
-// SameURL is true map to the same key.
+// SSHHostWithPort returns "host:port" of an SSH repository URL in the form used
+// for known_hosts lookups (port 22 when absent), or "" for other or unparseable
+// URLs.
+func SSHHostWithPort(raw string) string {
+	ok, _ := IsSSHURL(raw)
+	if !ok {
+		return ""
+	}
+	n := NormalizeURL(raw)
+	if n == "" {
+		return ""
+	}
+	u, err := url.Parse(n)
+	if err != nil || u.Hostname() == "" {
+		return ""
+	}
+	port := u.Port()
+	if port == "" {
+		port = "22"
+	}
+	return net.JoinHostPort(u.Hostname(), port)
+}
+
+// RepoKey returns a file-system safe key for a repository location (40 lowercase
+// hex characters), suitable for naming the persistent checkout directory. Only
+// spellings that certainly denote the same location share a key: scheme and host
+// case, default ports, credentials (and the user of http(s) URLs), trailing
+// slashes, fragments, and scp-like versus ssh:// forms are normalized as in
+// NormalizeURL. Path case and ".git" suffixes are kept, because a server may serve
+// different repositories at "/org/App" and "/org/app", or at "repo" and
+// "repo.git". RepoKey(a) == RepoKey(b) therefore implies SameURL(a, b) for
+// non-empty input, but URLs that SameURL considers equal may have different keys.
 func RepoKey(raw string) string {
+	n := normalizeURL(raw, false)
+	if n == "" {
+		n = strings.TrimSpace(raw)
+	}
+	return hashKey(n)
+}
+
+// sameURLKey is a key shared by all URLs SameURL considers equal (used to
+// invalidate every cached spelling of a repository).
+func sameURLKey(raw string) string {
 	n := NormalizeURL(raw)
 	if n == "" {
 		n = strings.TrimSpace(raw)
 	}
-	sum := sha256.Sum256([]byte(strings.ToLower(n)))
+	return hashKey(strings.ToLower(n))
+}
+
+func hashKey(s string) string {
+	sum := sha256.Sum256([]byte(s))
 	return hex.EncodeToString(sum[:])[:40]
 }
 
@@ -205,7 +256,9 @@ func SanitizeURL(raw string) string {
 	}
 	if u.User != nil {
 		if _, has := u.User.Password(); has {
-			u.User = url.UserPassword(u.User.Username(), "******")
+			const placeholder = "PATROLREDACTED"
+			u.User = url.UserPassword(u.User.Username(), placeholder)
+			return strings.Replace(u.String(), ":"+placeholder+"@", ":******@", 1)
 		}
 	}
 	return u.String()
