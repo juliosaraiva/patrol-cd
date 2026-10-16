@@ -76,6 +76,7 @@ type engineOptions struct {
 	factory        ServiceFactory
 	product        string
 	serviceOverlay map[string]services.Service
+	templateLimits TemplateLimits
 }
 
 // Option configures an Engine.
@@ -128,6 +129,12 @@ func WithSendTimeout(d time.Duration) Option { return func(o *engineOptions) { o
 
 // WithServiceFactory replaces services.New (tests, custom services).
 func WithServiceFactory(f ServiceFactory) Option { return func(o *engineOptions) { o.factory = f } }
+
+// WithTemplateLimits sets the resource limits of one render (zero fields keep the
+// defaults: DefaultTemplateMaxBytes, DefaultTemplateMaxSteps, DefaultTemplateTimeout).
+func WithTemplateLimits(l TemplateLimits) Option {
+	return func(o *engineOptions) { o.templateLimits = l }
+}
 
 // WithServices registers ready-made services by name, overriding configured ones.
 func WithServices(m map[string]services.Service) Option {
@@ -192,6 +199,7 @@ func NewEngine(cfg *Config, opts ...Option) (*Engine, error) {
 	if o.product == "" {
 		o.product = "Patrol CD"
 	}
+	o.templateLimits = o.templateLimits.withDefaults()
 	e := &Engine{
 		cfg:       cfg,
 		opts:      o,
@@ -420,12 +428,13 @@ func (e *Engine) Render(ctx context.Context, app map[string]any, templates []str
 	if err != nil {
 		return nil, err
 	}
-	return e.render(p, templates, dest)
+	return e.render(ctx, p, templates, dest)
 }
 
-func (e *Engine) render(p *processing, templates []string, dest services.Destination) (*services.Notification, error) {
-	vars := e.vars(p, dest)
-	var out services.Notification
+// render renders templates for dest within one TemplateLimits budget.
+func (e *Engine) render(ctx context.Context, p *processing, templates []string, dest services.Destination) (*services.Notification, error) {
+	compiled := make([]*compiledTemplate, 0, len(templates))
+	mutates := false
 	for _, name := range templates {
 		if err, ok := e.tmplErrs[name]; ok {
 			return nil, fmt.Errorf("template %q: %w", name, err)
@@ -434,11 +443,43 @@ func (e *Engine) render(p *processing, templates []string, dest services.Destina
 		if !ok {
 			return nil, fmt.Errorf("%w: template '%s' is not supported", ErrTemplateNotFound, name)
 		}
-		if err := ct.apply(&out, vars); err != nil {
-			return nil, fmt.Errorf("rendering template %q: %w", name, err)
+		compiled = append(compiled, ct)
+		mutates = mutates || ct.mutates
+	}
+	vars := e.vars(p, dest)
+	if mutates {
+		isolateVars(vars)
+	}
+	b := newRenderBudget(ctx, e.opts.templateLimits, vars)
+	var out services.Notification
+	for _, ct := range compiled {
+		if err := ct.apply(&out, b); err != nil {
+			return nil, fmt.Errorf("rendering template %q: %w", ct.name, err)
 		}
 	}
 	return &out, nil
+}
+
+// isolateVars gives a render private copies of every map a template could modify in place
+// (set, unset, merge), so that one render never affects another rendered from the same
+// application data.
+func isolateVars(vars map[string]any) {
+	for k, v := range vars {
+		switch t := v.(type) {
+		case map[string]any:
+			vars[k] = deepCopyJSON(t)
+		case map[string]string:
+			vars[k] = cloneStringMap(t)
+		}
+	}
+}
+
+func cloneStringMap(m map[string]string) map[string]string {
+	out := make(map[string]string, len(m))
+	for k, v := range m {
+		out[k] = v
+	}
+	return out
 }
 
 func (e *Engine) send(ctx context.Context, n *services.Notification, dest services.Destination) error {
@@ -509,7 +550,7 @@ func (e *Engine) Process(ctx context.Context, app map[string]any, state Delivery
 					results = append(results, res)
 					continue
 				}
-				n, err := e.render(p, cr.Templates, d)
+				n, err := e.render(ctx, p, cr.Templates, d)
 				if err == nil && e.opts.dryRun {
 					res.Status = StatusDryRun
 					res.Notification = n
@@ -551,7 +592,7 @@ func (e *Engine) NotifyTemplate(ctx context.Context, app map[string]any, templat
 	results := make([]DeliveryResult, 0, len(dests))
 	for _, d := range dests {
 		res := DeliveryResult{Templates: []string{template}, Destination: d}
-		n, err := e.render(p, []string{template}, d)
+		n, err := e.render(ctx, p, []string{template}, d)
 		switch {
 		case err != nil:
 		case e.opts.dryRun:

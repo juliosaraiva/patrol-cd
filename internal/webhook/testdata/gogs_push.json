@@ -1,0 +1,17 @@
+{
+  "ref": "refs/heads/main",
+  "before": "1111111111111111111111111111111111111111",
+  "after": "2222222222222222222222222222222222222222",
+  "commits": [{"added": ["apps/web/deployment.yaml"], "removed": [], "modified": []}],
+  "repository": {
+    "id": 5,
+    "owner": {"username": "acme"},
+    "name": "platform",
+    "full_name": "acme/platform",
+    "html_url": "https://gogs.example.com/acme/platform",
+    "ssh_url": "git@gogs.example.com:acme/platform.git",
+    "clone_url": "https://gogs.example.com/acme/platform.git",
+    "default_branch": "main"
+  },
+  "sender": {"username": "alice"}
+}

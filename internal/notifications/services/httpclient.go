@@ -100,12 +100,41 @@ func newTransport(deps Deps, ts transportSettings) *http.Transport {
 	if ts.idleConnTimeout > 0 {
 		tr.IdleConnTimeout = ts.idleConnTimeout
 	}
+	if deps.Network.RootCAs != nil && !ts.insecureSkipVerify {
+		// Direct TLS connections are verified against the dialed host, which also covers IP
+		// address endpoints (no SNI is sent for them, so the negotiated server name that
+		// the shared configuration sees is empty). Proxied connections keep the shared
+		// configuration, which refuses an empty server name.
+		dial := deps.dialer()
+		tr.DialTLSContext = func(ctx context.Context, network, addr string) (net.Conn, error) {
+			host, _, err := net.SplitHostPort(addr)
+			if err != nil {
+				return nil, err
+			}
+			raw, err := dial(ctx, network, addr)
+			if err != nil {
+				return nil, err
+			}
+			cfg := tlsConfig(deps, host, false)
+			cfg.NextProtos = []string{"h2", "http/1.1"}
+			tc := tls.Client(raw, cfg)
+			hctx, cancel := context.WithTimeout(ctx, tr.TLSHandshakeTimeout)
+			defer cancel()
+			if err := tc.HandshakeContext(hctx); err != nil {
+				_ = raw.Close()
+				return nil, err
+			}
+			return tc, nil
+		}
+	}
 	return tr
 }
 
 // tlsConfig returns a client TLS configuration. When a RootCAs resolver is configured the
 // chain is verified against the resolver's pool for the negotiated server name, which also
-// works for proxied (CONNECT) connections.
+// works for proxied (CONNECT) connections. For IP address endpoints no server name is
+// negotiated: the certificate is then verified against serverName (the dialed host), and
+// refused when serverName is empty.
 func tlsConfig(deps Deps, serverName string, insecure bool) *tls.Config {
 	cfg := &tls.Config{MinVersion: tls.VersionTLS12, ServerName: serverName}
 	if insecure {
@@ -121,9 +150,16 @@ func tlsConfig(deps Deps, serverName string, insecure bool) *tls.Config {
 		if len(cs.PeerCertificates) == 0 {
 			return errors.New("tls: server presented no certificates")
 		}
-		pool, err := resolver(cs.ServerName)
+		name := cs.ServerName
+		if name == "" {
+			name = serverName
+		}
+		if name == "" {
+			return errors.New("tls: no server name to verify the certificate against")
+		}
+		pool, err := resolver(name)
 		if err != nil {
-			return fmt.Errorf("tls: resolving trust roots for %s: %w", cs.ServerName, err)
+			return fmt.Errorf("tls: resolving trust roots for %s: %w", name, err)
 		}
 		if pool == nil {
 			pool, err = x509.SystemCertPool()
@@ -131,7 +167,7 @@ func tlsConfig(deps Deps, serverName string, insecure bool) *tls.Config {
 				return fmt.Errorf("tls: loading system roots: %w", err)
 			}
 		}
-		opts := x509.VerifyOptions{DNSName: cs.ServerName, Roots: pool, Intermediates: x509.NewCertPool()}
+		opts := x509.VerifyOptions{DNSName: name, Roots: pool, Intermediates: x509.NewCertPool()}
 		for _, c := range cs.PeerCertificates[1:] {
 			opts.Intermediates.AddCert(c)
 		}

@@ -6,9 +6,6 @@ import (
 	"fmt"
 	"reflect"
 	"strings"
-	texttemplate "text/template"
-
-	"github.com/Masterminds/sprig/v3"
 
 	"github.com/juliosaraiva/patrol-cd/internal/notifications/services"
 )
@@ -25,27 +22,8 @@ const (
 	defaultNewRelicUser      = "{{(call .repo.GetCommitMetadata .app.status.sync.revision).Author}}"
 )
 
-// templateFuncs is sprig's text function map without functions that read the controller
-// environment (env, expandenv) or perform network lookups (getHostByName).
-var templateFuncs = func() texttemplate.FuncMap {
-	f := sprig.TxtFuncMap()
-	delete(f, "env")
-	delete(f, "expandenv")
-	delete(f, "getHostByName")
-	return f
-}()
-
-// TemplateFuncNames returns the names of the functions available to templates (besides the
-// text/template builtins).
-func TemplateFuncNames() []string {
-	out := make([]string, 0, len(templateFuncs))
-	for k := range templateFuncs {
-		out = append(out, k)
-	}
-	return out
-}
-
-type renderFn func(vars map[string]any) (reflect.Value, error)
+// renderFn renders a compiled value with the template data and limits of a render.
+type renderFn func(b *renderBudget) (reflect.Value, error)
 
 type compiledSection struct {
 	field  int
@@ -57,6 +35,8 @@ type compiledTemplate struct {
 	name     string
 	message  renderFn
 	sections []compiledSection
+	// mutates reports that the template calls a function modifying maps in place.
+	mutates bool
 }
 
 var notificationType = reflect.TypeOf(services.Notification{})
@@ -120,6 +100,7 @@ func compileTemplate(name string, def services.Notification) (*compiledTemplate,
 	def = applyTemplateDefaults(name, def)
 	v := reflect.ValueOf(def)
 	ct := &compiledTemplate{name: name}
+	mutates := false
 	for i := 0; i < notificationType.NumField(); i++ {
 		f := notificationType.Field(i)
 		if !f.IsExported() {
@@ -127,7 +108,7 @@ func compileTemplate(name string, def services.Notification) (*compiledTemplate,
 		}
 		fv := v.Field(i)
 		if f.Name == "Message" {
-			fn, err := compileValue(name, fv)
+			fn, err := compileValue(name, fv, &mutates)
 			if err != nil {
 				return nil, fmt.Errorf("message: %w", err)
 			}
@@ -137,12 +118,13 @@ func compileTemplate(name string, def services.Notification) (*compiledTemplate,
 		if fv.IsZero() {
 			continue
 		}
-		fn, err := compileValue(name, fv)
+		fn, err := compileValue(name, fv, &mutates)
 		if err != nil {
 			return nil, fmt.Errorf("%s: %w", jsonName(f), err)
 		}
 		ct.sections = append(ct.sections, compiledSection{field: i, isMap: fv.Kind() == reflect.Map, render: fn})
 	}
+	ct.mutates = mutates
 	return ct, nil
 }
 
@@ -157,38 +139,42 @@ func jsonName(f reflect.StructField) string {
 
 // compileValue returns a renderer mirroring v's structure in which every string is the
 // output of executing it as a template. Map keys and non-string scalars are copied.
-func compileValue(name string, v reflect.Value) (renderFn, error) {
+// *mutates is set when a template calls a function that modifies maps in place.
+func compileValue(name string, v reflect.Value, mutates *bool) (renderFn, error) {
 	switch v.Kind() {
 	case reflect.String:
 		src := v.String()
 		typ := v.Type()
 		if !strings.Contains(src, "{{") {
 			out := reflect.ValueOf(src).Convert(typ)
-			return func(map[string]any) (reflect.Value, error) { return out, nil }, nil
+			return func(*renderBudget) (reflect.Value, error) { return out, nil }, nil
 		}
-		t, err := texttemplate.New(name).Funcs(templateFuncs).Parse(src)
+		ct, err := compileText(name, src)
 		if err != nil {
 			return nil, err
 		}
-		return func(vars map[string]any) (reflect.Value, error) {
-			var buf limitedBuffer
-			if err := t.Execute(&buf, vars); err != nil {
+		if ct.mutates {
+			*mutates = true
+		}
+		return func(b *renderBudget) (reflect.Value, error) {
+			out, err := b.execute(ct)
+			if err != nil {
 				return reflect.Value{}, err
 			}
-			return reflect.ValueOf(buf.String()).Convert(typ), nil
+			return reflect.ValueOf(out).Convert(typ), nil
 		}, nil
 	case reflect.Pointer:
 		typ := v.Type()
 		if v.IsNil() {
 			zero := reflect.Zero(typ)
-			return func(map[string]any) (reflect.Value, error) { return zero, nil }, nil
+			return func(*renderBudget) (reflect.Value, error) { return zero, nil }, nil
 		}
-		elem, err := compileValue(name, v.Elem())
+		elem, err := compileValue(name, v.Elem(), mutates)
 		if err != nil {
 			return nil, err
 		}
-		return func(vars map[string]any) (reflect.Value, error) {
-			ev, err := elem(vars)
+		return func(b *renderBudget) (reflect.Value, error) {
+			ev, err := elem(b)
 			if err != nil {
 				return reflect.Value{}, err
 			}
@@ -203,19 +189,19 @@ func compileValue(name string, v reflect.Value) (renderFn, error) {
 			if !typ.Field(i).IsExported() {
 				continue
 			}
-			fn, err := compileValue(name, v.Field(i))
+			fn, err := compileValue(name, v.Field(i), mutates)
 			if err != nil {
 				return nil, fmt.Errorf("%s: %w", jsonName(typ.Field(i)), err)
 			}
 			fields[i] = fn
 		}
-		return func(vars map[string]any) (reflect.Value, error) {
+		return func(b *renderBudget) (reflect.Value, error) {
 			out := reflect.New(typ).Elem()
 			for i, fn := range fields {
 				if fn == nil {
 					continue
 				}
-				fv, err := fn(vars)
+				fv, err := fn(b)
 				if err != nil {
 					return reflect.Value{}, err
 				}
@@ -227,20 +213,20 @@ func compileValue(name string, v reflect.Value) (renderFn, error) {
 		typ := v.Type()
 		if v.IsNil() {
 			zero := reflect.Zero(typ)
-			return func(map[string]any) (reflect.Value, error) { return zero, nil }, nil
+			return func(*renderBudget) (reflect.Value, error) { return zero, nil }, nil
 		}
 		elems := make([]renderFn, v.Len())
 		for i := 0; i < v.Len(); i++ {
-			fn, err := compileValue(name, v.Index(i))
+			fn, err := compileValue(name, v.Index(i), mutates)
 			if err != nil {
 				return nil, fmt.Errorf("[%d]: %w", i, err)
 			}
 			elems[i] = fn
 		}
-		return func(vars map[string]any) (reflect.Value, error) {
+		return func(b *renderBudget) (reflect.Value, error) {
 			out := reflect.MakeSlice(typ, len(elems), len(elems))
 			for i, fn := range elems {
-				ev, err := fn(vars)
+				ev, err := fn(b)
 				if err != nil {
 					return reflect.Value{}, err
 				}
@@ -252,7 +238,7 @@ func compileValue(name string, v reflect.Value) (renderFn, error) {
 		typ := v.Type()
 		if v.IsNil() {
 			zero := reflect.Zero(typ)
-			return func(map[string]any) (reflect.Value, error) { return zero, nil }, nil
+			return func(*renderBudget) (reflect.Value, error) { return zero, nil }, nil
 		}
 		type entry struct {
 			key reflect.Value
@@ -261,16 +247,16 @@ func compileValue(name string, v reflect.Value) (renderFn, error) {
 		var entries []entry
 		iter := v.MapRange()
 		for iter.Next() {
-			fn, err := compileValue(name, iter.Value())
+			fn, err := compileValue(name, iter.Value(), mutates)
 			if err != nil {
 				return nil, fmt.Errorf("%v: %w", iter.Key().Interface(), err)
 			}
 			entries = append(entries, entry{key: iter.Key(), fn: fn})
 		}
-		return func(vars map[string]any) (reflect.Value, error) {
+		return func(b *renderBudget) (reflect.Value, error) {
 			out := reflect.MakeMapWithSize(typ, len(entries))
 			for _, e := range entries {
-				ev, err := e.fn(vars)
+				ev, err := e.fn(b)
 				if err != nil {
 					return reflect.Value{}, err
 				}
@@ -281,15 +267,15 @@ func compileValue(name string, v reflect.Value) (renderFn, error) {
 	default:
 		cp := reflect.New(v.Type()).Elem()
 		cp.Set(v)
-		return func(map[string]any) (reflect.Value, error) { return cp, nil }, nil
+		return func(*renderBudget) (reflect.Value, error) { return cp, nil }, nil
 	}
 }
 
 // apply renders the template into out. Message is overwritten only when the rendered
 // message is non-empty; every section present in the template replaces the corresponding
 // section of out (webhook entries are merged per webhook name).
-func (ct *compiledTemplate) apply(out *services.Notification, vars map[string]any) error {
-	mv, err := ct.message(vars)
+func (ct *compiledTemplate) apply(out *services.Notification, b *renderBudget) error {
+	mv, err := ct.message(b)
 	if err != nil {
 		return err
 	}
@@ -298,7 +284,7 @@ func (ct *compiledTemplate) apply(out *services.Notification, vars map[string]an
 	}
 	dst := reflect.ValueOf(out).Elem()
 	for _, s := range ct.sections {
-		rv, err := s.render(vars)
+		rv, err := s.render(b)
 		if err != nil {
 			return err
 		}
@@ -331,3 +317,5 @@ func (l *limitedBuffer) Write(p []byte) (int, error) {
 }
 
 func (l *limitedBuffer) String() string { return l.buf.String() }
+
+func (l *limitedBuffer) Len() int { return l.buf.Len() }

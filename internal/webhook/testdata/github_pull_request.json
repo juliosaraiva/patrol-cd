@@ -1,0 +1,24 @@
+{
+  "action": "opened",
+  "number": 7,
+  "pull_request": {
+    "number": 7,
+    "title": "Add feature",
+    "state": "open",
+    "html_url": "https://github.com/acme/platform/pull/7",
+    "user": {"login": "alice"},
+    "labels": [{"name": "preview"}],
+    "head": {"ref": "feature/x", "sha": "3333333333333333333333333333333333333333"},
+    "base": {"ref": "main", "sha": "2222222222222222222222222222222222222222"}
+  },
+  "repository": {
+    "id": 1001,
+    "name": "platform",
+    "full_name": "acme/platform",
+    "owner": {"login": "acme"},
+    "html_url": "https://github.com/acme/platform",
+    "url": "https://api.github.com/repos/acme/platform",
+    "default_branch": "main"
+  },
+  "sender": {"login": "alice"}
+}

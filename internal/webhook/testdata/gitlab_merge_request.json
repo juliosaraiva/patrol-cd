@@ -1,0 +1,23 @@
+{
+  "object_kind": "merge_request",
+  "user": {"username": "alice"},
+  "project": {
+    "id": 15,
+    "name": "platform",
+    "web_url": "https://gitlab.example.com/acme/platform",
+    "path_with_namespace": "acme/platform",
+    "default_branch": "main"
+  },
+  "object_attributes": {
+    "iid": 3,
+    "title": "Feature",
+    "state": "opened",
+    "action": "update",
+    "source_branch": "feature/x",
+    "target_branch": "main",
+    "target_project_id": 15,
+    "url": "https://gitlab.example.com/acme/platform/-/merge_requests/3",
+    "last_commit": {"id": "3333333333333333333333333333333333333333"}
+  },
+  "labels": [{"title": "preview"}]
+}

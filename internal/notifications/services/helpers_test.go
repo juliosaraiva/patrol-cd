@@ -83,6 +83,18 @@ func newServer(t *testing.T, h func(w http.ResponseWriter, c captured)) (*httpte
 	return srv, rec
 }
 
+// newTLSRecordingServer is newServer over HTTPS (self-signed certificate).
+func newTLSRecordingServer(t *testing.T, h func(w http.ResponseWriter, c captured)) (*httptest.Server, *recorder) {
+	t.Helper()
+	rec := &recorder{}
+	srv := httptest.NewTLSServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		c := rec.add(r)
+		h(w, c)
+	}))
+	t.Cleanup(srv.Close)
+	return srv, rec
+}
+
 // newTLSServer starts a recording HTTPS server with a self-signed certificate.
 func newTLSServer(t *testing.T) (*httptest.Server, *recorder) {
 	t.Helper()

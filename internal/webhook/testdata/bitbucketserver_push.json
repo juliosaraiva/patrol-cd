@@ -1,0 +1,26 @@
+{
+  "eventKey": "repo:refs_changed",
+  "actor": {"name": "alice"},
+  "repository": {
+    "id": 9,
+    "slug": "platform",
+    "name": "platform",
+    "project": {"key": "ACME"},
+    "links": {
+      "clone": [
+        {"href": "https://bitbucket.example.com/scm/acme/platform.git", "name": "http"},
+        {"href": "ssh://git@bitbucket.example.com:7999/acme/platform.git", "name": "ssh"}
+      ],
+      "self": [{"href": "https://bitbucket.example.com/projects/ACME/repos/platform/browse"}]
+    }
+  },
+  "changes": [
+    {
+      "ref": {"id": "refs/heads/main", "displayId": "main", "type": "BRANCH"},
+      "refId": "refs/heads/main",
+      "fromHash": "1111111111111111111111111111111111111111",
+      "toHash": "2222222222222222222222222222222222222222",
+      "type": "UPDATE"
+    }
+  ]
+}

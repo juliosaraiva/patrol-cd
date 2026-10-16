@@ -1,0 +1,9 @@
+{
+  "action": "published",
+  "package": {
+    "name": "charts/web",
+    "package_type": "CONTAINER",
+    "owner": {"login": "acme"},
+    "package_version": {"container_metadata": {"tag": {"name": "1.2.3"}}}
+  }
+}

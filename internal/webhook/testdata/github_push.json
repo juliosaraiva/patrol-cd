@@ -1,0 +1,25 @@
+{
+  "ref": "refs/heads/main",
+  "before": "1111111111111111111111111111111111111111",
+  "after": "2222222222222222222222222222222222222222",
+  "created": false,
+  "deleted": false,
+  "forced": false,
+  "repository": {
+    "id": 1001,
+    "name": "platform",
+    "full_name": "acme/platform",
+    "owner": {"login": "acme", "name": "acme"},
+    "private": false,
+    "html_url": "https://github.com/acme/platform",
+    "clone_url": "https://github.com/acme/platform.git",
+    "ssh_url": "git@github.com:acme/platform.git",
+    "url": "https://github.com/acme/platform",
+    "default_branch": "main"
+  },
+  "commits": [
+    {"added": ["apps/web/deployment.yaml"], "modified": ["apps/web/kustomization.yaml"], "removed": []},
+    {"added": [], "modified": ["README.md"], "removed": ["apps/old/x.yaml"]}
+  ],
+  "sender": {"login": "alice"}
+}

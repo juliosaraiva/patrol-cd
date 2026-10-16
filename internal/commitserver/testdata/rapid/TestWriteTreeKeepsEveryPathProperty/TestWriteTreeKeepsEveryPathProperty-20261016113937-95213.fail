@@ -1,0 +1,30 @@
+# 2026/10/16 11:39:37.159980 [TestWriteTreeKeepsEveryPathProperty] [rapid] draw paths: 2
+# 2026/10/16 11:39:37.159983 [TestWriteTreeKeepsEveryPathProperty] [rapid] draw parts: []string{"manifest.yaml", "manifest.yaml"}
+# 2026/10/16 11:39:37.159994 [TestWriteTreeKeepsEveryPathProperty] [rapid] draw parts: []string{"manifest.yaml"}
+# 2026/10/16 11:39:37.162427 [TestWriteTreeKeepsEveryPathProperty] 
+# 	Error Trace:	/Users/juliosaraiva/Developer/patrol-cd/internal/commitserver/write_test.go:90
+# 	            				/Users/juliosaraiva/go/pkg/mod/pgregory.net/rapid@v1.3.0/engine.go:458
+# 	            				/Users/juliosaraiva/go/pkg/mod/pgregory.net/rapid@v1.3.0/engine.go:467
+# 	            				/Users/juliosaraiva/go/pkg/mod/pgregory.net/rapid@v1.3.0/engine.go:292
+# 	            				/Users/juliosaraiva/go/pkg/mod/pgregory.net/rapid@v1.3.0/engine.go:207
+# 	            				/Users/juliosaraiva/Developer/patrol-cd/internal/commitserver/write_test.go:67
+# 	Error:      	Received unexpected error:
+# 	            	openat manifest.yaml/manifest.yaml/manifest.yaml: not a directory
+# 	Test:       	TestWriteTreeKeepsEveryPathProperty
+# 	Messages:   	manifest.yaml/manifest.yaml
+# 
+v0.4.8#15939450263098403365
+0x0
+0x0
+0x1
+0x0
+0x38e38e38e38e4
+0x2
+0x10000000000000
+0x38e38e38e38e4
+0x2
+0x0
+0x0
+0x38e38e38e38e4
+0x2
+0x0

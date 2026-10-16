@@ -7,6 +7,8 @@ import (
 	"strconv"
 	"strings"
 	"time"
+
+	"sigs.k8s.io/yaml"
 )
 
 // flexString accepts a JSON string, number or boolean and stores its textual form. Service
@@ -147,13 +149,16 @@ func (t TransportOptions) settings() (transportSettings, error) {
 	return s, nil
 }
 
-// decodeOptions decodes JSON service options into dst. Unknown fields are ignored, as in
-// the baseline.
+// decodeOptions decodes service options (JSON, or YAML) into dst. Unknown fields are
+// ignored, as in the baseline. Decoding goes through sigs.k8s.io/yaml with dst as the type
+// hint, like the baseline's typed YAML decode: an unquoted number or boolean given for a
+// string-typed option (an AWS account id, a numeric header value or API key) is converted
+// to its text instead of failing.
 func decodeOptions(serviceType string, raw []byte, dst any) error {
 	if len(bytes.TrimSpace(raw)) == 0 || bytes.Equal(bytes.TrimSpace(raw), []byte("null")) {
 		return nil
 	}
-	if err := json.Unmarshal(raw, dst); err != nil {
+	if err := yaml.Unmarshal(raw, dst); err != nil {
 		return fmt.Errorf("%w: %s: %v", ErrInvalidOptions, serviceType, err)
 	}
 	return nil

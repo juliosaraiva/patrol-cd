@@ -1,0 +1,22 @@
+{
+  "actor": {"nickname": "alice"},
+  "repository": {
+    "uuid": "{repo-uuid}",
+    "full_name": "acme/platform",
+    "name": "platform",
+    "is_private": true,
+    "links": {
+      "html": {"href": "https://bitbucket.org/acme/platform"},
+      "self": {"href": "API_BASE/repositories/acme/platform"}
+    }
+  },
+  "push": {
+    "changes": [
+      {
+        "new": {"type": "branch", "name": "main", "target": {"hash": "2222222222222222222222222222222222222222"}},
+        "old": {"type": "branch", "name": "main", "target": {"hash": "1111111111111111111111111111111111111111"}},
+        "created": false, "closed": false, "forced": false
+      }
+    ]
+  }
+}

@@ -19,6 +19,7 @@ import (
 	"net/url"
 	"strconv"
 	"strings"
+	"sync"
 	"testing"
 )
 
@@ -232,8 +233,9 @@ func TestAwsSqs(t *testing.T) {
 // ---------------------------------------------------------------------------------------
 // GCP Pub/Sub
 
-func TestGCPPubSub(t *testing.T) {
-	t.Parallel()
+// gcpTestKeyPEM returns a PKCS#8 RSA private key for service account key files.
+func gcpTestKeyPEM(t *testing.T) string {
+	t.Helper()
 	key, err := rsa.GenerateKey(rand.Reader, 2048)
 	if err != nil {
 		t.Fatal(err)
@@ -242,27 +244,106 @@ func TestGCPPubSub(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	keyPEM := string(pem.EncodeToMemory(&pem.Block{Type: "PRIVATE KEY", Bytes: der}))
-	srv, rec := newServer(t, func(w http.ResponseWriter, c captured) {
-		switch {
-		case c.Path == "/token":
-			form, _ := url.ParseQuery(string(c.Body))
-			if form.Get("grant_type") != "urn:ietf:params:oauth:grant-type:jwt-bearer" || form.Get("assertion") == "" {
-				writeJSON(w, 400, map[string]any{"error": "invalid_grant"})
-				return
-			}
-			writeJSON(w, 200, map[string]any{"access_token": "ya29.test-token", "token_type": "Bearer", "expires_in": 3600})
-		case strings.HasSuffix(c.Path, ":publish"):
-			writeJSON(w, 200, map[string]any{"messageIds": []string{"1"}})
-		default:
-			writeJSON(w, 404, map[string]any{})
-		}
-	})
+	return string(pem.EncodeToMemory(&pem.Block{Type: "PRIVATE KEY", Bytes: der}))
+}
+
+func gcpServiceAccountJSON(keyPEM, tokenURI string) string {
 	sa, _ := json.Marshal(map[string]string{
 		"type": "service_account", "project_id": "my-project", "private_key_id": "kid", "private_key": keyPEM,
-		"client_email": "patrol@my-project.iam.gserviceaccount.com", "client_id": "1", "token_uri": srv.URL + "/token",
+		"client_email": "patrol@my-project.iam.gserviceaccount.com", "client_id": "1", "token_uri": tokenURI,
 	})
-	svc := mustNew(t, TypeGCPPubSub, map[string]any{"project": "my-project", "topic": "my-topic", "keyJSON": string(sa), "endpoint": srv.URL}, testDeps())
+	return string(sa)
+}
+
+func gcpTokenHandler(w http.ResponseWriter, c captured) {
+	switch {
+	case c.Path == "/token":
+		form, _ := url.ParseQuery(string(c.Body))
+		if form.Get("grant_type") != "urn:ietf:params:oauth:grant-type:jwt-bearer" || form.Get("assertion") == "" {
+			writeJSON(w, 400, map[string]any{"error": "invalid_grant"})
+			return
+		}
+		writeJSON(w, 200, map[string]any{"access_token": "ya29.test-token", "token_type": "Bearer", "expires_in": 3600})
+	case strings.HasSuffix(c.Path, ":publish"):
+		writeJSON(w, 200, map[string]any{"messageIds": []string{"1"}})
+	default:
+		writeJSON(w, 404, map[string]any{})
+	}
+}
+
+// TestGCPPubSubTokenURIIsValidated: the token endpoint named by a service account key is
+// subject to the same URL policy (https only, ValidateURL hook) as every other endpoint.
+func TestGCPPubSubTokenURIIsValidated(t *testing.T) {
+	t.Parallel()
+	keyPEM := gcpTestKeyPEM(t)
+	pubsub, pubRec := newServer(t, gcpTokenHandler)
+	tokenSrv, tokenRec := newTLSRecordingServer(t, gcpTokenHandler)
+	pubsubHost := strings.TrimPrefix(pubsub.URL, "http://")
+	var mu sync.Mutex
+	var seen []string
+	deps := testDeps()
+	deps.Network.ValidateURL = func(u *url.URL) error {
+		mu.Lock()
+		seen = append(seen, u.Host)
+		mu.Unlock()
+		if u.Host != pubsubHost {
+			return errors.New("host not in allow-list")
+		}
+		return nil
+	}
+	tests := map[string]string{
+		"host rejected by ValidateURL": tokenSrv.URL + "/token",
+		"plain http token endpoint":    pubsub.URL + "/token",
+		"non-http scheme":              "file:///etc/passwd",
+	}
+	for name, tokenURI := range tests {
+		svc := mustNew(t, TypeGCPPubSub, map[string]any{
+			"project": "p", "topic": "t", "keyJSON": gcpServiceAccountJSON(keyPEM, tokenURI), "endpoint": pubsub.URL,
+			"insecureSkipVerify": true, // so that only the URL policy can stop the token request
+		}, deps)
+		err := send(t, svc, Notification{Message: "m"}, Destination{})
+		if !errors.Is(err, ErrURLNotAllowed) {
+			t.Errorf("%s: want ErrURLNotAllowed, got %v", name, err)
+		}
+	}
+	if n := len(tokenRec.all()); n != 0 {
+		t.Fatalf("token server contacted without validation (%d requests)", n)
+	}
+	if n := len(pubRec.all()); n != 0 {
+		t.Fatalf("publish attempted without a token (%d requests)", n)
+	}
+}
+
+// TestGCPPubSubTokenClientValidatesEveryRequest: the token exchange client checks the
+// initial request URL too, not only redirects (covers credentials whose token endpoint is
+// not taken from the key file, e.g. Application Default Credentials).
+func TestGCPPubSubTokenClientValidatesEveryRequest(t *testing.T) {
+	t.Parallel()
+	srv, rec := newServer(t, gcpTokenHandler)
+	deps := testDeps()
+	deps.Network.ValidateURL = func(*url.URL) error { return errors.New("denied") }
+	svc, err := newGCPPubSubService([]byte(`{"project":"p"}`), deps, NewRedactor())
+	if err != nil {
+		t.Fatal(err)
+	}
+	client := svc.(*gcpPubSubService).tokenHTTPClient()
+	resp, err := client.Post(srv.URL+"/token", "application/x-www-form-urlencoded", strings.NewReader("a=b"))
+	if err == nil {
+		_ = resp.Body.Close()
+	}
+	if !errors.Is(err, ErrURLNotAllowed) || len(rec.all()) != 0 {
+		t.Fatalf("token client must validate the first request: err=%v requests=%d", err, len(rec.all()))
+	}
+}
+
+func TestGCPPubSub(t *testing.T) {
+	t.Parallel()
+	keyPEM := gcpTestKeyPEM(t)
+	srv, rec := newTLSRecordingServer(t, gcpTokenHandler)
+	svc := mustNew(t, TypeGCPPubSub, map[string]any{
+		"project": "my-project", "topic": "my-topic", "keyJSON": gcpServiceAccountJSON(keyPEM, srv.URL+"/token"), "endpoint": srv.URL,
+		"insecureSkipVerify": true, // self-signed httptest certificate
+	}, testDeps())
 	n := Notification{Message: "Deployment ready", GCPPubSub: &GCPPubSubNotification{Attributes: map[string]string{"app": "guestbook"}}}
 	mustSend(t, svc, n, Destination{Recipient: "override-topic"})
 	mustSend(t, svc, n, Destination{})

@@ -1,0 +1,18 @@
+{
+  "ref": "refs/heads/main",
+  "before": "1111111111111111111111111111111111111111",
+  "after": "2222222222222222222222222222222222222222",
+  "commits": [{"added": ["apps/web/deployment.yaml"], "removed": [], "modified": []}],
+  "total_commits": 1,
+  "repository": {
+    "id": 6,
+    "owner": {"login": "acme", "username": "acme"},
+    "name": "platform",
+    "full_name": "acme/platform",
+    "html_url": "https://gitea.example.com/acme/platform",
+    "ssh_url": "git@gitea.example.com:acme/platform.git",
+    "clone_url": "https://gitea.example.com/acme/platform.git",
+    "default_branch": "main"
+  },
+  "sender": {"login": "alice", "username": "alice"}
+}

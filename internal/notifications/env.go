@@ -8,6 +8,7 @@ import (
 	"strings"
 	"sync"
 	"time"
+	"unicode/utf8"
 
 	"github.com/juliosaraiva/patrol-cd/internal/notifications/services"
 )
@@ -148,9 +149,28 @@ func parseTime(timestamp string) (time.Time, error) {
 }
 
 var stringHelpers = map[string]any{
-	"ReplaceAll": strings.ReplaceAll,
+	"ReplaceAll": boundedReplaceAll,
 	"ToUpper":    strings.ToUpper,
 	"ToLower":    strings.ToLower,
+}
+
+// maxHelperOutputBytes bounds strings built by the strings.* helpers (triggers and
+// templates): strings.ReplaceAll with an empty old string inserts new between every rune.
+const maxHelperOutputBytes = 4 << 20
+
+// boundedReplaceAll is strings.ReplaceAll refusing results larger than
+// maxHelperOutputBytes (computed before allocating).
+func boundedReplaceAll(s, old, replacement string) (string, error) {
+	var n int
+	if old == "" {
+		n = utf8.RuneCountInString(s) + 1
+	} else {
+		n = strings.Count(s, old)
+	}
+	if grow := len(replacement) - len(old); n > 0 && grow > 0 && grow > (maxHelperOutputBytes-len(s))/n {
+		return "", fmt.Errorf("%w: strings.ReplaceAll result exceeds %d bytes", ErrTemplateLimitExceeded, maxHelperOutputBytes)
+	}
+	return strings.ReplaceAll(s, old, replacement), nil
 }
 
 var syncHelpers = map[string]any{

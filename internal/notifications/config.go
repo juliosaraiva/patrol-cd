@@ -46,6 +46,10 @@ var (
 	ErrRepoServiceUnavailable = errors.New("repository service is not available")
 	// ErrTemplateOutputTooLarge reports a template field rendering beyond the size limit.
 	ErrTemplateOutputTooLarge = errors.New("rendered template exceeds size limit")
+	// ErrTemplateLimitExceeded reports a template (or a strings.* helper) exceeding the
+	// render resource limits (TemplateLimits) or building a value the sandbox refuses
+	// (too large, too deep or cyclic).
+	ErrTemplateLimitExceeded = errors.New("template resource limit exceeded")
 )
 
 // Condition is one condition of a trigger.
@@ -340,8 +344,10 @@ func parseService(key, v string, secretData map[string][]byte) (ServiceConfig, [
 	if !hasName || name == "" {
 		name = typ
 	}
+	// UseNumber keeps numeric scalars verbatim (no float64 rounding) so that the service
+	// decodes them with the type hints of its option struct, like the baseline does.
 	var tree any
-	if err := yaml.Unmarshal([]byte(v), &tree); err != nil {
+	if err := yaml.Unmarshal([]byte(v), &tree, useNumber); err != nil {
 		return ServiceConfig{}, nil, err
 	}
 	sub := &secretSubstituter{data: secretData}
@@ -355,6 +361,11 @@ func parseService(key, v string, secretData map[string][]byte) (ServiceConfig, [
 		warnings = append(warnings, fmt.Sprintf("service %q references secret key %q which does not exist", name, missing))
 	}
 	return ServiceConfig{Name: name, Type: typ, Options: opts, secretValues: sub.used()}, warnings, nil
+}
+
+func useNumber(d *json.Decoder) *json.Decoder {
+	d.UseNumber()
+	return d
 }
 
 var secretRef = regexp.MustCompile(`\$[\w-]+(?:\.[\w-]+)*`)

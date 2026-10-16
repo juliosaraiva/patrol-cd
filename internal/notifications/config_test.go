@@ -309,3 +309,68 @@ func TestSecretSubstitutionProperties(t *testing.T) {
 		}
 	})
 }
+
+// TestServiceOptionsCoerceUnquotedScalars covers configurations that are valid for the
+// baseline: unquoted numbers and booleans in string-typed options are decoded with the
+// YAML type hints of the option struct (sigs.k8s.io/yaml semantics) instead of failing.
+func TestServiceOptionsCoerceUnquotedScalars(t *testing.T) {
+	t.Parallel()
+	tests := map[string]string{
+		"service.awssqs":            "region: us-east-1\nqueue: q\naccount: 123456789012\n",
+		"service.webhook.hook":      "url: https://hooks.example.com\nheaders:\n- name: X-Build-Id\n  value: 12345\n- name: X-Flag\n  value: true\nbasicAuth:\n  username: 42\n  password: 1234\n",
+		"service.opsgenie":          "apiUrl: api.opsgenie.com\napiKeys:\n  team: 12345678\n",
+		"service.pagerduty":         "token: t\nfrom: a@b.c\nserviceID: 1234567\n",
+		"service.pagerdutyv2":       "serviceKeys:\n  svc: 987654321\n",
+		"service.telegram":          "token: 123456789\n",
+		"service.grafana":           "apiUrl: https://grafana.example.com/api\napiKey: 31337\n",
+		"service.newrelic":          "apiURL: https://api.newrelic.com\napiKey: 1234\n",
+		"service.alertmanager":      "targets:\n- 10.0.0.1:9093\nbearerToken: 777\n",
+		"service.email":             "host: smtp.example.com\nport: 587\nusername: 1001\npassword: 2002\nfrom: a@b.c\n",
+		"service.github":            "appID: 12345\ninstallationID: 67890\nprivateKey: $gh-key\n",
+		"service.slack":             "token: 1234\nusername: 2024\n",
+		"service.nats":              "url: nats://127.0.0.1:4222\nheaders:\n  X-Id: 9\n",
+		"service.webhook.bigint":    "url: https://hooks.example.com\nheaders:\n- name: X-Big\n  value: 12345678901234567890\n",
+		"service.teams":             "recipientUrls:\n  channel: https://example.webhook.office.com/x\n",
+		"service.rocketchat":        "email: a@b.c\npassword: 123456\n",
+		"service.mattermost":        "apiURL: https://mm.example.com\ntoken: 99\n",
+		"service.webex":             "token: 123\n",
+		"service.pushover":          "token: 123\n",
+		"service.googlechat":        "webhooks:\n  space: https://chat.googleapis.com/v1/spaces/x\n",
+		"service.gcppubsub":         "project: 123456\ntopic: 789\n",
+		"service.webhook.retrymax":  "url: https://hooks.example.com\nretryMax: 3\nretryWaitMin: 1s\n",
+		"service.webhook.transport": "url: https://hooks.example.com\nmaxIdleConns: 10\nidleConnTimeout: 30s\ninsecureSkipVerify: false\n",
+	}
+	secret := map[string][]byte{"gh-key": []byte("-----BEGIN RSA PRIVATE KEY-----\nMIIBOgIBAAJBAK\n-----END RSA PRIVATE KEY-----\n")}
+	for key, v := range tests {
+		t.Run(key, func(t *testing.T) {
+			t.Parallel()
+			cfg, err := ParseConfig(map[string]string{key: v}, secret)
+			if err != nil {
+				t.Fatalf("ParseConfig: %v", err)
+			}
+			eng, err := NewEngine(cfg)
+			if err != nil {
+				t.Fatal(err)
+			}
+			for _, w := range eng.Warnings() {
+				if strings.Contains(w, "cannot unmarshal") || strings.Contains(w, "invalid options") {
+					t.Fatalf("unquoted scalar rejected: %s", w)
+				}
+			}
+		})
+	}
+}
+
+// TestServiceOptionsKeepLargeIntegers ensures numbers survive secret substitution without
+// float64 precision loss.
+func TestServiceOptionsKeepLargeIntegers(t *testing.T) {
+	t.Parallel()
+	cfg, err := ParseConfig(map[string]string{"service.webhook.x": "url: https://h.example.com\nheaders:\n- name: X-Big\n  value: 12345678901234567890\n- name: X-Id\n  value: 9007199254740993\n"}, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	raw := string(cfg.Services["x"].Options)
+	if !strings.Contains(raw, "12345678901234567890") || !strings.Contains(raw, "9007199254740993") {
+		t.Fatalf("integer precision lost: %s", raw)
+	}
+}

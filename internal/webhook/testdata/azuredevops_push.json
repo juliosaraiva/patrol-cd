@@ -1,0 +1,18 @@
+{
+  "id": "03c164c2-8912-4d5e-8009-3707d5f83734",
+  "eventType": "git.push",
+  "resource": {
+    "refUpdates": [
+      {"name": "refs/heads/main", "oldObjectId": "1111111111111111111111111111111111111111", "newObjectId": "2222222222222222222222222222222222222222"}
+    ],
+    "repository": {
+      "id": "11111111-2222-3333-4444-555555555555",
+      "name": "platform",
+      "url": "https://dev.azure.com/acme/_apis/git/repositories/11111111-2222-3333-4444-555555555555",
+      "remoteUrl": "https://dev.azure.com/acme/Platform/_git/platform",
+      "defaultBranch": "refs/heads/main",
+      "project": {"name": "Platform", "visibility": "private"}
+    },
+    "pushedBy": {"uniqueName": "alice@example.com"}
+  }
+}

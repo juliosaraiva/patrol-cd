@@ -24,8 +24,9 @@ const (
 // GCPPubSubOptions configure a gcppubsub service. KeyJSON (inline service account key,
 // normally a $secret reference) and Endpoint are Patrol extensions. Without KeyFile or
 // KeyJSON, Application Default Credentials (e.g. GKE Workload Identity) are used. Only
-// service_account key files are accepted, so a key file cannot redirect token exchange to
-// an arbitrary external endpoint.
+// service_account keys are accepted (external_account keys can name arbitrary token and
+// credential-source URLs). The key's token_uri must be https and pass Network.ValidateURL,
+// and the token exchange client validates every request it sends, not only redirects.
 type GCPPubSubOptions struct {
 	Project  string `json:"project"`
 	Topic    string `json:"topic"`
@@ -70,17 +71,23 @@ func (s *gcpPubSubService) tokenSource() (oauth2.TokenSource, error) {
 		return s.tokens, nil
 	}
 	// The token source outlives any single delivery, so it gets a background context that
-	// carries the guarded HTTP client for token exchange.
-	ctx := context.WithValue(context.Background(), oauth2.HTTPClient, s.http.client)
+	// carries the guarded, validating HTTP client for token exchange.
+	ctx := context.WithValue(context.Background(), oauth2.HTTPClient, s.tokenHTTPClient())
 	var creds *google.Credentials
 	var err error
 	switch {
 	case s.opts.KeyJSON != "":
+		if err := s.checkServiceAccountKey([]byte(s.opts.KeyJSON)); err != nil {
+			return nil, err
+		}
 		creds, err = google.CredentialsFromJSONWithType(ctx, []byte(s.opts.KeyJSON), google.ServiceAccount, pubsubScope)
 	case s.opts.KeyFile != "":
 		data, rerr := readBoundedFile(s.opts.KeyFile, maxKeyFileBytes)
 		if rerr != nil {
 			return nil, fmt.Errorf("%w: gcppubsub: reading keyFile: %v", ErrInvalidOptions, rerr)
+		}
+		if err := s.checkServiceAccountKey(data); err != nil {
+			return nil, err
 		}
 		creds, err = google.CredentialsFromJSONWithType(ctx, data, google.ServiceAccount, pubsubScope)
 	default:
@@ -91,6 +98,59 @@ func (s *gcpPubSubService) tokenSource() (oauth2.TokenSource, error) {
 	}
 	s.tokens = creds.TokenSource
 	return s.tokens, nil
+}
+
+// checkServiceAccountKey applies the endpoint policy to the token endpoint named by a
+// service account key (golang.org/x/oauth2/google honours its token_uri): https only, and
+// the Network.ValidateURL hook. An absent token_uri means Google's default endpoint, which
+// the validating token client still checks when it is contacted.
+func (s *gcpPubSubService) checkServiceAccountKey(data []byte) error {
+	var key struct {
+		Type     string `json:"type"`
+		TokenURI string `json:"token_uri"`
+	}
+	if err := json.Unmarshal(data, &key); err != nil {
+		return fmt.Errorf("%w: gcppubsub: key is not valid JSON", ErrInvalidOptions)
+	}
+	if key.Type != string(google.ServiceAccount) {
+		return fmt.Errorf("%w: gcppubsub: only %q keys are supported, got %q", ErrInvalidOptions, google.ServiceAccount, key.Type)
+	}
+	if strings.TrimSpace(key.TokenURI) == "" {
+		return nil
+	}
+	u, err := parseEndpoint(key.TokenURI)
+	if err != nil {
+		return fmt.Errorf("gcppubsub: key token_uri: %w", err)
+	}
+	if err := validateEndpoint(u, []string{"https"}, s.http.validate); err != nil {
+		return fmt.Errorf("gcppubsub: key token_uri: %w", err)
+	}
+	return nil
+}
+
+// tokenHTTPClient returns the client used for OAuth2 token exchange: the service's guarded
+// client whose transport also validates the URL of every request (the client's redirect
+// check alone does not cover the first request).
+func (s *gcpPubSubService) tokenHTTPClient() *http.Client {
+	c := *s.http.client
+	c.Transport = validatingTransport{base: s.http.client.Transport, check: s.http.checkURL}
+	return &c
+}
+
+// validatingTransport refuses requests whose URL fails check.
+type validatingTransport struct {
+	base  http.RoundTripper
+	check func(*url.URL) error
+}
+
+func (t validatingTransport) RoundTrip(req *http.Request) (*http.Response, error) {
+	if err := t.check(req.URL); err != nil {
+		if req.Body != nil {
+			_ = req.Body.Close()
+		}
+		return nil, err
+	}
+	return t.base.RoundTrip(req)
 }
 
 func readBoundedFile(path string, limit int64) ([]byte, error) {

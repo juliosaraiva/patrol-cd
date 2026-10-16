@@ -1,0 +1,20 @@
+{
+  "object_kind": "push",
+  "ref": "refs/heads/main",
+  "before": "1111111111111111111111111111111111111111",
+  "after": "2222222222222222222222222222222222222222",
+  "user_username": "alice",
+  "project_id": 15,
+  "project": {
+    "id": 15,
+    "name": "platform",
+    "web_url": "https://gitlab.example.com/acme/platform",
+    "git_ssh_url": "git@gitlab.example.com:acme/platform.git",
+    "git_http_url": "https://gitlab.example.com/acme/platform.git",
+    "path_with_namespace": "acme/platform",
+    "default_branch": "main",
+    "visibility_level": 0
+  },
+  "commits": [{"added": ["apps/web/deployment.yaml"], "modified": [], "removed": []}],
+  "total_commits_count": 1
+}
