@@ -1,0 +1,41 @@
+# Patrol CD secret-scan configuration (gitleaks v8). The default ruleset stays on; the
+# allowlists below are narrow and each entry says why. Run: gitleaks dir . -c .gitleaks.toml
+title = "Patrol CD"
+
+[extend]
+useDefault = true
+
+[[allowlists]]
+description = "Deliberately committed TEST-ONLY fixtures (clearly marked in the files)"
+paths = [
+  '''test/e2e/fixtures/git-server/manifests/ssh-host-key\.secret\.yaml''', # TEST-ONLY e2e git-server host key, protects nothing
+  '''internal/cli/admin/testdata/argocd/export\.yaml''',                   # Argo CD export fixture; every value is "fake-…" base64
+]
+
+[[allowlists]]
+description = "Fake credentials used by unit tests and harnesses"
+condition = "OR"
+regexes = [
+  '''0123456789abcdef0123456789abcdef[-\w]*''',  # fixed fake server signing keys
+  '''glpat-test-0123456789''',                     # fake GitLab token
+  '''no such key: 0123456789ABCDEF''',            # fake GPG key id in an error-message assertion
+]
+
+[[allowlists]]
+description = "generic-api-key entropy heuristics hit prose, test literals and key NAMES"
+targetRules = ["generic-api-key"]
+paths = [
+  '''^docs/.*\.md$''',
+  '''_test\.go$''',
+  '''/testdata/''',
+  '''internal/cli/admin/argoconvert\.go$''', # compares annotation key names, no values
+  '''internal/apiserver/services/internal/miscapitest/harness\.go$''', # fake signing key constant
+]
+
+[[allowlists]]
+description = "UI placeholders/tests contain PEM header text only (no key body); ui/dist is a build output and is git-ignored"
+targetRules = ["private-key", "generic-api-key"]
+paths = [
+  '''^ui/src/pages/settings/''',
+  '''^ui/dist/''',
+]

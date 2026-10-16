@@ -1,0 +1,21 @@
+# kind cluster "patrol-target": a destination (workload) cluster managed by the Patrol CD
+# instance running in patrol-control. Create it with hack/kind/up.sh.
+#
+# patrol-control reaches its API server over kind's shared docker network at
+# https://patrol-target-control-plane:6443 (see docs/guides/local-development.md).
+kind: Cluster
+apiVersion: kind.x-k8s.io/v1alpha4
+name: patrol-target
+networking:
+  apiServerAddress: "127.0.0.1"
+  # Distinct from patrol-control's defaults (10.244.0.0/16, 10.96.0.0/16) so addresses seen in
+  # logs and resource status identify the cluster unambiguously.
+  podSubnet: "10.245.0.0/16"
+  serviceSubnet: "10.97.0.0/16"
+nodes:
+  # Single node: kind removes the control-plane NoSchedule taint, so workloads run here.
+  - role: control-plane
+containerdConfigPatches:
+  - |-
+    [plugins."io.containerd.grpc.v1.cri".registry]
+      config_path = "/etc/containerd/certs.d"

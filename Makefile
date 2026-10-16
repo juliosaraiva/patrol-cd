@@ -116,3 +116,5 @@ test: $(SETUP_ENVTEST) ## Run Go tests, including envtest-backed admission tests
 build: ## Build all packages; binaries under cmd/ are written to ./bin.
 	$(GO) build ./...
 	@if [ -d cmd ]; then $(GO) build -o $(LOCALBIN)/ ./cmd/...; fi
+
+include hack/build.mk

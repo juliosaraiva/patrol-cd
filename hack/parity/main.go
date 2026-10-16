@@ -80,7 +80,50 @@ func run(root string, check bool) error {
 	if err != nil {
 		return err
 	}
+	aliases := map[string]string{}
+	if b, err := os.ReadFile(filepath.Join(root, "docs/parity/aliases.yaml")); err == nil {
+		if err := yaml.Unmarshal(b, &aliases); err != nil {
+			return fmt.Errorf("aliases.yaml: %w", err)
+		}
+	}
 	var problems []string
+	// Iterate aliases in sorted order: several aliases share one canonical feature, and the
+	// merged lists must not depend on map iteration order (matrix.md must be reproducible).
+	aliasKeys := make([]string, 0, len(aliases))
+	for a := range aliases {
+		aliasKeys = append(aliasKeys, a)
+	}
+	sort.Strings(aliasKeys)
+	for _, a := range aliasKeys {
+		c := aliases[a]
+		if _, ok := seen[a]; !ok {
+			problems = append(problems, "aliases.yaml: unknown alias "+a)
+		}
+		if _, ok := seen[c]; !ok {
+			problems = append(problems, "aliases.yaml: unknown canonical "+c)
+		}
+		if _, ok := aliases[c]; ok {
+			problems = append(problems, "aliases.yaml: canonical "+c+" is itself an alias")
+		}
+		if s, ok := st[a]; ok {
+			c2 := st[c]
+			c2.Impl = uniqSorted(append(c2.Impl, s.Impl...))
+			c2.Tests = uniqSorted(append(c2.Tests, s.Tests...))
+			if c2.Status == "" || rank[s.Status] < rank[c2.Status] {
+				c2.Status = s.Status
+			}
+			st[c] = c2
+		}
+	}
+	for _, a := range aliasKeys {
+		c := aliases[a]
+		s := st[c]
+		if s.Status == "" {
+			s.Status = "not-started"
+		}
+		s.Notes = strings.Trim("alias of "+c+"; "+s.Notes, "; ")
+		st[a] = s
+	}
 	for id, s := range st {
 		if _, ok := seen[id]; !ok {
 			problems = append(problems, "status.yaml: unknown feature "+id)
@@ -163,12 +206,28 @@ func loadStatus(dir string) (map[string]status, error) {
 	return out, nil
 }
 
+func uniqSorted(in []string) []string {
+	if len(in) == 0 {
+		return in
+	}
+	out := append([]string(nil), in...)
+	sort.Strings(out)
+	w := 1
+	for i := 1; i < len(out); i++ {
+		if out[i] != out[w-1] {
+			out[w] = out[i]
+			w++
+		}
+	}
+	return out[:w]
+}
+
 func parseArea(path string) ([]feature, error) {
 	fh, err := os.Open(path)
 	if err != nil {
 		return nil, err
 	}
-	defer fh.Close()
+	defer func() { _ = fh.Close() }()
 	area := strings.TrimSuffix(filepath.Base(path), ".md")
 	var out []feature
 	var cur *feature

@@ -1,0 +1,17 @@
+# Registers patrol-target with the Patrol CD instance in patrol-control. Applied by
+# hack/kind/register-target.sh into the namespace given with --namespace, next to the Secret
+# cluster-patrol-target (keys bearerToken and caData) that the script creates.
+apiVersion: cd.patrol.example/v1alpha1
+kind: Cluster
+metadata:
+  name: patrol-target
+  labels:
+    app.kubernetes.io/part-of: patrol-cd-dev
+spec:
+  name: patrol-target
+  # patrol-target's control-plane container on kind's docker network; its serving certificate
+  # includes this name, so TLS is verified against caData.
+  server: https://patrol-target-control-plane:6443
+  config:
+    credentialsRef:
+      name: cluster-patrol-target

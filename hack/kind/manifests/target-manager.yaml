@@ -1,0 +1,27 @@
+# Identity Patrol CD uses to manage the patrol-target cluster (applied to patrol-target by
+# hack/kind/register-target.sh). cluster-admin is acceptable for this disposable cluster; a
+# production destination should get a narrower role.
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: patrol-manager
+  namespace: kube-system
+  labels:
+    app.kubernetes.io/name: patrol-manager
+    app.kubernetes.io/part-of: patrol-cd-dev
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRoleBinding
+metadata:
+  name: patrol-manager
+  labels:
+    app.kubernetes.io/name: patrol-manager
+    app.kubernetes.io/part-of: patrol-cd-dev
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: ClusterRole
+  name: cluster-admin
+subjects:
+  - kind: ServiceAccount
+    name: patrol-manager
+    namespace: kube-system
