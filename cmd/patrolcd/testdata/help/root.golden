@@ -1,0 +1,26 @@
+patrolcd runs the Patrol CD control-plane components. Each subcommand is one component;
+the image also links the binary under each component name (patrol-server, patrol-repo-server, ...).
+
+Configuration precedence for every patrol-cmd-params-cm parameter:
+  command-line flag > environment variable (PATROL_*) > patrol-cmd-params-cm > default
+
+Usage:
+  patrolcd [flags]
+  patrolcd [command]
+
+Available Commands:
+  appset-controller        Run the ApplicationSet controller
+  cmp-server               Run a config management plugin sidecar server
+  commit-server            Run the commit-server (source hydrator writes; no Kubernetes access)
+  controller               Run the application controller (reconcilers, sharding, tree API, source hydrator)
+  help                     Help about any command
+  k8s-auth                 Print Kubernetes exec credentials for managed cloud clusters
+  notifications-controller Run the notifications controller
+  repo-server              Run the repo-server (sources and manifest rendering; no Kubernetes access)
+  server                   Run patrol-server (API, web UI, webhooks)
+  version                  Print version information
+
+Flags:
+  -h, --help   help for patrolcd
+
+Use "patrolcd [command] --help" for more information about a command.

@@ -1,0 +1,9 @@
+Print version information
+
+Usage:
+  patrolcd version [flags]
+
+Flags:
+  -h, --help            help for version
+  -o, --output string   Output format: json or wide
+      --short           Print the version number only

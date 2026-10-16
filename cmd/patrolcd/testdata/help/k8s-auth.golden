@@ -1,0 +1,15 @@
+Print Kubernetes exec credentials for managed cloud clusters
+
+Usage:
+  patrolcd k8s-auth [flags]
+  patrolcd k8s-auth [command]
+
+Available Commands:
+  aws         Print an EKS token (presigned sts:GetCallerIdentity)
+  azure       Print an AKS token (Microsoft Entra ID; workload identity by default)
+  gcp         Print a GKE token from Google application default credentials
+
+Flags:
+  -h, --help   help for k8s-auth
+
+Use "patrolcd k8s-auth [command] --help" for more information about a command.

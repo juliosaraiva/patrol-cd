@@ -1,0 +1,76 @@
+Run patrol-server (API, web UI, webhooks)
+
+Usage:
+  patrolcd server [flags]
+
+Flags:
+      --address string                                Listen address; env PATROL_SERVER_LISTEN_ADDRESS, patrol-cmd-params-cm server.listen.address (default "0.0.0.0")
+      --allow-cluster-exec                            Let cluster connection checks run exec credential plugins and use the server's own cloud identity
+      --allowed-scm-providers strings                 Allowed SCM provider API URLs; env PATROL_APPLICATIONSET_CONTROLLER_ALLOWED_SCM_PROVIDERS, patrol-cmd-params-cm applicationsetcontroller.allowed.scm.providers
+      --api-content-types string                      Semicolon-separated content types allowed on non-GET requests (empty allows all); env PATROL_API_CONTENT_TYPES, patrol-cmd-params-cm server.api.content.types (default "application/json")
+      --app-state-cache-expiration duration           Application state cache TTL; env PATROL_APP_STATE_CACHE_EXPIRATION, patrol-cmd-params-cm server.app.state.cache.expiration (default 1h)
+      --application-namespaces strings                Additional namespaces (globs) Applications may live in; env PATROL_APPLICATION_NAMESPACES, patrol-cmd-params-cm application.namespaces
+      --basehref string                               UI base href; env PATROL_SERVER_BASEHREF, patrol-cmd-params-cm server.basehref (default "/")
+      --connection-status-cache-expiration duration   Repository/cluster connection status cache TTL; env PATROL_SERVER_CONNECTION_STATUS_CACHE_EXPIRATION, patrol-cmd-params-cm server.connection.status.cache.expiration (default 1h)
+      --content-security-policy string                Content-Security-Policy header (empty disables); env PATROL_SERVER_CONTENT_SECURITY_POLICY, patrol-cmd-params-cm server.content.security.policy (default "frame-ancestors 'self';")
+      --context string                                Kubeconfig context to use
+      --controller-service string                     Headless Service of the controller StatefulSet (tree API routing) (default "patrol-controller")
+      --controller-statefulset string                 Controller StatefulSet name (tree API routing) (default "patrol-controller")
+      --controller-tree-api-ca-cert-path string       CA bundle verifying the controller tree API certificate (default: not verified; the internal token authenticates)
+      --controller-tree-api-port int                  Port of the controller tree API (default 8090)
+      --controller-tree-api-tls                       Use TLS to reach the controller tree API
+      --controller-tree-api-url string                Send every controller tree API call to this URL (single controller, development); default: route to the replica owning the shard
+      --default-cache-expiration duration             Default cache TTL; env PATROL_DEFAULT_CACHE_EXPIRATION, patrol-cmd-params-cm server.default.cache.expiration (default 24h)
+      --dex-server string                             Dex address; env PATROL_SERVER_DEX_SERVER, patrol-cmd-params-cm server.dex.server (default "patrol-dex-server:5556")
+      --dex-server-ca-cert-path string                CA bundle verifying Dex's certificate with --dex-server-strict-tls (default "/app/config/dex/tls/ca.crt")
+      --dex-server-cert-path string                   Dex's certificate, pinned with --dex-server-strict-tls (Dex must present exactly this certificate) (default "/app/config/dex/tls/tls.crt")
+      --dex-server-plaintext                          Connect to Dex without TLS; env PATROL_SERVER_DEX_SERVER_PLAINTEXT, patrol-cmd-params-cm server.dex.server.plaintext
+      --dex-server-strict-tls                         Verify Dex's TLS certificate; env PATROL_SERVER_DEX_SERVER_STRICT_TLS, patrol-cmd-params-cm server.dex.server.strict.tls
+      --disable-auth                                  Disable authentication and authorization; env PATROL_SERVER_DISABLE_AUTH, patrol-cmd-params-cm server.disable.auth
+      --download-dir string                           Directory of CLI binaries served under /download/ (patrol-<os>-<arch>) (default "/shared/download")
+      --enable-github-api-metrics                     GitHub API metrics; env PATROL_APPLICATIONSET_CONTROLLER_ENABLE_GITHUB_API_METRICS, patrol-cmd-params-cm applicationsetcontroller.enable.github.api.metrics
+      --enable-gzip                                   Gzip HTTP responses; env PATROL_SERVER_ENABLE_GZIP, patrol-cmd-params-cm server.enable.gzip (default true)
+      --enable-new-git-file-globbing                  New git files generator globbing; env PATROL_APPLICATIONSET_CONTROLLER_ENABLE_NEW_GIT_FILE_GLOBBING, patrol-cmd-params-cm applicationsetcontroller.enable.new.git.file.globbing
+      --enable-pprof                                  Serve /debug/pprof/ on the metrics listener (otherwise only while the file named by $PATROL_ENABLE_PROFILER_FILE_PATH contains "true")
+      --enable-proxy-extension                        Enable proxy extensions; env PATROL_SERVER_ENABLE_PROXY_EXTENSION, patrol-cmd-params-cm server.enable.proxy.extension
+      --enable-scm-providers                          Enable SCM provider and pull request generators; env PATROL_APPLICATIONSET_CONTROLLER_ENABLE_SCM_PROVIDERS, patrol-cmd-params-cm applicationsetcontroller.enable.scm.providers (default true)
+      --extensions-dir string                         Directory of UI extensions (extension*.js concatenated into /extensions.js; other files served under /extensions/) (default "/tmp/extensions")
+      --glob-cache-size int                           RBAC glob cache size (no effect: patterns are compiled with the policy); env PATROL_SERVER_GLOB_CACHE_SIZE, patrol-cmd-params-cm server.glob.cache.size (default 10000)
+      --healthz-addr string                           Separate listener serving /healthz, /readyz and /livez ("" or "-": the metrics listener only)
+  -h, --help                                          help for server
+      --hydrator-enabled                              Enable the source hydrator; env PATROL_HYDRATOR_ENABLED, patrol-cmd-params-cm hydrator.enabled
+      --insecure                                      Serve without TLS; env PATROL_SERVER_INSECURE, patrol-cmd-params-cm server.insecure
+      --internal-token-file string                    File holding the shared internal token (default $PATROL_INTERNAL_TOKEN_FILE or /app/config/internal-token/token)
+      --kubeconfig string                             Path to a kubeconfig file (default: in-cluster configuration, else $KUBECONFIG or ~/.kube/config)
+      --logformat string                              Log format (json or text, any case) (one of json, text); env PATROL_SERVER_LOGFORMAT, patrol-cmd-params-cm server.log.format (default "json")
+      --loglevel level                                Log level (a logrus level name, any case); env PATROL_SERVER_LOG_LEVEL, patrol-cmd-params-cm server.log.level (default info)
+      --metrics-addr string                           Address of the metrics, probe and profiler listener ("-" disables it) (default: --metrics-address and --metrics-port)
+      --metrics-address string                        Metrics listen address; env PATROL_SERVER_METRICS_LISTEN_ADDRESS, patrol-cmd-params-cm server.metrics.listen.address (default "0.0.0.0")
+      --metrics-port int                              Port of the metrics listener (default 8083)
+  -n, --namespace string                              Control-plane namespace (default: the pod namespace, else the kubeconfig context namespace)
+      --oidc-cache-expiration duration                OIDC state cache TTL; env PATROL_SERVER_OIDC_CACHE_EXPIRATION, patrol-cmd-params-cm server.oidc.cache.expiration (default 3m)
+      --otlp-address string                           OpenTelemetry collector address; env PATROL_SERVER_OTLP_ADDRESS, patrol-cmd-params-cm otlp.address
+      --otlp-attrs strings                            OpenTelemetry attributes (key:value,...); env PATROL_SERVER_OTLP_ATTRS, patrol-cmd-params-cm otlp.attrs
+      --otlp-headers key=value                        OpenTelemetry headers (k1=v1,k2=v2); env PATROL_SERVER_OTLP_HEADERS, patrol-cmd-params-cm otlp.headers
+      --otlp-insecure                                 OpenTelemetry collector without TLS; env PATROL_SERVER_OTLP_INSECURE, patrol-cmd-params-cm otlp.insecure (default true)
+      --port int                                      Port of the API, UI and webhook listener (default 8080)
+      --repo-server string                            Repo-server address; env PATROL_SERVER_REPO_SERVER, patrol-cmd-params-cm repo.server (default "patrol-repo-server:8081")
+      --repo-server-ca-cert-path string               CA bundle verifying the repo-server; env PATROL_SERVER_REPO_SERVER_CA_CERT_PATH, patrol-cmd-params-cm server.repo.server.ca.cert.path
+      --repo-server-client-cert-key-path string       mTLS client key; env PATROL_SERVER_REPO_SERVER_CLIENT_CERT_KEY_PATH, patrol-cmd-params-cm server.repo.server.client.cert.key.path (default "/app/config/reposerver/mtls/client.key")
+      --repo-server-client-cert-path string           mTLS client certificate; env PATROL_SERVER_REPO_SERVER_CLIENT_CERT_PATH, patrol-cmd-params-cm server.repo.server.client.cert.path (default "/app/config/reposerver/mtls/client.crt")
+      --repo-server-plaintext                         Connect to the repo-server without TLS; env PATROL_SERVER_REPO_SERVER_PLAINTEXT, patrol-cmd-params-cm server.repo.server.plaintext
+      --repo-server-timeout-seconds int               Repo-server request timeout in seconds; env PATROL_SERVER_REPO_SERVER_TIMEOUT_SECONDS, patrol-cmd-params-cm server.repo.server.timeout.seconds (default 60)
+      --rootpath string                               Path prefix behind a reverse proxy; env PATROL_SERVER_ROOTPATH, patrol-cmd-params-cm server.rootpath
+      --scm-root-ca-path string                       CA bundle for SCM providers; env PATROL_APPLICATIONSET_CONTROLLER_SCM_ROOT_CA_PATH, patrol-cmd-params-cm applicationsetcontroller.scm.root.ca.path
+      --shutdown-timeout duration                     Bound of the graceful drain after SIGTERM (default 30s)
+      --staticassets string                           Additional static assets directory; env PATROL_SERVER_STATIC_ASSETS, patrol-cmd-params-cm server.staticassets (default "/shared/app")
+      --sync-with-replace-allowed                     Allow Replace syncs through the API; env PATROL_SYNC_WITH_REPLACE_ALLOWED, patrol-cmd-params-cm server.sync.replace.allowed (default true)
+      --tls-cert string                               TLS certificate file of the listener (reloaded when it changes)
+      --tls-key string                                TLS private key file of the listener
+      --tlsciphers string                             Colon-separated TLS cipher suites; env PATROL_TLS_CIPHERS, patrol-cmd-params-cm server.tls.ciphers (default "TLS_ECDHE_RSA_WITH_AES_256_GCM_SHA384")
+      --tlsmaxversion string                          Maximum TLS version (one of 1.0, 1.1, 1.2, 1.3); env PATROL_TLS_MAX_VERSION, patrol-cmd-params-cm server.tls.maxversion (default "1.3")
+      --tlsminversion string                          Minimum TLS version (one of 1.0, 1.1, 1.2, 1.3); env PATROL_TLS_MIN_VERSION, patrol-cmd-params-cm server.tls.minversion (default "1.2")
+      --trusted-proxies strings                       CIDRs of reverse proxies whose X-Forwarded-For is trusted (rate limiting, logs, webhook source)
+      --webhook-parallelism-limit int                 Concurrent webhook requests; env PATROL_SERVER_WEBHOOK_PARALLELISM_LIMIT, patrol-cmd-params-cm server.webhook.parallelism.limit (default 50)
+      --webhook-refresh-workers int                   Webhook refresh workers; env PATROL_SERVER_WEBHOOK_REFRESH_WORKERS, patrol-cmd-params-cm server.webhook.refresh.workers (default 20)
+      --x-frame-options string                        X-Frame-Options header (empty disables); env PATROL_SERVER_X_FRAME_OPTIONS, patrol-cmd-params-cm server.x.frame.options (default "sameorigin")

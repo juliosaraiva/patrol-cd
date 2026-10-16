@@ -1,0 +1,47 @@
+Run the ApplicationSet controller
+
+Usage:
+  patrolcd appset-controller [flags]
+
+Flags:
+      --allowed-scm-providers strings             Allowed SCM provider API URLs; env PATROL_APPLICATIONSET_CONTROLLER_ALLOWED_SCM_PROVIDERS, patrol-cmd-params-cm applicationsetcontroller.allowed.scm.providers
+      --applicationset-namespaces strings         Namespaces (globs) watched for ApplicationSets; env PATROL_APPLICATIONSET_CONTROLLER_NAMESPACES, patrol-cmd-params-cm applicationsetcontroller.namespaces
+      --cache-sync-period duration                Informer resync period (default 10h0m0s)
+      --concurrent-application-updates int        Parallel Application writes within one reconcile (default 1)
+      --concurrent-reconciliations int            Concurrent reconciliations; env PATROL_APPLICATIONSET_CONTROLLER_CONCURRENT_RECONCILIATIONS, patrol-cmd-params-cm applicationsetcontroller.concurrent.reconciliations.max (default 10)
+      --context string                            Kubeconfig context to use
+      --debug                                     Debug logging (overrides log level); env PATROL_APPLICATIONSET_CONTROLLER_DEBUG, patrol-cmd-params-cm applicationsetcontroller.debug
+      --dry-run                                   Do not change Applications; env PATROL_APPLICATIONSET_CONTROLLER_DRY_RUN, patrol-cmd-params-cm applicationsetcontroller.dryrun
+      --enable-github-api-metrics                 GitHub API metrics; env PATROL_APPLICATIONSET_CONTROLLER_ENABLE_GITHUB_API_METRICS, patrol-cmd-params-cm applicationsetcontroller.enable.github.api.metrics
+      --enable-leader-election                    Leader election; env PATROL_APPLICATIONSET_CONTROLLER_ENABLE_LEADER_ELECTION, patrol-cmd-params-cm applicationsetcontroller.enable.leader.election
+      --enable-new-git-file-globbing              New git files generator globbing; env PATROL_APPLICATIONSET_CONTROLLER_ENABLE_NEW_GIT_FILE_GLOBBING, patrol-cmd-params-cm applicationsetcontroller.enable.new.git.file.globbing
+      --enable-policy-override                    Allow ApplicationSets to override the policy (unset: true when policy is empty); env PATROL_APPLICATIONSET_CONTROLLER_ENABLE_POLICY_OVERRIDE, patrol-cmd-params-cm applicationsetcontroller.enable.policy.override
+      --enable-pprof                              Serve /debug/pprof/ on the metrics listener (otherwise only while the file named by $PATROL_ENABLE_PROFILER_FILE_PATH contains "true")
+      --enable-progressive-syncs                  Progressive syncs; env PATROL_APPLICATIONSET_CONTROLLER_ENABLE_PROGRESSIVE_SYNCS, patrol-cmd-params-cm applicationsetcontroller.enable.progressive.syncs
+      --enable-scm-providers                      Enable SCM provider and pull request generators; env PATROL_APPLICATIONSET_CONTROLLER_ENABLE_SCM_PROVIDERS, patrol-cmd-params-cm applicationsetcontroller.enable.scm.providers (default true)
+      --enable-tokenref-strict-mode               Require scm-creds labelled tokenRef Secrets; env PATROL_APPLICATIONSET_CONTROLLER_TOKENREF_STRICT_MODE, patrol-cmd-params-cm applicationsetcontroller.enable.tokenref.strict.mode
+      --healthz-addr string                       Separate listener serving /healthz, /readyz and /livez ("" or "-": the metrics listener only) (default ":8081")
+  -h, --help                                      help for appset-controller
+      --internal-token-file string                File holding the shared internal token (default $PATROL_INTERNAL_TOKEN_FILE or /app/config/internal-token/token)
+      --kubeconfig string                         Path to a kubeconfig file (default: in-cluster configuration, else $KUBECONFIG or ~/.kube/config)
+      --logformat string                          Log format (json or text, any case) (one of json, text); env PATROL_APPLICATIONSET_CONTROLLER_LOGFORMAT, patrol-cmd-params-cm applicationsetcontroller.log.format (default "json")
+      --loglevel level                            Log level (a logrus level name, any case); env PATROL_APPLICATIONSET_CONTROLLER_LOGLEVEL, patrol-cmd-params-cm applicationsetcontroller.log.level (default info)
+      --max-resources-status-count int            Maximum resources in ApplicationSet status; env PATROL_APPLICATIONSET_CONTROLLER_MAX_RESOURCES_STATUS_COUNT, patrol-cmd-params-cm applicationsetcontroller.status.max.resources.count (default 5000)
+      --metrics-addr string                       Address of the metrics, probe and profiler listener ("-" disables it) (default ":8080")
+      --metrics-applicationset-labels strings     ApplicationSet label keys exported by patrol_appset_labels
+  -n, --namespace string                          Control-plane namespace (default: the pod namespace, else the kubeconfig context namespace)
+      --policy string                             Application sync policy (one of "", sync, create-only, create-update, create-delete); env PATROL_APPLICATIONSET_CONTROLLER_POLICY, patrol-cmd-params-cm applicationsetcontroller.policy
+      --preserved-annotations strings             Annotations preserved on generated Applications; env PATROL_APPLICATIONSET_CONTROLLER_GLOBAL_PRESERVED_ANNOTATIONS, patrol-cmd-params-cm applicationsetcontroller.global.preserved.annotations
+      --preserved-labels strings                  Labels preserved on generated Applications; env PATROL_APPLICATIONSET_CONTROLLER_GLOBAL_PRESERVED_LABELS, patrol-cmd-params-cm applicationsetcontroller.global.preserved.labels
+      --repo-server string                        Repo-server address; env PATROL_APPLICATIONSET_CONTROLLER_REPO_SERVER, patrol-cmd-params-cm repo.server (default "patrol-repo-server:8081")
+      --repo-server-ca-cert-path string           CA bundle verifying the repo-server; env PATROL_APPLICATIONSET_CONTROLLER_REPO_SERVER_CA_CERT_PATH, patrol-cmd-params-cm applicationsetcontroller.repo.server.ca.cert.path
+      --repo-server-client-cert-key-path string   mTLS client key; env PATROL_APPLICATIONSET_CONTROLLER_REPO_SERVER_CLIENT_CERT_KEY_PATH, patrol-cmd-params-cm applicationsetcontroller.repo.server.client.cert.key.path (default "/app/config/reposerver/mtls/client.key")
+      --repo-server-client-cert-path string       mTLS client certificate; env PATROL_APPLICATIONSET_CONTROLLER_REPO_SERVER_CLIENT_CERT_PATH, patrol-cmd-params-cm applicationsetcontroller.repo.server.client.cert.path (default "/app/config/reposerver/mtls/client.crt")
+      --repo-server-plaintext                     Connect to the repo-server without TLS; env PATROL_APPLICATIONSET_CONTROLLER_REPO_SERVER_PLAINTEXT, patrol-cmd-params-cm applicationsetcontroller.repo.server.plaintext
+      --repo-server-timeout-seconds int           Repo-server request timeout in seconds; env PATROL_APPLICATIONSET_CONTROLLER_REPO_SERVER_TIMEOUT_SECONDS, patrol-cmd-params-cm applicationsetcontroller.repo.server.timeout.seconds (default 60)
+      --scm-no-proxy string                       Hosts reached without the SCM proxy
+      --scm-proxy-url string                      Proxy of SCM provider API requests
+      --scm-root-ca-path string                   CA bundle for SCM providers; env PATROL_APPLICATIONSET_CONTROLLER_SCM_ROOT_CA_PATH, patrol-cmd-params-cm applicationsetcontroller.scm.root.ca.path
+      --shutdown-timeout duration                 Bound of the graceful drain after SIGTERM (default 30s)
+      --webhook-addr string                       Address receiving SCM webhooks (upstream :7000); patrol-server's /api/webhook refreshes ApplicationSets too
+      --webhook-parallelism-limit int             Concurrent webhook requests; env PATROL_APPLICATIONSET_CONTROLLER_WEBHOOK_PARALLELISM_LIMIT, patrol-cmd-params-cm applicationsetcontroller.webhook.parallelism.limit (default 50)

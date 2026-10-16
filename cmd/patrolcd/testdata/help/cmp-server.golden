@@ -1,0 +1,21 @@
+Run a config management plugin sidecar server
+
+Usage:
+  patrolcd cmp-server [flags]
+
+Flags:
+      --config-dir-path string      Directory of the config management plugin configuration file (plugin.yaml) (default "/home/patrol/cmp-server/config")
+      --enable-pprof                Serve /debug/pprof/ on the metrics listener (otherwise only while the file named by $PATROL_ENABLE_PROFILER_FILE_PATH contains "true")
+      --exec-timeout duration       Timeout of each plugin command (env PATROL_EXEC_TIMEOUT) (default 1m30s)
+  -h, --help                        help for cmp-server
+      --logformat string            Log format: json|text (env PATROL_CMP_SERVER_LOGFORMAT) (default "json")
+      --loglevel string             Log level: debug|info|warn|error (env PATROL_CMP_SERVER_LOGLEVEL) (default "info")
+      --max-archive-bytes int       Maximum compressed source archive size per request; negative disables (default 1073741824)
+      --max-extracted-bytes int     Maximum extracted source size per request; negative disables (default 1073741824)
+      --max-files int               Maximum number of archive entries per request; negative disables (default 500000)
+      --metrics-addr string         Address of the metrics, probe and profiler listener ("-" disables it) (default "-")
+      --pass-env strings            Sidecar environment variables passed to plugin commands: names, PREFIX* or * (env PATROL_CMP_PASS_ENV); plugins get only PATH, HOME, TMPDIR and LANG otherwise
+      --receive-timeout duration    Maximum time to receive one request stream; 0 leaves only the client deadline (env PATROL_CMP_RECEIVE_TIMEOUT) (default 5m0s)
+      --shutdown-timeout duration   Bound of the graceful drain after SIGTERM (default 30s)
+      --socket-dir string           Plugin socket directory shared with the repo-server (env PATROL_PLUGINSOCKFILEPATH) (default "/home/patrol/cmp-server/plugins")
+      --work-dir string             Parent of the _cmp_server work directory, wiped at startup (env PATROL_CMP_WORKDIR) (default "/tmp")

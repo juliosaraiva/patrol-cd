@@ -1,0 +1,57 @@
+Run the application controller (reconcilers, sharding, tree API, source hydrator)
+
+Usage:
+  patrolcd controller [flags]
+
+Flags:
+      --app-state-cache-expiration duration                       Application state cache TTL; env PATROL_APP_STATE_CACHE_EXPIRATION, patrol-cmd-params-cm controller.app.state.cache.expiration (default 1h)
+      --application-namespaces strings                            Additional namespaces (globs) Applications may live in; env PATROL_APPLICATION_NAMESPACES, patrol-cmd-params-cm application.namespaces
+      --commit-server string                                      Commit-server address; env PATROL_APPLICATION_CONTROLLER_COMMIT_SERVER, patrol-cmd-params-cm commit.server (default "patrol-commit-server:8086")
+      --commit-server-ca-cert-path string                         CA bundle verifying the commit-server certificate (https commit.server; default: not verified, the internal token authenticates)
+      --commit-server-client-cert-key-path string                 Key of --commit-server-client-cert-path
+      --commit-server-client-cert-path string                     Client certificate presented to a commit-server requiring mutual TLS (https commit.server)
+      --commit-server-timeout duration                            Bound of one source hydrator commit request (clone, write, push) (default 10m0s)
+      --context string                                            Kubeconfig context to use
+      --default-cache-expiration duration                         Default cache TTL; env PATROL_DEFAULT_CACHE_EXPIRATION, patrol-cmd-params-cm controller.default.cache.expiration (default 24h)
+      --dynamic-cluster-distribution-enabled                      Read the shard count from the controller workload (env PATROL_ENABLE_DYNAMIC_CLUSTER_DISTRIBUTION)
+      --enable-pprof                                              Serve /debug/pprof/ on the metrics listener (otherwise only while the file named by $PATROL_ENABLE_PROFILER_FILE_PATH contains "true")
+      --healthz-addr string                                       Separate listener serving /healthz, /readyz and /livez ("" or "-": the metrics listener only)
+  -h, --help                                                      help for controller
+      --hydration-processors int                                  Hydration workers; env PATROL_APPLICATION_CONTROLLER_HYDRATION_PROCESSORS, patrol-cmd-params-cm controller.hydration.processors (default 5)
+      --hydrator-enabled                                          Enable the source hydrator; env PATROL_HYDRATOR_ENABLED, patrol-cmd-params-cm hydrator.enabled
+      --ignore-normalizer-jq-execution-timeout-seconds duration   Jq ignore-rule timeout (0 = normalizer default); env PATROL_IGNORE_NORMALIZER_JQ_TIMEOUT, patrol-cmd-params-cm controller.ignore.normalizer.jq.timeout (default 0s)
+      --internal-token-file string                                File holding the shared internal token (default $PATROL_INTERNAL_TOKEN_FILE or /app/config/internal-token/token)
+      --kubeconfig string                                         Path to a kubeconfig file (default: in-cluster configuration, else $KUBECONFIG or ~/.kube/config)
+      --kubectl-parallelism-limit int                             Concurrent apply operations (<1 = unlimited); env PATROL_APPLICATION_CONTROLLER_KUBECTL_PARALLELISM_LIMIT, patrol-cmd-params-cm controller.kubectl.parallelism.limit (default 20)
+      --logformat string                                          Log format (json or text, any case) (one of json, text); env PATROL_APPLICATION_CONTROLLER_LOGFORMAT, patrol-cmd-params-cm controller.log.format (default "json")
+      --loglevel level                                            Log level (a logrus level name, any case); env PATROL_APPLICATION_CONTROLLER_LOGLEVEL, patrol-cmd-params-cm controller.log.level (default info)
+      --metrics-addr string                                       Address of the metrics, probe and profiler listener ("-" disables it) (default: --metrics-address and --metrics-port)
+      --metrics-cache-expiration duration                         Prometheus metrics cache expiration (0 disables); env PATROL_APPLICATION_CONTROLLER_METRICS_CACHE_EXPIRATION, patrol-cmd-params-cm controller.metrics.cache.expiration (default 0s)
+      --metrics-port int                                          Port of the metrics listener (default 8082)
+  -n, --namespace string                                          Control-plane namespace (default: the pod namespace, else the kubeconfig context namespace)
+      --operation-processors int                                  Operation workers; env PATROL_APPLICATION_CONTROLLER_OPERATION_PROCESSORS, patrol-cmd-params-cm controller.operation.processors (default 10)
+      --otlp-address string                                       OpenTelemetry collector address; env PATROL_APPLICATION_CONTROLLER_OTLP_ADDRESS, patrol-cmd-params-cm otlp.address
+      --otlp-attrs strings                                        OpenTelemetry attributes (key:value,...); env PATROL_APPLICATION_CONTROLLER_OTLP_ATTRS, patrol-cmd-params-cm otlp.attrs
+      --otlp-headers key=value                                    OpenTelemetry headers (k1=v1,k2=v2); env PATROL_APPLICATION_CONTROLLER_OTLP_HEADERS, patrol-cmd-params-cm otlp.headers
+      --otlp-insecure                                             OpenTelemetry collector without TLS; env PATROL_APPLICATION_CONTROLLER_OTLP_INSECURE, patrol-cmd-params-cm otlp.insecure (default true)
+      --persist-resource-health                                   Store resource health in Application status; env PATROL_APPLICATION_CONTROLLER_PERSIST_RESOURCE_HEALTH, patrol-cmd-params-cm controller.resource.health.persist
+      --repo-error-grace-period-seconds duration                  Grace period for repo-server errors (a duration such as 180s); env PATROL_REPO_ERROR_GRACE_PERIOD_SECONDS, patrol-cmd-params-cm controller.repo.error.grace.period.seconds (default 180s)
+      --repo-server string                                        Repo-server address; env PATROL_APPLICATION_CONTROLLER_REPO_SERVER, patrol-cmd-params-cm repo.server (default "patrol-repo-server:8081")
+      --repo-server-ca-cert-path string                           CA bundle verifying the repo-server; env PATROL_APPLICATION_CONTROLLER_REPO_SERVER_CA_CERT_PATH, patrol-cmd-params-cm controller.repo.server.ca.cert.path
+      --repo-server-client-cert-key-path string                   mTLS client key; env PATROL_APPLICATION_CONTROLLER_REPO_SERVER_CLIENT_CERT_KEY_PATH, patrol-cmd-params-cm controller.repo.server.client.cert.key.path (default "/app/config/reposerver/mtls/client.key")
+      --repo-server-client-cert-path string                       mTLS client certificate; env PATROL_APPLICATION_CONTROLLER_REPO_SERVER_CLIENT_CERT_PATH, patrol-cmd-params-cm controller.repo.server.client.cert.path (default "/app/config/reposerver/mtls/client.crt")
+      --repo-server-plaintext                                     Connect to the repo-server without TLS; env PATROL_APPLICATION_CONTROLLER_REPO_SERVER_PLAINTEXT, patrol-cmd-params-cm controller.repo.server.plaintext
+      --repo-server-timeout-seconds int                           Repo-server request timeout in seconds; env PATROL_APPLICATION_CONTROLLER_REPO_SERVER_TIMEOUT_SECONDS, patrol-cmd-params-cm controller.repo.server.timeout.seconds (default 60)
+      --self-heal-backoff-cap-seconds int                         Maximum self-heal backoff; env PATROL_APPLICATION_CONTROLLER_SELF_HEAL_BACKOFF_CAP_SECONDS, patrol-cmd-params-cm controller.self.heal.backoff.cap.seconds (default 300)
+      --self-heal-backoff-factor int                              Self-heal backoff factor; env PATROL_APPLICATION_CONTROLLER_SELF_HEAL_BACKOFF_FACTOR, patrol-cmd-params-cm controller.self.heal.backoff.factor (default 3)
+      --self-heal-backoff-timeout-seconds int                     Initial self-heal backoff (0 disables backoff); env PATROL_APPLICATION_CONTROLLER_SELF_HEAL_BACKOFF_TIMEOUT_SECONDS, patrol-cmd-params-cm controller.self.heal.backoff.timeout.seconds (default 2)
+      --self-heal-timeout-seconds int                             Fixed delay between self-heal attempts; env PATROL_APPLICATION_CONTROLLER_SELF_HEAL_TIMEOUT_SECONDS, patrol-cmd-params-cm controller.self.heal.timeout.seconds
+      --server-side-diff-enabled                                  Use server-side diff by default; env PATROL_APPLICATION_CONTROLLER_SERVER_SIDE_DIFF, patrol-cmd-params-cm controller.diff.server.side
+      --sharding-method string                                    Cluster to shard assignment (one of legacy, round-robin, consistent-hashing); env PATROL_CONTROLLER_SHARDING_ALGORITHM, patrol-cmd-params-cm controller.sharding.algorithm (default "legacy")
+      --shutdown-timeout duration                                 Bound of the graceful drain after SIGTERM (default 30s)
+      --status-processors int                                     Application refresh workers; env PATROL_APPLICATION_CONTROLLER_STATUS_PROCESSORS, patrol-cmd-params-cm controller.status.processors (default 20)
+      --sync-timeout int                                          Sync operation timeout (0 = none); env PATROL_APPLICATION_CONTROLLER_SYNC_TIMEOUT, patrol-cmd-params-cm controller.sync.timeout.seconds
+      --tls-cert string                                           TLS certificate file of the listener (reloaded when it changes)
+      --tls-client-ca string                                      CA bundle requiring and verifying client certificates (mutual TLS)
+      --tls-key string                                            TLS private key file of the listener
+      --tree-api-addr string                                      Address of the tree API served to patrol-server ("-" disables it); TLS with --tls-cert/--tls-key (default ":8090")

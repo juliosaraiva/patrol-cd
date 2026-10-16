@@ -1,0 +1,32 @@
+Run the notifications controller
+
+Usage:
+  patrolcd notifications-controller [flags]
+
+Flags:
+      --allow-private-egress                      Let control-plane notification services reach private, loopback and link-local addresses
+      --app-label-selector string                 Label selector restricting the watched Applications
+      --application-namespaces strings            Additional namespaces (globs) Applications may live in; env PATROL_APPLICATION_NAMESPACES, patrol-cmd-params-cm application.namespaces
+      --config-map-name string                    Notifications ConfigMap (default "patrol-notifications-cm")
+      --context string                            Kubeconfig context to use
+      --egress-allowed-cidrs strings              Non-public CIDRs control-plane notification services may reach
+      --enable-leader-election                    Run only on the replica holding the leader election Lease
+      --enable-pprof                              Serve /debug/pprof/ on the metrics listener (otherwise only while the file named by $PATROL_ENABLE_PROFILER_FILE_PATH contains "true")
+      --healthz-addr string                       Separate listener serving /healthz, /readyz and /livez ("" or "-": the metrics listener only)
+  -h, --help                                      help for notifications-controller
+      --internal-token-file string                File holding the shared internal token (default $PATROL_INTERNAL_TOKEN_FILE or /app/config/internal-token/token)
+      --kubeconfig string                         Path to a kubeconfig file (default: in-cluster configuration, else $KUBECONFIG or ~/.kube/config)
+      --logformat string                          Log format (json or text, any case) (one of json, text); env PATROL_NOTIFICATIONS_CONTROLLER_LOGFORMAT, patrol-cmd-params-cm notificationscontroller.log.format (default "json")
+      --loglevel level                            Log level (a logrus level name, any case); env PATROL_NOTIFICATIONS_CONTROLLER_LOGLEVEL, patrol-cmd-params-cm notificationscontroller.log.level (default info)
+      --metrics-addr string                       Address of the metrics, probe and profiler listener ("-" disables it) (default ":9001")
+  -n, --namespace string                          Control-plane namespace (default: the pod namespace, else the kubeconfig context namespace)
+      --processors-count int                      Notification workers; env PATROL_NOTIFICATION_CONTROLLER_PROCESSORS_COUNT, patrol-cmd-params-cm notificationscontroller.processors.count (default 1)
+      --repo-server string                        Repo-server address of the repo.* template helpers (default "patrol-repo-server:8081")
+      --repo-server-ca-cert-path string           CA bundle verifying the repo-server; env PATROL_NOTIFICATION_CONTROLLER_REPO_SERVER_CA_CERT_PATH, patrol-cmd-params-cm notificationscontroller.repo.server.ca.cert.path
+      --repo-server-client-cert-key-path string   mTLS client key; env PATROL_NOTIFICATION_CONTROLLER_REPO_SERVER_CLIENT_CERT_KEY_PATH, patrol-cmd-params-cm notificationscontroller.repo.server.client.cert.key.path (default "/app/config/reposerver/mtls/client.key")
+      --repo-server-client-cert-path string       mTLS client certificate; env PATROL_NOTIFICATION_CONTROLLER_REPO_SERVER_CLIENT_CERT_PATH, patrol-cmd-params-cm notificationscontroller.repo.server.client.cert.path (default "/app/config/reposerver/mtls/client.crt")
+      --repo-server-plaintext                     Connect to the repo-server without TLS; env PATROL_NOTIFICATION_CONTROLLER_REPO_SERVER_PLAINTEXT, patrol-cmd-params-cm notificationscontroller.repo.server.plaintext
+      --secret-name string                        Notifications Secret (default "patrol-notifications-secret")
+      --self-service-notification-enabled         Namespace-level notification configuration; env PATROL_NOTIFICATION_CONTROLLER_SELF_SERVICE_NOTIFICATION_ENABLED, patrol-cmd-params-cm notificationscontroller.selfservice.enabled
+      --shutdown-timeout duration                 Bound of the graceful drain after SIGTERM (default 30s)
+      --tenant-egress-allowed-cidrs strings       Non-public CIDRs self-service (namespace) configurations may reach

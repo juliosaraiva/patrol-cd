@@ -1,0 +1,28 @@
+Run the commit-server (source hydrator writes; no Kubernetes access)
+
+Usage:
+  patrolcd commit-server [flags]
+
+Flags:
+      --address string                Listen address; env PATROL_COMMIT_SERVER_LISTEN_ADDRESS, patrol-cmd-params-cm commitserver.listen.address (default "0.0.0.0")
+      --credentials-dir string        Directory of per-command credential files (tmpfs recommended; default $TMPDIR)
+      --enable-pprof                  Serve /debug/pprof/ on the metrics listener (otherwise only while the file named by $PATROL_ENABLE_PROFILER_FILE_PATH contains "true")
+      --git-path string               git executable (default "git")
+      --git-timeout duration          Timeout of each git command (0: the internal/git default)
+      --healthz-addr string           Separate listener serving /healthz, /readyz and /livez ("" or "-": the metrics listener only)
+  -h, --help                          help for commit-server
+      --internal-token-file string    File holding the shared internal token (default $PATROL_INTERNAL_TOKEN_FILE or /app/config/internal-token/token)
+      --logformat string              Log format (json or text, any case) (one of json, text); env PATROL_COMMIT_SERVER_LOGFORMAT, patrol-cmd-params-cm commitserver.log.format (default "json")
+      --loglevel level                Log level (a logrus level name, any case); env PATROL_COMMIT_SERVER_LOGLEVEL, patrol-cmd-params-cm commitserver.log.level (default info)
+      --max-concurrent-requests int   Requests processed at once (0: unlimited)
+      --metrics-addr string           Address of the metrics, probe and profiler listener ("-" disables it) (default: --metrics-address and --metrics-port)
+      --metrics-address string        Metrics listen address; env PATROL_COMMIT_SERVER_METRICS_LISTEN_ADDRESS, patrol-cmd-params-cm commitserver.metrics.listen.address (default "0.0.0.0")
+      --metrics-port int              Port of the metrics listener (default 8087)
+      --port int                      Port of the API listener (default 8086)
+      --shutdown-timeout duration     Bound of the graceful drain after SIGTERM (default 30s)
+      --ssh-known-hosts-path string   SSH known hosts file mounted from patrol-ssh-known-hosts-cm ("-" disables) (default "/app/config/ssh/ssh_known_hosts")
+      --tls-cert string               TLS certificate file of the listener (reloaded when it changes)
+      --tls-certs-dir string          Repository TLS certificates directory mounted from patrol-tls-certs-cm ("-" disables) (default "/app/config/tls")
+      --tls-client-ca string          CA bundle requiring and verifying client certificates (mutual TLS)
+      --tls-key string                TLS private key file of the listener
+      --work-dir string               Directory of per-request clones (an ephemeral volume; default $TMPDIR)

@@ -1,0 +1,4 @@
+# Build output copied by `make ui-build` (hack/build.mk); only the placeholders are tracked.
+*
+!.keep
+!.gitignore

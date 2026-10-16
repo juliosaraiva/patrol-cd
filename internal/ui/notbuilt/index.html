@@ -1,0 +1,27 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<base href="/" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>Patrol CD</title>
+<style>
+  :root { color-scheme: light dark; --fg: #1f2328; --bg: #ffffff; --muted: #59636e; --border: #d1d9e0; }
+  @media (prefers-color-scheme: dark) { :root { --fg: #e6edf3; --bg: #0d1117; --muted: #9198a1; --border: #3d444d; } }
+  body { margin: 0; font: 15px/1.5 system-ui, -apple-system, "Segoe UI", sans-serif; color: var(--fg); background: var(--bg); }
+  main { max-width: 40rem; margin: 4rem auto; padding: 0 1rem; }
+  h1 { font-size: 1.25rem; margin: 0 0 1rem; }
+  p { margin: 0 0 1rem; }
+  code { font: 13px/1.4 ui-monospace, SFMono-Regular, Menlo, monospace; border: 1px solid var(--border); border-radius: 4px; padding: 0 .25rem; }
+  .muted { color: var(--muted); }
+</style>
+</head>
+<body>
+<main>
+  <h1>Patrol CD web UI is not built into this binary</h1>
+  <p>The API is available under <code>api/v1</code>. To include the UI, build it and rebuild the binary:</p>
+  <p><code>make ui-build build-bin</code></p>
+  <p class="muted">The UI build (<code>pnpm -C ui build</code>) is copied into <code>internal/ui/dist</code> and embedded by <code>go build</code>.</p>
+</main>
+</body>
+</html>
