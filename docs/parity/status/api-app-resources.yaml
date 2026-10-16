@@ -1,0 +1,286 @@
+# Resource-level application API (internal/apiserver/services/applications: resource tree and
+# its stream, managed resources, server-side diff, events, live resource get/patch/delete,
+# resource actions, pod logs, web terminal) and its pkg/apiclient types and methods. See
+# docs/architecture/components/api-app-resources.md.
+# Evidence: tests through pkg/apiclient against the real route chain (auth.TokenService SSO
+# sessions, rbac.Enforcer, audit with a Kubernetes Event recorder), an envtest kube-apiserver
+# 1.36 that is both the control plane and the destination cluster (with Kubernetes RBAC applied
+# to impersonated service accounts), the real internal/controller/treeapi handler and client
+# in front of a fake StateProvider (no controller computes trees), the real internal/project
+# lookups and internal/lua runtime with the built-in customizations. pods/log and pods/exec are
+# served by an in-process kubelet stand-in behind the same proxy (envtest has no kubelet). The
+# service is not wired into the patrol-server command yet, so nothing here is "verified".
+# Commands and results: docs/architecture/components/api-app-resources.md#verification.
+
+API-004:
+  status: implemented
+  impl: [internal/apiserver/services/applications/logs.go, pkg/apiclient/application_resources.go]
+  tests:
+    - internal/apiserver/services/applications/logs_test.go:TestApplicationLogs
+    - pkg/apiclient/application_resources_test.go:TestApplicationResourceClientRequests
+  notes: >-
+    Logs part: SSE log streams and download=true (application/octet-stream,
+    attachment;filename="<ns>-<pod>-<container>.log", "log.log" when a part is not a valid name,
+    stops at the last entry, error text written to the body). Events are bare LogEntry JSON (no
+    {"result": ...} gRPC-gateway envelope). The watch/tree streams are the framework's and the
+    applications service's.
+
+API-021:
+  status: implemented
+  impl:
+    - internal/apiserver/services/applications/tree.go
+    - internal/apiserver/services/applications/diff.go
+    - pkg/apiclient/application_resources.go
+  tests:
+    - internal/apiserver/services/applications/tree_test.go:TestResourceTree
+    - internal/apiserver/services/applications/tree_test.go:TestResourceTreeCacheMiss
+    - internal/apiserver/services/applications/tree_test.go:TestWatchResourceTree
+    - internal/apiserver/services/applications/tree_test.go:TestManagedResources
+    - internal/apiserver/services/applications/tree_test.go:TestServerSideDiff
+    - internal/apiserver/services/applications/resource_internal_test.go:TestMaskResourceDiff
+  notes: >-
+    Trees, managed resources and server-side diffs come from the controller replica owning the
+    application (tree API); a missing state triggers a normal refresh (upstream
+    getCachedAppState) or reports the ComparisonError/InvalidSpecError conditions (412). The
+    stream polls with ETags (3 s) and on Application events, authorizes every event, ends with
+    DELETED or a 403 error event. Server-side diff is POST with a JSON body (contract) instead of
+    GET with repeated query parameters; Secret results are masked again at the API. The API
+    checks live states against their declared identities (upstream messages) and refuses a
+    target manifest paired with a live state that names another object (400; upstream does not
+    check targets, so the controller would dry-run apply any object with its credentials).
+
+API-022:
+  status: implemented
+  impl: [internal/apiserver/services/applications/resource.go, pkg/apiclient/application_resources.go]
+  tests:
+    - internal/apiserver/services/applications/resource_test.go:TestGetResource
+    - internal/apiserver/services/applications/resource_test.go:TestPatchResource
+    - internal/apiserver/services/applications/resource_test.go:TestDeleteResource
+  notes: >-
+    Node with UID of the tree (managed or orphaned) else 400 "<kind> <group> <name> not found as
+    part of application <app>"; version override; Secret data and sensitive annotations masked;
+    patch types json/merge/strategic (or their media types) in the body; failed Secret patches
+    report only "failed to patch Secret ns/name"; delete propagation orphan > force > foreground;
+    ResourceUpdated/ResourceDeleted events with the upstream messages.
+
+API-023:
+  status: implemented
+  impl: [internal/apiserver/services/applications/actions.go, pkg/apiclient/application_resources.go]
+  tests:
+    - internal/apiserver/services/applications/actions_test.go:TestListResourceActions
+    - internal/apiserver/services/applications/actions_test.go:TestRunResourceAction
+    - internal/apiserver/services/applications/actions_test.go:TestRunCreateAction
+    - internal/apiserver/services/applications/actions_test.go:TestApplicationSelfAction
+  notes: >-
+    One run route (POST /resource/actions) with V2 semantics (body action +
+    resourceActionParameters); there is no separate /v2 path. Patrol refuses disabled actions and
+    parameters the action's discovery does not declare (upstream accepts both).
+
+API-024:
+  status: implemented
+  impl: [internal/apiserver/services/applications/logs.go, pkg/apiclient/application_resources.go]
+  tests:
+    - internal/apiserver/services/applications/logs_test.go:TestApplicationLogs
+    - internal/apiserver/services/applications/logs_test.go:TestApplicationLogsAuthorization
+    - internal/apiserver/services/applications/logs_test.go:TestApplicationLogsFollow
+    - internal/apiserver/services/applications/resource_internal_test.go:TestSelectPods
+    - internal/apiserver/services/applications/resource_internal_test.go:TestMergeLogs
+    - internal/apiserver/services/applications/resource_internal_test.go:TestReadLogLines
+  notes: >-
+    Pods of the managed tree selected directly or through ancestors, server.maxPodLogsToRender
+    (more pods than the value refused, 0 refuses every pod as upstream; no pod is an empty stream),
+    merge by timestamp (100 ms window), filter with "!" and matchCase, untilTime, sinceTime,
+    sinceSeconds, tailLines, previous, container, follow; pod stream errors become a line.
+    Patrol additions: lines truncated at 64 KiB, 2000 lines/s rate limit, 256 MiB per stream,
+    session and permission re-checks every minute (401/403 error event), a line without a
+    timestamp keeps the previous one (upstream ends the stream).
+
+API-026:
+  status: implemented
+  impl: [internal/apiserver/services/applications/resource.go]
+  tests:
+    - internal/apiserver/services/applications/resource_test.go:TestApplicationEvents
+  notes: >-
+    Events part (ListResourceEvents); sync windows are the applications service's. At most
+    1000 events per answer (upstream unbounded).
+
+API-044:
+  status: implemented
+  impl:
+    - internal/apiserver/services/applications/terminal.go
+    - internal/apiserver/services/applications/terminal_exec.go
+    - pkg/apiclient/application_resources.go
+  tests:
+    - internal/apiserver/services/applications/terminal_test.go:TestTerminalSession
+    - internal/apiserver/services/applications/terminal_test.go:TestTerminalRefusals
+    - internal/apiserver/services/applications/terminal_test.go:TestTerminalRevocationAndIdle
+    - internal/apiserver/services/applications/resource_internal_test.go:TestParseTerminalRequest
+    - internal/apiserver/services/applications/resource_internal_test.go:TestTerminalOriginAllowed
+    - pkg/apiclient/application_resources_test.go:TestTerminalClient
+  notes: >-
+    exec.enabled (404), exec.shells with fallback, name validation messages, pod of the tree,
+    running container, resize, permission re-check on every message and session/application
+    re-check every 30 s, keepalive pings. Differences: RBAC denials are 403 (upstream 401), a
+    wrong project is 404 (existence hiding), same-origin handshakes only (upstream accepts any
+    origin), idle timeout (30 min), start/end audit entries; the exec uses the Kubernetes
+    WebSocket channel protocol v5/v4 only (no SPDY fallback, client-go remotecommand is not a
+    module dependency).
+
+DIFF-088:
+  status: in-progress
+  impl: [internal/apiserver/services/applications/tree.go, pkg/apiclient/application_resources.go]
+  tests:
+    - internal/apiserver/services/applications/tree_test.go:TestResourceTree
+    - internal/apiserver/services/applications/tree_test.go:TestWatchResourceTree
+  notes: ResourceTree and WatchResourceTree APIs done; the `patrol app resources` CLI is not part of this task.
+
+SYNC-100:
+  status: implemented
+  impl: [internal/apiserver/services/applications/actions.go]
+  tests:
+    - internal/apiserver/services/applications/actions_test.go:TestListResourceActions
+  notes: Discovery through internal/lua (configured scripts first, built-ins unless replaced); the Application itself (group cd.patrol.example) included.
+
+SYNC-101:
+  status: implemented
+  impl: [internal/apiserver/services/applications/actions.go]
+  tests:
+    - internal/apiserver/services/applications/actions_test.go:TestRunResourceAction
+    - internal/apiserver/services/applications/resource_internal_test.go:TestSplitStatusPatch
+  notes: >-
+    Merge patch from live to result, status subresource first when status changes (NotFound
+    falls back to one full patch), ResourceActionRan events "ran action <a> on resource
+    <g>/<k>/<n>". The resource-level Event upstream also records on the managed resource is not
+    emitted (the audit Event is on the Application).
+
+SYNC-102:
+  status: implemented
+  impl: [internal/apiserver/services/applications/actions.go]
+  tests:
+    - internal/apiserver/services/applications/actions_test.go:TestRunResourceAction
+    - internal/apiserver/services/applications/resource_internal_test.go:TestCheckActionParameters
+  notes: Parameters must be declared by the action's discovery (Patrol validation); values reach Lua as actionParams.
+
+SYNC-103:
+  status: implemented
+  impl: [internal/apiserver/services/applications/actions.go]
+  tests:
+    - internal/apiserver/services/applications/actions_test.go:TestRunCreateAction
+  notes: Project check of every impacted resource, server-side dry-run creation of all creates before any write, then writes in order.
+
+SYNC-112:
+  status: implemented
+  impl: [internal/apiserver/services/applications/actions.go]
+  tests:
+    - internal/apiserver/services/applications/actions_test.go:TestRunResourceAction
+    - internal/apiserver/services/applications/actions_test.go:TestRunCreateAction
+  notes: applications, action/<group>/<kind>/<action> with existence hiding; "application is not permitted to manage <g>/<k>/<n> in <ns>" (403).
+
+SYNC-113:
+  status: implemented
+  impl: [internal/apiserver/services/applications/resource.go]
+  tests:
+    - internal/apiserver/services/applications/resource_test.go:TestResourceImpersonation
+  notes: >-
+    Settings read per request; first matching destinationServiceAccounts entry; user-only
+    impersonation; enforced no-match 412 "error getting application cluster config: no matching
+    service account found for destination server <s> and namespace <ns>"; not enforced falls
+    back to the cluster credentials with the info log.
+
+SYNC-115:
+  status: implemented
+  impl: [internal/apiserver/services/applications/resource.go]
+  tests:
+    - internal/apiserver/services/applications/resource_test.go:TestApplicationEvents
+    - internal/apiserver/services/applications/resource_test.go:TestResourceImpersonation
+
+SYNC-116:
+  status: implemented
+  impl: [internal/apiserver/services/applications/resource.go]
+  tests:
+    - internal/apiserver/services/applications/resource_test.go:TestResourceImpersonation
+
+SYNC-117:
+  status: implemented
+  impl: [internal/apiserver/services/applications/resource.go]
+  tests:
+    - internal/apiserver/services/applications/resource_test.go:TestResourceImpersonation
+    - internal/apiserver/services/applications/resource_test.go:TestPatchResource
+  notes: The Application's project is used in both fine-grained inheritance paths (no upstream nil-project defect).
+
+SYNC-118:
+  status: implemented
+  impl: [internal/apiserver/services/applications/resource.go]
+  tests:
+    - internal/apiserver/services/applications/resource_test.go:TestResourceImpersonation
+    - internal/apiserver/services/applications/resource_test.go:TestDeleteResource
+
+SYNC-119:
+  status: implemented
+  impl: [internal/apiserver/services/applications/logs.go]
+  tests:
+    - internal/apiserver/services/applications/logs_test.go:TestApplicationLogsFollow
+    - internal/apiserver/services/applications/terminal_test.go:TestTerminalNotImpersonated
+
+SYNC-120:
+  status: implemented
+  impl: [internal/apiserver/services/applications/actions.go]
+  tests:
+    - internal/apiserver/services/applications/actions_test.go:TestRunActionImpersonated
+
+SYNC-121:
+  status: implemented
+  impl: [internal/apiserver/services/applications/actions.go]
+  tests:
+    - internal/apiserver/services/applications/actions_test.go:TestRunActionImpersonated
+
+SYNC-122:
+  status: implemented
+  impl: [internal/apiserver/services/applications/actions.go]
+  tests:
+    - internal/apiserver/services/applications/actions_test.go:TestApplicationSelfAction
+  notes: >-
+    The cluster configuration is still resolved (an enforced no-match fails as upstream), but
+    the Application is patched in the control plane (where Patrol Applications live) with the
+    resourceVersion the action saw; an action may not change spec.project.
+
+SYNC-123:
+  status: implemented
+  impl: [internal/apiserver/services/applications/terminal.go]
+  tests:
+    - internal/apiserver/services/applications/terminal_test.go:TestTerminalNotImpersonated
+    - internal/apiserver/services/applications/terminal_test.go:TestTerminalSession
+
+SYNC-124:
+  status: implemented
+  impl: [internal/apiserver/services/applications/diff.go]
+  tests:
+    - internal/apiserver/services/applications/tree_test.go:TestServerSideDiff
+  notes: >-
+    The API server forwards to the controller's tree API, which runs the dry runs with its own
+    credentials. Before that, a target manifest paired with a live state must have the live
+    resource's group/kind/namespace/name (400 "target manifest <i> (...) does not match live
+    resource ..."), so only the Application's managed resources are dry-run applied.
+
+TEN-070:
+  status: implemented
+  impl: [internal/apiserver/services/applications/resource.go]
+  tests:
+    - internal/apiserver/services/applications/resource_test.go:TestPatchResource
+    - internal/apiserver/services/applications/resource_test.go:TestDeleteResource
+
+TEN-071:
+  status: implemented
+  impl: [internal/apiserver/services/applications/resource.go]
+  tests:
+    - internal/apiserver/services/applications/resource_test.go:TestPatchResource
+  notes: The plain verb is checked without auditing first when inheritance is enabled, then the fine-grained action (audited on denial).
+
+TEN-084:
+  status: in-progress
+  impl: [internal/apiserver/services/applications/logs.go, internal/apiserver/services/applications/terminal.go]
+  tests:
+    - internal/apiserver/services/applications/logs_test.go:TestApplicationLogsAuthorization
+    - internal/apiserver/services/applications/terminal_test.go:TestTerminalRefusals
+    - internal/apiserver/services/applications/terminal_test.go:TestTerminalRevocationAndIdle
+  notes: logs, get and exec, create done (re-checked during streams and sessions); the extensions invoke part is the extensions service's.

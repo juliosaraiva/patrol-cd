@@ -7,7 +7,7 @@ selfHeal, allowEmpty, enabled), same-revision loop prevention and self-heal back
 (app-level `spec.syncPolicy.syncOptions` and resource-level `argocd.argoproj.io/sync-options`); phases, waves and
 hooks (Argo CD and Helm annotations, delete policies, PreDelete/PostDelete); task ordering; pruning order; dry-run;
 missing-CRD handling; sync windows (definition, matching, evaluation, overrun, enforcement points); revision
-history and rollback; sync timeout; service account impersonation for sync; resource actions (Lua discovery and
+history and rollback; sync timeout; service account impersonation for sync and for API-server live operations; resource actions (Lua discovery and
 execution, parameters, create-operations, built-in action catalogue). Out of scope (covered by other areas): manifest
 generation and source types, diffing/normalization and compare-options (only referenced where they change sync
 behaviour), health assessment internals (only the health-to-sync-phase mapping is here), resource tracking methods,
@@ -2129,6 +2129,439 @@ Permalink base: `https://github.com/argoproj/argo-cd/blob/a5038b0e2bbac171575438
 - **Tests required**:
   - Authorization: policy `action/apps/Deployment/*` allows restart but not `action//Pod/...`.
 
+## L. Impersonation of API-server live operations
+
+Since 3.5, when impersonation is enabled, the API server also impersonates the destination service account for the
+calls it makes to an Application's destination cluster. This section lists each affected operation separately (the
+shared rules are in SYNC-113), plus the API-server paths that are explicitly not impersonated (SYNC-123, SYNC-124).
+For the controller-side sync and deletion behaviour, see SYNC-093 and SYNC-094.
+
+### SYNC-113 API-server impersonated cluster config resolution (shared rules)
+- **Upstream**:
+  https://github.com/argoproj/argo-cd/blob/a5038b0e2bbac1715754380ae0084df8e3d5b48c/server/application/application.go#L1401 ,
+  https://github.com/argoproj/argo-cd/blob/a5038b0e2bbac1715754380ae0084df8e3d5b48c/server/application/application.go#L1411 ,
+  https://github.com/argoproj/argo-cd/blob/a5038b0e2bbac1715754380ae0084df8e3d5b48c/server/application/application.go#L1420 ,
+  https://github.com/argoproj/argo-cd/blob/a5038b0e2bbac1715754380ae0084df8e3d5b48c/server/application/application.go#L1431 ,
+  https://github.com/argoproj/argo-cd/blob/a5038b0e2bbac1715754380ae0084df8e3d5b48c/server/application/application.go#L1436 ,
+  https://github.com/argoproj/argo-cd/blob/a5038b0e2bbac1715754380ae0084df8e3d5b48c/server/application/application.go#L1440 ,
+  https://github.com/argoproj/argo-cd/blob/a5038b0e2bbac1715754380ae0084df8e3d5b48c/util/settings/impersonation.go#L19 ,
+  https://github.com/argoproj/argo-cd/blob/a5038b0e2bbac1715754380ae0084df8e3d5b48c/util/settings/settings.go#L2742 ,
+  https://github.com/argoproj/argo-cd/blob/a5038b0e2bbac1715754380ae0084df8e3d5b48c/util/settings/settings.go#L2751 ,
+  https://github.com/argoproj/argo-cd/blob/a5038b0e2bbac1715754380ae0084df8e3d5b48c/pkg/apis/application/v1alpha1/types.go#L4081 ,
+  https://github.com/argoproj/argo-cd/blob/a5038b0e2bbac1715754380ae0084df8e3d5b48c/manifests/cluster-rbac/server/argocd-server-clusterrole.yaml#L9 ,
+  https://github.com/argoproj/argo-cd/blob/a5038b0e2bbac1715754380ae0084df8e3d5b48c/server/application/application_test.go#L5180 ,
+  https://github.com/argoproj/argo-cd/blob/a5038b0e2bbac1715754380ae0084df8e3d5b48c/docs/operator-manual/upgrading/3.4-3.5.md#L108 ,
+  https://github.com/argoproj/argo-cd/blob/a5038b0e2bbac1715754380ae0084df8e3d5b48c/docs/operator-manual/app-sync-using-impersonation.md#L33
+- **Maturity**: Beta (Service Account Impersonation, `docs/operator-manual/feature-maturity.md#L26`)
+- **Semantics**: Each API-server RPC that reaches the destination cluster for a user request (SYNC-114 to SYNC-122)
+  builds its Kubernetes client from one shared resolver, `getApplicationClusterConfig(app, project)`:
+  1. Resolve the destination cluster from `spec.destination` (server or name). Errors are returned as "error validating destination: ...".
+  2. Build the cluster REST config with Argo CD's client defaults (`Cluster.RESTConfig()`, which is `RawRestConfig()` plus `SetK8SConfigDefaults`).
+  3. Read `application.sync.impersonation.enabled` from `argocd-cm` on every call. Only the exact string `"true"` enables
+     impersonation. When it is disabled, the cluster credentials are returned unchanged.
+  4. When it is enabled, derive the service account with the same algorithm as sync (SYNC-093): the first
+     `spec.destinationServiceAccounts[]` entry of the Application's project whose `server` glob matches the cluster URL and
+     whose `namespace` glob matches `spec.destination.namespace`.
+  5. On a match, set only `Impersonate.UserName = system:serviceaccount:<ns>:<name>`. No impersonated groups, UID or
+     extra fields are set.
+  6. With no match, read `application.sync.impersonation.enforced`, which defaults to true when the key is absent and is
+     true for any value other than `"false"`. If enforced, the error is "no matching service account found for destination
+     server <server> and namespace <namespace>". If not enforced, Argo CD writes the info log "no matching service account
+     found for impersonation for app <appns>/<app> (project: <proj>, server: <server>, namespace: <ns>), falling back to
+     controller service account" and returns the credentials without impersonation.
+  Callers wrap resolver errors as "error getting application cluster config: <cause>". In the API server, the identity
+  used when nothing is impersonated is the cluster secret's credentials. For an in-cluster destination without
+  credentials, it is the `argocd-server` pod's own service account. It is not the controller's service account, despite
+  the log text. Because the settings and project are read on each call, changes apply to the next request without a
+  restart. The following are never impersonated: the resource tree and managed-resource lookups that each operation runs
+  first (these read the controller's cache), application-level events (SYNC-115), the web terminal (SYNC-123) and the
+  API-server server-side diff (SYNC-124).
+- **Edge cases**:
+  - Derivation errors propagate as "error deriving service account to impersonate: invalid glob pattern for destination
+    server|namespace: ..." or "... default service account contains invalid chars '<v>'".
+  - A ConfigMap read failure gives "error getting impersonation setting: ..." or "error getting impersonation enforcement
+    setting: ...".
+  - Kubernetes only accepts impersonation from an identity that has `impersonate` on `serviceaccounts`. The shipped
+    `argocd-server` ClusterRole grants get/patch/delete on `*/*`, list events, get pods and pods/log, get/list/watch
+    applications(sets), and create jobs and workflows, but not `impersonate`. So for an in-cluster destination that uses
+    the pod identity, Kubernetes rejects impersonated API-server calls unless the operator adds that permission. External
+    clusters use the cluster secret's credentials.
+  - Within a request, the impersonation check runs after Argo CD RBAC and, for resource-scoped operations, after the
+    resource-tree membership check. A request denied by RBAC, or one that names a resource outside the tree, never reaches
+    the resolver.
+- **Configuration surface**: `argocd-cm` `application.sync.impersonation.enabled` (default false) and
+  `application.sync.impersonation.enforced` (default true); AppProject `spec.destinationServiceAccounts[]`; cluster
+  secrets (the credentials that do the impersonating).
+- **Exposure**: CRD (AppProject); API (internal mechanism behind the RPCs in SYNC-114 to SYNC-122); no direct CLI or UI.
+- **Tests required**:
+  - Positive: `TestGetApplicationClusterConfig/ImpersonationDisabled` → `Impersonate.UserName` empty.
+  - Positive: `.../ImpersonationEnabledWithMatch` → `system:serviceaccount:<destns>:test-sa`; `.../ImpersonationEnabledWithMatchEnforcementDisabled` → still impersonated.
+  - Negative: `.../ImpersonationEnabledWithNoMatch` → error contains "no matching service account found".
+  - Positive: `.../ImpersonationEnabledWithNoMatchEnforcementDisabled` → no impersonation, info log emitted.
+  - Positive: outgoing requests carry exactly one `Impersonate-User` header and no `Impersonate-Group` / `Impersonate-Uid` / `Impersonate-Extra-*`.
+  - Recovery: set `enabled` to `"false"` in `argocd-cm` and confirm the next call is not impersonated without restarting
+    the server; add a matching `destinationServiceAccounts` entry and confirm the next call succeeds.
+  - Authorization: an impersonated SA that lacks the required verb gets the Kubernetes Forbidden text inside the RPC error.
+
+### SYNC-114 Impersonated cluster discovery for GetManifests / GetManifestsWithFiles
+- **Upstream**:
+  https://github.com/argoproj/argo-cd/blob/a5038b0e2bbac1715754380ae0084df8e3d5b48c/server/application/application.go#L491 ,
+  https://github.com/argoproj/argo-cd/blob/a5038b0e2bbac1715754380ae0084df8e3d5b48c/server/application/application.go#L513 ,
+  https://github.com/argoproj/argo-cd/blob/a5038b0e2bbac1715754380ae0084df8e3d5b48c/server/application/application.go#L518 ,
+  https://github.com/argoproj/argo-cd/blob/a5038b0e2bbac1715754380ae0084df8e3d5b48c/server/application/application.go#L523 ,
+  https://github.com/argoproj/argo-cd/blob/a5038b0e2bbac1715754380ae0084df8e3d5b48c/server/application/application.go#L652 ,
+  https://github.com/argoproj/argo-cd/blob/a5038b0e2bbac1715754380ae0084df8e3d5b48c/server/application/application.go#L682 ,
+  https://github.com/argoproj/argo-cd/blob/a5038b0e2bbac1715754380ae0084df8e3d5b48c/server/application/application.go#L687 ,
+  https://github.com/argoproj/argo-cd/blob/a5038b0e2bbac1715754380ae0084df8e3d5b48c/gitops-engine/pkg/utils/kube/ctl.go#L168 ,
+  https://github.com/argoproj/argo-cd/blob/a5038b0e2bbac1715754380ae0084df8e3d5b48c/gitops-engine/pkg/utils/kube/ctl.go#L355 ,
+  https://github.com/argoproj/argo-cd/blob/a5038b0e2bbac1715754380ae0084df8e3d5b48c/server/application/application.proto#L405 ,
+  https://github.com/argoproj/argo-cd/blob/a5038b0e2bbac1715754380ae0084df8e3d5b48c/server/application/application.proto#L410 ,
+  https://github.com/argoproj/argo-cd/blob/a5038b0e2bbac1715754380ae0084df8e3d5b48c/cmd/argocd/commands/app.go#L1885 ,
+  https://github.com/argoproj/argo-cd/blob/a5038b0e2bbac1715754380ae0084df8e3d5b48c/cmd/argocd/commands/app.go#L2918 ,
+  https://github.com/argoproj/argo-cd/blob/a5038b0e2bbac1715754380ae0084df8e3d5b48c/cmd/argocd/commands/app_diff.go#L401 ,
+  https://github.com/argoproj/argo-cd/blob/a5038b0e2bbac1715754380ae0084df8e3d5b48c/cmd/argocd/commands/app_diff.go#L420
+- **Maturity**: Beta
+- **Semantics**: `GET /api/v1/applications/{name}/manifests` (GetManifests) and the client-streaming
+  `POST /api/v1/applications/manifestsWithFiles` (GetManifestsWithFiles) both require RBAC `applications, get`. Before
+  calling the repo-server, each resolves the impersonated config (SYNC-113) and uses it to fetch the destination's server
+  version (`GET /version`) and its API resources through discovery (only resources that support both list and watch).
+  These become the `KubeVersion` and `ApiVersions` of the manifest request, which feed Helm `.Capabilities` and Kustomize.
+  Under impersonation, the generated manifests therefore reflect what the impersonated SA can discover. Discovery runs on
+  every call and is not cached. No resource verbs are needed, only read access to the non-resource discovery URLs
+  (`/version`, `/api`, `/apis/...`).
+- **Edge cases**:
+  - If impersonation is enforced and no SA matches, the whole call fails with "error getting application cluster config:
+    no matching service account found ...", even though generating manifests writes nothing to the cluster.
+  - A discovery failure gives "error getting server version: failed to get server version: ..." or "error getting API
+    resources: ...".
+  - GetManifests checks for a namespace that is not enabled (NamespaceNotPermittedError) before resolving the cluster config.
+  - GetManifestsWithFiles resolves impersonation with the project returned by the RBAC lookup, then reloads the project
+    for repository lookup.
+  - Patrol must not add impersonated groups, which would change the discovery permissions the API server sees.
+- **Configuration surface**: as SYNC-113.
+- **Exposure**: API (both RPCs); CLI `argocd app manifests APPNAME --revision <r>` (and `--revisions/--source-positions`),
+  `argocd app diff --revision ...` and `argocd app diff --local ... --server-side-generate` (GetManifestsWithFiles), and
+  `argocd app sync --label ...` (fetches the target manifests to select resources). The UI service defines
+  `getManifest` but no component calls it (see Unconfirmed).
+- **Tests required**:
+  - Positive: impersonation enabled with a matching SA → manifests are returned, and `/version` and discovery requests carry `Impersonate-User`.
+  - Negative: enforced with no match → the error above, and the repo-server is never called.
+  - Positive: not enforced with no match → succeeds with the server's credentials.
+  - Negative: the SA is denied discovery (system:discovery binding removed) → "error getting server version".
+  - Positive: `argocd app sync --label` under enforced impersonation with no match fails before the sync is submitted.
+
+### SYNC-115 Impersonated resource event listing (ListResourceEvents)
+- **Upstream**:
+  https://github.com/argoproj/argo-cd/blob/a5038b0e2bbac1715754380ae0084df8e3d5b48c/server/application/application.go#L899 ,
+  https://github.com/argoproj/argo-cd/blob/a5038b0e2bbac1715754380ae0084df8e3d5b48c/server/application/application.go#L913 ,
+  https://github.com/argoproj/argo-cd/blob/a5038b0e2bbac1715754380ae0084df8e3d5b48c/server/application/application.go#L927 ,
+  https://github.com/argoproj/argo-cd/blob/a5038b0e2bbac1715754380ae0084df8e3d5b48c/server/application/application.go#L939 ,
+  https://github.com/argoproj/argo-cd/blob/a5038b0e2bbac1715754380ae0084df8e3d5b48c/server/application/application.go#L955 ,
+  https://github.com/argoproj/argo-cd/blob/a5038b0e2bbac1715754380ae0084df8e3d5b48c/server/application/application.proto#L61 ,
+  https://github.com/argoproj/argo-cd/blob/a5038b0e2bbac1715754380ae0084df8e3d5b48c/server/application/application.proto#L362 ,
+  https://github.com/argoproj/argo-cd/blob/a5038b0e2bbac1715754380ae0084df8e3d5b48c/docs/operator-manual/upgrading/3.4-3.5.md#L121
+- **Maturity**: Beta
+- **Semantics**: `GET /api/v1/applications/{name}/events?resourceNamespace&resourceName&resourceUID&appNamespace&project`
+  requires RBAC `applications, get`. It has two modes:
+  - Application events (`resourceName` and `resourceUID` both empty): Argo CD lists Events in the Application's namespace
+    on the control-plane cluster, with field selector involvedObject name/uid/namespace equal to the Application, using
+    the API server's own clientset. This mode is never impersonated, and the resolver is not called, so it works even
+    when impersonation is enforced and no SA matches.
+  - Resource events: the target must be in the app tree (`nodes` or `orphanedNodes`) with an exact match on UID, name and
+    namespace. Argo CD then resolves the impersonated config and lists `events` in `resourceNamespace` with field selector
+    `involvedObject.name/uid/namespace`.
+  Required verb: `list` on core `events` in the resource's namespace.
+- **Edge cases**:
+  - A resource not in the tree returns InvalidArgument "<resourceName> not found as part of application <name>", with no
+    cluster call.
+  - For a cluster-scoped resource, `resourceNamespace` is empty, so the list is cluster-wide and the SA needs a
+    cluster-wide `list events`.
+  - Impersonation errors return "error getting application cluster config: ...". Forbidden returns "error listing
+    resource events: ...".
+  - Orphaned resources are accepted.
+- **Configuration surface**: as SYNC-113.
+- **Exposure**: API; UI application "Events" tab (application mode) and resource details "Events" tab (resource mode); no CLI.
+- **Tests required**:
+  - Positive: resource events listed with an SA that has `list events` in the namespace; the request carries `Impersonate-User`.
+  - Negative: an SA without `list events` → "error listing resource events".
+  - Positive: application events under enforced impersonation with no match still succeed, without impersonation.
+  - Positive: a cluster-scoped resource (empty namespace) triggers an all-namespaces list.
+  - Negative: a resource not in the tree → InvalidArgument and no Kubernetes call.
+
+### SYNC-116 Impersonated live manifest read (GetResource)
+- **Upstream**:
+  https://github.com/argoproj/argo-cd/blob/a5038b0e2bbac1715754380ae0084df8e3d5b48c/server/application/application.go#L1485 ,
+  https://github.com/argoproj/argo-cd/blob/a5038b0e2bbac1715754380ae0084df8e3d5b48c/server/application/application.go#L1508 ,
+  https://github.com/argoproj/argo-cd/blob/a5038b0e2bbac1715754380ae0084df8e3d5b48c/server/application/application.go#L1512 ,
+  https://github.com/argoproj/argo-cd/blob/a5038b0e2bbac1715754380ae0084df8e3d5b48c/server/application/application.go#L1520 ,
+  https://github.com/argoproj/argo-cd/blob/a5038b0e2bbac1715754380ae0084df8e3d5b48c/server/application/application.go#L1530 ,
+  https://github.com/argoproj/argo-cd/blob/a5038b0e2bbac1715754380ae0084df8e3d5b48c/gitops-engine/pkg/utils/kube/ctl.go#L181 ,
+  https://github.com/argoproj/argo-cd/blob/a5038b0e2bbac1715754380ae0084df8e3d5b48c/server/application/application.proto#L490 ,
+  https://github.com/argoproj/argo-cd/blob/a5038b0e2bbac1715754380ae0084df8e3d5b48c/ui/src/app/applications/components/resource-details/resource-details.tsx#L277 ,
+  https://github.com/argoproj/argo-cd/blob/a5038b0e2bbac1715754380ae0084df8e3d5b48c/docs/operator-manual/upgrading/3.4-3.5.md#L118
+- **Maturity**: Beta
+- **Semantics**: `GET /api/v1/applications/{name}/resource?namespace&resourceName&version&group&kind&appNamespace&project`
+  requires RBAC `applications, get`. The node must be in the cached app tree with a non-empty UID. Argo CD then resolves
+  the impersonated config, uses discovery to map the GVK to a resource that supports `get`, and runs `GET` on the object
+  as the impersonated SA. A request `version` overrides the version from the tree. For core `Secret`, `data` values are masked before the response is returned. Required verb: `get`.
+- **Edge cases**:
+  - A node missing from the tree, or one with an empty UID, returns InvalidArgument "<kind> <group> <name> not found as
+    part of application <app>".
+  - Resolver errors return "error getting application cluster config: ...". Forbidden or discovery failures return
+    "error getting resource: ...".
+  - The UI resource-details panel catches GetResource errors and shows no live state instead of an error. A Forbidden
+    response for the impersonated SA therefore shows an empty live manifest.
+- **Configuration surface**: as SYNC-113.
+- **Exposure**: API; CLI `argocd app get-resource APPNAME --kind K [--resource-name N --group G --project P --filter-fields F --show-managed-fields -o yaml|json]`; UI resource details "Live Manifest" and the diff view.
+- **Tests required**:
+  - Positive: an SA with `get` → the manifest is returned; a Secret is masked.
+  - Negative: an SA without `get` → error containing "forbidden"; under enforced impersonation with no match → resolver error.
+  - Positive: with impersonation disabled, the request is sent with the server's credentials and no `Impersonate-User`.
+  - Authorization: a user without `applications, get` is denied before any cluster call.
+
+### SYNC-117 Impersonated resource patch (PatchResource)
+- **Upstream**:
+  https://github.com/argoproj/argo-cd/blob/a5038b0e2bbac1715754380ae0084df8e3d5b48c/server/application/application.go#L1558 ,
+  https://github.com/argoproj/argo-cd/blob/a5038b0e2bbac1715754380ae0084df8e3d5b48c/server/application/application.go#L1574 ,
+  https://github.com/argoproj/argo-cd/blob/a5038b0e2bbac1715754380ae0084df8e3d5b48c/server/application/application.go#L1578 ,
+  https://github.com/argoproj/argo-cd/blob/a5038b0e2bbac1715754380ae0084df8e3d5b48c/server/application/application.go#L1593 ,
+  https://github.com/argoproj/argo-cd/blob/a5038b0e2bbac1715754380ae0084df8e3d5b48c/server/application/application.go#L1497 ,
+  https://github.com/argoproj/argo-cd/blob/a5038b0e2bbac1715754380ae0084df8e3d5b48c/gitops-engine/pkg/utils/kube/ctl.go#L229 ,
+  https://github.com/argoproj/argo-cd/blob/a5038b0e2bbac1715754380ae0084df8e3d5b48c/util/grpc/grpc.go#L27 ,
+  https://github.com/argoproj/argo-cd/blob/a5038b0e2bbac1715754380ae0084df8e3d5b48c/server/application/application.proto#L495 ,
+  https://github.com/argoproj/argo-cd/blob/a5038b0e2bbac1715754380ae0084df8e3d5b48c/docs/operator-manual/upgrading/3.4-3.5.md#L119
+- **Maturity**: Beta
+- **Semantics**: `POST /api/v1/applications/{name}/resource` (body = the patch string; query namespace, resourceName,
+  version, group, kind, patchType, appNamespace, project) requires RBAC `applications, update`, or the fine-grained
+  `update/<group>/<kind>/<ns>/<name>` (RBAC area). After the tree check, Argo CD resolves the impersonated config, runs
+  discovery, and sends one `PATCH` with the requested patch type. It does not GET the object first, so code only needs
+  `patch` (the upgrade doc lists get and patch). Secret results are masked. Argo CD emits the Kubernetes Event (reason
+  ResourceUpdated) "patched resource <group>/<kind> '<name>'".
+- **Edge cases**:
+  - A failed patch of a core Secret returns only "failed to patch Secret <ns>/<name>", so no secret data leaks. Other
+    failures return "error patching resource: <k8s msg>". A nil result returns "failed to patch resource: manifest was nil".
+  - Upstream defect (found by reading the code, not by running it): when
+    `server.rbac.disableApplicationFineGrainedRBACInheritance` is `"false"` and the user lacks app-level `update` but has
+    the fine-grained permission, the retry RBAC lookup throws away the project. The resolver then gets a nil project.
+    With impersonation enabled, this is a nil-pointer panic, which the gRPC recovery handler turns into `codes.Internal`
+    with the panic text. With the default setting (inheritance disabled when the key is empty), the fine-grained action is
+    checked first and the project is kept. Patrol should impersonate using the Application's project in both paths (see
+    Doc/implementation differences).
+- **Configuration surface**: as SYNC-113, plus `argocd-cm` `server.rbac.disableApplicationFineGrainedRBACInheritance`.
+- **Exposure**: API; CLI `argocd app patch-resource APPNAME --patch P --patch-type T --kind K --resource-name N [--group --namespace --all --project]`; UI resource details "Live Manifest" Edit/Save.
+- **Tests required**:
+  - Positive: an SA with only `patch`, and no `get`, can patch.
+  - Negative: an SA without `patch` → "error patching resource: ... forbidden".
+  - Negative: a Forbidden patch on a Secret → exactly "failed to patch Secret ns/name".
+  - Authorization: a user without `update` (and without fine-grained permission) is denied before any cluster call.
+  - Positive (Patrol target): fine-grained `update/...` with inheritance enabled and impersonation enabled impersonates the project SA. Upstream returns Internal.
+
+### SYNC-118 Impersonated resource deletion (DeleteResource)
+- **Upstream**:
+  https://github.com/argoproj/argo-cd/blob/a5038b0e2bbac1715754380ae0084df8e3d5b48c/server/application/application.go#L1601 ,
+  https://github.com/argoproj/argo-cd/blob/a5038b0e2bbac1715754380ae0084df8e3d5b48c/server/application/application.go#L1619 ,
+  https://github.com/argoproj/argo-cd/blob/a5038b0e2bbac1715754380ae0084df8e3d5b48c/server/application/application.go#L1623 ,
+  https://github.com/argoproj/argo-cd/blob/a5038b0e2bbac1715754380ae0084df8e3d5b48c/server/application/application.go#L1630 ,
+  https://github.com/argoproj/argo-cd/blob/a5038b0e2bbac1715754380ae0084df8e3d5b48c/server/application/application.go#L1634 ,
+  https://github.com/argoproj/argo-cd/blob/a5038b0e2bbac1715754380ae0084df8e3d5b48c/gitops-engine/pkg/utils/kube/ctl.go#L253 ,
+  https://github.com/argoproj/argo-cd/blob/a5038b0e2bbac1715754380ae0084df8e3d5b48c/server/application/application.proto#L528 ,
+  https://github.com/argoproj/argo-cd/blob/a5038b0e2bbac1715754380ae0084df8e3d5b48c/cmd/argocd/commands/app_resources.go#L382 ,
+  https://github.com/argoproj/argo-cd/blob/a5038b0e2bbac1715754380ae0084df8e3d5b48c/docs/operator-manual/upgrading/3.4-3.5.md#L120
+- **Maturity**: Beta
+- **Semantics**: `DELETE /api/v1/applications/{name}/resource?...&force&orphan` requires RBAC `applications, delete`, or
+  the fine-grained `delete/<group>/<kind>/<ns>/<name>`. After the tree check, Argo CD resolves the impersonated config,
+  runs discovery, and sends one `DELETE` as the impersonated SA. Propagation is `orphan` → Orphan; otherwise
+  `force` → Background with `gracePeriodSeconds: 0`; otherwise Foreground. Orphan takes precedence over force. Argo CD
+  emits the Event (reason ResourceDeleted) "deleted resource <group>/<kind> '<name>'". Required verb: `delete`.
+- **Edge cases**:
+  - Forbidden returns "error deleting resource: ...". Resolver errors return "error getting application cluster config: ...".
+  - The fine-grained inheritance nil-project defect described in SYNC-117 applies to `delete` too.
+  - The UI pod "Delete" shortcut always sends `orphan=false`, with `force` taken from its dialog checkbox.
+- **Configuration surface**: as SYNC-117.
+- **Exposure**: API; CLI `argocd app delete-resource APPNAME --kind K --resource-name N [--group --namespace --force --orphan --all --orphaned --project]`; UI resource "Delete" dialog (foreground/background/orphan choices) and the pod Delete action.
+- **Tests required**:
+  - Positive: an SA with `delete` deletes, and the propagation policy matches the flags in each of the three cases.
+  - Negative: an SA without `delete` → "error deleting resource: ... forbidden".
+  - Negative: enforced impersonation with no match → the resolver error, and the object is not deleted.
+  - Authorization: a user without `delete` is denied.
+
+### SYNC-119 Impersonated pod log streaming (PodLogs)
+- **Upstream**:
+  https://github.com/argoproj/argo-cd/blob/a5038b0e2bbac1715754380ae0084df8e3d5b48c/server/application/application.go#L1855 ,
+  https://github.com/argoproj/argo-cd/blob/a5038b0e2bbac1715754380ae0084df8e3d5b48c/server/application/application.go#L1894 ,
+  https://github.com/argoproj/argo-cd/blob/a5038b0e2bbac1715754380ae0084df8e3d5b48c/server/application/application.go#L1903 ,
+  https://github.com/argoproj/argo-cd/blob/a5038b0e2bbac1715754380ae0084df8e3d5b48c/server/application/application.go#L1915 ,
+  https://github.com/argoproj/argo-cd/blob/a5038b0e2bbac1715754380ae0084df8e3d5b48c/server/application/application.go#L1925 ,
+  https://github.com/argoproj/argo-cd/blob/a5038b0e2bbac1715754380ae0084df8e3d5b48c/server/application/application.go#L1931 ,
+  https://github.com/argoproj/argo-cd/blob/a5038b0e2bbac1715754380ae0084df8e3d5b48c/server/application/application.go#L1952 ,
+  https://github.com/argoproj/argo-cd/blob/a5038b0e2bbac1715754380ae0084df8e3d5b48c/util/settings/settings.go#L949 ,
+  https://github.com/argoproj/argo-cd/blob/a5038b0e2bbac1715754380ae0084df8e3d5b48c/server/application/application.proto#L533 ,
+  https://github.com/argoproj/argo-cd/blob/a5038b0e2bbac1715754380ae0084df8e3d5b48c/docs/operator-manual/upgrading/3.4-3.5.md#L122
+- **Maturity**: Beta
+- **Semantics**: `GET /api/v1/applications/{name}/pods/{podName}/logs` and `GET /api/v1/applications/{name}/logs`
+  (server stream) require RBAC `applications, get` and `logs, get`. The order is: parse `untilTime`, run the RBAC
+  checks, load the tree, resolve the impersonated config, then select pods from the tree by
+  kind/group/resourceName/namespace. Because the config is resolved before pod selection, an enforced no-match fails even
+  when no pod would be selected. With zero pods the stream ends with no error. With more pods than
+  `server.maxPodLogsToRender` (default 10), the RPC returns InvalidArgument "max pods to view logs are reached. Please
+  provide more granular query". For each pod, Argo CD calls `GET pods/{name}/log` as the impersonated SA, with container,
+  follow, `timestamps=true`, sinceSeconds, sinceTime, tailLines and previous. The code calls only the `pods/log`
+  subresource and needs `get` on it.
+- **Edge cases**:
+  - If a pod's log stream cannot be opened (for example Forbidden for the impersonated SA), the RPC does not fail. The
+    Kubernetes error text is sent as a log line for that pod, and the other pods keep streaming.
+  - Resolver errors end the stream with "error getting application cluster config: ...".
+  - An invalid `untilTime` returns "invalid untilTime parameter value: ..." before RBAC runs.
+- **Configuration surface**: as SYNC-113, plus `argocd-cm` `server.maxPodLogsToRender`.
+- **Exposure**: API; CLI `argocd app logs APPNAME [--kind --group --name --namespace -c/--container -f/--follow --tail --since-seconds --until-time --filter -m/--match-case -p/--previous]`; UI resource details "Logs" tab.
+- **Tests required**:
+  - Positive: an SA with `get pods/log` streams logs, and the request carries `Impersonate-User`.
+  - Negative: an SA without `pods/log` → the stream holds a line with the Forbidden text, and the RPC status is OK.
+  - Negative: enforced with no match → the stream errors before any log request, even for a query that selects no pods.
+  - Authorization: a user without `logs, get` is denied before any cluster call.
+
+### SYNC-120 Impersonated resource action discovery (ListResourceActions)
+- **Upstream**:
+  https://github.com/argoproj/argo-cd/blob/a5038b0e2bbac1715754380ae0084df8e3d5b48c/server/application/application.go#L2561 ,
+  https://github.com/argoproj/argo-cd/blob/a5038b0e2bbac1715754380ae0084df8e3d5b48c/server/application/application.go#L2583 ,
+  https://github.com/argoproj/argo-cd/blob/a5038b0e2bbac1715754380ae0084df8e3d5b48c/server/application/application.go#L2599 ,
+  https://github.com/argoproj/argo-cd/blob/a5038b0e2bbac1715754380ae0084df8e3d5b48c/server/application/application.go#L2609 ,
+  https://github.com/argoproj/argo-cd/blob/a5038b0e2bbac1715754380ae0084df8e3d5b48c/server/application/application_test.go#L5330 ,
+  https://github.com/argoproj/argo-cd/blob/a5038b0e2bbac1715754380ae0084df8e3d5b48c/server/application/application.proto#L503
+- **Maturity**: Beta (impersonation behaviour; action discovery itself is SYNC-100, GA)
+- **Semantics**: `GET /api/v1/applications/{name}/resource/actions` requires RBAC `applications, get`.
+  - For a managed resource: tree check, then the impersonated config, then discovery plus `GET` of the live object as
+    the impersonated SA. The Lua discovery scripts see the object as that SA reads it. Required verb: `get` on the target.
+  - For the Application itself (kind `Application`, group `argoproj.io`, `resourceName` equal to the app name): the
+    object comes from the informer with no cluster GET, but the impersonated config is still resolved. An enforced
+    no-match therefore fails the listing even though no cluster call is made.
+- **Edge cases**:
+  - Resolver errors return "error getting application cluster config: ...". Forbidden returns "error getting resource: ...".
+  - The upgrade doc's permission table does not list ListResourceActions.
+- **Configuration surface**: as SYNC-113.
+- **Exposure**: API; CLI `argocd app actions list APPNAME`; UI resource "Actions" menu (populated on open).
+- **Tests required**:
+  - Positive: `TestGetUnstructuredLiveResourceOrAppWithImpersonation` (Application self path → impersonated config `system:serviceaccount:<destns>:test-sa`).
+  - Positive: for a managed Deployment, the GET carries `Impersonate-User`.
+  - Negative: an SA without `get` → "error getting resource"; enforced with no match on the self path → resolver error.
+
+### SYNC-121 Impersonated resource action execution (RunResourceAction / RunResourceActionV2)
+- **Upstream**:
+  https://github.com/argoproj/argo-cd/blob/a5038b0e2bbac1715754380ae0084df8e3d5b48c/server/application/application.go#L2662 ,
+  https://github.com/argoproj/argo-cd/blob/a5038b0e2bbac1715754380ae0084df8e3d5b48c/server/application/application.go#L2673 ,
+  https://github.com/argoproj/argo-cd/blob/a5038b0e2bbac1715754380ae0084df8e3d5b48c/server/application/application.go#L2729 ,
+  https://github.com/argoproj/argo-cd/blob/a5038b0e2bbac1715754380ae0084df8e3d5b48c/server/application/application.go#L2735 ,
+  https://github.com/argoproj/argo-cd/blob/a5038b0e2bbac1715754380ae0084df8e3d5b48c/server/application/application.go#L2756 ,
+  https://github.com/argoproj/argo-cd/blob/a5038b0e2bbac1715754380ae0084df8e3d5b48c/server/application/application.go#L2783 ,
+  https://github.com/argoproj/argo-cd/blob/a5038b0e2bbac1715754380ae0084df8e3d5b48c/server/application/application.go#L2799 ,
+  https://github.com/argoproj/argo-cd/blob/a5038b0e2bbac1715754380ae0084df8e3d5b48c/server/application/application.go#L2801 ,
+  https://github.com/argoproj/argo-cd/blob/a5038b0e2bbac1715754380ae0084df8e3d5b48c/server/application/application.go#L2840 ,
+  https://github.com/argoproj/argo-cd/blob/a5038b0e2bbac1715754380ae0084df8e3d5b48c/gitops-engine/pkg/utils/kube/ctl.go#L205 ,
+  https://github.com/argoproj/argo-cd/blob/a5038b0e2bbac1715754380ae0084df8e3d5b48c/docs/operator-manual/upgrading/3.4-3.5.md#L123
+- **Maturity**: Beta (impersonation behaviour; action execution itself is SYNC-101, GA)
+- **Semantics**: `POST /api/v1/applications/{name}/resource/actions/v2` (and the deprecated `.../resource/actions`)
+  requires RBAC `applications, action/<group>/<kind>/<action>`. All cluster calls use the single impersonated config
+  resolved for the Application, in this order:
+  1. `GET` the live object, except on the Application self path (SYNC-122).
+  2. Run the Lua action.
+  3. For each impacted resource, run the Argo CD project permission check (not Kubernetes RBAC). For each `create`
+     operation, send a server-side dry-run `create` (`dryRun: [All]`). All dry runs finish before any real write.
+  4. Write in the order the script returned: a `patch` computes a JSON merge patch, and `{}` means no Kubernetes call.
+     If the patch changes `status`, Argo CD first sends `PATCH` to the `status` subresource; a NotFound means there is
+     no status subresource, and Argo CD falls back to one full patch. It then sends `PATCH` for the remaining fields. A
+     `create` sends `POST`.
+  Required verbs: `get` on the target; `create` on every kind a create-type action makes (for example `jobs` for CronJob
+  `create-job`); `patch` on patched kinds, plus `patch` on `<resource>/status` when the action changes status.
+- **Edge cases**:
+  - The sequence is not transactional. If a later step fails, earlier patches and creates stay applied.
+  - A Forbidden dry-run create is returned unwrapped, and nothing is written.
+  - A non-NotFound error from the status-subresource patch returns "error patching resource: ..." without attempting
+    the main patch.
+  - A create failure returns "error creating resource: ...".
+  - Custom actions may need more verbs, depending on what they return.
+- **Configuration surface**: as SYNC-113; actions customizations (SYNC-104).
+- **Exposure**: API; CLI `argocd app actions run APPNAME ACTION --kind K [--resource-name --group --namespace --all]` (the CLI sends no parameters); UI resource "Actions" menu.
+- **Tests required**:
+  - Positive: Deployment `restart` with an SA that has `get` and `patch`.
+  - Positive: CronJob `create-job` with an SA that has `get cronjobs` and `create jobs`.
+  - Negative: CronJob `create-job` with an SA lacking `create jobs` → the dry-run fails and no Job exists afterwards.
+  - Negative: a status-changing action on a CRD with a status subresource where the SA lacks `patch` on `<res>/status` → error, main patch not applied.
+  - Authorization: a user without `action/...` is denied before any cluster call.
+
+### SYNC-122 Application self-action (toggle-auto-sync) under impersonation
+- **Upstream**:
+  https://github.com/argoproj/argo-cd/blob/a5038b0e2bbac1715754380ae0084df8e3d5b48c/server/application/application.go#L2584 ,
+  https://github.com/argoproj/argo-cd/blob/a5038b0e2bbac1715754380ae0084df8e3d5b48c/server/application/application.go#L2599 ,
+  https://github.com/argoproj/argo-cd/blob/a5038b0e2bbac1715754380ae0084df8e3d5b48c/server/application/application.go#L2603 ,
+  https://github.com/argoproj/argo-cd/blob/a5038b0e2bbac1715754380ae0084df8e3d5b48c/resource_customizations/argoproj.io/Application/actions/discovery.lua#L1 ,
+  https://github.com/argoproj/argo-cd/blob/a5038b0e2bbac1715754380ae0084df8e3d5b48c/ui/src/app/applications/components/application-summary/application-summary.tsx#L563 ,
+  https://github.com/argoproj/argo-cd/blob/a5038b0e2bbac1715754380ae0084df8e3d5b48c/ui/src/app/applications/components/application-details/application-details.tsx#L1370
+- **Maturity**: Beta
+- **Semantics**: Users who fail the `canI applications update` check toggle auto-sync in the UI by running the built-in
+  action `toggle-auto-sync` on the Application itself (kind `Application`, group `argoproj.io`, name equal to
+  resourceName). The application details menu always uses the action; the summary panel uses it only when the user
+  lacks `update`. RBAC is `applications, action/argoproj.io/Application/toggle-auto-sync`. The server reads the
+  Application from the informer, resolves the cluster config for the Application's destination cluster (impersonated
+  per SYNC-113), and sends the merge patch for the Application object through that config. Under impersonation, the
+  destination SA therefore needs `patch` on `applications.argoproj.io` in the Application's namespace, on the cluster
+  that the destination points to. The audit Event is "ran action toggle-auto-sync", with no resource suffix.
+- **Edge cases**:
+  - Enforced with no match → the toggle fails ("error getting application cluster config: ...").
+  - For a remote destination, the patch goes to the remote cluster rather than the control plane. The runtime result of
+    that was not verified (see Unconfirmed).
+- **Configuration surface**: as SYNC-113.
+- **Exposure**: API; UI application details "Toggle Auto-Sync" menu item and the summary "Enable/Disable Auto-Sync" button; no CLI.
+- **Tests required**:
+  - Positive: an in-cluster destination with an SA that can patch Applications in the app namespace → `spec.syncPolicy.automated.enabled` flips.
+  - Negative: an SA without patch on Applications → error; enforced with no match → error.
+  - Authorization: a user without the action permission is denied.
+
+### SYNC-123 Web terminal is not impersonated
+- **Upstream**:
+  https://github.com/argoproj/argo-cd/blob/a5038b0e2bbac1715754380ae0084df8e3d5b48c/server/application/terminal.go#L62 ,
+  https://github.com/argoproj/argo-cd/blob/a5038b0e2bbac1715754380ae0084df8e3d5b48c/server/application/terminal.go#L86 ,
+  https://github.com/argoproj/argo-cd/blob/a5038b0e2bbac1715754380ae0084df8e3d5b48c/server/application/terminal.go#L155 ,
+  https://github.com/argoproj/argo-cd/blob/a5038b0e2bbac1715754380ae0084df8e3d5b48c/server/application/terminal.go#L182 ,
+  https://github.com/argoproj/argo-cd/blob/a5038b0e2bbac1715754380ae0084df8e3d5b48c/server/application/terminal.go#L206 ,
+  https://github.com/argoproj/argo-cd/blob/a5038b0e2bbac1715754380ae0084df8e3d5b48c/server/application/terminal.go#L306 ,
+  https://github.com/argoproj/argo-cd/blob/a5038b0e2bbac1715754380ae0084df8e3d5b48c/server/server.go#L1227 ,
+  https://github.com/argoproj/argo-cd/blob/a5038b0e2bbac1715754380ae0084df8e3d5b48c/docs/operator-manual/upgrading/3.4-3.5.md#L110
+- **Maturity**: Beta
+- **Semantics**: The `/terminal` WebSocket handler (HTTP, not gRPC) is enabled only with `argocd-cm` `exec.enabled: "true"`
+  (otherwise 404) and requires RBAC `applications, get` and `exec, create`. It builds its client from
+  `Cluster.RawRestConfig()` and never calls the impersonation resolver. The pod `GET` and the `pods/exec` stream always run
+  with Argo CD's own credentials for the cluster, whatever the values of `application.sync.impersonation.enabled` and
+  `.enforced` and whether an SA matches. The permissions of the impersonated SA have no effect on the terminal.
+- **Edge cases**: With impersonation enforced and no matching `destinationServiceAccounts`, the terminal still works while
+  logs, events and resource reads fail. This is a privilege difference that operators may not expect, because the
+  3.4→3.5 note says impersonation now covers "all API server operations".
+- **Configuration surface**: `argocd-cm` `exec.enabled`, `exec.shells`; RBAC `exec, create`.
+- **Exposure**: API (HTTP `/terminal?pod&container&appName&appNamespace&projectName&namespace`); UI pod "Terminal" tab; no CLI.
+- **Tests required**:
+  - Positive (parity): impersonation enabled and enforced with no matching SA → the terminal session starts, and the exec
+    request has no `Impersonate-User` header.
+  - Negative: `exec.enabled` unset → 404; a user without `exec, create` → forbidden.
+
+### SYNC-124 API-server ServerSideDiff is not impersonated
+- **Upstream**:
+  https://github.com/argoproj/argo-cd/blob/a5038b0e2bbac1715754380ae0084df8e3d5b48c/server/application/application.go#L2992 ,
+  https://github.com/argoproj/argo-cd/blob/a5038b0e2bbac1715754380ae0084df8e3d5b48c/server/application/application.go#L3018 ,
+  https://github.com/argoproj/argo-cd/blob/a5038b0e2bbac1715754380ae0084df8e3d5b48c/server/application/application.go#L3029 ,
+  https://github.com/argoproj/argo-cd/blob/a5038b0e2bbac1715754380ae0084df8e3d5b48c/server/application/application.proto#L460 ,
+  https://github.com/argoproj/argo-cd/blob/a5038b0e2bbac1715754380ae0084df8e3d5b48c/cmd/argocd/commands/app_diff.go#L291
+- **Maturity**: Beta
+- **Semantics**: `GET /api/v1/applications/{appName}/server-side-diff` requires RBAC `applications, get`. It builds its
+  client from `Cluster.RawRestConfig()` with no impersonation. The OpenAPI schema load and the server-side-apply dry runs
+  run with Argo CD's own cluster credentials, whatever the impersonation settings. The controller's comparison
+  (including `ServerSideDiff=true` compare option) is not impersonated either; only sync and deletion are impersonated
+  on the controller side (SYNC-093).
+- **Edge cases**: With impersonation enforced and no matching SA, ServerSideDiff still succeeds. Dry-run results can
+  differ from what the impersonated SA would get at sync time; for example, an admission policy keyed on the user.
+- **Configuration surface**: none specific.
+- **Exposure**: API; CLI `argocd app diff --server-side-diff` (or the app's compare-options annotation `ServerSideDiff=true`).
+- **Tests required**:
+  - Positive (parity): enforced impersonation with no match → ServerSideDiff returns results, and the dry-run requests carry no `Impersonate-User`.
+
 ## Unconfirmed
 
 - Multi-source rollback restriction mentioned in the task scope: not found. Checked
@@ -2146,6 +2579,18 @@ Permalink base: `https://github.com/argoproj/argo-cd/blob/a5038b0e2bbac171575438
 - Whether the legacy single-key `resource.customizations` YAML accepts an `actions` entry per group/kind (`ResourceOverride.Actions` has no json tag; checked `util/settings/settings.go#L1051`, `pkg/apis/application/v1alpha1/types.go#L2595`); only the split key `resource.customizations.actions.<group_Kind>` was confirmed.
 - Whether `server.sync.replace.allowed` is also enforced for Rollback (spec option `Replace=true`): Rollback handler does not
   check it (`server/application/application.go#L2265-L2325`); not tested.
+
+- UI use of GetManifests (SYNC-114): `getManifest` is defined in `ui/src/app/shared/services/applications-service.ts#L176`,
+  but no caller was found under `ui/src/app` (searched for `getManifest(`), so UI exposure is recorded as none.
+- Runtime result of the Application self-action (SYNC-122) for a remote destination. The code sends the Application
+  merge patch through the destination cluster's config (`server/application/application.go#L2599`, `#L2603`, `#L2778`);
+  the actual outcome (NotFound, missing CRD, or patching an unrelated object) was not executed.
+- The nil-project panic on the fine-grained RBAC inheritance retry path under impersonation (SYNC-117/SYNC-118) comes
+  from reading the code (`server/application/application.go#L1494-L1497`, `#L1512`, `util/settings/impersonation.go#L28`)
+  and was not reproduced.
+- Which groups Kubernetes attaches to an impersonated `system:serviceaccount:*` user when no `Impersonate-Group` is sent
+  (this decides whether default discovery/`system:authenticated` bindings apply to SYNC-114). This is Kubernetes
+  apiserver behaviour, not verified in this checkout.
 
 ## Doc/implementation differences
 
@@ -2182,3 +2627,28 @@ Permalink base: `https://github.com/argoproj/argo-cd/blob/a5038b0e2bbac171575438
 - `docs/operator-manual/resource_actions.md#L36` labels list-returning (create/patch) actions "An alpha feature, introduced in
   2.8", but `docs/operator-manual/feature-maturity.md` does not list it; this inventory records it as GA per the maturity rule
   (SYNC-103).
+
+- `docs/operator-manual/upgrading/3.4-3.5.md#L110` says impersonation now applies to "all API server operations". Code
+  does not impersonate the web terminal (`server/application/terminal.go#L62`, `#L182`, raw config), the API-server
+  ServerSideDiff (`server/application/application.go#L3018`), or application-level ListResourceEvents, which uses the
+  server's own clientset (`application.go#L914`). `docs/operator-manual/app-sync-using-impersonation.md#L33` likewise
+  says impersonation covers "UI operations triggered by the user", but the UI terminal is not covered (SYNC-123, SYNC-124).
+- The permission table in `docs/operator-manual/upgrading/3.4-3.5.md#L116-L123` differs from the code in four ways:
+  - Patch resource lists `get, patch`, but the code only sends PATCH (`application.go#L1574`).
+  - Pod logs lists `get` on `pods` and `pods/log`, but the code only calls the `pods/log` subresource (`application.go#L1931`).
+  - It omits the impersonated discovery in GetManifests/GetManifestsWithFiles (`application.go#L513`, `#L682`), the
+    impersonated GET in ListResourceActions (`application.go#L2609`), and the `status`-subresource PATCH used by actions
+    (`application.go#L2799`).
+  - `create` is needed only for create-type actions, as a dry run and then a create (`application.go#L2735`, `#L2840`).
+- The API-server fallback log (`server/application/application.go#L1436`) says "falling back to controller service
+  account". In the API server, the identity used is the cluster secret's credentials, or the `argocd-server` pod's SA for
+  an in-cluster destination without credentials (`pkg/apis/application/v1alpha1/types.go#L3983-L3986`).
+- Neither impersonation doc says that the Argo CD credential for a cluster must hold `impersonate` on `serviceaccounts`.
+  The shipped `argocd-server` ClusterRole (`manifests/cluster-rbac/server/argocd-server-clusterrole.yaml#L9-L51`) does not
+  grant it (the controller ClusterRole grants `*`). So once impersonation is enabled, impersonated API-server calls to an
+  in-cluster destination that uses the pod identity are rejected by Kubernetes unless the operator adds the permission.
+- Upstream defect: in `getAppLiveResource`, the fine-grained RBAC retry (`application.go#L1497`) throws away the project,
+  and `getApplicationClusterConfig` receives `nil`. With impersonation enabled and
+  `server.rbac.disableApplicationFineGrainedRBACInheritance: "false"`, PatchResource and DeleteResource end in a recovered
+  panic (`codes.Internal`). Patrol should derive the SA from the Application's
+  project instead (SYNC-117).

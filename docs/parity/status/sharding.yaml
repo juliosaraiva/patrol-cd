@@ -1,0 +1,189 @@
+# internal/controller/sharding (cluster → shard assignment, Lease-based shard ownership,
+# predicates) and internal/controller/treeapi (controller internal tree/diff/live-object API
+# and its shard-routing client). See docs/architecture/components/sharding.md and
+# docs/architecture/components/treeapi.md (commands and results under "Verification").
+# Library-level evidence: the controller binary, patrol-server and the CLI do not use the
+# packages yet, so nothing is exercised through a running controller. envtest tests use a real
+# kube-apiserver 1.36 (Leases, a StatefulSet object without a controller, the generated
+# Cluster CRD); the tree API is tested over real HTTP with a fake StateProvider.
+
+OPS-040:
+  status: implemented
+  impl:
+    - internal/controller/sharding/config.go
+    - internal/controller/sharding/lease.go
+    - internal/controller/sharding/ownership.go
+  tests:
+    - internal/controller/sharding/config_test.go:TestConfigFromEnv
+    - internal/controller/sharding/config_test.go:TestInferShard
+    - internal/controller/sharding/config_test.go:TestPreferredShard
+    - internal/controller/sharding/lease_test.go:TestLeaseManagerAcquiresAndRenewsPreferredShard
+    - internal/controller/sharding/lease_failure_test.go:TestLeaseManagerLateHeartbeatReportsLapse
+    - internal/controller/sharding/lease_failure_test.go:TestLeaseManagerAcquireErrorsFailHealthz
+    - internal/controller/sharding/lease_failure_test.go:TestLeaseManagerRenewErrors
+    - internal/controller/sharding/lease_failure_test.go:TestLeaseManagerHungCallIsBounded
+    - internal/controller/sharding/lease_failure_test.go:TestLeaseManagerSeesShardLeasesWithoutLabels
+    - internal/controller/sharding/envtest_test.go:TestLeaseFailoverEnvtest
+    - internal/controller/sharding/envtest_test.go:TestUnlabeledShardLeaseEnvtest
+    - internal/controller/sharding/ownership_test.go:TestOwnershipPredicates
+  notes: >-
+    PATROL_CONTROLLER_REPLICAS / PATROL_CONTROLLER_SHARD / hostname ordinal with upstream
+    parsing and warnings; one replica processes all clusters. Shards are owned through Leases
+    patrol-controller-shard-<n> (ADR-0008) instead of trusting the ordinal alone. Difference: a
+    preferred shard not lower than the replica count makes the replica a standby (upstream falls
+    back to shard 0 when greater, and keeps a shard equal to the replica count); destinations
+    that do not resolve are served by shard 0 (upstream: by every shard). Controller wiring
+    (filtering informers and caches by OwnsApplication/OwnsCluster) is not done here.
+
+OPS-041:
+  status: implemented
+  impl: [internal/controller/sharding/algorithm.go]
+  tests:
+    - internal/controller/sharding/algorithm_test.go:TestLegacyShardGolden
+    - internal/controller/sharding/algorithm_test.go:TestLegacyShardIsFNV32a
+    - internal/controller/sharding/algorithm_test.go:TestParseAlgorithm
+    - internal/controller/sharding/assigner_test.go:TestAssignerLegacy
+  notes: >-
+    FNV-32a of the Cluster object UID modulo replicas; golden values from the baseline tests
+    (IDs 1..4 over 5 replicas → 4,1,2,2); the synthetic in-cluster cluster has the empty ID
+    (shard 0). Unknown algorithm names log upstream's warning and use legacy.
+
+OPS-042:
+  status: implemented
+  impl: [internal/controller/sharding/algorithm.go, internal/controller/sharding/assigner.go]
+  tests:
+    - internal/controller/sharding/algorithm_test.go:TestRoundRobinShardGolden
+    - internal/controller/sharding/algorithm_test.go:TestRoundRobinReshuffle
+    - internal/controller/sharding/assigner_test.go:TestAssignerRoundRobinRedistributesOnAdd
+  notes: >-
+    Rank in the clusters sorted by ID (ties by server) modulo replicas, in-cluster included
+    (empty ID sorts first); 5 clusters over 2 replicas give 3/2; removing the first-ranked
+    cluster reshuffles the others (baseline TestShuffle values).
+
+OPS-043:
+  status: implemented
+  impl: [internal/controller/sharding/consistent.go, internal/controller/sharding/algorithm.go]
+  tests:
+    - internal/controller/sharding/algorithm_test.go:TestConsistentHashingDistributionAndScaleDown
+    - internal/controller/sharding/algorithm_test.go:TestConsistentHashingBoundedLoadsProperty
+    - internal/controller/sharding/algorithm_test.go:TestConsistentHashingAddingUnloadedClusterMovesNothing
+    - internal/controller/sharding/algorithm_test.go:TestRingHashIsBLAKE2b512LittleEndian
+    - internal/controller/sharding/algorithm_test.go:TestRingVirtualNodeCollisionsFollowInsertionOrder
+    - internal/controller/sharding/consistent_test.go:TestConsistentHashingMatchesNaiveRing
+    - internal/controller/sharding/assigner_test.go:TestAssignerConsistentHashingUsesApplications
+  notes: >-
+    Re-implemented ring with the baseline's parameters (members "0".."N-1", 1000 virtual nodes
+    "<member><i>", BLAKE2b-512 first 8 bytes little endian, later member wins a colliding
+    virtual node, successor strictly after the key, bound ceil(floor((T+1)/N)*1.25)), loads =
+    Applications per spec.destination.server. Parity is argued from the algorithm and a
+    differential test against an independent mirror of the baseline's structure; no upstream
+    golden assignment exists to compare with. Differences: Application destinations are
+    normalized (trailing "/"), Applications are keyed by namespace/name (upstream: name), and a
+    destination change recomputes loads (upstream waits for another trigger).
+
+OPS-044:
+  status: implemented
+  impl: [internal/controller/sharding/algorithm.go, internal/controller/sharding/assigner.go]
+  tests:
+    - internal/controller/sharding/algorithm_test.go:TestDistribute
+    - internal/controller/sharding/assigner_test.go:TestAssignerLegacy
+    - internal/controller/sharding/envtest_test.go:TestAssignedShardWriterEnvtest
+  notes: >-
+    Cluster.spec.shard lower than the replica count pins the cluster for every algorithm. A
+    higher value logs "Specified cluster shard (n) for cluster: <server> is greater than the
+    number of available shard (r). Using shard 0." and uses shard 0, which is what the
+    baseline's runtime path (ClusterSharding.updateDistribution) does; the "Assigning
+    automatically" wording of the inventory comes from GetClusterFilter, which the baseline
+    controller does not call. Cluster.status.assignedShard is written by the owner of the shard.
+
+OPS-045:
+  status: implemented
+  impl:
+    - internal/controller/sharding/lease.go
+    - internal/controller/sharding/replicas.go
+    - internal/controller/sharding/assigner.go
+  tests:
+    - internal/controller/sharding/envtest_test.go:TestDynamicDistributionEnvtest
+    - internal/controller/sharding/envtest_test.go:TestDynamicDistributionWaitsForReplicaCountEnvtest
+    - internal/controller/sharding/envtest_test.go:TestLeaseFailoverEnvtest
+    - internal/controller/sharding/lease_test.go:TestLeaseManagerFailoverAndHandoff
+    - internal/controller/sharding/lease_failure_test.go:TestLeaseManagerFirstReplicaReadFailureClaimsNothing
+    - internal/controller/sharding/lease_failure_test.go:TestLeaseManagerFailedHandoffReleaseIsNotUndone
+    - internal/controller/sharding/lease_test.go:TestLeaseManagerReplicaCountChanges
+    - internal/controller/sharding/lease_test.go:TestWorkloadReplicas
+    - internal/controller/sharding/config_test.go:TestConfigFromEnv
+  notes: >-
+    PATROL_ENABLE_DYNAMIC_CLUSTER_DISTRIBUTION reads spec.replicas of the controller
+    StatefulSet (or a Deployment) named PATROL_APPLICATION_CONTROLLER_NAME every heartbeat;
+    changes rebalance clusters and Leases without restarts. The shard-mapping ConfigMap is
+    replaced by per-shard Leases by design (ADR-0008): renewal every
+    PATROL_CONTROLLER_HEARTBEAT_TIME (10..60s, default 10s) is the heartbeat, expiry after
+    3 heartbeats is the takeover rule, with handoff back to the preferred replica. Readiness
+    errors keep upstream's messages with "statefulset" for the kind. Difference: when the
+    replica count cannot be read before one is known, upstream exits at startup; Patrol keeps
+    running, claims no shard and fails readiness until the read succeeds.
+
+OPS-053:
+  status: different-by-design
+  notes: >-
+    No Redis (ADR-0004): resource trees live in controller memory and are served on demand by
+    the controller tree API (docs/architecture/components/treeapi.md), so there is nothing to
+    split into keys and PATROL_APPLICATION_TREE_SHARD_SIZE does not exist.
+
+REPO-097:
+  status: in-progress
+  impl: [internal/controller/sharding/assigner.go, internal/controller/sharding/ownership.go]
+  tests:
+    - internal/controller/sharding/assigner_test.go:TestAssignerLegacy
+    - internal/controller/sharding/ownership_test.go:TestOwnershipShardForApplication
+  notes: >-
+    Skip-reconcile clusters stay in the distribution but no shard owns them (OwnsApplication,
+    OwnsCluster and the predicates return false); the synthetic in-cluster cluster is never
+    skipped. Skipping reconciliation is controller wiring.
+
+API-021:
+  status: in-progress
+  impl: [internal/controller/treeapi/handler.go, internal/controller/treeapi/client.go]
+  tests:
+    - internal/controller/treeapi/treeapi_test.go:TestTreeRoundTrip
+    - internal/controller/treeapi/treeapi_test.go:TestManagedResources
+    - internal/controller/treeapi/treeapi_test.go:TestServerSideDiff
+    - internal/controller/treeapi/treeapi_test.go:TestClientReroutesMisdirectedRequests
+  notes: >-
+    Internal controller API and routing client only; the public /api/v1 routes, RBAC and the
+    watch stream are internal/apiserver (the tree endpoint offers ETag/If-None-Match for
+    polling).
+
+API-022:
+  status: in-progress
+  impl: [internal/controller/treeapi/handler.go]
+  tests: [internal/controller/treeapi/treeapi_test.go:TestResource]
+  notes: >-
+    GetResource part of the internal API: tree membership with UID required ("<kind> <group>
+    <name> not found as part of application <app>"), version override, Secret masking.
+    Patch/delete and the public route are not here.
+
+DIFF-038:
+  status: in-progress
+  impl: [internal/controller/treeapi/handler.go]
+  tests: [internal/controller/treeapi/treeapi_test.go:TestManagedResources]
+  notes: >-
+    Hooks excluded, exact-match filters, "null" for missing sides, Secret data and sensitive
+    annotations masked on both object sides and the diff pair. Public route, RBAC and the
+    refresh-on-cache-miss behavior are internal/apiserver.
+
+DIFF-039:
+  status: in-progress
+  impl: [internal/controller/treeapi/handler.go]
+  tests: [internal/controller/treeapi/treeapi_test.go:TestServerSideDiff]
+  notes: >-
+    Name/namespace/group/kind mismatch (InvalidArgument) and managed-resource membership
+    (PermissionDenied) checks with upstream messages, masking decided from parsed objects (a
+    spoofed kind cannot unmask a Secret), aligned metadata, any-modified. The dry run itself is
+    the controller's StateProvider. Difference: misaligned arrays are rejected as invalid input.
+
+DIFF-088:
+  status: in-progress
+  impl: [internal/controller/treeapi/handler.go, internal/controller/treeapi/client.go]
+  tests: [internal/controller/treeapi/treeapi_test.go:TestTreeRoundTrip]
+  notes: Internal tree endpoint only; public route, stream and CLI are elsewhere.

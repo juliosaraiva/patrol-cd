@@ -1,0 +1,444 @@
+# internal/compare (application state comparison engine). See
+# docs/architecture/components/compare.md (commands and results under "Verification").
+# Library-level evidence: the Application reconciler, the controller tree API and the API
+# server do not call the engine yet, so no status write, event, API, CLI or UI surface is
+# exercised. envtest tests use a real kube-apiserver 1.36 with the real cache, diff, tracking,
+# health, project and settings packages and a fake repo-server returning canned manifests.
+
+DIFF-028:
+  status: implemented
+  impl: [internal/compare/compare.go]
+  tests:
+    - internal/compare/envtest_test.go:TestEnvCompareLifecycle
+    - internal/compare/envtest_test.go:TestEnvIgnoreExtraneousDoesNotHideModifications
+  notes: >-
+    Extraneous resources with compare-options IgnoreExtraneous stay OutOfSync (and
+    requiresPruning) without making the Application OutOfSync; a modified resource carrying the
+    annotation still does.
+
+DIFF-029:
+  status: implemented
+  impl: [internal/compare/target.go, internal/compare/compare.go]
+  tests:
+    - internal/compare/unit_test.go:TestNormalizeTargets
+    - internal/compare/unit_test.go:TestNormalizeTargetsGenerateNameKeys
+    - internal/compare/envtest_test.go:TestEnvNamespaceDefaulting
+    - internal/compare/envtest_test.go:TestEnvMultiSourceLastWins
+  notes: >-
+    Namespace stripping/defaulting from discovery (unknown scope = namespaced), tracking
+    re-applied, generateName keys, last duplicate wins with the upstream RepeatedResourceWarning
+    text, InvalidSpecError "Namespace for <name> <gvk> is missing.". Deviation: a tracking
+    failure marks the comparison Unknown instead of continuing without targets.
+
+DIFF-030:
+  status: implemented
+  impl: [internal/compare/compare.go, internal/compare/status.go]
+  tests:
+    - internal/compare/envtest_test.go:TestEnvCompareLifecycle
+    - internal/compare/envtest_test.go:TestEnvHooksExcludedFromHealth
+    - internal/compare/envtest_test.go:TestEnvCopiedTrackingIsNotManaged
+    - internal/compare/envtest_test.go:TestEnvProjectRestrictions
+    - internal/compare/envtest_test.go:TestEnvRepoErrorComparisonError
+    - internal/compare/envtest_test.go:TestEnvManagedNamespaceMetadata
+    - internal/compare/unit_test.go:TestRequiresDeletionConfirmation
+  notes: >-
+    Resource status rules (hooks/ignored/Skip/copied ids without status; OutOfSync for
+    modified, missing, extraneous; denied kinds Unknown; load failures Unknown everywhere;
+    managed namespace metadata change), requiresPruning, requiresDeletionConfirmation, sync
+    waves (hooks from the matching hook target). Persisting status.resources is the
+    controller's job.
+
+DIFF-031:
+  status: in-progress
+  impl: [internal/compare/secrets.go]
+  tests:
+    - internal/compare/envtest_test.go:TestEnvMaskSecrets
+  notes: >-
+    Result.MaskSecrets masks target, live and diff (recomputed for legacy diffs, result pair
+    masked for server-side diff) with resource.sensitive.mask.annotations. The API paths
+    (managed resources, GetResource, ServerSideDiff API) are not implemented here.
+
+DIFF-033:
+  status: in-progress
+  impl: [internal/compare/info.go, internal/compare/livestate.go]
+  tests:
+    - internal/compare/info_test.go:TestAppOfAndSkipResourceUpdate
+    - internal/compare/info_test.go:TestShouldHashManifest
+  notes: >-
+    The cache populator hashes tracked resources, Applications and annotated untracked ones
+    with the ignoreResourceUpdates rules; SkipResourceUpdate compares hash and health. The
+    controller's update handler that drops refreshes does not exist yet.
+
+DIFF-009:
+  status: in-progress
+  impl: [internal/compare/ssd.go, internal/compare/diffconfig.go]
+  tests:
+    - internal/compare/envtest_test.go:TestEnvServerSideDiff
+  notes: >-
+    Strategy selection (controller default, ServerSideDiff=true/false annotation,
+    IncludeMutationWebhook), SSA dry runs with dryRun=All and force through the raw cluster
+    config, OpenAPI v2 type parser per cluster; Synced and drift verified against a real API
+    server. Missing provider or dry runner -> UnknownError condition (upstream). The diff
+    algorithm itself is internal/diff.
+
+DIFF-062:
+  status: in-progress
+  impl: [internal/compare/status.go]
+  tests:
+    - internal/compare/unit_test.go:TestApplicationHealth
+    - internal/compare/envtest_test.go:TestEnvHooksExcludedFromHealth
+    - internal/compare/envtest_test.go:TestEnvCompareLifecycle
+  notes: >-
+    Health of every managed resource with Lua overrides, aggregation through
+    internal/health (hooks, ignore-healthcheck, self reference, Missing, all-missing), first
+    error as "error setting app health: failed to get resource health for ...". Health Unknown
+    on project/spec errors is the controller's.
+
+DIFF-063:
+  status: implemented
+  impl: [internal/compare/status.go]
+  tests:
+    - internal/compare/unit_test.go:TestApplicationHealth
+    - internal/compare/envtest_test.go:TestEnvHooksExcludedFromHealth
+
+DIFF-064:
+  status: in-progress
+  impl: [internal/compare/status.go, internal/compare/compare.go]
+  tests:
+    - internal/compare/unit_test.go:TestApplicationHealth
+  notes: >-
+    Health written to status.resources only with PersistResourceHealth;
+    ResourceHealthSource inline vs appTree; tree nodes carry health. The API server's fill-in
+    from the tree is not implemented here.
+
+DIFF-066:
+  status: implemented
+  impl: [internal/compare/info.go, internal/compare/treebuild.go]
+  tests:
+    - internal/compare/info_test.go:TestPopulateResourceInfoAttribution
+    - internal/compare/envtest_test.go:TestEnvResourceTreeAndHosts
+
+DIFF-070:
+  status: implemented
+  impl: [internal/compare/compare.go]
+  tests:
+    - internal/compare/envtest_test.go:TestEnvExcludedResources
+  notes: Upstream message "Resource <group>/<kind> <name> is excluded in the settings"; the app stays Synced.
+
+DIFF-076:
+  status: in-progress
+  impl: [internal/compare/compare.go, internal/compare/info.go]
+  tests:
+    - internal/compare/envtest_test.go:TestEnvCompareLifecycle
+    - internal/compare/envtest_test.go:TestEnvSharedResourceWarning
+    - internal/compare/envtest_test.go:TestEnvCopiedTrackingIsNotManaged
+  notes: >-
+    Live set = cached tracked roots (manifests retained for tracked roots and CRDs) plus GETs
+    of targets; SharedResourceWarning with the upstream wording. Owned children with copied
+    labels are excluded by the cache's root rule.
+
+DIFF-077:
+  status: implemented
+  impl: [internal/compare/compare.go, internal/compare/treebuild.go]
+  tests:
+    - internal/compare/envtest_test.go:TestEnvProjectRestrictions
+    - internal/compare/envtest_test.go:TestEnvOrphanedResources
+
+DIFF-078:
+  status: in-progress
+  impl: [internal/compare/treebuild.go]
+  tests:
+    - internal/compare/envtest_test.go:TestEnvOrphanedResources
+  notes: >-
+    Orphans from the destination namespace's top-level resources (not managed, permitted, not
+    excepted, not attributed to an existing Application) with descendants;
+    OrphanedResourceWarning when warn is true. Metric and orphan-triggered tree refreshes are
+    controller work.
+
+DIFF-079:
+  status: implemented
+  impl: [internal/compare/treebuild.go]
+  tests:
+    - internal/compare/envtest_test.go:TestEnvOrphanedResources
+  notes: Exceptions evaluated by internal/project (built-in exclusions and ignore globs).
+
+DIFF-080:
+  status: implemented
+  impl: [internal/compare/treebuild.go, internal/compare/tree.go]
+  tests:
+    - internal/compare/envtest_test.go:TestEnvResourceTreeAndHosts
+    - internal/compare/envtest_test.go:TestEnvCompareLifecycle
+  notes: Served through the controller tree API (not implemented here).
+
+DIFF-087:
+  status: in-progress
+  impl: [internal/compare/info.go]
+  tests:
+    - internal/compare/info_test.go:TestAppOfAndSkipResourceUpdate
+    - internal/compare/info_test.go:TestPopulateResourceInfoAttribution
+  notes: Attribution helpers only; refresh triggering is the controller's.
+
+DIFF-089:
+  status: implemented
+  impl: [internal/compare/podinfo.go]
+  tests:
+    - internal/compare/info_test.go:TestPodInfo
+    - internal/compare/info_test.go:TestPodInfoImagesNodeAndLabels
+    - internal/compare/info_test.go:TestPodRequests
+
+DIFF-090:
+  status: implemented
+  impl: [internal/compare/info.go]
+  tests:
+    - internal/compare/info_test.go:TestServiceInfo
+    - internal/compare/envtest_test.go:TestEnvResourceTreeAndHosts
+
+DIFF-091:
+  status: implemented
+  impl: [internal/compare/info.go]
+  tests:
+    - internal/compare/info_test.go:TestIngressInfo
+  notes: The tls[].hosts quirk (host lists never switch to https) is reproduced.
+
+DIFF-092:
+  status: implemented
+  impl: [internal/compare/info.go]
+  tests:
+    - internal/compare/info_test.go:TestGatewayAndRouteInfo
+
+DIFF-093:
+  status: implemented
+  impl: [internal/compare/info.go]
+  tests:
+    - internal/compare/info_test.go:TestGatewayAndRouteInfo
+
+DIFF-094:
+  status: implemented
+  impl: [internal/compare/info.go]
+  tests:
+    - internal/compare/info_test.go:TestIstioInfo
+
+DIFF-095:
+  status: implemented
+  impl: [internal/compare/info.go]
+  tests:
+    - internal/compare/info_test.go:TestServiceInfo
+    - internal/compare/info_test.go:TestIngressInfo
+
+DIFF-096:
+  status: implemented
+  impl: [internal/compare/info.go]
+  tests:
+    - internal/compare/info_test.go:TestRevisionCustomLabelsAndManagedByURL
+
+DIFF-097:
+  status: implemented
+  impl: [internal/compare/info.go, internal/compare/livestate.go]
+  tests:
+    - internal/compare/info_test.go:TestRevisionCustomLabelsAndManagedByURL
+    - internal/compare/envtest_test.go:TestEnvSettingsChangeInvalidatesCache
+    - internal/compare/livestate_test.go:TestEnvSettingsChangeAppliedAfterFailedCall
+    - internal/compare/livestate_test.go:TestLiveStateCacheSettingsChangeSurvivesFailedCall
+    - internal/compare/livestate_test.go:TestLiveStateCacheConcurrentCallersWaitForSettingsChange
+  notes: >-
+    Unlike upstream (read when a cluster cache is created), a change of resource.customLabels
+    reconfigures the cluster caches in place through LiveStateCache, also when the call that
+    first observes the change fails.
+
+DIFF-098:
+  status: implemented
+  impl: [internal/compare/treebuild.go, internal/compare/info.go]
+  tests:
+    - internal/compare/envtest_test.go:TestEnvResourceTreeAndHosts
+
+DIFF-099:
+  status: implemented
+  impl: [internal/compare/info.go]
+  tests:
+    - internal/compare/info_test.go:TestRevisionCustomLabelsAndManagedByURL
+
+DIFF-100:
+  status: implemented
+  impl: [internal/compare/treebuild.go]
+  tests:
+    - internal/compare/unit_test.go:TestTreeSummary
+    - internal/compare/envtest_test.go:TestEnvResourceTreeAndHosts
+
+APP-012:
+  status: in-progress
+  impl: [internal/compare/compare.go]
+  tests:
+    - internal/compare/envtest_test.go:TestEnvCompareLifecycle
+    - internal/compare/envtest_test.go:TestEnvMultiSourceLastWins
+  notes: Result.SourceType / SourceTypes from the repo-server responses; persisting them is the controller's.
+
+APP-014:
+  status: in-progress
+  impl: [internal/compare/target.go, internal/compare/compare.go]
+  tests:
+    - internal/compare/envtest_test.go:TestEnvMultiSourceLastWins
+  notes: >-
+    Per-source generation in order, "failed to generate manifest for source <i> of <n>", last
+    wins with RepeatedResourceWarning, plural status fields. Source validation is elsewhere.
+
+APP-015:
+  status: in-progress
+  impl: [internal/compare/target.go]
+  tests:
+    - internal/compare/envtest_test.go:TestEnvMultiSourceLastWins
+  notes: >-
+    "$<ref>" ref targets built with key validation and uniqueness (upstream messages) and
+    revision overrides; value-file resolution is the repo-server's.
+
+APP-016:
+  status: in-progress
+  impl: [internal/compare/target.go]
+  tests:
+    - internal/compare/envtest_test.go:TestEnvMultiSourceLastWins
+  notes: Ref-only sources are sent to the repo-server and contribute only their revision.
+
+APP-022:
+  status: in-progress
+  impl: [internal/compare/compare.go, internal/compare/status.go]
+  tests:
+    - internal/compare/envtest_test.go:TestEnvManagedNamespaceMetadata
+    - internal/compare/unit_test.go:TestManagedNamespaceHelpers
+  notes: Comparison side only (synthesized target, change detection through Input.LastSyncResult).
+
+APP-027:
+  status: in-progress
+  impl: [internal/compare/compare.go]
+  tests:
+    - internal/compare/envtest_test.go:TestEnvCompareLifecycle
+    - internal/compare/envtest_test.go:TestEnvRepoErrorComparisonError
+  notes: status.sync computed (status, comparedTo, revision(s), shortRevision); written by the controller.
+
+APP-029:
+  status: in-progress
+  impl: [internal/compare/status.go]
+  tests:
+    - internal/compare/unit_test.go:TestApplicationHealth
+
+APP-030:
+  status: in-progress
+  impl: [internal/compare/compare.go, internal/compare/status.go]
+  tests:
+    - internal/compare/envtest_test.go:TestEnvCompareLifecycle
+    - internal/compare/envtest_test.go:TestEnvResourcesTruncated
+  notes: >-
+    Sorted ResourceStatus list, bounded by MaxResources with a ResourcesTruncatedWarning
+    condition (Patrol addition).
+
+APP-031:
+  status: in-progress
+  impl: [internal/compare/status.go]
+  tests:
+    - internal/compare/unit_test.go:TestApplicationHealth
+
+APP-034:
+  status: in-progress
+  impl: [internal/compare/compare.go, internal/compare/conditions.go]
+  tests:
+    - internal/compare/envtest_test.go:TestEnvRepoErrorComparisonError
+    - internal/compare/envtest_test.go:TestEnvIgnoreDifferences
+    - internal/compare/envtest_test.go:TestEnvLocalManifests
+    - internal/compare/unit_test.go:TestMergeConditions
+
+APP-038:
+  status: in-progress
+  impl: [internal/compare/compare.go]
+  tests:
+    - internal/compare/envtest_test.go:TestEnvSharedResourceWarning
+
+APP-039:
+  status: in-progress
+  impl: [internal/compare/target.go]
+  tests:
+    - internal/compare/envtest_test.go:TestEnvMultiSourceLastWins
+    - internal/compare/unit_test.go:TestNormalizeTargets
+
+APP-040:
+  status: in-progress
+  impl: [internal/compare/compare.go]
+  tests:
+    - internal/compare/envtest_test.go:TestEnvExcludedResources
+
+APP-041:
+  status: in-progress
+  impl: [internal/compare/treebuild.go]
+  tests:
+    - internal/compare/envtest_test.go:TestEnvOrphanedResources
+
+APP-043:
+  status: in-progress
+  impl: [internal/compare/treebuild.go]
+  tests:
+    - internal/compare/unit_test.go:TestTreeSummary
+    - internal/compare/envtest_test.go:TestEnvResourceTreeAndHosts
+
+APP-075:
+  status: in-progress
+  impl: [internal/compare/compare.go]
+  tests:
+    - internal/compare/envtest_test.go:TestEnvCopiedTrackingIsNotManaged
+  notes: Copied tracking ids get no status and are never requiresPruning; sync filtering is internal/sync.
+
+APP-077:
+  status: in-progress
+  impl: [internal/compare/compare.go]
+  tests:
+    - internal/compare/envtest_test.go:TestEnvSharedResourceWarning
+  notes: Detection and condition; FailOnSharedResource is enforced by internal/sync.
+
+APP-086:
+  status: in-progress
+  impl: [internal/compare/deps.go, internal/compare/compare.go]
+  tests:
+    - internal/compare/unit_test.go:TestRepoErrorGracePeriod
+    - internal/compare/envtest_test.go:TestEnvRepoErrorGracePeriod
+  notes: >-
+    ErrRepoErrorDeferred within the grace period, hard refreshes report at once, success
+    resets. Keyed by namespace/name/UID (upstream: name only); a period <= 0 disables deferral.
+    Flag/env wiring is the controller's.
+
+APP-090:
+  status: in-progress
+  impl: [internal/compare/target.go]
+  tests:
+    - internal/compare/unit_test.go:TestSourceRefreshPaths
+  notes: >-
+    Refresh paths and UpdateRevisionForPaths for RevisionsMayHaveChanges; not exercised
+    against a real repo-server here.
+
+APP-091:
+  status: in-progress
+  impl: [internal/compare/treebuild.go, internal/compare/status.go]
+  tests:
+    - internal/compare/unit_test.go:TestTreeSummary
+    - internal/compare/unit_test.go:TestApplicationHealth
+  notes: isAppOfApps and the child-Application health rule; child Application health itself is opt-in Lua.
+
+APP-093:
+  status: implemented
+  impl: [internal/compare/status.go]
+  tests:
+    - internal/compare/envtest_test.go:TestEnvHooksExcludedFromHealth
+
+APP-100:
+  status: in-progress
+  impl: [internal/compare/info.go, internal/compare/treebuild.go]
+  tests:
+    - internal/compare/info_test.go:TestServiceInfo
+    - internal/compare/unit_test.go:TestTreeSummary
+
+APP-101:
+  status: implemented
+  impl: [internal/compare/info.go]
+  tests:
+    - internal/compare/info_test.go:TestIngressInfo
+
+APP-102:
+  status: implemented
+  impl: [internal/compare/info.go]
+  tests:
+    - internal/compare/info_test.go:TestRevisionCustomLabelsAndManagedByURL

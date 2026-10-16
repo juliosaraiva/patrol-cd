@@ -1459,7 +1459,7 @@ durations accept Go syntax and, as a fallback, day suffixes (`util/env/env.go`).
 
 ### OPS-058 Periodic soft reconciliation (`timeout.reconciliation`, `--app-resync`)
 - **Upstream**:
-  https://github.com/argoproj/argo-cd/blob/a5038b0e2bbac1715754380ae0084df8e3d5b48c/cmd/argocd-application-controller/commands/argocd_application_controller.go#L44 ,
+  https://github.com/argoproj/argo-cd/blob/a5038b0e2bbac1715754380ae0084df8e3d5b48c/cmd/argocd-application-controller/commands/argocd_application_controller.go#L45 ,
   https://github.com/argoproj/argo-cd/blob/a5038b0e2bbac1715754380ae0084df8e3d5b48c/cmd/argocd-application-controller/commands/argocd_application_controller.go#L143 ,
   https://github.com/argoproj/argo-cd/blob/a5038b0e2bbac1715754380ae0084df8e3d5b48c/cmd/argocd-application-controller/commands/argocd_application_controller.go#L259 ,
   https://github.com/argoproj/argo-cd/blob/a5038b0e2bbac1715754380ae0084df8e3d5b48c/controller/appcontroller.go#L2194 ,
@@ -1499,7 +1499,7 @@ durations accept Go syntax and, as a fallback, day suffixes (`util/env/env.go`).
 
 ### OPS-059 Reconciliation jitter (`timeout.reconciliation.jitter`, `--app-resync-jitter`)
 - **Upstream**:
-  https://github.com/argoproj/argo-cd/blob/a5038b0e2bbac1715754380ae0084df8e3d5b48c/cmd/argocd-application-controller/commands/argocd_application_controller.go#L46 ,
+  https://github.com/argoproj/argo-cd/blob/a5038b0e2bbac1715754380ae0084df8e3d5b48c/cmd/argocd-application-controller/commands/argocd_application_controller.go#L47 ,
   https://github.com/argoproj/argo-cd/blob/a5038b0e2bbac1715754380ae0084df8e3d5b48c/cmd/argocd-application-controller/commands/argocd_application_controller.go#L261 ,
   https://github.com/argoproj/argo-cd/blob/a5038b0e2bbac1715754380ae0084df8e3d5b48c/controller/appcontroller.go#L2791 ,
   https://github.com/argoproj/argo-cd/blob/a5038b0e2bbac1715754380ae0084df8e3d5b48c/manifests/base/application-controller/argocd-application-controller-statefulset.yaml#L49 ,
@@ -1521,7 +1521,7 @@ durations accept Go syntax and, as a fallback, day suffixes (`util/env/env.go`).
 
 ### OPS-060 Periodic hard reconciliation (`timeout.hard.reconciliation`, `--app-hard-resync`)
 - **Upstream**:
-  https://github.com/argoproj/argo-cd/blob/a5038b0e2bbac1715754380ae0084df8e3d5b48c/cmd/argocd-application-controller/commands/argocd_application_controller.go#L48 ,
+  https://github.com/argoproj/argo-cd/blob/a5038b0e2bbac1715754380ae0084df8e3d5b48c/cmd/argocd-application-controller/commands/argocd_application_controller.go#L49 ,
   https://github.com/argoproj/argo-cd/blob/a5038b0e2bbac1715754380ae0084df8e3d5b48c/cmd/argocd-application-controller/commands/argocd_application_controller.go#L260 ,
   https://github.com/argoproj/argo-cd/blob/a5038b0e2bbac1715754380ae0084df8e3d5b48c/controller/appcontroller.go#L2224 ,
   https://github.com/argoproj/argo-cd/blob/a5038b0e2bbac1715754380ae0084df8e3d5b48c/controller/appcontroller.go#L2018 ,
@@ -1661,7 +1661,7 @@ durations accept Go syntax and, as a fallback, day suffixes (`util/env/env.go`).
   https://github.com/argoproj/argo-cd/blob/a5038b0e2bbac1715754380ae0084df8e3d5b48c/controller/appcontroller.go#L321 ,
   https://github.com/argoproj/argo-cd/blob/a5038b0e2bbac1715754380ae0084df8e3d5b48c/controller/metrics/metrics.go#L187 ,
   https://github.com/argoproj/argo-cd/blob/a5038b0e2bbac1715754380ae0084df8e3d5b48c/server/metrics/metrics.go#L74 ,
-  https://github.com/argoproj/argo-cd/blob/a5038b0e2bbac1715754380ae0084df8e3d5b48c/reposerver/metrics/metrics.go#L46 ,
+  https://github.com/argoproj/argo-cd/blob/a5038b0e2bbac1715754380ae0084df8e3d5b48c/reposerver/metrics/metrics.go#L41 ,
   https://github.com/argoproj/argo-cd/blob/a5038b0e2bbac1715754380ae0084df8e3d5b48c/cmd/argocd-repo-server/commands/argocd_repo_server.go#L188 ,
   https://github.com/argoproj/argo-cd/blob/a5038b0e2bbac1715754380ae0084df8e3d5b48c/cmd/argocd-applicationset-controller/commands/applicationset_controller.go#L166 ,
   https://github.com/argoproj/argo-cd/blob/a5038b0e2bbac1715754380ae0084df8e3d5b48c/cmd/argocd-notification/commands/argocd_notification.go#L149 ,
@@ -2084,3 +2084,2140 @@ durations accept Go syntax and, as a fallback, day suffixes (`util/env/env.go`).
 - **Tests required**:
   - Positive: one successful hydration commit → `argocd_commitserver_commit_request_total{response_type="success"}` +1 and a `push` git request recorded.
   - Negative: push rejected → `response_type="failure"`.
+
+---
+
+## F. Tracing, logging, events and runtime diagnostics
+
+### OPS-085 OpenTelemetry tracing (OTLP gRPC exporter)
+- **Upstream**:
+  https://github.com/argoproj/argo-cd/blob/a5038b0e2bbac1715754380ae0084df8e3d5b48c/util/trace/trace.go#L20 ,
+  https://github.com/argoproj/argo-cd/blob/a5038b0e2bbac1715754380ae0084df8e3d5b48c/cmd/argocd-application-controller/commands/argocd_application_controller.go#L231 ,
+  https://github.com/argoproj/argo-cd/blob/a5038b0e2bbac1715754380ae0084df8e3d5b48c/cmd/argocd-application-controller/commands/argocd_application_controller.go#L288 ,
+  https://github.com/argoproj/argo-cd/blob/a5038b0e2bbac1715754380ae0084df8e3d5b48c/cmd/argocd-server/commands/argocd_server.go#L281 ,
+  https://github.com/argoproj/argo-cd/blob/a5038b0e2bbac1715754380ae0084df8e3d5b48c/cmd/argocd-server/commands/argocd_server.go#L324 ,
+  https://github.com/argoproj/argo-cd/blob/a5038b0e2bbac1715754380ae0084df8e3d5b48c/cmd/argocd-repo-server/commands/argocd_repo_server.go#L171 ,
+  https://github.com/argoproj/argo-cd/blob/a5038b0e2bbac1715754380ae0084df8e3d5b48c/cmd/argocd-repo-server/commands/argocd_repo_server.go#L262 ,
+  https://github.com/argoproj/argo-cd/blob/a5038b0e2bbac1715754380ae0084df8e3d5b48c/server/server.go#L1204 ,
+  https://github.com/argoproj/argo-cd/blob/a5038b0e2bbac1715754380ae0084df8e3d5b48c/manifests/base/application-controller/argocd-application-controller-statefulset.yaml#L269 ,
+  https://github.com/argoproj/argo-cd/blob/a5038b0e2bbac1715754380ae0084df8e3d5b48c/docs/operator-manual/argocd-cmd-params-cm.yaml#L25 ,
+  https://github.com/argoproj/argo-cd/blob/a5038b0e2bbac1715754380ae0084df8e3d5b48c/docs/operator-manual/upgrading/3.3-3.4.md#L144
+- **Maturity**: GA
+- **Semantics**: Supported by the application controller, API server and repo-server (and the CMP sidecar server, owner
+  02). Flags (env, cmd-params key): `--otlp-address` (`ARGOCD_<COMP>_OTLP_ADDRESS`, `otlp.address`, default empty =
+  tracing off), `--otlp-insecure` (`..._OTLP_INSECURE`, `otlp.insecure`, default **true** → plaintext gRPC; false →
+  TLS with system roots), `--otlp-headers` (`..._OTLP_HEADERS`, `otlp.headers`, `k1=v1,k2=v2` sent with every export),
+  `--otlp-attrs` (`..._OTLP_ATTRS`, `otlp.attrs`, `key:value,...` added as resource attributes) where `<COMP>` is
+  `APPLICATION_CONTROLLER`, `SERVER`, `REPO_SERVER`. Exporter: OTLP/gRPC trace exporter with batch span processor,
+  `AlwaysSample` sampler, W3C TraceContext propagator; resource `service.name` = `argocd-controller` (controller),
+  `argocd-server`, `argocd-repo-server`. gRPC client/server stats handlers (otelgrpc) instrument inter-component calls;
+  the API server extracts trace context from incoming HTTP headers before invoking gRPC-gateway handlers; proxy
+  extensions/dex proxy are wrapped with otelhttp. The API server re-initializes the tracer on every in-process restart
+  (OPS-095). Since 3.4 the bundled OTel SDK uses semantic conventions v1.40 (metric/attribute names changed).
+- **Edge cases**: Exporter creation failure is fatal (`failed to initialize tracing: ...`). An attr without exactly one
+  `:` is skipped with warning `OTLP attr '<a>' split with ':' length not 2`. The dynamic-distribution controller
+  Deployment variant does not map `otlp.attrs` (manifest gap). ApplicationSet, notifications, commit-server and Dex have
+  no OTLP options.
+- **Configuration surface**: `otlp.address`, `otlp.insecure`, `otlp.headers`, `otlp.attrs`; flags above.
+- **Exposure**: ConfigMap; flags; OTLP collector.
+- **Tests required**:
+  - Positive: with an OTLP collector, a UI-triggered sync produces linked spans across argocd-server → controller → repo-server with the three service names.
+  - Positive: headers configured are received by the collector; attrs appear as resource attributes.
+  - Negative: malformed attr skipped with warning; unreachable collector does not break request processing.
+  - Positive: `otlp.insecure: "false"` uses TLS to the collector.
+
+### OPS-086 Log format and level per component
+- **Upstream**:
+  https://github.com/argoproj/argo-cd/blob/a5038b0e2bbac1715754380ae0084df8e3d5b48c/util/cli/cli.go#L186 ,
+  https://github.com/argoproj/argo-cd/blob/a5038b0e2bbac1715754380ae0084df8e3d5b48c/util/cli/cli.go#L200 ,
+  https://github.com/argoproj/argo-cd/blob/a5038b0e2bbac1715754380ae0084df8e3d5b48c/util/log/logrus.go#L35 ,
+  https://github.com/argoproj/argo-cd/blob/a5038b0e2bbac1715754380ae0084df8e3d5b48c/cmd/argocd-application-controller/commands/argocd_application_controller.go#L269 ,
+  https://github.com/argoproj/argo-cd/blob/a5038b0e2bbac1715754380ae0084df8e3d5b48c/cmd/argocd-server/commands/argocd_server.go#L311 ,
+  https://github.com/argoproj/argo-cd/blob/a5038b0e2bbac1715754380ae0084df8e3d5b48c/cmd/argocd-applicationset-controller/commands/applicationset_controller.go#L113 ,
+  https://github.com/argoproj/argo-cd/blob/a5038b0e2bbac1715754380ae0084df8e3d5b48c/cmd/argocd-notification/commands/argocd_notification.go#L101
+- **Maturity**: GA
+- **Semantics**: Every server component accepts `--logformat` (`json` default | `text`) and `--loglevel` (`debug|info|warn|
+  error`, default `info`; any logrus level name accepted). Env/cmd-params mapping: controller
+  `ARGOCD_APPLICATION_CONTROLLER_LOGFORMAT/_LOGLEVEL` (`controller.log.format/.level`), server
+  `ARGOCD_SERVER_LOGFORMAT`/`ARGOCD_SERVER_LOG_LEVEL` (`server.log.*`), repo-server `ARGOCD_REPO_SERVER_LOGFORMAT/_LOGLEVEL`,
+  appset `ARGOCD_APPLICATIONSET_CONTROLLER_LOGFORMAT/_LOGLEVEL` plus `--debug` (`..._DEBUG`) which forces `debug`,
+  notifications `ARGOCD_NOTIFICATIONS_CONTROLLER_LOGFORMAT/_LOGLEVEL`, dex wrapper `ARGOCD_DEX_SERVER_LOGFORMAT/_LOGLEVEL`,
+  commit-server `ARGOCD_COMMIT_SERVER_LOGFORMAT/_LOGLEVEL`. The chosen format/level is exported to the process env
+  (`ARGOCD_LOG_FORMAT`, `ARGOCD_LOG_LEVEL`) so child loggers created later (e.g. gitops-engine/logr bridges) inherit it.
+- **Edge cases**: Unknown format → fatal `Unknown log format '<f>'` (notifications: returns `unknown log format '<f>'`);
+  empty format = text in `SetLogFormat`. Invalid level → fatal parse error. `argocd admin` itself has `--logformat`
+  (json) / `--loglevel` (info) without env.
+- **Configuration surface**: flags/env/cmd-params keys above.
+- **Exposure**: Pod logs.
+- **Tests required**:
+  - Positive: each component emits JSON with `level`, `msg`, `time` by default; `text` produces logfmt-style lines.
+  - Negative: `controller.log.format: xml` → controller exits with the error.
+  - Positive: appset `--debug=true` overrides `loglevel=error`.
+
+### OPS-087 Log timestamp format, full timestamps and forced colors
+- **Upstream**:
+  https://github.com/argoproj/argo-cd/blob/a5038b0e2bbac1715754380ae0084df8e3d5b48c/util/log/logrus.go#L65 ,
+  https://github.com/argoproj/argo-cd/blob/a5038b0e2bbac1715754380ae0084df8e3d5b48c/util/log/logrus.go#L69 ,
+  https://github.com/argoproj/argo-cd/blob/a5038b0e2bbac1715754380ae0084df8e3d5b48c/util/log/logrus.go#L73 ,
+  https://github.com/argoproj/argo-cd/blob/a5038b0e2bbac1715754380ae0084df8e3d5b48c/common/common.go#L315 ,
+  https://github.com/argoproj/argo-cd/blob/a5038b0e2bbac1715754380ae0084df8e3d5b48c/cmd/argocd-notification/commands/argocd_notification.go#L109 ,
+  https://github.com/argoproj/argo-cd/blob/a5038b0e2bbac1715754380ae0084df8e3d5b48c/docs/operator-manual/argocd-cmd-params-cm.yaml#L41
+- **Maturity**: GA
+- **Semantics**: `ARGOCD_LOG_FORMAT_TIMESTAMP` (cmd-params `log.format.timestamp`) sets the Go time layout for the
+  `time` field (JSON and text; empty = RFC3339). `ARGOCD_LOG_FORMAT_ENABLE_FULL_TIMESTAMP=1` prints full timestamps in
+  text format. `FORCE_LOG_COLORS=1` forces ANSI colors in text format.
+- **Edge cases**: The notifications controller builds its own formatter (plain JSONFormatter, or TextFormatter only when
+  `FORCE_LOG_COLORS=1`), so the timestamp/full-timestamp settings do not apply there. Values other than `1` for the two
+  boolean env vars are treated as off.
+- **Configuration surface**: env vars above; cmd-params `log.format.timestamp`.
+- **Exposure**: Pod logs.
+- **Tests required**:
+  - Positive: `log.format.timestamp: "2006-01-02T15:04:05.000Z07:00"` → millisecond timestamps in repo-server JSON logs.
+  - Positive: text format + `ARGOCD_LOG_FORMAT_ENABLE_FULL_TIMESTAMP=1` → full timestamp instead of elapsed seconds.
+
+### OPS-088 Kubernetes client (klog) verbosity (`--gloglevel`)
+- **Upstream**:
+  https://github.com/argoproj/argo-cd/blob/a5038b0e2bbac1715754380ae0084df8e3d5b48c/util/cli/cli.go#L208 ,
+  https://github.com/argoproj/argo-cd/blob/a5038b0e2bbac1715754380ae0084df8e3d5b48c/cmd/argocd-application-controller/commands/argocd_application_controller.go#L271 ,
+  https://github.com/argoproj/argo-cd/blob/a5038b0e2bbac1715754380ae0084df8e3d5b48c/cmd/argocd-server/commands/argocd_server.go#L313
+- **Maturity**: GA
+- **Semantics**: Controller and API server accept `--gloglevel <int>` (default 0, no env/cmd-params key) which
+  initializes klog with `logtostderr=true`, `stderrthreshold=INFO` and `-v=<n>`, exposing client-go request tracing
+  (e.g. `-v=6` prints every API call, `-v=9` bodies).
+- **Edge cases**: Other components do not expose the flag.
+- **Configuration surface**: flag `--gloglevel`.
+- **Exposure**: Pod logs.
+- **Tests required**:
+  - Positive: `--gloglevel 6` on the controller logs Kubernetes request URLs at startup list/watch.
+
+### OPS-089 RBAC and SSO debug logging (`ARGOCD_RBAC_DEBUG`, `ARGOCD_SSO_DEBUG`)
+- **Upstream**:
+  https://github.com/argoproj/argo-cd/blob/a5038b0e2bbac1715754380ae0084df8e3d5b48c/common/common.go#L260 ,
+  https://github.com/argoproj/argo-cd/blob/a5038b0e2bbac1715754380ae0084df8e3d5b48c/server/server.go#L356 ,
+  https://github.com/argoproj/argo-cd/blob/a5038b0e2bbac1715754380ae0084df8e3d5b48c/util/oidc/oidc.go#L271 ,
+  https://github.com/argoproj/argo-cd/blob/a5038b0e2bbac1715754380ae0084df8e3d5b48c/util/oidc/oidc.go#L650 ,
+  https://github.com/argoproj/argo-cd/blob/a5038b0e2bbac1715754380ae0084df8e3d5b48c/util/session/sessionmanager.go#L177
+- **Maturity**: GA
+- **Semantics**: API-server env flags (exact value `1`): `ARGOCD_RBAC_DEBUG=1` enables Casbin enforcement logging (each
+  RBAC decision with request tuple and result); `ARGOCD_SSO_DEBUG=1` enables verbose OAuth2/OIDC debugging (HTTP
+  client dump of IdP exchanges and token/claims processing in the session manager). Owner of RBAC/SSO semantics: 07.
+- **Edge cases**: Any other value (e.g. `true`) is ignored. SSO debug output can contain tokens — operator must treat
+  logs as sensitive.
+- **Configuration surface**: env on `argocd-server`.
+- **Exposure**: Pod logs.
+- **Tests required**:
+  - Positive: `ARGOCD_RBAC_DEBUG=1` → an allowed and a denied request both logged with the evaluated policy tuple.
+  - Negative: `ARGOCD_RBAC_DEBUG=true` → no RBAC debug output.
+
+### OPS-090 Structured log fields, security tagging and API payload logging
+- **Upstream**:
+  https://github.com/argoproj/argo-cd/blob/a5038b0e2bbac1715754380ae0084df8e3d5b48c/util/app/log/log.go#L9 ,
+  https://github.com/argoproj/argo-cd/blob/a5038b0e2bbac1715754380ae0084df8e3d5b48c/common/common.go#L472 ,
+  https://github.com/argoproj/argo-cd/blob/a5038b0e2bbac1715754380ae0084df8e3d5b48c/server/server.go#L937 ,
+  https://github.com/argoproj/argo-cd/blob/a5038b0e2bbac1715754380ae0084df8e3d5b48c/server/server.go#L1218 ,
+  https://github.com/argoproj/argo-cd/blob/a5038b0e2bbac1715754380ae0084df8e3d5b48c/docs/operator-manual/security.md#L211 ,
+  https://github.com/argoproj/argo-cd/blob/a5038b0e2bbac1715754380ae0084df8e3d5b48c/docs/operator-manual/security.md#L230 ,
+  https://github.com/argoproj/argo-cd/blob/a5038b0e2bbac1715754380ae0084df8e3d5b48c/docs/operator-manual/security.md#L239
+- **Maturity**: GA
+- **Semantics**: Application-scoped log lines carry `application` (name), `app-namespace`, `project`; ApplicationSet
+  lines carry `applicationSet`, `appSet-namespace`, `project`. Security-relevant lines carry `security` = 1 (low) …
+  5 (emergency) and, where applicable, `CWE` (used e.g. for out-of-bounds symlinks, webhook verification failures,
+  disabled CSRF protection: `Content-Type enforcement is disabled, which may make your API vulnerable to CSRF attacks`
+  with `security=3`). The API server logs gRPC request payloads except for sensitive methods (cluster create/update,
+  session create, password update, GPG key create, repository/repocreds create/update/validate incl. write variants,
+  `PatchResource`, `GetManifestsWithFiles`) — owner of interceptor details: 08 (API-008). Client IPs are not logged.
+- **Edge cases**: Tagging is incomplete by design (doc warning). Payload logging must never include secrets.
+- **Configuration surface**: none (log level controls volume).
+- **Exposure**: Pod logs.
+- **Tests required**:
+  - Positive: a refresh log line includes `application`, `app-namespace`, `project`.
+  - Positive: `server.api.content.types: ""` start-up warning includes `security=3`.
+  - Negative: creating a repository with a password does not log the password (payload suppressed).
+
+### OPS-091 Kubernetes events (audit trail) and `--enable-k8s-event`
+- **Upstream**:
+  https://github.com/argoproj/argo-cd/blob/a5038b0e2bbac1715754380ae0084df8e3d5b48c/util/argo/audit_logger.go#L39 ,
+  https://github.com/argoproj/argo-cd/blob/a5038b0e2bbac1715754380ae0084df8e3d5b48c/util/argo/audit_logger.go#L49 ,
+  https://github.com/argoproj/argo-cd/blob/a5038b0e2bbac1715754380ae0084df8e3d5b48c/util/argo/audit_logger.go#L115 ,
+  https://github.com/argoproj/argo-cd/blob/a5038b0e2bbac1715754380ae0084df8e3d5b48c/util/argo/audit_logger.go#L180 ,
+  https://github.com/argoproj/argo-cd/blob/a5038b0e2bbac1715754380ae0084df8e3d5b48c/util/argo/audit_logger.go#L207 ,
+  https://github.com/argoproj/argo-cd/blob/a5038b0e2bbac1715754380ae0084df8e3d5b48c/controller/appcontroller.go#L1151 ,
+  https://github.com/argoproj/argo-cd/blob/a5038b0e2bbac1715754380ae0084df8e3d5b48c/controller/appcontroller.go#L1816 ,
+  https://github.com/argoproj/argo-cd/blob/a5038b0e2bbac1715754380ae0084df8e3d5b48c/controller/appcontroller.go#L2332 ,
+  https://github.com/argoproj/argo-cd/blob/a5038b0e2bbac1715754380ae0084df8e3d5b48c/controller/appcontroller.go#L2558 ,
+  https://github.com/argoproj/argo-cd/blob/a5038b0e2bbac1715754380ae0084df8e3d5b48c/server/application/application.go#L2540 ,
+  https://github.com/argoproj/argo-cd/blob/a5038b0e2bbac1715754380ae0084df8e3d5b48c/server/project/project.go#L516 ,
+  https://github.com/argoproj/argo-cd/blob/a5038b0e2bbac1715754380ae0084df8e3d5b48c/server/applicationset/applicationset.go#L599 ,
+  https://github.com/argoproj/argo-cd/blob/a5038b0e2bbac1715754380ae0084df8e3d5b48c/cmd/argocd-application-controller/commands/argocd_application_controller.go#L308 ,
+  https://github.com/argoproj/argo-cd/blob/a5038b0e2bbac1715754380ae0084df8e3d5b48c/docs/operator-manual/security.md#L176
+- **Maturity**: GA
+- **Semantics**: Reasons: `StatusRefreshed`, `ResourceCreated`, `ResourceUpdated`, `ResourceDeleted`, `ResourceActionRan`,
+  `OperationStarted`, `OperationCompleted`. Each event is created (never aggregated: name `<obj>.<unixnano hex>`,
+  count 1) with `source.component` = `argocd-application-controller` or `argocd-server`, `involvedObject` = the
+  Application/AppProject/ApplicationSet (or, for resource actions, the live resource node with its original namespace),
+  annotations carrying log fields (`dest-server`, `dest-namespace`, `user`, `resource-namespace`), and is also logged at
+  info with `type`/`reason`. Namespace: the object's namespace for Application/AppProject/ApplicationSet; the Argo CD
+  namespace for other resources. Emitters — controller: `Updated sync status: <old> -> <new>`, `Updated health status:
+  <old> -> <new>` (Normal/ResourceUpdated), `Initiated automated sync to '<revs>'` (OperationStarted),
+  `[Partial ]Sync operation [to <rev>] succeeded|failed: <msg>` (Normal|Warning/OperationCompleted),
+  `Unable to delete application resources: <err>` (Warning/StatusRefreshed). API server (message prefixed with the
+  username or `Unknown user`): app `created application`, `updated application spec`, `deleted application`,
+  `patched resource <g>/<k> '<n>'`, `deleted resource ...`, `initiated sync to <rev>`/`initiated rollback to <id>`,
+  `terminated running operation`, `ran action <a>[ on resource <g>/<k>/<n>]` (+ a resource event); project
+  `created project`, `updated project`, `deleted project`, `created token`, `deleted token`; ApplicationSet
+  `created ApplicationSet`, `updated ApplicationSets spec`, `deleted ApplicationSets`. Toggle: `--enable-k8s-event`
+  (controller and server; env `ARGOCD_ENABLE_K8S_EVENT`, comma list; default `all`; `none` disables all; otherwise only
+  the listed reasons are emitted).
+- **Edge cases**: Event creation failure logs `Unable to create audit event: <err>` and is otherwise ignored. AppProject
+  events omit the `user` annotation (fields not passed). `ARGOCD_ENABLE_K8S_EVENT` is not wired to any cmd-params key.
+  Order in the list matters only for `all`/`none` (first match returns).
+- **Configuration surface**: flag/env `--enable-k8s-event` / `ARGOCD_ENABLE_K8S_EVENT`.
+- **Exposure**: Kubernetes Events; API `ListResourceEvents` / `GET /api/v1/applications/{name}/events`,
+  `/api/v1/projects/{name}/events` (owner 08); UI events tab.
+- **Tests required**:
+  - Positive: create + sync an app via API as `admin` → events `ResourceCreated` ("admin created application"), `OperationStarted`, `OperationCompleted`, sync/health `ResourceUpdated` from the controller, with correct `source.component`.
+  - Positive: `--enable-k8s-event=OperationCompleted` → only that reason is emitted.
+  - Positive: `none` → no events, logs still written.
+  - Authorization: events for apps in another namespace (apps-in-any-namespace) are created in the app's namespace.
+
+### OPS-092 Event label propagation (`resource.includeEventLabelKeys`, `resource.excludeEventLabelKeys`)
+- **Upstream**:
+  https://github.com/argoproj/argo-cd/blob/a5038b0e2bbac1715754380ae0084df8e3d5b48c/util/argo/argo.go#L1316 ,
+  https://github.com/argoproj/argo-cd/blob/a5038b0e2bbac1715754380ae0084df8e3d5b48c/util/settings/settings.go#L2624 ,
+  https://github.com/argoproj/argo-cd/blob/a5038b0e2bbac1715754380ae0084df8e3d5b48c/util/settings/settings.go#L2640 ,
+  https://github.com/argoproj/argo-cd/blob/a5038b0e2bbac1715754380ae0084df8e3d5b48c/docs/operator-manual/argocd-cm.yaml#L231
+- **Maturity**: GA
+- **Semantics**: For Application events (controller and server), labels of the Application merged with labels of its
+  AppProject (Application wins on conflict) are filtered: a label is copied onto the Event's `metadata.labels` only if its
+  key matches a glob in `resource.includeEventLabelKeys` (comma list, spaces stripped) and does not match a glob in
+  `resource.excludeEventLabelKeys`. Default (keys absent) = no labels copied.
+- **Edge cases**: Project lookup failure is logged as warning and only app labels are considered. Not applied to
+  AppProject/ApplicationSet/resource events.
+- **Configuration surface**: argocd-cm `resource.includeEventLabelKeys`, `resource.excludeEventLabelKeys`.
+- **Exposure**: ConfigMap; Kubernetes Events.
+- **Tests required**:
+  - Positive: include `team,env*`, app label `team=a`, project label `env=prod` → event has both labels.
+  - Positive: exclude `env*` removes `env` even if included.
+  - Positive: conflicting key on app and project → app value used.
+
+### OPS-093 ApplicationSet controller Kubernetes events
+- **Upstream**:
+  https://github.com/argoproj/argo-cd/blob/a5038b0e2bbac1715754380ae0084df8e3d5b48c/applicationset/controllers/applicationset_controller.go#L753 ,
+  https://github.com/argoproj/argo-cd/blob/a5038b0e2bbac1715754380ae0084df8e3d5b48c/applicationset/controllers/applicationset_controller.go#L871 ,
+  https://github.com/argoproj/argo-cd/blob/a5038b0e2bbac1715754380ae0084df8e3d5b48c/applicationset/controllers/applicationset_controller.go#L965
+- **Maturity**: GA
+- **Semantics**: Through the controller-runtime recorder, the ApplicationSet controller emits Normal events on the
+  ApplicationSet: reason = the controller-runtime create-or-update result (`created` or `updated`; `unchanged`
+  emits no event to avoid etcd churn) with message `<action> Application "<name>"`, reason `Deleted` with `Deleted Application "<name>"`, and reason `Updated`
+  with `Updated Application "<name>" finalizer before deletion, because application has an invalid destination`.
+  Not affected by `--enable-k8s-event`. Requires `events` create/patch RBAC (OPS-007).
+- **Edge cases**: Standard client-go event aggregation applies (unlike OPS-091).
+- **Configuration surface**: none.
+- **Exposure**: Kubernetes Events on ApplicationSet objects.
+- **Tests required**:
+  - Positive: appset generating a new app → Normal event with message `... Application "<name>"`.
+  - Positive: generator element removed (policy sync) → `Deleted` event.
+
+### OPS-094 Runtime diagnostics: periodic stats, stack and heap dumps
+- **Upstream**:
+  https://github.com/argoproj/argo-cd/blob/a5038b0e2bbac1715754380ae0084df8e3d5b48c/cmd/argocd-application-controller/commands/argocd_application_controller.go#L227 ,
+  https://github.com/argoproj/argo-cd/blob/a5038b0e2bbac1715754380ae0084df8e3d5b48c/cmd/argocd-server/commands/argocd_server.go#L271 ,
+  https://github.com/argoproj/argo-cd/blob/a5038b0e2bbac1715754380ae0084df8e3d5b48c/cmd/argocd-repo-server/commands/argocd_repo_server.go#L230 ,
+  https://github.com/argoproj/argo-cd/blob/a5038b0e2bbac1715754380ae0084df8e3d5b48c/cmd/argocd-applicationset-controller/commands/applicationset_controller.go#L284
+- **Maturity**: GA
+- **Semantics**: Controller, API server, repo-server (and CMP server) call `stats.RegisterStackDumper()`,
+  `stats.StartStatsTicker(10m)` and `stats.RegisterHeapDumper("memprofile")` from `github.com/argoproj/pkg/v2/stats`;
+  the ApplicationSet controller only starts the 10-minute stats ticker. Behaviour of the external package (see
+  Unconfirmed): periodic log of memory/goroutine statistics every 10 minutes; a signal-triggered goroutine stack dump and
+  a signal-triggered heap profile written to file `memprofile`. Complemented by the pprof endpoints (OPS-056).
+- **Edge cases**: The heap dump writes into the working directory; with read-only root filesystems the dump may fail.
+- **Configuration surface**: none.
+- **Exposure**: Pod logs; signals.
+- **Tests required**:
+  - Positive: after 10 minutes each listed component has logged one stats line.
+  - Positive (if Patrol implements signals): sending the dump signal produces a goroutine dump in logs.
+
+---
+
+## G. TLS and mTLS
+
+### OPS-095 API server settings watcher and in-process restart
+- **Upstream**:
+  https://github.com/argoproj/argo-cd/blob/a5038b0e2bbac1715754380ae0084df8e3d5b48c/server/server.go#L803 ,
+  https://github.com/argoproj/argo-cd/blob/a5038b0e2bbac1715754380ae0084df8e3d5b48c/server/server.go#L785 ,
+  https://github.com/argoproj/argo-cd/blob/a5038b0e2bbac1715754380ae0084df8e3d5b48c/server/server.go#L436 ,
+  https://github.com/argoproj/argo-cd/blob/a5038b0e2bbac1715754380ae0084df8e3d5b48c/cmd/argocd-server/commands/argocd_server.go#L276
+- **Maturity**: GA
+- **Semantics**: The API server subscribes to settings changes. It performs a graceful **in-process restart** (stop
+  listeners, re-create servers, re-read settings, re-init tracing; the pod is not restarted) when any of these change:
+  generated Dex config, OIDC config, `url`, `additionalUrls`, `webhook.github.secret`, `webhook.gitlab.secret`,
+  `webhook.bitbucket.uuid`, `webhook.bitbucketserver.secret`, `webhook.gogs.secret`; logs e.g. `url modified.
+  restarting`, then `shutting down settings watch`. Changes of `extension.config` only rebuild the proxy-extension
+  registry (no restart). TLS certificate changes are hot-reloaded without restart (OPS-096). During the restart
+  `/healthz` returns 503 "API Server is not available: it either hasn't started or is restarting".
+- **Edge cases**: Azure DevOps webhook credentials are not in the restart list (read per request). In-flight requests
+  are drained with a 20s shutdown timeout.
+- **Configuration surface**: argocd-cm / argocd-secret keys above.
+- **Exposure**: API availability.
+- **Tests required**:
+  - Positive: change `url` in argocd-cm → log `url modified. restarting`, new value effective (SSO redirect) without pod restart.
+  - Positive: change `extension.config` → no restart, registry updated.
+  - Recovery: continuous `/healthz` probe during restart shows a brief 503 then 200.
+
+### OPS-096 API server TLS certificate sources and hot reload
+- **Upstream**:
+  https://github.com/argoproj/argo-cd/blob/a5038b0e2bbac1715754380ae0084df8e3d5b48c/util/settings/settings.go#L535 ,
+  https://github.com/argoproj/argo-cd/blob/a5038b0e2bbac1715754380ae0084df8e3d5b48c/util/settings/settings.go#L1735 ,
+  https://github.com/argoproj/argo-cd/blob/a5038b0e2bbac1715754380ae0084df8e3d5b48c/util/settings/settings.go#L1771 ,
+  https://github.com/argoproj/argo-cd/blob/a5038b0e2bbac1715754380ae0084df8e3d5b48c/util/settings/settings.go#L1798 ,
+  https://github.com/argoproj/argo-cd/blob/a5038b0e2bbac1715754380ae0084df8e3d5b48c/util/settings/settings.go#L2457 ,
+  https://github.com/argoproj/argo-cd/blob/a5038b0e2bbac1715754380ae0084df8e3d5b48c/server/server.go#L649 ,
+  https://github.com/argoproj/argo-cd/blob/a5038b0e2bbac1715754380ae0084df8e3d5b48c/docs/operator-manual/tls.md#L42 ,
+  https://github.com/argoproj/argo-cd/blob/a5038b0e2bbac1715754380ae0084df8e3d5b48c/docs/operator-manual/tls.md#L62
+- **Maturity**: GA
+- **Semantics**: Priority: (1) Secret `argocd-server-tls` keys `tls.crt`/`tls.key` (type `kubernetes.io/tls` optional;
+  safe for cert-manager/SealedSecrets); (2) `argocd-secret` `tls.crt`/`tls.key` (deprecated); (3) a self-signed
+  certificate generated at bootstrap (org "Argo CD", RSA 2048, valid 1 year, SANs `localhost`, `argocd-server`,
+  `argocd-server.<ns>`, `argocd-server.<ns>.svc`, `argocd-server.<ns>.svc.cluster.local`) persisted into `argocd-secret`
+  (only when not insecure). The TLS listener resolves the certificate per handshake (`GetCertificate`) from current
+  settings, so renewed certificates are served without restart (log `tls certificate modified. reloading certificate`).
+  Parsed certificates are cached per Secret name + resourceVersion. A certificate loaded from `argocd-server-tls` is
+  never written back to `argocd-secret`.
+- **Edge cases**: A Secret with only one of the two keys is ignored (falls through to the next source). An unparsable
+  key pair → settings error (incomplete settings) and the previous certificate stays in use. If neither secret has a
+  cert and the server runs `--insecure`, no cert is generated.
+- **Configuration surface**: Secrets `argocd-server-tls`, `argocd-secret`.
+- **Exposure**: HTTPS/gRPC endpoint.
+- **Tests required**:
+  - Positive: create `argocd-server-tls` → served cert switches without restart (openssl s_client).
+  - Positive: both secrets populated → `argocd-server-tls` wins.
+  - Positive: fresh install → self-signed cert with the 5 SANs persisted in `argocd-secret`.
+  - Negative: invalid PEM in `argocd-server-tls` → previous cert keeps being served, error logged.
+
+### OPS-097 TLS protocol versions and cipher suites (`--tlsminversion`, `--tlsmaxversion`, `--tlsciphers`)
+- **Upstream**:
+  https://github.com/argoproj/argo-cd/blob/a5038b0e2bbac1715754380ae0084df8e3d5b48c/util/tls/tls.go#L31 ,
+  https://github.com/argoproj/argo-cd/blob/a5038b0e2bbac1715754380ae0084df8e3d5b48c/util/tls/tls.go#L91 ,
+  https://github.com/argoproj/argo-cd/blob/a5038b0e2bbac1715754380ae0084df8e3d5b48c/util/tls/tls.go#L102 ,
+  https://github.com/argoproj/argo-cd/blob/a5038b0e2bbac1715754380ae0084df8e3d5b48c/util/tls/tls.go#L138 ,
+  https://github.com/argoproj/argo-cd/blob/a5038b0e2bbac1715754380ae0084df8e3d5b48c/util/tls/tls.go#L190 ,
+  https://github.com/argoproj/argo-cd/blob/a5038b0e2bbac1715754380ae0084df8e3d5b48c/docs/operator-manual/tls.md#L50 ,
+  https://github.com/argoproj/argo-cd/blob/a5038b0e2bbac1715754380ae0084df8e3d5b48c/docs/operator-manual/tls.md#L105
+- **Maturity**: GA
+- **Semantics**: Available on `argocd-server` and `argocd-repo-server` (shared env names `ARGOCD_TLS_MIN_VERSION`,
+  `ARGOCD_TLS_MAX_VERSION`, `ARGOCD_TLS_CIPHERS`; cmd-params `server.tls.*`, `reposerver.tls.*`). Versions `1.0|1.1|1.2|1.3`
+  (defaults min `1.2`, max `1.3`); empty string = Go default. Ciphers: colon-separated Go cipher-suite names (default
+  `TLS_ECDHE_RSA_WITH_AES_256_GCM_SHA384`); the special value `list` prints `Supported TLS ciphers:` with the versions of
+  each suite and exits 0. When min version is 1.3, cipher configuration is ignored (warning `TLSv1.3 cipher suites are not
+  configurable, ignoring value of --tlsciphers` if non-default).
+- **Edge cases**: Invalid version → startup error `error retrieving TLS version by min version "<v>": <v> is not valid TLS
+  version`; min > max → `minimum TLS version <a> must not be higher than maximum TLS version <b>`; unknown cipher →
+  `invalid cipher suite specified: <name>`. Ciphers do not restrict TLS 1.3 suites when max is 1.3 (Go behaviour).
+- **Configuration surface**: flags/env/cmd-params above.
+- **Exposure**: TLS endpoints.
+- **Tests required**:
+  - Positive: min 1.3 → TLS 1.2 client handshake rejected.
+  - Negative: `--tlsminversion 1.3 --tlsmaxversion 1.2` → startup failure with the exact message.
+  - Positive: `--tlsciphers list` prints suites and exits 0.
+  - Negative: unknown cipher name → startup failure.
+
+### OPS-098 `--insecure` mode, HTTP→HTTPS redirect and single-port protocol multiplexing
+- **Upstream**:
+  https://github.com/argoproj/argo-cd/blob/a5038b0e2bbac1715754380ae0084df8e3d5b48c/cmd/argocd-server/commands/argocd_server.go#L307 ,
+  https://github.com/argoproj/argo-cd/blob/a5038b0e2bbac1715754380ae0084df8e3d5b48c/server/server.go#L909 ,
+  https://github.com/argoproj/argo-cd/blob/a5038b0e2bbac1715754380ae0084df8e3d5b48c/server/server.go#L610 ,
+  https://github.com/argoproj/argo-cd/blob/a5038b0e2bbac1715754380ae0084df8e3d5b48c/server/server.go#L627 ,
+  https://github.com/argoproj/argo-cd/blob/a5038b0e2bbac1715754380ae0084df8e3d5b48c/server/server.go#L1379 ,
+  https://github.com/argoproj/argo-cd/blob/a5038b0e2bbac1715754380ae0084df8e3d5b48c/docs/operator-manual/ingress.md#L3
+- **Maturity**: GA
+- **Semantics**: The API server serves gRPC, gRPC-Web, REST/JSON and the UI on one port (8080) using connection
+  multiplexing. TLS on (default, a certificate exists, not insecure): plain HTTP/1.x requests on the port are answered by
+  a redirect server with **307 Temporary Redirect** to `https://<Host><path>[?query]` (root path prefixed if missing);
+  everything else is TLS-terminated (ALPN `http/1.1`, `h2`) and then split into HTTPS (HTTP/1.1) and gRPC (HTTP/2 with
+  `content-type: application/grpc`). `--insecure` (`server.insecure`, `ARGOCD_SERVER_INSECURE`) disables TLS: HTTP/1.1 and
+  h2c gRPC are served in clear text and no self-signed certificate is generated. Insecure mode is the documented mode
+  behind TLS-terminating proxies/ingresses.
+- **Edge cases**: HTTPS clients are expected to use HTTP/1.1 (h2 is used only by gRPC). In insecure mode, the CLI must
+  use `--plaintext` (or `--grpc-web` through a proxy). The internal grpc-gateway loopback connection uses TLS with
+  `InsecureSkipVerify` when TLS is on.
+- **Configuration surface**: `server.insecure`; Service ports 80/443 → 8080.
+- **Exposure**: Network endpoint.
+- **Tests required**:
+  - Positive: TLS mode, `curl -i http://server:8080/applications?x=1` → 307 with `Location: https://server:8080/applications?x=1`.
+  - Positive: gRPC (CLI) and REST (curl) both work on the same port in TLS and in insecure mode.
+  - Positive: `--insecure` → no `tls.crt` generated in `argocd-secret` (OPS-030) and HTTP served directly.
+
+### OPS-099 Repo-server server certificate (`argocd-repo-server-tls`)
+- **Upstream**:
+  https://github.com/argoproj/argo-cd/blob/a5038b0e2bbac1715754380ae0084df8e3d5b48c/reposerver/server.go#L46 ,
+  https://github.com/argoproj/argo-cd/blob/a5038b0e2bbac1715754380ae0084df8e3d5b48c/reposerver/server.go#L55 ,
+  https://github.com/argoproj/argo-cd/blob/a5038b0e2bbac1715754380ae0084df8e3d5b48c/util/tls/tls.go#L433 ,
+  https://github.com/argoproj/argo-cd/blob/a5038b0e2bbac1715754380ae0084df8e3d5b48c/manifests/base/repo-server/argocd-repo-server-deployment.yaml#L369 ,
+  https://github.com/argoproj/argo-cd/blob/a5038b0e2bbac1715754380ae0084df8e3d5b48c/docs/operator-manual/tls.md#L117
+- **Maturity**: GA
+- **Semantics**: Secret `argocd-repo-server-tls` (optional; keys `tls.crt`, `tls.key`, `ca.crt`) is mounted at
+  `/app/config/reposerver/tls` (base path overridable with `ARGOCD_APP_CONF_PATH`). If both files exist the repo-server
+  loads them (`Loading TLS configuration from cert=... and key=...`), otherwise it generates an in-memory self-signed
+  certificate for hosts `localhost`, `reposerver` (`Generating self-signed TLS certificate for this session`). TLS
+  options from OPS-097 apply. The certificate is read only at start: changes require a repo-server restart. The same
+  Secret is mounted into clients for the legacy strict-TLS path (server `/app/config/server/tls`, controller
+  `/app/config/controller/tls`, appset/notifications `/app/config/reposerver/tls`).
+- **Edge cases**: Unreadable/mismatched key pair → startup failure `unable to initialize TLS configuration with cert=...`.
+  The self-signed certificate cannot be verified by clients, hence clients default to non-validating TLS (OPS-101).
+  Documented SANs required: `DNS:argocd-repo-server`, `DNS:argocd-repo-server.<ns>.svc`.
+- **Configuration surface**: Secret `argocd-repo-server-tls`; `--disable-tls` / `reposerver.disable.tls`.
+- **Exposure**: gRPC endpoint 8081.
+- **Tests required**:
+  - Positive: provide a CA-signed cert → served by repo-server after restart; strict clients connect.
+  - Negative: update the Secret without restart → old cert still served (parity).
+  - Positive: `reposerver.disable.tls: "true"` (with `reposerver.client.ca.path: ""`) → plaintext gRPC.
+
+### OPS-100 Dex server TLS (`argocd-dex-server-tls`, `--disable-tls`)
+- **Upstream**:
+  https://github.com/argoproj/argo-cd/blob/a5038b0e2bbac1715754380ae0084df8e3d5b48c/cmd/argocd-dex/commands/argocd_dex.go#L82 ,
+  https://github.com/argoproj/argo-cd/blob/a5038b0e2bbac1715754380ae0084df8e3d5b48c/cmd/argocd-dex/commands/argocd_dex.go#L146 ,
+  https://github.com/argoproj/argo-cd/blob/a5038b0e2bbac1715754380ae0084df8e3d5b48c/manifests/base/dex/argocd-dex-server-deployment.yaml#L94 ,
+  https://github.com/argoproj/argo-cd/blob/a5038b0e2bbac1715754380ae0084df8e3d5b48c/docs/operator-manual/tls.md#L145
+- **Maturity**: GA
+- **Semantics**: `argocd-dex rundex` loads `/tls/tls.crt` + `/tls/tls.key` (Secret `argocd-dex-server-tls`, optional mount)
+  or generates a self-signed certificate for `localhost`, `dexserver`, writes the PEMs to `/tmp/tls.crt` and `/tmp/tls.key`
+  and generates a Dex config whose HTTPS listener uses them. `--disable-tls` (`dexserver.disable.tls`,
+  `ARGOCD_DEX_SERVER_DISABLE_TLS`) makes Dex serve plain HTTP. Restart required for certificate changes.
+- **Edge cases**: Failure to write the files → fatal `could not write TLS certificate: ...`. Documented SANs:
+  `DNS:argocd-dex-server`, `DNS:argocd-dex-server.<ns>.svc`; self-signed `ca.crt` must be included for strict clients.
+- **Configuration surface**: Secret `argocd-dex-server-tls`; `dexserver.disable.tls`.
+- **Exposure**: Dex HTTPS 5556.
+- **Tests required**:
+  - Positive: default → Dex serves HTTPS with a self-signed cert; SSO login via the API server proxy succeeds.
+  - Positive: `dexserver.disable.tls: "true"` + `server.dex.server.plaintext: "true"` → login works over HTTP.
+  - Negative: Dex plaintext but server not plaintext → SSO login fails (TLS handshake error).
+
+### OPS-101 Component → repo-server TLS verification (`--repo-server-plaintext`, `--repo-server-ca-cert-path`, deprecated `--repo-server-strict-tls`)
+- **Upstream**:
+  https://github.com/argoproj/argo-cd/blob/a5038b0e2bbac1715754380ae0084df8e3d5b48c/util/tls/tls.go#L513 ,
+  https://github.com/argoproj/argo-cd/blob/a5038b0e2bbac1715754380ae0084df8e3d5b48c/reposerver/apiclient/clientset.go#L164 ,
+  https://github.com/argoproj/argo-cd/blob/a5038b0e2bbac1715754380ae0084df8e3d5b48c/cmd/argocd-server/commands/argocd_server.go#L161 ,
+  https://github.com/argoproj/argo-cd/blob/a5038b0e2bbac1715754380ae0084df8e3d5b48c/cmd/argocd-application-controller/commands/argocd_application_controller.go#L150 ,
+  https://github.com/argoproj/argo-cd/blob/a5038b0e2bbac1715754380ae0084df8e3d5b48c/cmd/argocd-applicationset-controller/commands/applicationset_controller.go#L222 ,
+  https://github.com/argoproj/argo-cd/blob/a5038b0e2bbac1715754380ae0084df8e3d5b48c/cmd/argocd-notification/commands/argocd_notification.go#L130 ,
+  https://github.com/argoproj/argo-cd/blob/a5038b0e2bbac1715754380ae0084df8e3d5b48c/docs/operator-manual/tls.md#L32 ,
+  https://github.com/argoproj/argo-cd/blob/a5038b0e2bbac1715754380ae0084df8e3d5b48c/docs/operator-manual/tls.md#L184 ,
+  https://github.com/argoproj/argo-cd/blob/a5038b0e2bbac1715754380ae0084df8e3d5b48c/docs/operator-manual/upgrading/3.4-3.5.md#L229
+- **Maturity**: GA (`--repo-server-strict-tls`: Deprecated)
+- **Semantics**: Clients: argocd-server, application controller, ApplicationSet controller, notifications controller.
+  Modes: (a) plaintext — `--repo-server-plaintext` (notifications: `--argocd-repo-server-plaintext`) uses insecure gRPC
+  credentials (repo-server must run `--disable-tls`); (b) default — TLS **without** verification (`InsecureSkipVerify`);
+  (c) verified — `--repo-server-ca-cert-path <file>` (env `ARGOCD_<PREFIX>_REPO_SERVER_CA_CERT_PATH`, prefixes
+  `SERVER`, `APPLICATION_CONTROLLER`, `APPLICATIONSET_CONTROLLER`, `NOTIFICATION_CONTROLLER`; cmd-params
+  `<comp>.repo.server.ca.cert.path`) loads a CA pool and verifies the server certificate; (d) legacy strict —
+  deprecated `--repo-server-strict-tls` (hidden; notifications `--argocd-repo-server-strict-tls`, no env) enables
+  verification and, if no CA path was given, loads the mounted `argocd-repo-server-tls` `tls.crt`+`ca.crt` from the
+  component-specific mount (OPS-099); both flags combine with OR semantics; an explicit CA path takes precedence over
+  the legacy mount. RPC timeout `--repo-server-timeout-seconds` (60; notifications fixed 5s).
+- **Edge cases**: CA file unreadable → startup error `error loading repo-server CA: ...`; legacy path unreadable → fatal.
+  Deprecated flag prints a cobra deprecation warning `use --repo-server-ca-cert-path instead`. Notifications controller
+  flag is `--repo-server-ca-cert-path` (shared helper), not `--argocd-repo-server-ca-cert-path` as documented (Doc/
+  implementation differences).
+- **Configuration surface**: flags/env/cmd-params above (OPS-020/022/026/027).
+- **Exposure**: Internal gRPC.
+- **Tests required**:
+  - Positive: CA-signed repo-server cert + `--repo-server-ca-cert-path` on all 4 clients → all RPCs succeed.
+  - Negative: CA path pointing to a different CA → `x509: certificate signed by unknown authority` errors in app conditions.
+  - Positive: default (no CA) works against a self-signed repo-server.
+  - Positive: plaintext on clients + `--disable-tls` on repo-server works; mismatched (plaintext client, TLS server) fails.
+  - Positive: deprecated `--repo-server-strict-tls` still works and logs deprecation.
+
+### OPS-102 API server → Dex TLS verification (`--dex-server-plaintext`, `--dex-server-strict-tls`)
+- **Upstream**:
+  https://github.com/argoproj/argo-cd/blob/a5038b0e2bbac1715754380ae0084df8e3d5b48c/cmd/argocd-server/commands/argocd_server.go#L192 ,
+  https://github.com/argoproj/argo-cd/blob/a5038b0e2bbac1715754380ae0084df8e3d5b48c/cmd/argocd-server/commands/argocd_server.go#L334 ,
+  https://github.com/argoproj/argo-cd/blob/a5038b0e2bbac1715754380ae0084df8e3d5b48c/util/dex/dex.go#L29 ,
+  https://github.com/argoproj/argo-cd/blob/a5038b0e2bbac1715754380ae0084df8e3d5b48c/util/dex/dex.go#L125 ,
+  https://github.com/argoproj/argo-cd/blob/a5038b0e2bbac1715754380ae0084df8e3d5b48c/docs/operator-manual/tls.md#L232
+- **Maturity**: GA
+- **Semantics**: `--dex-server` (`ARGOCD_SERVER_DEX_SERVER`, `server.dex.server`, default `argocd-dex-server:5556`);
+  `--dex-server-plaintext` (`server.dex.server.plaintext`) → `http://` scheme, no TLS; default → HTTPS without
+  verification; `--dex-server-strict-tls` (`server.dex.server.strict.tls`) → verifies against `ca.crt` **and pins** the
+  leaf: the presented certificate must byte-equal `/app/config/dex/tls/tls.crt` (mounted from `argocd-dex-server-tls`),
+  else `dex server certificate does not match`. Used by the `/api/dex` reverse proxy and by the OIDC client.
+- **Edge cases**: Strict mode with missing mounted files → fatal at start. Plaintext flag also changes the generated
+  Dex config issuer expectations (dex config generated with TLS disabled).
+- **Configuration surface**: keys/flags above.
+- **Exposure**: Internal HTTPS.
+- **Tests required**:
+  - Positive: strict TLS with matching mounted cert → SSO works.
+  - Negative: strict TLS while Dex serves a different (even CA-valid) cert → login fails with "dex server certificate does not match".
+
+### OPS-103 Repo-server mutual TLS (`argocd-repo-server-mtls`)
+- **Upstream**:
+  https://github.com/argoproj/argo-cd/blob/a5038b0e2bbac1715754380ae0084df8e3d5b48c/util/tls/tls.go#L490 ,
+  https://github.com/argoproj/argo-cd/blob/a5038b0e2bbac1715754380ae0084df8e3d5b48c/util/tls/tls.go#L554 ,
+  https://github.com/argoproj/argo-cd/blob/a5038b0e2bbac1715754380ae0084df8e3d5b48c/reposerver/server.go#L68 ,
+  https://github.com/argoproj/argo-cd/blob/a5038b0e2bbac1715754380ae0084df8e3d5b48c/reposerver/apiclient/clientset.go#L62 ,
+  https://github.com/argoproj/argo-cd/blob/a5038b0e2bbac1715754380ae0084df8e3d5b48c/reposerver/apiclient/clientset.go#L174 ,
+  https://github.com/argoproj/argo-cd/blob/a5038b0e2bbac1715754380ae0084df8e3d5b48c/cmd/argocd-repo-server/commands/argocd_repo_server.go#L144 ,
+  https://github.com/argoproj/argo-cd/blob/a5038b0e2bbac1715754380ae0084df8e3d5b48c/cmd/argocd-repo-server/commands/argocd_repo_server.go#L186 ,
+  https://github.com/argoproj/argo-cd/blob/a5038b0e2bbac1715754380ae0084df8e3d5b48c/manifests/base/repo-server/argocd-repo-server-deployment.yaml#L378 ,
+  https://github.com/argoproj/argo-cd/blob/a5038b0e2bbac1715754380ae0084df8e3d5b48c/docs/operator-manual/mtls.md#L11 ,
+  https://github.com/argoproj/argo-cd/blob/a5038b0e2bbac1715754380ae0084df8e3d5b48c/docs/operator-manual/upgrading/3.4-3.5.md#L186
+- **Maturity**: GA (new in 3.5, opt-in)
+- **Semantics**: Secret `argocd-repo-server-mtls` (optional) keys: `client-ca.crt` (projected only into the repo-server at
+  `/app/config/reposerver/mtls/client-ca.crt`), `client.crt`, `client.key`, optional `server-ca.crt` (projected into
+  server, controller StatefulSet, appset and notifications at `/app/config/reposerver/mtls/`). Server side:
+  `--client-ca-path` (`ARGOCD_REPO_SERVER_CLIENT_CA_PATH`, `reposerver.client.ca.path`, default
+  `/app/config/reposerver/mtls/client-ca.crt`): if the file exists, `RequireAndVerifyClientCert` with that CA bundle
+  (log `mTLS enabled for repo-server: requiring client certificates from CA=<path>`); if absent, mTLS is silently
+  skipped. The repo-server generates an ephemeral self-signed ECDSA P-256 client certificate (10 years,
+  `Argo CD Health Check`) added to its client-CA pool for its own `/healthz?full=true` self-dial (log `Generated
+  ephemeral health-check client certificate (CN=...)`). Client side: `--repo-server-client-cert-path` /
+  `--repo-server-client-cert-key-path` (defaults the mounted `client.crt`/`client.key`; env/cmd-params per component);
+  if the cert file exists at start it is eagerly loaded and then served via `GetClientCertificate`, re-read when the
+  files' mtime changes (`Client certificate reloaded from <path> (mtime changed)`), and an empty certificate is
+  presented if the file later disappears. Authentication only: any certificate signed by the client CA is accepted (no
+  per-component identity).
+- **Edge cases**: `--client-ca-path` with `--disable-tls` → startup error `--client-ca-path cannot be used when
+  --disable-tls is enabled` (default path is non-empty). Only one of client cert/key flags set →
+  `--repo-server-client-cert-key-path is required when --repo-server-client-cert-path is specified` (and vice versa).
+  Cert file present but invalid → `failed to load initial client certificate: ...`. The dynamic-distribution controller
+  Deployment variant does not mount `argocd-repo-server-mtls` (Doc/implementation differences). The `server-ca.crt` key
+  is mounted but not used by default (`--repo-server-ca-cert-path` must point to it explicitly).
+- **Configuration surface**: Secret `argocd-repo-server-mtls`; `reposerver.client.ca.path`;
+  `<comp>.repo.server.client.cert.path`, `<comp>.repo.server.client.cert.key.path`.
+- **Exposure**: Internal gRPC.
+- **Tests required**:
+  - Positive: create the Secret, restart → all clients connect with the shared client cert; repo-server logs mTLS enabled.
+  - Negative: a client without a cert (e.g. grpcurl) → TLS handshake failure (bad certificate).
+  - Positive: repo-server liveness `?full=true` stays healthy with mTLS on.
+  - Recovery: rotate `client.crt`/`client.key` in the Secret → clients pick up the new cert without restart (mtime change).
+  - Negative: `reposerver.disable.tls: "true"` with the default client CA path → startup error.
+
+### OPS-104 Plaintext internal channels (commit-server gRPC, Redis default, metrics)
+- **Upstream**:
+  https://github.com/argoproj/argo-cd/blob/a5038b0e2bbac1715754380ae0084df8e3d5b48c/commitserver/apiclient/clientset.go#L39 ,
+  https://github.com/argoproj/argo-cd/blob/a5038b0e2bbac1715754380ae0084df8e3d5b48c/cmd/argocd-commit-server/commands/argocd_commit_server.go#L110 ,
+  https://github.com/argoproj/argo-cd/blob/a5038b0e2bbac1715754380ae0084df8e3d5b48c/util/cache/cache.go#L235 ,
+  https://github.com/argoproj/argo-cd/blob/a5038b0e2bbac1715754380ae0084df8e3d5b48c/docs/operator-manual/security.md#L36
+- **Maturity**: GA (commit-server: Beta)
+- **Semantics**: The controller → commit-server gRPC connection always uses insecure (plaintext) credentials and the
+  commit-server has no TLS options; access is restricted by NetworkPolicy to the controller (OPS-010). Redis traffic is
+  plaintext unless `--redis-use-tls` and related flags are set (OPS-051). All `/metrics`, `/healthz` and pprof endpoints
+  are plain HTTP. The security doc states that service-to-service traffic between server, repo-server and controller is
+  TLS (true for repo-server gRPC, OPS-099/101).
+- **Edge cases**: Service meshes can wrap these channels (documented approach for disabling internal TLS, OPS-099/101).
+- **Configuration surface**: none for commit-server; Redis TLS flags.
+- **Exposure**: Internal network.
+- **Tests required**:
+  - Positive: packet capture shows plaintext gRPC between controller and commit-server (parity) — or Patrol documents an added TLS option as extension.
+  - Positive: Redis TLS flags enable TLS (OPS-051).
+
+---
+
+## H. Exposure: root path, HTTP surface flags and ingress patterns
+
+### OPS-105 Server root path (`--rootpath`)
+- **Upstream**:
+  https://github.com/argoproj/argo-cd/blob/a5038b0e2bbac1715754380ae0084df8e3d5b48c/cmd/argocd-server/commands/argocd_server.go#L215 ,
+  https://github.com/argoproj/argo-cd/blob/a5038b0e2bbac1715754380ae0084df8e3d5b48c/cmd/argocd-server/commands/argocd_server.go#L310 ,
+  https://github.com/argoproj/argo-cd/blob/a5038b0e2bbac1715754380ae0084df8e3d5b48c/server/server.go#L1143 ,
+  https://github.com/argoproj/argo-cd/blob/a5038b0e2bbac1715754380ae0084df8e3d5b48c/server/server.go#L1379 ,
+  https://github.com/argoproj/argo-cd/blob/a5038b0e2bbac1715754380ae0084df8e3d5b48c/server/server.go#L1253 ,
+  https://github.com/argoproj/argo-cd/blob/a5038b0e2bbac1715754380ae0084df8e3d5b48c/docs/operator-manual/ingress.md#L848 ,
+  https://github.com/argoproj/argo-cd/blob/a5038b0e2bbac1715754380ae0084df8e3d5b48c/docs/operator-manual/ingress.md#L894
+- **Maturity**: GA
+- **Semantics**: `--rootpath` (`ARGOCD_SERVER_ROOTPATH`, `server.rootpath`, default empty) serves the whole API server
+  (REST, gRPC-Web, UI, `/auth`, `/api/dex`, `/swagger-ui`, `/download`, `/extensions`, webhooks) under `/<root>/` by
+  stripping the prefix; `/healthz` is additionally served at the bare path for probes. When set, `--basehref` is forced
+  to the root path (OPS-106). The HTTP→HTTPS redirect keeps/prepends the prefix. Native gRPC (HTTP/2) clients are not
+  path-routed; CLI users behind a path-based proxy use `argocd login <host> --grpc-web-root-path /<root>` (OPS-107).
+- **Edge cases**: Requests outside the prefix (other than `/healthz`) return 404. Leading/trailing slashes are trimmed
+  (`/argo-cd/` ≡ `argo-cd`). When `--rootpath` is set, a warning `--basehref and --rootpath had conflict: ...` is logged
+  whenever basehref differs from rootpath, including the default `/`.
+- **Configuration surface**: `server.rootpath`.
+- **Exposure**: HTTP routing; UI.
+- **Tests required**:
+  - Positive: `--rootpath /argo-cd` → UI at `/argo-cd/`, REST at `/argo-cd/api/v1/applications`, `/healthz` at both `/healthz` and `/argo-cd/healthz`.
+  - Negative: `/api/v1/applications` without prefix → 404.
+  - Positive: TLS mode redirect from `http://host/applications` → `https://host/argo-cd/applications`.
+  - Positive: `argocd login host --grpc-web-root-path /argo-cd` works through a path-based proxy.
+
+### OPS-106 UI base href (`--basehref`)
+- **Upstream**:
+  https://github.com/argoproj/argo-cd/blob/a5038b0e2bbac1715754380ae0084df8e3d5b48c/cmd/argocd-server/commands/argocd_server.go#L309 ,
+  https://github.com/argoproj/argo-cd/blob/a5038b0e2bbac1715754380ae0084df8e3d5b48c/server/server.go#L1433 ,
+  https://github.com/argoproj/argo-cd/blob/a5038b0e2bbac1715754380ae0084df8e3d5b48c/server/server.go#L1182 ,
+  https://github.com/argoproj/argo-cd/blob/a5038b0e2bbac1715754380ae0084df8e3d5b48c/util/dex/dex.go#L59 ,
+  https://github.com/argoproj/argo-cd/blob/a5038b0e2bbac1715754380ae0084df8e3d5b48c/docs/operator-manual/ingress.md#L900
+- **Maturity**: GA
+- **Semantics**: `--basehref` (`ARGOCD_SERVER_BASEHREF`, `server.basehref`, default `/`) rewrites `<base href>` in the
+  served `index.html` to `/<basehref>/` (computed once) and is used for logout redirects and the Dex reverse-proxy target
+  path; the API itself keeps serving at `/`, so the fronting proxy must rewrite `/<basehref>/(.*)` → `/$1`
+  (documented nginx example, with `proxy_buffering off` for streaming endpoints).
+- **Edge cases**: `/` or empty leaves index.html unchanged. Ignored (overridden) when `--rootpath` is set.
+- **Configuration surface**: `server.basehref`.
+- **Exposure**: UI.
+- **Tests required**:
+  - Positive: `--basehref /argo-cd` → index.html contains `<base href="/argo-cd/">`, API still under `/api/...`.
+  - Positive: behind an nginx rewrite the UI loads all assets and SSO logout returns to `/argo-cd/`.
+
+### OPS-107 CLI connectivity through proxies (gRPC-Web fallback, root path, extra headers)
+- **Upstream**:
+  https://github.com/argoproj/argo-cd/blob/a5038b0e2bbac1715754380ae0084df8e3d5b48c/cmd/argocd/commands/root.go#L82 ,
+  https://github.com/argoproj/argo-cd/blob/a5038b0e2bbac1715754380ae0084df8e3d5b48c/cmd/argocd/commands/root.go#L86 ,
+  https://github.com/argoproj/argo-cd/blob/a5038b0e2bbac1715754380ae0084df8e3d5b48c/docs/operator-manual/ingress.md#L840 ,
+  https://github.com/argoproj/argo-cd/blob/a5038b0e2bbac1715754380ae0084df8e3d5b48c/docs/operator-manual/ingress.md#L1040
+- **Maturity**: GA
+- **Semantics**: Operator-facing contract for ingress designs: the CLI speaks native gRPC over HTTP/2 by default;
+  `--grpc-web` switches to gRPC-Web over HTTP/1.1 (needed for L7 proxies without HTTP/2 upstream support, e.g. GKE
+  ingress); `--grpc-web-root-path <path>` enables gRPC-Web under a sub-path; `--header/-H k:v` (repeatable or comma-
+  separated) adds headers to every request so the CLI can pass through authenticating reverse proxies. Owner of the
+  CLI transport semantics: 08 (API-053).
+- **Edge cases**: The server accepts gRPC-Web on the main port (content type `application/grpc-web+proto`).
+- **Configuration surface**: CLI global flags (persisted in the CLI config by `argocd login`).
+- **Exposure**: CLI.
+- **Tests required**:
+  - Positive: behind an HTTP/1.1-only proxy, `argocd app list --grpc-web` succeeds while native gRPC fails.
+  - Positive: proxy requiring header `x-token: foo` → `argocd login ... --header 'x-token:foo'` succeeds.
+
+### OPS-108 API content-type enforcement (`--api-content-types`)
+- **Upstream**:
+  https://github.com/argoproj/argo-cd/blob/a5038b0e2bbac1715754380ae0084df8e3d5b48c/cmd/argocd-server/commands/argocd_server.go#L317 ,
+  https://github.com/argoproj/argo-cd/blob/a5038b0e2bbac1715754380ae0084df8e3d5b48c/server/server.go#L1215 ,
+  https://github.com/argoproj/argo-cd/blob/a5038b0e2bbac1715754380ae0084df8e3d5b48c/server/server.go#L1288 ,
+  https://github.com/argoproj/argo-cd/blob/a5038b0e2bbac1715754380ae0084df8e3d5b48c/docs/operator-manual/argocd-cmd-params-cm.yaml#L157
+- **Maturity**: GA
+- **Semantics**: `--api-content-types` (`ARGOCD_API_CONTENT_TYPES`, `server.api.content.types`; semicolon-separated,
+  default `application/json`, empty allowed) restricts non-GET requests under `/api/` to the listed `Content-Type`
+  values (case-insensitive exact match) → otherwise `415 Invalid content type`. Empty list disables enforcement and logs
+  a `security=3` CSRF warning. Owner of REST semantics: 08 (API-003).
+- **Edge cases**: `application/json; charset=utf-8` does not match `application/json` (exact header comparison).
+  Webhook (`/api/webhook`) and badge endpoints are registered outside this handler.
+- **Configuration surface**: `server.api.content.types`.
+- **Exposure**: REST API.
+- **Tests required**:
+  - Negative: POST `/api/v1/applications` with `text/plain` → 415.
+  - Positive: GET with any content type passes; empty config allows `text/plain` POST and logs the warning.
+
+### OPS-109 Security response headers (`--x-frame-options`, `--content-security-policy`)
+- **Upstream**:
+  https://github.com/argoproj/argo-cd/blob/a5038b0e2bbac1715754380ae0084df8e3d5b48c/cmd/argocd-server/commands/argocd_server.go#L329 ,
+  https://github.com/argoproj/argo-cd/blob/a5038b0e2bbac1715754380ae0084df8e3d5b48c/server/server.go#L1464 ,
+  https://github.com/argoproj/argo-cd/blob/a5038b0e2bbac1715754380ae0084df8e3d5b48c/server/server.go#L1484
+- **Maturity**: GA
+- **Semantics**: For UI/static responses: `X-Frame-Options` = `--x-frame-options` (`ARGOCD_SERVER_X_FRAME_OPTIONS`,
+  `server.x.frame.options`, default `sameorigin`; empty disables the header); `Content-Security-Policy` =
+  `--content-security-policy` (`ARGOCD_SERVER_CONTENT_SECURITY_POLICY`, manifest key `server.content.security.policy`,
+  default `frame-ancestors 'self';`; empty disables); `X-XSS-Protection: 1` always. index.html is served with no-cache
+  headers; hashed `main.<20 hex>.js` bundles get `Cache-Control: public, max-age=31536000, immutable`. Owner: 08 (API-013).
+- **Edge cases**: Headers are not added to `/api/` JSON responses.
+- **Configuration surface**: keys above.
+- **Exposure**: HTTP headers.
+- **Tests required**:
+  - Positive: GET `/` → `X-Frame-Options: sameorigin`, `Content-Security-Policy: frame-ancestors 'self';`.
+  - Positive: `server.x.frame.options: ""` → header absent.
+
+### OPS-110 Response compression (`--enable-gzip`)
+- **Upstream**:
+  https://github.com/argoproj/argo-cd/blob/a5038b0e2bbac1715754380ae0084df8e3d5b48c/cmd/argocd-server/commands/argocd_server.go#L318 ,
+  https://github.com/argoproj/argo-cd/blob/a5038b0e2bbac1715754380ae0084df8e3d5b48c/server/server.go#L1160 ,
+  https://github.com/argoproj/argo-cd/blob/a5038b0e2bbac1715754380ae0084df8e3d5b48c/server/server.go#L1201
+- **Maturity**: GA
+- **Semantics**: `--enable-gzip` (`ARGOCD_SERVER_ENABLE_GZIP`, `server.enable.gzip`, default **true**) wraps the REST
+  gateway, `/extensions.js` and static assets in a compression handler (gzip/deflate by `Accept-Encoding`), except
+  requests with `Accept: text/event-stream` (SSE streams are never compressed). The core-mode local server disables gzip.
+- **Edge cases**: gRPC and gRPC-Web responses are not affected.
+- **Configuration surface**: `server.enable.gzip`.
+- **Exposure**: HTTP.
+- **Tests required**:
+  - Positive: `Accept-Encoding: gzip` on `/api/v1/applications` → `Content-Encoding: gzip`.
+  - Negative: SSE watch with `Accept: text/event-stream` → uncompressed.
+  - Positive: `server.enable.gzip: "false"` → never compressed.
+
+### OPS-111 Additional static assets directory (`--staticassets`)
+- **Upstream**:
+  https://github.com/argoproj/argo-cd/blob/a5038b0e2bbac1715754380ae0084df8e3d5b48c/cmd/argocd-server/commands/argocd_server.go#L308 ,
+  https://github.com/argoproj/argo-cd/blob/a5038b0e2bbac1715754380ae0084df8e3d5b48c/server/server.go#L364 ,
+  https://github.com/argoproj/argo-cd/blob/a5038b0e2bbac1715754380ae0084df8e3d5b48c/docs/operator-manual/upgrading/3.0-3.1.md#L3
+- **Maturity**: GA
+- **Semantics**: The UI is embedded in the binary; `--staticassets` (`ARGOCD_SERVER_STATIC_ASSETS`, `server.staticassets`,
+  default `/shared/app`) is overlaid via a composable FS rooted with `os.OpenRoot`, so operator files (e.g. custom CSS
+  referenced by `ui.cssurl`, logos) are served alongside embedded assets. Root-confined access means symlinks pointing
+  outside the directory fail (3.1 behaviour change: HTTP 500).
+- **Edge cases**: Non-existent directory → warning `Static assets directory "<d>" does not exist, using only embedded
+  assets`; other open errors are fatal. The 3.1 upgrade note names the default `/app/shared` while code uses
+  `/shared/app` (Doc/implementation differences).
+- **Configuration surface**: `server.staticassets`; volume mounted into argocd-server.
+- **Exposure**: HTTP static files.
+- **Tests required**:
+  - Positive: mount `custom.css` into `/shared/app` → served at `/custom.css`.
+  - Negative: symlink to `/etc/passwd` inside the directory → 500, file content not disclosed.
+
+### OPS-112 CLI binary download endpoint (`/download/argocd-linux[-<arch>]`)
+- **Upstream**:
+  https://github.com/argoproj/argo-cd/blob/a5038b0e2bbac1715754380ae0084df8e3d5b48c/server/server.go#L1266 ,
+  https://github.com/argoproj/argo-cd/blob/a5038b0e2bbac1715754380ae0084df8e3d5b48c/server/server.go#L1416
+- **Maturity**: GA
+- **Semantics**: If an `argocd` binary is on the server's PATH, `GET /download/argocd-linux` and
+  `/download/argocd-linux-<GOARCH>` serve it (unauthenticated `http.ServeFile`); other platforms are offered via
+  argocd-cm `help.download.*` links (owner 08, API-014/API-109).
+- **Edge cases**: Binary missing → routes not registered (404) and warning `argocd not in PATH`. Mixed-arch server
+  replicas each serve their own arch on the arch-agnostic route.
+- **Configuration surface**: none.
+- **Exposure**: HTTP; UI help page.
+- **Tests required**:
+  - Positive: download returns an executable matching the server version/arch.
+
+### OPS-113 Ingress pattern: TLS passthrough to the API server
+- **Upstream**:
+  https://github.com/argoproj/argo-cd/blob/a5038b0e2bbac1715754380ae0084df8e3d5b48c/docs/operator-manual/ingress.md#L231 ,
+  https://github.com/argoproj/argo-cd/blob/a5038b0e2bbac1715754380ae0084df8e3d5b48c/docs/operator-manual/ingress.md#L267 ,
+  https://github.com/argoproj/argo-cd/blob/a5038b0e2bbac1715754380ae0084df8e3d5b48c/docs/operator-manual/ingress.md#L1100
+- **Maturity**: GA
+- **Semantics**: A single hostname for UI, REST and gRPC by passing TLS through to `argocd-server` (port `https`/443),
+  which terminates TLS with `argocd-server-tls` and multiplexes protocols (OPS-098). Documented recipes: ingress-nginx
+  Ingress with `nginx.ingress.kubernetes.io/ssl-passthrough: "true"` + `force-ssl-redirect: "true"` (controller needs
+  `--enable-ssl-passthrough`; ingress-nginx is marked retired/archived); cert-manager variant adds
+  `backend-protocol: HTTPS`; Gateway API `TLSRoute` (experimental channel) attached to a `Passthrough` TLS listener.
+- **Edge cases**: cert-manager cannot issue certificates for passthrough Gateway listeners (doc note); TLS must stay
+  enabled on the server (not `--insecure`).
+- **Configuration surface**: Ingress/Gateway objects; `argocd-server-tls`.
+- **Exposure**: Network.
+- **Tests required**:
+  - Positive: passthrough ingress → browser UI and `argocd login <host>` (native gRPC) both work on one hostname.
+
+### OPS-114 Ingress pattern: TLS termination at the proxy with a separate gRPC host
+- **Upstream**:
+  https://github.com/argoproj/argo-cd/blob/a5038b0e2bbac1715754380ae0084df8e3d5b48c/docs/operator-manual/ingress.md#L305 ,
+  https://github.com/argoproj/argo-cd/blob/a5038b0e2bbac1715754380ae0084df8e3d5b48c/docs/operator-manual/ingress.md#L375 ,
+  https://github.com/argoproj/argo-cd/blob/a5038b0e2bbac1715754380ae0084df8e3d5b48c/docs/operator-manual/ingress.md#L93
+- **Maturity**: GA
+- **Semantics**: When the ingress terminates TLS and supports one backend protocol per Ingress, two Ingresses are used:
+  HTTP host (e.g. `argocd.example.com`, backend port `http`, `backend-protocol: HTTP`) and gRPC host
+  (`grpc.argocd.example.com`, backend port `https`, `backend-protocol: GRPC`), each with its own TLS secret; the API
+  server runs `--insecure` (h2c gRPC upstream). Same pattern documented for F5 NGINX (requires HTTP/2 listener) and
+  Contour (separate internal/external Ingress classes, gRPC host annotated through the Service
+  `projectcontour.io/upstream-protocol.h2c: "https,443"`).
+- **Edge cases**: CLI must log in to the gRPC host (or use `--grpc-web` against the HTTP host).
+- **Configuration surface**: Ingress objects; `server.insecure`.
+- **Exposure**: Network.
+- **Tests required**:
+  - Positive: with `--insecure`, UI through the HTTP host and `argocd login grpc.<host>` through the gRPC host both work.
+
+### OPS-115 Ingress pattern: Traefik IngressRoute (single host, header-based gRPC routing)
+- **Upstream**:
+  https://github.com/argoproj/argo-cd/blob/a5038b0e2bbac1715754380ae0084df8e3d5b48c/docs/operator-manual/ingress.md#L440 ,
+  https://github.com/argoproj/argo-cd/blob/a5038b0e2bbac1715754380ae0084df8e3d5b48c/docs/operator-manual/ingress.md#L448
+- **Maturity**: GA
+- **Semantics**: Traefik v3 terminates TLS; one `IngressRoute` with two rules on the same host: default rule →
+  `argocd-server:80`; rule matching `Header(Content-Type, application/grpc)` (higher priority) → `argocd-server:80` with
+  `scheme: h2c`. API server runs `--insecure`.
+- **Edge cases**: Requires h2c support from the server in insecure mode (OPS-098).
+- **Configuration surface**: IngressRoute CRD.
+- **Exposure**: Network.
+- **Tests required**:
+  - Positive: single hostname serves UI and native gRPC CLI.
+
+### OPS-116 Ingress pattern: AWS ALB with a dedicated gRPC target group
+- **Upstream**:
+  https://github.com/argoproj/argo-cd/blob/a5038b0e2bbac1715754380ae0084df8e3d5b48c/docs/operator-manual/ingress.md#L476 ,
+  https://github.com/argoproj/argo-cd/blob/a5038b0e2bbac1715754380ae0084df8e3d5b48c/docs/operator-manual/ingress.md#L486
+- **Maturity**: GA
+- **Semantics**: Extra Service (e.g. `argogrpc`, NodePort, port 443 → 8080) annotated
+  `alb.ingress.kubernetes.io/backend-protocol-version: GRPC`; the Ingress (`backend-protocol: HTTPS`) routes requests with
+  header `Content-Type: application/grpc` to it via `alb.ingress.kubernetes.io/conditions.argogrpc` (gRPC path listed
+  before the UI path) and uses gRPC health check `/grpc.health.v1.Health/Check` with success code `0`. Classic ELB/NLB can
+  be used as L4 balancers.
+- **Edge cases**: Requires the API server to implement the standard gRPC health service (owner 08, API-011) and to
+  downgrade non-gRPC calls to HTTP/1.
+- **Configuration surface**: Service + Ingress annotations.
+- **Exposure**: Network.
+- **Tests required**:
+  - Positive: gRPC health check `grpc.health.v1.Health/Check` returns SERVING on port 8080 (TLS on).
+
+### OPS-117 Ingress pattern: GKE (NEG, BackendConfig, FrontendConfig)
+- **Upstream**:
+  https://github.com/argoproj/argo-cd/blob/a5038b0e2bbac1715754380ae0084df8e3d5b48c/docs/operator-manual/ingress.md#L672 ,
+  https://github.com/argoproj/argo-cd/blob/a5038b0e2bbac1715754380ae0084df8e3d5b48c/docs/operator-manual/ingress.md#L717 ,
+  https://github.com/argoproj/argo-cd/blob/a5038b0e2bbac1715754380ae0084df8e3d5b48c/docs/operator-manual/ingress.md#L740
+- **Maturity**: GA
+- **Semantics**: API server `--insecure` (avoids redirect loops); Service with `cloud.google.com/neg` and
+  `cloud.google.com/backend-config` annotations; BackendConfig HTTP health check `GET /healthz` on port 8080
+  (interval 30s, timeout 5s); FrontendConfig `redirectToHttps`; Ingress with TLS secret (path `/*` with
+  `ImplementationSpecific` for GKE < 1.21.3-gke.1600, else `/` Prefix). The GCLB path is HTTP/1.1 → CLI uses `--grpc-web`.
+- **Edge cases**: `/healthz` must answer 200 over plain HTTP in insecure mode.
+- **Configuration surface**: GKE CRDs and annotations.
+- **Exposure**: Network.
+- **Tests required**:
+  - Positive: `/healthz` returns 200 over HTTP with `--insecure`; CLI with `--grpc-web` works through an HTTP/1.1-only LB.
+
+### OPS-118 Ingress pattern: Istio with a sub-path
+- **Upstream**:
+  https://github.com/argoproj/argo-cd/blob/a5038b0e2bbac1715754380ae0084df8e3d5b48c/docs/operator-manual/ingress.md#L546
+- **Maturity**: GA
+- **Semantics**: Kustomize patch runs the API server with `--insecure --basehref /argocd --rootpath /argocd` and env
+  `ARGOCD_MAX_CONCURRENT_LOGIN_REQUESTS_COUNT=0`; an Istio Gateway/VirtualService routes `/argocd` to `argocd-server:80`.
+- **Edge cases**: Login concurrency limit disabled in the example (OPS-034).
+- **Configuration surface**: server flags; Istio objects.
+- **Exposure**: Network.
+- **Tests required**:
+  - Positive: UI and REST reachable under `/argocd` through the mesh ingress.
+
+### OPS-119 Ingress pattern: Ambassador / Emissary Mappings
+- **Upstream**:
+  https://github.com/argoproj/argo-cd/blob/a5038b0e2bbac1715754380ae0084df8e3d5b48c/docs/operator-manual/ingress.md#L11 ,
+  https://github.com/argoproj/argo-cd/blob/a5038b0e2bbac1715754380ae0084df8e3d5b48c/docs/operator-manual/ingress.md#L20 ,
+  https://github.com/argoproj/argo-cd/blob/a5038b0e2bbac1715754380ae0084df8e3d5b48c/docs/operator-manual/ingress.md#L53
+- **Maturity**: GA
+- **Semantics**: Host-based: two Mappings — UI (`host: argocd.example.com` → `https://argocd-server:443`) and CLI
+  (`host: argocd.example.com:443`, `regex_headers Content-Type ^application/grpc.*$`, `grpc: true` → `argocd-server:80`)
+  because the CLI sends the port in the Host header; API server `--insecure` (not required with gRPC-Web). Path-based:
+  `--rootpath /argo-cd` and one Mapping with `prefix`/`rewrite` `/argo-cd`; CLI uses `--grpc-web-root-path /argo-cd`.
+- **Edge cases**: With `strip_matching_host_port` the port in the CLI mapping must be omitted.
+- **Configuration surface**: Mapping CRDs; server flags.
+- **Exposure**: Network.
+- **Tests required**:
+  - Positive: CLI Host header includes `:443` when connecting to `host:443` (Patrol CLI parity for host header).
+
+### OPS-120 Ingress pattern: Contour HTTPProxy (same host, h2c)
+- **Upstream**:
+  https://github.com/argoproj/argo-cd/blob/a5038b0e2bbac1715754380ae0084df8e3d5b48c/docs/operator-manual/ingress.md#L185 ,
+  https://github.com/argoproj/argo-cd/blob/a5038b0e2bbac1715754380ae0084df8e3d5b48c/docs/operator-manual/ingress.md#L192
+- **Maturity**: GA
+- **Semantics**: With `--insecure`, a Contour `HTTPProxy` can serve REST and gRPC on one hostname by routing the gRPC
+  route to the service with `protocol: h2c`.
+- **Edge cases**: Same h2c dependency as OPS-115.
+- **Configuration surface**: HTTPProxy CRD.
+- **Exposure**: Network.
+- **Tests required**:
+  - Positive: single hostname via HTTPProxy works for UI and CLI.
+
+### OPS-121 Ingress pattern: Gateway API (HTTPRoute, GRPCRoute, BackendTLSPolicy)
+- **Upstream**:
+  https://github.com/argoproj/argo-cd/blob/a5038b0e2bbac1715754380ae0084df8e3d5b48c/docs/operator-manual/ingress.md#L949 ,
+  https://github.com/argoproj/argo-cd/blob/a5038b0e2bbac1715754380ae0084df8e3d5b48c/docs/operator-manual/ingress.md#L985 ,
+  https://github.com/argoproj/argo-cd/blob/a5038b0e2bbac1715754380ae0084df8e3d5b48c/docs/operator-manual/ingress.md#L1013 ,
+  https://github.com/argoproj/argo-cd/blob/a5038b0e2bbac1715754380ae0084df8e3d5b48c/docs/operator-manual/ingress.md#L1038 ,
+  https://github.com/argoproj/argo-cd/blob/a5038b0e2bbac1715754380ae0084df8e3d5b48c/docs/operator-manual/ingress.md#L1071
+- **Maturity**: GA
+- **Semantics**: Gateway terminates TLS; `HTTPRoute` → `argocd-server:80` for the UI/REST host; `GRPCRoute` →
+  `argocd-server:443` on a separate gRPC host with the Service port `appProtocol: kubernetes.io/h2c` (Helm value
+  `server.service.servicePortHttpsAppProtocol`); optional `BackendTLSPolicy` to keep TLS to the server (validating
+  against a CA ConfigMap and hostname `argocd-server.argocd.svc.cluster.local`) instead of `--insecure`. Same-host
+  HTTPRoute+GRPCRoute is implementation-dependent and needs header matches. TLS passthrough variant: OPS-113.
+- **Edge cases**: The upstream install manifests do not set `appProtocol` on the Service (Helm-only value).
+- **Configuration surface**: Gateway API objects; Service `appProtocol`.
+- **Exposure**: Network.
+- **Tests required**:
+  - Positive: GRPCRoute with h2c backend + `--insecure` → native gRPC CLI works; HTTPRoute serves UI.
+  - Positive: BackendTLSPolicy with the server certificate's CA keeps end-to-end TLS.
+
+---
+
+## I. Core mode, local dashboard, multi-instance and self-management
+
+### OPS-122 Core (headless) mode CLI (`argocd login --core`, `--core`)
+- **Upstream**:
+  https://github.com/argoproj/argo-cd/blob/a5038b0e2bbac1715754380ae0084df8e3d5b48c/cmd/argocd/commands/headless/headless.go#L180 ,
+  https://github.com/argoproj/argo-cd/blob/a5038b0e2bbac1715754380ae0084df8e3d5b48c/cmd/argocd/commands/headless/headless.go#L264 ,
+  https://github.com/argoproj/argo-cd/blob/a5038b0e2bbac1715754380ae0084df8e3d5b48c/cmd/argocd/commands/headless/headless.go#L56 ,
+  https://github.com/argoproj/argo-cd/blob/a5038b0e2bbac1715754380ae0084df8e3d5b48c/cmd/argocd/commands/headless/headless.go#L125 ,
+  https://github.com/argoproj/argo-cd/blob/a5038b0e2bbac1715754380ae0084df8e3d5b48c/docs/operator-manual/core.md#L64 ,
+  https://github.com/argoproj/argo-cd/blob/a5038b0e2bbac1715754380ae0084df8e3d5b48c/docs/operator-manual/core.md#L10
+- **Maturity**: GA
+- **Semantics**: With `--core` (or a CLI context saved by `argocd login --core`), each CLI invocation starts an
+  in-process API server bound to `localhost:<random port>` with `DisableAuth=true`, `Insecure=true`, gzip off, proxy
+  extensions off, using the user's kubeconfig (namespace = kubeconfig context namespace). Redis: an embedded in-memory
+  Redis (miniredis) for server state plus a lazily port-forwarded connection to the cluster's Redis
+  (`app.kubernetes.io/name=argocd-redis-ha-haproxy` or `argocd-redis`, port 6379, password from the `argocd-redis`
+  Secret) for app-state cache; repo-server access is port-forwarded on demand to pod port 8081. The CLI then talks
+  plaintext gRPC to the local server; the server shuts down when the command ends. Authorization is purely Kubernetes
+  RBAC of the caller; Argo CD RBAC, API, notifications and OIDC are unavailable. Owner of CLI flag semantics: 08 (API-055).
+- **Edge cases**: The kubeconfig context must point at the Argo CD namespace (`kubectl config set-context --current
+  --namespace=argocd`), else listing returns nothing/forbidden. 5 connectivity attempts at 1s interval → `all retries
+  failed: ...`. Missing Redis password → warning, continues. Logging forced to error level.
+- **Configuration surface**: CLI `--core`; kubeconfig; CLI flags `--redis-haproxy-name`, `--redis-name`,
+  `--repo-server-name`, `--redis-compress` (owner 08).
+- **Exposure**: CLI.
+- **Tests required**:
+  - Positive: on a core install, `argocd login --core` then `argocd app list`/`app sync` work with only kubeconfig credentials.
+  - Authorization: a kube user without `get applications` gets a forbidden error.
+  - Positive: commands needing manifests (`app diff`) reach the repo-server via port-forward.
+
+### OPS-123 Local web UI (`argocd admin dashboard`)
+- **Upstream**:
+  https://github.com/argoproj/argo-cd/blob/a5038b0e2bbac1715754380ae0084df8e3d5b48c/cmd/argocd/commands/admin/dashboard.go#L42 ,
+  https://github.com/argoproj/argo-cd/blob/a5038b0e2bbac1715754380ae0084df8e3d5b48c/cmd/argocd/commands/admin/dashboard.go#L62 ,
+  https://github.com/argoproj/argo-cd/blob/a5038b0e2bbac1715754380ae0084df8e3d5b48c/common/common.go#L86 ,
+  https://github.com/argoproj/argo-cd/blob/a5038b0e2bbac1715754380ae0084df8e3d5b48c/docs/operator-manual/core.md#L92
+- **Maturity**: GA
+- **Semantics**: Starts the core-mode local API server (OPS-122) on `--address` (default `localhost`) / `--port` (default
+  8080) and prints `Argo CD UI is available at http://<address>:<port>`; serves the full UI without login (auth
+  disabled) until SIGINT/SIGTERM, then shuts down (`clean shutdown`). Accepts kubectl flags (`-n argocd`, `--context`)
+  and cache flags (e.g. `--redis-compress`).
+- **Edge cases**: Binding to a non-loopback address exposes an unauthenticated UI with the caller's Kubernetes
+  privileges. Port in use → `could not start dashboard: ...`.
+- **Configuration surface**: CLI flags.
+- **Exposure**: CLI; local UI.
+- **Tests required**:
+  - Positive: `argocd admin dashboard -n argocd --port 8085` → UI lists apps without login.
+  - Negative: occupied port → error exit.
+
+### OPS-124 Managed-by URL annotation (`argocd.argoproj.io/managed-by-url`)
+- **Upstream**:
+  https://github.com/argoproj/argo-cd/blob/a5038b0e2bbac1715754380ae0084df8e3d5b48c/pkg/apis/application/v1alpha1/application_annotations.go#L15 ,
+  https://github.com/argoproj/argo-cd/blob/a5038b0e2bbac1715754380ae0084df8e3d5b48c/controller/cache/info.go#L787 ,
+  https://github.com/argoproj/argo-cd/blob/a5038b0e2bbac1715754380ae0084df8e3d5b48c/util/argo/argo.go#L407 ,
+  https://github.com/argoproj/argo-cd/blob/a5038b0e2bbac1715754380ae0084df8e3d5b48c/server/application/application.go#L1391 ,
+  https://github.com/argoproj/argo-cd/blob/a5038b0e2bbac1715754380ae0084df8e3d5b48c/server/deeplinks/deeplinks.go#L65 ,
+  https://github.com/argoproj/argo-cd/blob/a5038b0e2bbac1715754380ae0084df8e3d5b48c/ui/src/app/shared/utils.ts#L44 ,
+  https://github.com/argoproj/argo-cd/blob/a5038b0e2bbac1715754380ae0084df8e3d5b48c/docs/operator-manual/managed-by-url.md#L5
+- **Maturity**: GA
+- **Semantics**: Annotation on an Application naming the URL of the Argo CD instance that manages it (multi-instance
+  app-of-apps / hub-and-spoke). The controller copies it into the resource-tree node info (`managed-by-url`) for child
+  Application nodes; the UI links child apps to `<managed-by-url>/applications/<ns>/<name>` (external link) instead of the
+  local instance when the value is a valid `http:`/`https:` URL, otherwise falls back to the local URL (console warning,
+  invalid-URL badge "managed-by-url: invalid url provided"). Deep links get `managedByURL` in their template context when
+  valid. API create/update validation rejects non-http(s) values with InvalidArgument `application spec for <app> is
+  invalid: ... invalid managed-by URL: URL must include http or https protocol` (owner of UI rendering: 08, API-115).
+- **Edge cases**: Validation applies only through the Argo CD API; Applications created by kubectl/GitOps sync (the
+  documented app-of-apps flow) are not validated, only rendered defensively by the UI. Empty value = no annotation.
+- **Configuration surface**: Application annotation.
+- **Exposure**: CRD; API validation; UI.
+- **Tests required**:
+  - Positive: child app with `https://secondary.example.com` → tree node info contains `managed-by-url`, UI link targets the secondary instance.
+  - Negative: API create with `javascript:alert(1)` → InvalidArgument with the message above.
+  - Negative: same invalid value applied via kubectl → accepted by Kubernetes, UI falls back to local link.
+
+### OPS-125 Self-managed Argo CD (managing Argo CD with an Application)
+- **Upstream**:
+  https://github.com/argoproj/argo-cd/blob/a5038b0e2bbac1715754380ae0084df8e3d5b48c/docs/operator-manual/declarative-setup.md#L1471 ,
+  https://github.com/argoproj/argo-cd/blob/a5038b0e2bbac1715754380ae0084df8e3d5b48c/docs/operator-manual/upgrading/3.2-3.3.md#L13
+- **Maturity**: GA
+- **Semantics**: Argo CD can be deployed by an Application in its own namespace whose source is a Kustomize overlay
+  over the upstream `manifests/cluster-install` (plus repo/cluster Secrets, ingress, config patches). Since 3.3 the
+  Application must use `syncOptions: [ServerSideApply=true]` (conflict resolution added automatically) because of the
+  ApplicationSet CRD size (OPS-006).
+- **Edge cases**: Syncing the Argo CD Application restarts the controller performing the sync (operation resumes after
+  restart). Without SSA, sync fails with the 262144-byte annotation error.
+- **Configuration surface**: Application spec.
+- **Exposure**: CRD.
+- **Tests required**:
+  - Positive: self-managed Patrol upgrade via an Application with SSA completes and the app ends Synced/Healthy.
+  - Recovery: controller restart mid-sync → operation resumes/completes.
+
+---
+
+## J. Operator troubleshooting tools (`argocd admin`)
+
+### OPS-126 `argocd admin settings validate` (and settings source flags)
+- **Upstream**:
+  https://github.com/argoproj/argo-cd/blob/a5038b0e2bbac1715754380ae0084df8e3d5b48c/cmd/argocd/commands/admin/settings.go#L153 ,
+  https://github.com/argoproj/argo-cd/blob/a5038b0e2bbac1715754380ae0084df8e3d5b48c/cmd/argocd/commands/admin/settings.go#L67 ,
+  https://github.com/argoproj/argo-cd/blob/a5038b0e2bbac1715754380ae0084df8e3d5b48c/cmd/argocd/commands/admin/settings.go#L199 ,
+  https://github.com/argoproj/argo-cd/blob/a5038b0e2bbac1715754380ae0084df8e3d5b48c/cmd/argocd/commands/admin/settings.go#L268 ,
+  https://github.com/argoproj/argo-cd/blob/a5038b0e2bbac1715754380ae0084df8e3d5b48c/docs/user-guide/commands/argocd_admin_settings_validate.md#L1 ,
+  https://github.com/argoproj/argo-cd/blob/a5038b0e2bbac1715754380ae0084df8e3d5b48c/docs/operator-manual/troubleshooting.md#L12
+- **Maturity**: GA
+- **Semantics**: `argocd admin settings` (persistent flags `--argocd-cm-path`, `--argocd-secret-path`,
+  `--load-cluster-settings`, plus kubectl flags) builds an offline settings manager over a fake clientset: argocd-cm from
+  the file, else from the cluster when `--load-cluster-settings`; argocd-secret from the file, else from the cluster when
+  `--load-cluster-settings`, else a stub (`admin.password`/`server.secretkey` = `test`). `validate [--group <g>]...`
+  runs validators for groups `accounts` (`<n> accounts`), `general` (Dex/OIDC config parse, `url` missing hint,
+  instance label key, help, Google Analytics; summary `Dex is configured`/`OIDC is configured`/`SSO is not configured`),
+  `kustomize` (build options / `(<n> versions)`), `resource-overrides` (`<n> resource overrides`); default all groups
+  sorted. Output per group `✅ <group>` + summary or `❌ <group>` + error, followed by captured debug logs. Sibling
+  groups: `settings rbac` (owner 07), `resource-overrides` (OPS-127..130).
+- **Edge cases**: Neither `--argocd-cm-path` nor `--load-cluster-settings` → error `either --argocd-cm-path must be
+  provided or --load-cluster-settings must be set to true`. An unknown `--group` (e.g. `plugins`, used in the command's
+  own example) has no validator (nil function → crash) (Doc/implementation differences). Exit code is 0 even when a group
+  fails.
+- **Configuration surface**: CLI flags; local YAML files.
+- **Exposure**: CLI.
+- **Tests required**:
+  - Positive: valid argocd-cm file → all four groups ✅.
+  - Negative: malformed `dex.config` → `❌ general` with `invalid dex.config: ...`.
+  - Negative: no source flags → the error above.
+
+### OPS-127 `argocd admin settings resource-overrides ignore-differences`
+- **Upstream**:
+  https://github.com/argoproj/argo-cd/blob/a5038b0e2bbac1715754380ae0084df8e3d5b48c/cmd/argocd/commands/admin/settings.go#L344 ,
+  https://github.com/argoproj/argo-cd/blob/a5038b0e2bbac1715754380ae0084df8e3d5b48c/cmd/argocd/commands/admin/settings.go#L390 ,
+  https://github.com/argoproj/argo-cd/blob/a5038b0e2bbac1715754380ae0084df8e3d5b48c/docs/operator-manual/troubleshooting.md#L20
+- **Maturity**: GA
+- **Semantics**: `ignore-differences RESOURCE_YAML_PATH` loads the resource, looks up the override for `<group>/<Kind>`
+  (core: `<Kind>`) and applies its `ignoreDifferences` jsonPointers/jqPathExpressions with the ignore normalizer; prints
+  `Following fields are ignored:` and a diff of original vs normalized, or `No fields are ignored by ignoreDifferences
+  settings: ...`, or `Ignore differences are not configured for '<group>/<kind>'`.
+- **Edge cases**: `managedFieldsManagers` rules are not evaluated (needs live objects). `.all` overrides are not merged by
+  this lookup (key lookup only). Missing argument → help + exit 1.
+- **Configuration surface**: argocd-cm `resource.customizations.ignoreDifferences.*`.
+- **Exposure**: CLI.
+- **Tests required**:
+  - Positive: Deployment + rule `/spec/replicas` → diff shows replicas removed.
+  - Negative: kind without rules → "not configured" message.
+
+### OPS-128 `argocd admin settings resource-overrides ignore-resource-updates`
+- **Upstream**:
+  https://github.com/argoproj/argo-cd/blob/a5038b0e2bbac1715754380ae0084df8e3d5b48c/cmd/argocd/commands/admin/settings.go#L365 ,
+  https://github.com/argoproj/argo-cd/blob/a5038b0e2bbac1715754380ae0084df8e3d5b48c/cmd/argocd/commands/admin/settings.go#L440
+- **Maturity**: GA
+- **Semantics**: Same as OPS-127 but uses the effective ignore-resource-updates overrides (OPS-063: ignoreResourceUpdates
+  merged with ignoreDifferences when enabled, plus the three metadata defaults). Messages: `No overrides configured for
+  '<group>/<kind>'`, `Ignore resource updates are not configured for ...`, `No fields are ignored by ignoreResourceUpdates
+  settings: ...`, or the diff. Flag `--ignore-normalizer-jq-execution-timeout` (default normalizer timeout).
+- **Edge cases**: Because `*/*` metadata defaults always exist, kinds without explicit rules still resolve only through
+  their own key (per-kind lookup).
+- **Configuration surface**: argocd-cm ignoreResourceUpdates keys.
+- **Exposure**: CLI.
+- **Tests required**:
+  - Positive: ExternalSecret with `/status/refreshTime` rule → diff shows the field removed.
+
+### OPS-129 `argocd admin settings resource-overrides health`
+- **Upstream**:
+  https://github.com/argoproj/argo-cd/blob/a5038b0e2bbac1715754380ae0084df8e3d5b48c/cmd/argocd/commands/admin/settings.go#L488 ,
+  https://github.com/argoproj/argo-cd/blob/a5038b0e2bbac1715754380ae0084df8e3d5b48c/docs/operator-manual/troubleshooting.md#L32
+- **Maturity**: GA
+- **Semantics**: `health RESOURCE_YAML_PATH` evaluates resource health with the configured Lua overrides plus built-in
+  health checks (owner of health semantics: 04) and prints `STATUS: <status>` and `MESSAGE: <message>`, or `Health script
+  is not configured for '<group>/<kind>'` when no health is determinable.
+- **Edge cases**: Lua errors are fatal (non-zero exit).
+- **Configuration surface**: argocd-cm `resource.customizations.health.*`.
+- **Exposure**: CLI.
+- **Tests required**:
+  - Positive: custom health script returning Degraded → `STATUS: Degraded`.
+  - Positive: built-in kind (Deployment) without overrides still reports status.
+
+### OPS-130 `argocd admin settings resource-overrides list-actions` / `run-action`
+- **Upstream**:
+  https://github.com/argoproj/argo-cd/blob/a5038b0e2bbac1715754380ae0084df8e3d5b48c/cmd/argocd/commands/admin/settings.go#L521 ,
+  https://github.com/argoproj/argo-cd/blob/a5038b0e2bbac1715754380ae0084df8e3d5b48c/cmd/argocd/commands/admin/settings.go#L565 ,
+  https://github.com/argoproj/argo-cd/blob/a5038b0e2bbac1715754380ae0084df8e3d5b48c/docs/operator-manual/troubleshooting.md#L42
+- **Maturity**: GA
+- **Semantics**: `list-actions RESOURCE_YAML_PATH` runs the action discovery Lua and prints a sorted `NAME DISABLED`
+  table. `run-action RESOURCE_YAML_PATH ACTION` (alias `action`; `--param k=v` repeatable) executes the action Lua offline
+  and prints `Following fields have been changed:` + diff for patch operations, `Following resource was created:` + YAML
+  for create operations. Owner of action semantics: 04/05.
+- **Edge cases**: Only works when an `actions` override exists for the kind (`Actions are not configured for ...`) even
+  though built-in actions exist for some kinds. Bad `--param` → fatal `Invalid parameter format: <p>`. Unknown action
+  name → error from the Lua VM. The command examples use `resource-overrides action list` which does not exist
+  (Doc/implementation differences).
+- **Configuration surface**: argocd-cm `resource.customizations.actions.*`.
+- **Exposure**: CLI.
+- **Tests required**:
+  - Positive: Deployment with a configured `restart` action → listed; run prints the annotation diff.
+  - Negative: `--param bad` → fatal message.
+
+### OPS-131 `argocd admin app generate-spec`
+- **Upstream**:
+  https://github.com/argoproj/argo-cd/blob/a5038b0e2bbac1715754380ae0084df8e3d5b48c/cmd/argocd/commands/admin/app.go#L77 ,
+  https://github.com/argoproj/argo-cd/blob/a5038b0e2bbac1715754380ae0084df8e3d5b48c/cmd/argocd/commands/admin/app.go#L131 ,
+  https://github.com/argoproj/argo-cd/blob/a5038b0e2bbac1715754380ae0084df8e3d5b48c/docs/user-guide/commands/argocd_admin_app_generate-spec.md#L1
+- **Maturity**: GA
+- **Semantics**: Builds an Application manifest offline from the same flags as `argocd app create` (owner 08) and prints it
+  (`-o yaml|json`, default yaml); `-f/--file` uses a manifest file/URL as base, `-i/--inline` writes the result back to that
+  file, `--set-finalizer` adds the resources finalizer, `-l/--label`, `--annotations`. No API call.
+- **Edge cases**: `--name` is deprecated (ignored when a file is given). Multiple apps in the file → all printed.
+- **Configuration surface**: CLI flags.
+- **Exposure**: CLI.
+- **Tests required**:
+  - Positive: generated YAML equals the spec `argocd app create` would submit for the same flags (golden).
+  - Positive: `--inline` rewrites the file.
+
+### OPS-132 `argocd admin app get-reconcile-results` / `diff-reconcile-results`
+- **Upstream**:
+  https://github.com/argoproj/argo-cd/blob/a5038b0e2bbac1715754380ae0084df8e3d5b48c/cmd/argocd/commands/admin/app.go#L250 ,
+  https://github.com/argoproj/argo-cd/blob/a5038b0e2bbac1715754380ae0084df8e3d5b48c/cmd/argocd/commands/admin/app.go#L315 ,
+  https://github.com/argoproj/argo-cd/blob/a5038b0e2bbac1715754380ae0084df8e3d5b48c/cmd/argocd/commands/admin/app.go#L170
+- **Maturity**: GA
+- **Semantics**: `get-reconcile-results PATH` writes `{applications: [{name, health, sync, conditions}]}` for all apps
+  in the namespace (label selector `--l`, output `--o yaml|json`). Without `--refresh` it copies current status from the
+  CRs; with `--refresh` it recomputes reconciliation locally (in-process live state cache using the kubeconfig, repo-server
+  at `--repo-server` or auto port-forward to the repo-server pod on 8081 with non-validating TLS), optionally
+  `--server-side-diff`, `--ignore-normalizer-jq-execution-timeout`. `diff-reconcile-results PATH1 PATH2` prints, per app
+  name (sorted), a diff of the two result entries (apps missing on one side shown as added/removed). Used to compare
+  behaviour across versions/settings before upgrading.
+- **Edge cases**: Flags are literally `--l` and `--o` (double-dash single letters). Wrong arg count → help + exit 1.
+- **Configuration surface**: CLI flags.
+- **Exposure**: CLI.
+- **Tests required**:
+  - Positive: two snapshots differing in one app's sync status → diff shows only that app.
+  - Positive: `--refresh` produces results without the controller running.
+
+### OPS-133 `argocd admin cluster stats`
+- **Upstream**:
+  https://github.com/argoproj/argo-cd/blob/a5038b0e2bbac1715754380ae0084df8e3d5b48c/cmd/argocd/commands/admin/cluster.go#L457 ,
+  https://github.com/argoproj/argo-cd/blob/a5038b0e2bbac1715754380ae0084df8e3d5b48c/cmd/argocd/commands/admin/cluster.go#L81 ,
+  https://github.com/argoproj/argo-cd/blob/a5038b0e2bbac1715754380ae0084df8e3d5b48c/cmd/argocd/commands/admin/cluster.go#L167
+- **Maturity**: GA
+- **Semantics**: Lists every cluster with `SERVER SHARD CONNECTION NAMESPACES COUNT APPS COUNT RESOURCES COUNT`. Shard is
+  computed client-side with the selected `--sharding-method` (default legacy) and `--replicas` (default = number of pods
+  labelled `app.kubernetes.io/name=<app controller name>`); `--shard N` filters. Cluster info (connection, counts) is
+  read from Redis, by default through an automatic port-forward to the HAProxy/Redis pod (`--port-forward-redis`, default
+  true; else cache flags `--redis` etc. are used). Clusters processed in batches of 10 concurrently.
+- **Edge cases**: With replicas 0 all clusters show shard 0. Redis password read from `argocd-redis` (warning if absent).
+  The computed shard ignores dynamic-distribution ConfigMap state. Positional args in the documented example are ignored.
+- **Configuration surface**: CLI flags.
+- **Exposure**: CLI.
+- **Tests required**:
+  - Positive: 2 controller pods, 4 clusters → shard column equals the legacy algorithm output (OPS-041).
+  - Positive: `--shard 1` filters rows.
+
+### OPS-134 `argocd admin cluster shards`
+- **Upstream**:
+  https://github.com/argoproj/argo-cd/blob/a5038b0e2bbac1715754380ae0084df8e3d5b48c/cmd/argocd/commands/admin/cluster.go#L178 ,
+  https://github.com/argoproj/argo-cd/blob/a5038b0e2bbac1715754380ae0084df8e3d5b48c/cmd/argocd/commands/admin/cluster.go#L233
+- **Maturity**: GA
+- **Semantics**: Same inputs as OPS-133; prints `SHARD RESOURCES COUNT` with each shard's cached resource count and its
+  percentage of the per-shard average (`<n> (<p>%)`), to evaluate balance.
+- **Edge cases**: No controller pods and no `--replicas` → prints nothing (exit 0). No clusters → nothing.
+- **Configuration surface**: CLI flags.
+- **Exposure**: CLI.
+- **Tests required**:
+  - Positive: balanced 2 shards → both near 100%.
+
+### OPS-135 `argocd admin cluster kubeconfig`
+- **Upstream**:
+  https://github.com/argoproj/argo-cd/blob/a5038b0e2bbac1715754380ae0084df8e3d5b48c/cmd/argocd/commands/admin/cluster.go#L520 ,
+  https://github.com/argoproj/argo-cd/blob/a5038b0e2bbac1715754380ae0084df8e3d5b48c/docs/operator-manual/troubleshooting.md#L55
+- **Maturity**: GA
+- **Semantics**: `kubeconfig CLUSTER_URL OUTPUT_PATH` reads the cluster Secret (by server URL) and writes a kubeconfig
+  reproducing Argo CD's REST config (bearer token, TLS, exec/AWS auth) with the current namespace, to troubleshoot
+  connectivity (`kubectl get pods -v 9` with it, typically from inside the controller pod).
+- **Edge cases**: Requires exactly two args (help + exit 1 otherwise); examples in the command help with one/zero args or
+  `--delete` are not implemented (Doc/implementation differences). Unknown server → NotFound error.
+- **Configuration surface**: CLI.
+- **Exposure**: CLI.
+- **Tests required**:
+  - Positive: generated kubeconfig authenticates against the managed cluster.
+  - Negative: unknown URL → error exit.
+
+### OPS-136 `argocd admin cluster generate-spec`
+- **Upstream**:
+  https://github.com/argoproj/argo-cd/blob/a5038b0e2bbac1715754380ae0084df8e3d5b48c/cmd/argocd/commands/admin/cluster.go#L566 ,
+  https://github.com/argoproj/argo-cd/blob/a5038b0e2bbac1715754380ae0084df8e3d5b48c/cmd/argocd/commands/admin/cluster.go#L693
+- **Maturity**: GA
+- **Semantics**: Generates the declarative cluster Secret for a kubeconfig context offline (fake clientset in namespace
+  `argocd`): flags of `argocd cluster add` (owner 03) plus `--bearer-token` (default placeholder `bearer-token`),
+  `--generate-bearer-token` (creates the `argocd-manager` SA/RBAC and fetches a token from the target cluster),
+  `--service-account` (`argocd-manager`), `--system-namespace` (`kube-system`), `--label`, `--annotation`, `-o yaml|json`.
+- **Edge cases**: Unknown context → fatal `Context <c> does not exist in kubeconfig`; `--in-cluster` with
+  `--cluster-endpoint` → fatal `Can only use one of --in-cluster or --cluster-endpoint`.
+- **Configuration surface**: CLI.
+- **Exposure**: CLI.
+- **Tests required**:
+  - Positive: output Secret has `argocd.argoproj.io/secret-type: cluster` and the context's server.
+
+### OPS-137 `argocd admin cluster namespaces` (+ `enable-namespaced-mode`, `disable-namespaced-mode`)
+- **Upstream**:
+  https://github.com/argoproj/argo-cd/blob/a5038b0e2bbac1715754380ae0084df8e3d5b48c/cmd/argocd/commands/admin/cluster.go#L252 ,
+  https://github.com/argoproj/argo-cd/blob/a5038b0e2bbac1715754380ae0084df8e3d5b48c/cmd/argocd/commands/admin/cluster.go#L309 ,
+  https://github.com/argoproj/argo-cd/blob/a5038b0e2bbac1715754380ae0084df8e3d5b48c/cmd/argocd/commands/admin/cluster.go#L347 ,
+  https://github.com/argoproj/argo-cd/blob/a5038b0e2bbac1715754380ae0084df8e3d5b48c/cmd/argocd/commands/admin/cluster.go#L402
+- **Maturity**: GA
+- **Semantics**: `namespaces` prints `CLUSTER NAMESPACES` — namespaces actually used by apps per cluster (from
+  `status.resources`, else destination namespace; shortest first, first 4 + `(total N)`). `enable-namespaced-mode PATTERN`
+  sets `namespaces` (and `--cluster-resources`) on clusters whose URL glob-matches and whose namespace count is ≤
+  `--max-namespace-count` (default 0 → effectively never unless set); `disable-namespaced-mode PATTERN` clears
+  `namespaces`. Both default to `--dry-run=true` (prints `... done (dry run)`).
+- **Edge cases**: Clusters with zero used namespaces are skipped by enable. Apps with unresolvable destinations abort with
+  `error validating application destination`.
+- **Configuration surface**: CLI.
+- **Exposure**: CLI; modifies cluster Secrets.
+- **Tests required**:
+  - Positive: enable with `--max-namespace-count 5 --dry-run=false` → cluster Secret gains the namespaces list.
+  - Positive: default dry run makes no changes.
+
+### OPS-138 `argocd admin repo generate-spec`
+- **Upstream**:
+  https://github.com/argoproj/argo-cd/blob/a5038b0e2bbac1715754380ae0084df8e3d5b48c/cmd/argocd/commands/admin/repo.go#L92 ,
+  https://github.com/argoproj/argo-cd/blob/a5038b0e2bbac1715754380ae0084df8e3d5b48c/cmd/argocd/commands/admin/repo.go#L197
+- **Maturity**: GA
+- **Semantics**: Generates the repository Secret offline (fake clientset, namespace `argocd`) from the same flags as
+  `argocd repo add` (owner 03); prints with `-o yaml|json`. Prompts for the password when `--username` is given without
+  `--password`.
+- **Edge cases**: Helm repo without `--name` → `must specify --name for repos of type 'helm'`; SSH key with non-SSH URL,
+  TLS client cert/key mismatch, bearer-token combination errors as in `repo add`.
+- **Configuration surface**: CLI.
+- **Exposure**: CLI.
+- **Tests required**:
+  - Positive: output Secret has `argocd.argoproj.io/secret-type: repository` and the URL-derived name.
+  - Negative: helm repo without name → error.
+
+### OPS-139 `argocd admin proj generate-spec` / `update-role-policy`
+- **Upstream**:
+  https://github.com/argoproj/argo-cd/blob/a5038b0e2bbac1715754380ae0084df8e3d5b48c/cmd/argocd/commands/admin/project.go#L42 ,
+  https://github.com/argoproj/argo-cd/blob/a5038b0e2bbac1715754380ae0084df8e3d5b48c/cmd/argocd/commands/admin/project.go#L146
+- **Maturity**: GA
+- **Semantics**: `generate-spec PROJECT` builds an AppProject offline from `argocd proj create` flags (`-o`, `-f`, `-i`).
+  `update-role-policy PROJECT_GLOB MODIFICATION ACTION` bulk-edits project role policies: `set` (requires `--resource`,
+  `--scope`, `--permission`) adds or replaces the policy for ACTION in roles matching `--role` (default `*`); `remove`
+  deletes it; `--dry-run` defaults to **true**. Owner of project/RBAC semantics: 07.
+- **Edge cases**: Only policies with exactly 6 comma-separated parts are matched.
+- **Configuration surface**: CLI.
+- **Exposure**: CLI; modifies AppProjects.
+- **Tests required**:
+  - Positive: `update-role-policy '*' set 'action/*' --role '*deployer*' --resource applications --scope '*' --permission allow --dry-run=false` adds the policy to matching roles only.
+
+### OPS-140 `argocd admin proj generate-allow-list`
+- **Upstream**:
+  https://github.com/argoproj/argo-cd/blob/a5038b0e2bbac1715754380ae0084df8e3d5b48c/cmd/argocd/commands/admin/project_allowlist.go#L42 ,
+  https://github.com/argoproj/argo-cd/blob/a5038b0e2bbac1715754380ae0084df8e3d5b48c/cmd/argocd/commands/admin/project_allowlist.go#L104
+- **Maturity**: GA
+- **Semantics**: `generate-allow-list CLUSTERROLE_PATH PROJ_NAME` reads a ClusterRole YAML and the cluster's preferred API
+  resources (discovery via kubeconfig) and emits an AppProject named PROJ_NAME whose `namespaceResourceWhitelist`
+  contains a group/kind for every rule resource the role can `create` (case-insensitive verb match), resolving resource
+  names to kinds; output to stdout or `-o/--out <file>`.
+- **Edge cases**: Rules without apiGroups are skipped; only the **first** apiGroup of each rule is considered; wildcard
+  resources (`*`) do not match any discovered name. Discovery errors abort.
+- **Configuration surface**: CLI.
+- **Exposure**: CLI.
+- **Tests required**:
+  - Positive: ClusterRole allowing create on `deployments` (apps) and `configmaps` ("") → whitelist `apps/Deployment`, `/ConfigMap`.
+  - Negative: rule with only `get` → not included.
+
+### OPS-141 `argocd admin redis-initial-password`
+- **Upstream**:
+  https://github.com/argoproj/argo-cd/blob/a5038b0e2bbac1715754380ae0084df8e3d5b48c/cmd/argocd/commands/admin/redis_initial_password.go#L38 ,
+  https://github.com/argoproj/argo-cd/blob/a5038b0e2bbac1715754380ae0084df8e3d5b48c/docs/user-guide/commands/argocd_admin_redis-initial-password.md#L1
+- **Maturity**: GA
+- **Semantics**: Idempotently ensures Secret `argocd-redis` key `auth` exists (16 random chars from `[0-9A-Za-z-]`),
+  printing `Checking for initial Redis password in secret <ns>/argocd-redis at key auth.`, `Argo CD Redis secret state
+  confirmed: secret name argocd-redis.` and `Password secret is configured properly.`; used as the Redis init container
+  (OPS-013).
+- **Edge cases**: Existing Secret without `auth` → fatal `key auth doesn't exist in secret argocd-redis.`. Never
+  rotates an existing password.
+- **Configuration surface**: kubectl flags.
+- **Exposure**: CLI.
+- **Tests required**:
+  - Positive: run twice → same password.
+  - Negative: Secret without key → non-zero exit.
+
+---
+
+## K. Disaster recovery
+
+### OPS-142 `argocd admin export`
+- **Upstream**:
+  https://github.com/argoproj/argo-cd/blob/a5038b0e2bbac1715754380ae0084df8e3d5b48c/cmd/argocd/commands/admin/backup.go#L33 ,
+  https://github.com/argoproj/argo-cd/blob/a5038b0e2bbac1715754380ae0084df8e3d5b48c/cmd/argocd/commands/admin/backup.go#L455 ,
+  https://github.com/argoproj/argo-cd/blob/a5038b0e2bbac1715754380ae0084df8e3d5b48c/cmd/argocd/commands/admin/admin.go#L105 ,
+  https://github.com/argoproj/argo-cd/blob/a5038b0e2bbac1715754380ae0084df8e3d5b48c/cmd/argocd/commands/admin/admin.go#L173 ,
+  https://github.com/argoproj/argo-cd/blob/a5038b0e2bbac1715754380ae0084df8e3d5b48c/docs/operator-manual/disaster_recovery.md#L15
+- **Maturity**: GA
+- **Semantics**: Writes a multi-document YAML (separator `---`) to stdout (`-o -`, default) or `-o <file>` containing, in
+  order: ConfigMaps `argocd-cm`, `argocd-rbac-cm`, `argocd-ssh-known-hosts-cm`, `argocd-tls-certs-cm`; Secrets that are
+  `argocd-secret`, carry label `argocd.argoproj.io/secret-type` (repositories, repo-creds, clusters, …) or annotation
+  `managed-by: argocd.argoproj.io`; all AppProjects; Applications; ApplicationSets. Objects are stripped to
+  `apiVersion`, `kind`, `metadata.{name, labels, annotations, finalizers}` and their remaining body (spec/data/status);
+  `metadata.namespace` is kept only for objects outside the Argo CD namespace. Applications/ApplicationSets from
+  additional namespaces are included when the namespace matches `--application-namespaces` /
+  `--applicationset-namespaces` globs, or by default the `application.namespaces` /
+  `applicationsetcontroller.namespaces` values from `argocd-cmd-params-cm` (then all namespaces are listed and filtered).
+- **Edge cases**: Missing `argocd-cmd-params-cm` → fatal when namespace flags are not given. Missing required ConfigMap
+  (e.g. `argocd-rbac-cm`) → fatal NotFound. ApplicationSet list Forbidden → warning, continue. Running in the wrong
+  namespace does not fail (doc note). Not exported: `argocd-cmd-params-cm`, `argocd-gpg-keys-cm`, notifications
+  ConfigMap/Secret, `argocd-server-tls`, `argocd-redis`, `argocd-initial-admin-secret` (unless labelled/annotated as above).
+- **Configuration surface**: CLI flags (kubectl flags incl. `-n`).
+- **Exposure**: CLI.
+- **Tests required**:
+  - Positive: golden export of a seeded instance (ordering, stripped metadata, namespace handling).
+  - Positive: apps in an extra namespace exported only when the namespace is enabled.
+  - Negative: ConfigMap `argocd-tls-certs-cm` missing → non-zero exit.
+
+### OPS-143 `argocd admin import` (incl. `--prune`)
+- **Upstream**:
+  https://github.com/argoproj/argo-cd/blob/a5038b0e2bbac1715754380ae0084df8e3d5b48c/cmd/argocd/commands/admin/backup.go#L158 ,
+  https://github.com/argoproj/argo-cd/blob/a5038b0e2bbac1715754380ae0084df8e3d5b48c/cmd/argocd/commands/admin/backup.go#L367 ,
+  https://github.com/argoproj/argo-cd/blob/a5038b0e2bbac1715754380ae0084df8e3d5b48c/cmd/argocd/commands/admin/backup.go#L429 ,
+  https://github.com/argoproj/argo-cd/blob/a5038b0e2bbac1715754380ae0084df8e3d5b48c/cmd/argocd/commands/admin/backup.go#L484 ,
+  https://github.com/argoproj/argo-cd/blob/a5038b0e2bbac1715754380ae0084df8e3d5b48c/cmd/argocd/commands/admin/admin.go#L124 ,
+  https://github.com/argoproj/argo-cd/blob/a5038b0e2bbac1715754380ae0084df8e3d5b48c/docs/operator-manual/disaster_recovery.md#L21
+- **Maturity**: GA
+- **Semantics**: `import SOURCE` (`-` = stdin) with client QPS 100 / burst 50. Prints `import process started <ns>`. Builds
+  the live set (the 4 well-known ConfigMaps, Argo CD Secrets per OPS-142, Applications/ApplicationSets in enabled
+  namespaces, all AppProjects). For each backup object (namespace defaulted to the Argo CD namespace): skip when it matches
+  `--skip-resources-with-label key=value` (`Skipping ...`); skip Applications/ApplicationSets whose namespace is not
+  enabled; create if absent (`<g>/<k> <name> in namespace <ns> created`); if present and spec/data, labels, annotations
+  (ignoring `last-applied-configuration`) and finalizers are equal → unchanged (printed only with `--verbose`); otherwise
+  update live: copy annotations, labels, finalizers and `data` (Secret/ConfigMap) or `spec` (+`status` for Applications
+  if present in the backup) keeping other live fields (`updated`). `--ignore-tracking` keeps live tracking annotation/label
+  values. `--stop-operation` clears `operation` on Applications (and forces an update when an operation exists).
+  `--override-on-conflict` retries updates on conflict with the latest resourceVersion. Afterwards every live object not
+  in the backup prints `needs pruning`, or with `--prune` is deleted (Applications first have finalizers removed),
+  asking `Are you sure you want to prune <g>/<k> <name> ? [y/n]` when prompts are enabled
+  (`--prompts-enabled`, default from local CLI config, false); live objects matching the skip label are never pruned.
+  `--dry-run` prints the same lines suffixed ` (dry run)` without writing. Finishes with `Import process completed
+  successfully in namespace <ns> at <RFC3339>, duration: <d>`. Forbidden/NotFound API errors are warnings.
+- **Edge cases**: With `--prune`, a missing well-known ConfigMap in the backup (live one present) hits
+  `Unexpected kind 'ConfigMap' in prune list` (fatal, possibly after partial pruning — map iteration order).
+  `--application-namespaces`/`--applicationset-namespaces` default to the cmd-params values; if unset, only objects
+  without namespace/with the control-plane namespace are imported. Conflicts without `--override-on-conflict` print
+  `Failed to update ...` and then abort.
+- **Configuration surface**: CLI flags above.
+- **Exposure**: CLI.
+- **Tests required**:
+  - Positive: export → wipe → import restores all objects (round-trip golden).
+  - Positive: `--dry-run` makes no changes and prints `(dry run)` lines.
+  - Positive: `--prune` deletes an extra project/app (app finalizer removed first); without it prints `needs pruning`.
+  - Positive: `--skip-resources-with-label` excludes both import and prune for labelled objects.
+  - Negative: prune with a backup missing `argocd-rbac-cm` → fatal unexpected kind (parity) or documented fix.
+  - Positive: `--stop-operation` clears in-flight operations.
+
+### OPS-144 Backup/restore procedure and version pinning
+- **Upstream**:
+  https://github.com/argoproj/argo-cd/blob/a5038b0e2bbac1715754380ae0084df8e3d5b48c/docs/operator-manual/disaster_recovery.md#L1 ,
+  https://github.com/argoproj/argo-cd/blob/a5038b0e2bbac1715754380ae0084df8e3d5b48c/docs/operator-manual/upgrading/overview.md#L14
+- **Maturity**: GA
+- **Semantics**: Documented procedure: determine the server version (`argocd version`), run export/import with the CLI
+  image of the **same** version (`quay.io/argoproj/argocd:$VERSION argocd admin export > backup.yaml`, `... import - <
+  backup.yaml`, mounting `~/.kube`), passing `-n <namespace>` when not `argocd`. Major upgrades should be preceded by a
+  backup. Redis content and the initial admin secret are not part of the backup (regenerated).
+- **Edge cases**: Export silently succeeds against the wrong namespace (empty-ish backup).
+- **Configuration surface**: none.
+- **Exposure**: CLI/doc.
+- **Tests required**:
+  - Positive: DR drill — new cluster, install same version, import backup → apps reconcile to Synced without re-entering credentials.
+
+---
+
+## L. Server-commands reference (component binaries and flags)
+
+### OPS-145 Shared component CLI conventions (multi-call binary, Kubernetes client flags)
+- **Upstream**:
+  https://github.com/argoproj/argo-cd/blob/a5038b0e2bbac1715754380ae0084df8e3d5b48c/cmd/main.go#L36 ,
+  https://github.com/argoproj/argo-cd/blob/a5038b0e2bbac1715754380ae0084df8e3d5b48c/common/common.go#L25 ,
+  https://github.com/argoproj/argo-cd/blob/a5038b0e2bbac1715754380ae0084df8e3d5b48c/Dockerfile#L151 ,
+  https://github.com/argoproj/argo-cd/blob/a5038b0e2bbac1715754380ae0084df8e3d5b48c/util/cli/cli.go#L68 ,
+  https://github.com/argoproj/argo-cd/blob/a5038b0e2bbac1715754380ae0084df8e3d5b48c/docs/operator-manual/server-commands/additional-configuration-method.md#L1
+- **Maturity**: GA
+- **Semantics**: One `argocd` binary dispatches on `basename(argv[0])` or env `ARGOCD_BINARY_NAME`: `argocd-server`,
+  `argocd-application-controller`, `argocd-repo-server`, `argocd-cmp-server`, `argocd-commit-server`, `argocd-dex`,
+  `argocd-notifications`, `argocd-git-ask-pass`, `argocd-applicationset-controller`, `argocd-k8s-auth`; anything else
+  (e.g. `argocd-linux-amd64`) runs the CLI. The image symlinks all names except `argocd-git-ask-pass` under
+  `/usr/local/bin` and runs under `tini`. Every Kubernetes-facing component accepts the standard client flags
+  `--kubeconfig`, `--as`, `--as-group`, `--as-uid`, `--certificate-authority`, `--client-certificate`, `--client-key`,
+  `--cluster`, `--context`, `--disable-compression`, `--insecure-skip-tls-verify`, `-n/--namespace`, `--password`,
+  `--proxy-url`, `--request-timeout`, `--server`, `--tls-server-name`, `--token`, `--user`, `--username`; the namespace
+  defaults to the in-cluster ServiceAccount namespace (kubeconfig context namespace out of cluster) and determines where
+  all settings are read (OPS-012). Every env-backed flag can be fed from `argocd-cmd-params-cm` (OPS-017). Owner of the CLI
+  dispatch/plugin behaviour: 08 (API-057).
+- **Edge cases**: Out-of-cluster without kubeconfig → client config error at start.
+- **Configuration surface**: binary name; env `ARGOCD_BINARY_NAME`; kubectl flags.
+- **Exposure**: Container command.
+- **Tests required**:
+  - Positive: invoking the binary via each symlink name starts the corresponding component (`--help` header).
+  - Positive: `-n other` makes a component read `argocd-cm` from `other`.
+
+### OPS-146 `argocd-application-controller` flag reference
+- **Upstream**:
+  https://github.com/argoproj/argo-cd/blob/a5038b0e2bbac1715754380ae0084df8e3d5b48c/cmd/argocd-application-controller/commands/argocd_application_controller.go#L258 ,
+  https://github.com/argoproj/argo-cd/blob/a5038b0e2bbac1715754380ae0084df8e3d5b48c/docs/operator-manual/server-commands/argocd-application-controller.md#L1
+- **Maturity**: GA (sharding/dynamic distribution: Alpha; hydrator: Beta)
+- **Semantics**: Complete flag set (defaults; owner feature): `--app-resync` 120, `--app-hard-resync` 0,
+  `--app-resync-jitter` 60 (OPS-058..060); `--app-state-cache-expiration` 1h, `--default-cache-expiration` 24h, `--redis`,
+  `--redisdb`, `--sentinel`, `--sentinelmaster`, `--redis-use-tls`, `--redis-ca-certificate`, `--redis-client-certificate`,
+  `--redis-client-key`, `--redis-insecure-skip-tls-verify`, `--redis-compress` gzip (OPS-020/051);
+  `--application-namespaces` (07); `--commit-server` `argocd-commit-server:8086`, `--hydrator-enabled`,
+  `--hydration-processors` 5; `--dynamic-cluster-distribution-enabled` false (OPS-045); `--enable-k8s-event` all (OPS-091);
+  `--gloglevel` 0, `--logformat` json, `--loglevel` info (OPS-086/088); `--ignore-normalizer-jq-execution-timeout-seconds`
+  0; `--kubectl-parallelism-limit` 20 (OPS-039); `--metrics-application-conditions`, `--metrics-application-labels`,
+  `--metrics-cluster-labels`, `--metrics-cache-expiration` 0, `--metrics-port` 8082 (OPS-065..075);
+  `--operation-processors` 10, `--status-processors` 20 (OPS-038); `--otlp-address/-attrs/-headers/-insecure`
+  (OPS-085); `--persist-resource-health` false (04); `--repo-error-grace-period-seconds` 180;
+  `--repo-server` `argocd-repo-server:8081`, `--repo-server-timeout-seconds` 60, `--repo-server-plaintext`,
+  `--repo-server-ca-cert-path`, `--repo-server-client-cert-path`, `--repo-server-client-cert-key-path` (OPS-101/103),
+  hidden deprecated `--repo-server-strict-tls`; `--self-heal-timeout-seconds` 0, `--self-heal-backoff-timeout-seconds` 2,
+  `--self-heal-backoff-factor` 3, `--self-heal-backoff-cap-seconds` 300, hidden deprecated
+  `--self-heal-backoff-cooldown-seconds` 330 (05); `--server-side-diff-enabled` false (04); `--sharding-method` legacy
+  (OPS-041..043); `--sync-timeout` 0 (05); `--wq-backoff-factor` 1.5, `--wq-basedelay-ns` 1ms, `--wq-bucket-qps` MaxFloat64,
+  `--wq-bucket-size` 500, `--wq-cooldown-ns` 0, `--wq-maxdelay-ns` 1s (OPS-046); plus OPS-145 client flags. No
+  `--metrics-address` (binds 0.0.0.0).
+- **Edge cases**: Deprecated flags print a deprecation notice when used and are hidden from help.
+- **Configuration surface**: flags/env.
+- **Exposure**: Container args.
+- **Tests required**:
+  - Positive: `--help` flag-set parity test (names, types, defaults) against this list.
+
+### OPS-147 `argocd-server` flag reference (incl. `argocd-server version`)
+- **Upstream**:
+  https://github.com/argoproj/argo-cd/blob/a5038b0e2bbac1715754380ae0084df8e3d5b48c/cmd/argocd-server/commands/argocd_server.go#L306 ,
+  https://github.com/argoproj/argo-cd/blob/a5038b0e2bbac1715754380ae0084df8e3d5b48c/cmd/argocd-server/commands/argocd_server.go#L319 ,
+  https://github.com/argoproj/argo-cd/blob/a5038b0e2bbac1715754380ae0084df8e3d5b48c/docs/operator-manual/server-commands/argocd-server.md#L1 ,
+  https://github.com/argoproj/argo-cd/blob/a5038b0e2bbac1715754380ae0084df8e3d5b48c/docs/operator-manual/server-commands/argocd-server_version.md#L1
+- **Maturity**: GA (proxy extension: Beta; hydrator: Beta)
+- **Semantics**: Flags: `--address` 0.0.0.0, `--port` 8080, `--metrics-address`(see OPS-022 quirk), `--metrics-port` 8083;
+  `--insecure`, `--tlsminversion` 1.2, `--tlsmaxversion` 1.3, `--tlsciphers` (OPS-097/098); `--rootpath`, `--basehref` /,
+  `--staticassets` /shared/app, `--x-frame-options` sameorigin, `--content-security-policy`, `--api-content-types`
+  application/json, `--enable-gzip` true (OPS-105..111); `--disable-auth` (07); `--dex-server`, `--dex-server-plaintext`,
+  `--dex-server-strict-tls` (OPS-102); `--repo-server`, `--repo-server-timeout-seconds` 60, `--repo-server-plaintext`,
+  `--repo-server-ca-cert-path`, `--repo-server-client-cert-path`, `--repo-server-client-cert-key-path`, hidden
+  `--repo-server-strict-tls` (OPS-101/103); caches `--app-state-cache-expiration`, `--connection-status-cache-expiration`
+  1h, `--oidc-cache-expiration` 3m, `--login-attempts-expiration` 24h (deprecated/unused), `--default-cache-expiration`,
+  `--repo-cache-expiration`, `--revision-cache-expiration`, `--revision-cache-lock-timeout`, Redis flags and the
+  `--repo-server-`-prefixed Redis flag copies (OPS-051); `--application-namespaces`, `--enable-k8s-event`,
+  `--enable-proxy-extension`, `--glob-cache-size` 10000, `--hydrator-enabled`, `--sync-with-replace-allowed` true,
+  `--webhook-parallelism-limit` 50, `--webhook-refresh-workers` 20; ApplicationSet API helpers `--appset-scm-root-ca-path`,
+  `--appset-enable-scm-providers` true, `--appset-allowed-scm-providers`, `--appset-enable-new-git-file-globbing`,
+  `--appset-enable-github-api-metrics`; `--gloglevel`, `--logformat`, `--loglevel`; `--otlp-*`; OPS-145 client flags.
+  Subcommand `argocd-server version [--short]` prints build version info.
+- **Edge cases**: `--login-attempts-expiration` is accepted but unused.
+- **Configuration surface**: flags/env.
+- **Exposure**: Container args.
+- **Tests required**:
+  - Positive: help flag-set parity test; `argocd-server version --short` prints the version string only.
+
+### OPS-148 `argocd-repo-server` flag reference
+- **Upstream**:
+  https://github.com/argoproj/argo-cd/blob/a5038b0e2bbac1715754380ae0084df8e3d5b48c/cmd/argocd-repo-server/commands/argocd_repo_server.go#L255 ,
+  https://github.com/argoproj/argo-cd/blob/a5038b0e2bbac1715754380ae0084df8e3d5b48c/docs/operator-manual/server-commands/argocd-repo-server.md#L15
+- **Maturity**: GA
+- **Semantics**: `--address` 0.0.0.0, `--port` 8081, `--metrics-address` 0.0.0.0, `--metrics-port` 8084; `--logformat`,
+  `--loglevel`; `--parallelismlimit` 0 (OPS-035); `--disable-tls`, `--client-ca-path`, `--tlsminversion`,
+  `--tlsmaxversion`, `--tlsciphers` (OPS-097/099/103); `--otlp-*`; size limits `--max-combined-directory-manifests-size` 10M,
+  `--streamed-manifest-max-tar-size` 100M, `--streamed-manifest-max-extracted-size` 1G,
+  `--helm-manifest-max-extracted-size` 1G, `--disable-helm-manifest-max-extracted-size`, `--helm-registry-max-index-size`
+  1G (env `ARGOCD_REPO_SERVER_HELM_MANIFEST_MAX_INDEX_SIZE`, no cmd-params key), `--oci-manifest-max-extracted-size` 1G,
+  `--disable-oci-manifest-max-extracted-size`, `--oci-layer-media-types` (3 defaults); `--plugin-tar-exclude`,
+  `--plugin-use-manifest-generate-paths`, `--allow-oob-symlinks`, `--include-hidden-directories`,
+  `--enable-builtin-git-config` true (owner 02/03); caches `--repo-cache-expiration` 24h, `--revision-cache-expiration` 3m,
+  `--revision-cache-lock-timeout` 10s, `--default-cache-expiration` 24h and Redis flags (OPS-036/051). No kubectl client
+  flags (repo-server has no Kubernetes access).
+- **Edge cases**: Quantity parse errors are fatal at start.
+- **Configuration surface**: flags/env.
+- **Exposure**: Container args.
+- **Tests required**:
+  - Positive: help flag-set parity test.
+
+### OPS-149 `argocd-applicationset-controller` flag reference
+- **Upstream**:
+  https://github.com/argoproj/argo-cd/blob/a5038b0e2bbac1715754380ae0084df8e3d5b48c/cmd/argocd-applicationset-controller/commands/applicationset_controller.go#L294 ,
+  https://github.com/argoproj/argo-cd/blob/a5038b0e2bbac1715754380ae0084df8e3d5b48c/docs/operator-manual/server-commands/argocd-applicationset-controller.md#L1
+- **Maturity**: GA (progressive syncs: Beta)
+- **Semantics**: `--metrics-addr` :8080, `--probe-addr` :8081, `--webhook-addr` :7000, `--enable-leader-election`
+  (OPS-055), `--applicationset-namespaces`, `--argocd-repo-server` (`ARGOCD_APPLICATIONSET_CONTROLLER_REPO_SERVER`),
+  `--repo-server-plaintext`, `--repo-server-timeout-seconds` 60, `--repo-server-ca-cert-path`,
+  `--repo-server-client-cert-path`, `--repo-server-client-cert-key-path`, hidden `--repo-server-strict-tls`, `--policy`,
+  `--enable-policy-override`, `--debug`, `--logformat`, `--loglevel`, `--allowed-scm-providers`, `--enable-scm-providers`,
+  `--dry-run`, `--token-ref-strict-mode`, `--enable-progressive-syncs`, `--enable-new-git-file-globbing`,
+  `--concurrent-reconciliations` 10, `--concurrent-application-updates` 1, `--scm-root-ca-path`, `--scm-proxy-url`,
+  `--scm-no-proxy`, `--preserved-annotations`, `--preserved-labels`, `--webhook-parallelism-limit` 50,
+  `--metrics-applicationset-labels`, `--enable-github-api-metrics`, `--max-resources-status-count` 5000,
+  `--cache-sync-period` 10h; plus OPS-145 client flags. Semantics owned by 06 (keys in OPS-026).
+- **Edge cases**: Note the repo-server flag name differs from other components (`--argocd-repo-server`).
+- **Configuration surface**: flags/env.
+- **Exposure**: Container args.
+- **Tests required**:
+  - Positive: help flag-set parity test.
+
+### OPS-150 `argocd-notifications` flag reference
+- **Upstream**:
+  https://github.com/argoproj/argo-cd/blob/a5038b0e2bbac1715754380ae0084df8e3d5b48c/cmd/argocd-notification/commands/argocd_notification.go#L37 ,
+  https://github.com/argoproj/argo-cd/blob/a5038b0e2bbac1715754380ae0084df8e3d5b48c/cmd/argocd-notification/commands/argocd_notification.go#L178
+- **Maturity**: GA
+- **Semantics**: `--processors-count` 1 (`ARGOCD_NOTIFICATION_CONTROLLER_PROCESSORS_COUNT`), `--app-label-selector` (no env),
+  `--loglevel`, `--logformat`, `--metrics-port` 9001 (no env), `--argocd-repo-server` `argocd-repo-server:8081` (no env),
+  `--argocd-repo-server-plaintext`, deprecated `--argocd-repo-server-strict-tls` (no env), `--repo-server-ca-cert-path`,
+  `--repo-server-client-cert-path`, `--repo-server-client-cert-key-path` (env prefix `ARGOCD_NOTIFICATION_CONTROLLER_`),
+  `--config-map-name` argocd-notifications-cm, `--secret-name` argocd-notifications-secret, `--application-namespaces`,
+  `--self-service-notification-enabled`; plus OPS-145 client flags. Repo-server RPC timeout fixed at 5s. Semantics owned by 09.
+- **Edge cases**: No generated server-commands doc page exists for this binary (doc gap). Metrics bind to all interfaces.
+- **Configuration surface**: flags/env.
+- **Exposure**: Container args.
+- **Tests required**:
+  - Positive: help flag-set parity test; `--config-map-name custom-cm` reads triggers from that ConfigMap.
+
+### OPS-151 `argocd-commit-server` flag reference
+- **Upstream**:
+  https://github.com/argoproj/argo-cd/blob/a5038b0e2bbac1715754380ae0084df8e3d5b48c/cmd/argocd-commit-server/commands/argocd_commit_server.go#L110 ,
+  https://github.com/argoproj/argo-cd/blob/a5038b0e2bbac1715754380ae0084df8e3d5b48c/common/common.go#L80
+- **Maturity**: Beta (Source Hydrator)
+- **Semantics**: `--logformat`, `--loglevel`, `--address` 0.0.0.0 (`ARGOCD_COMMIT_SERVER_LISTEN_ADDRESS`), `--port` 8086,
+  `--metrics-address` 0.0.0.0 (`ARGOCD_COMMIT_SERVER_METRICS_LISTEN_ADDRESS`), `--metrics-port` 8087. No TLS, Redis,
+  OTLP or kubectl flags. Hydration semantics owned by the source-hydrator area.
+- **Edge cases**: No generated server-commands doc page exists for this binary.
+- **Configuration surface**: flags/env (OPS-024).
+- **Exposure**: Container args.
+- **Tests required**:
+  - Positive: help flag-set parity test; custom `--port` reachable by the controller via `commit.server`.
+
+### OPS-152 `argocd-dex` wrapper (`rundex`, `gendexcfg`)
+- **Upstream**:
+  https://github.com/argoproj/argo-cd/blob/a5038b0e2bbac1715754380ae0084df8e3d5b48c/cmd/argocd-dex/commands/argocd_dex.go#L30 ,
+  https://github.com/argoproj/argo-cd/blob/a5038b0e2bbac1715754380ae0084df8e3d5b48c/cmd/argocd-dex/commands/argocd_dex.go#L50 ,
+  https://github.com/argoproj/argo-cd/blob/a5038b0e2bbac1715754380ae0084df8e3d5b48c/cmd/argocd-dex/commands/argocd_dex.go#L157 ,
+  https://github.com/argoproj/argo-cd/blob/a5038b0e2bbac1715754380ae0084df8e3d5b48c/docs/operator-manual/server-commands/argocd-dex_rundex.md#L1
+- **Maturity**: GA
+- **Semantics**: `argocd-dex rundex` (flags `--logformat`, `--loglevel`, `--disable-tls`, client flags): runs inside the
+  Dex image (`ghcr.io/dexidp/dex`): init container `copyutil` copies the Argo CD binary to `/shared/argocd-dex` and the
+  Dex container runs `/shared/argocd-dex rundex`, which requires the `dex` binary on PATH, prepares TLS (OPS-100),
+  generates Dex config from argocd-cm/argocd-secret (owner 07), writes `/tmp/dex.yaml` and runs `dex serve /tmp/dex.yaml`;
+  on settings changes that alter the generated config it SIGTERMs Dex and restarts it (`dex config modified. restarting
+  dex`); if no Dex config is generated it logs `dex is not configured` and idles. `argocd-dex gendexcfg [-o file]` prints
+  the generated config with `staticClients[].secret` masked as `******` (or writes it unmasked to `-o`).
+- **Edge cases**: `dex` not found → fatal at start. Generated config is logged at debug level through a redactor.
+- **Configuration surface**: flags; argocd-cm `dex.config`.
+- **Exposure**: Container args.
+- **Tests required**:
+  - Positive: editing `dex.config` restarts the Dex child process without pod restart.
+  - Positive: `gendexcfg` masks client secrets on stdout.
+
+### OPS-153 Auxiliary binaries register (`argocd-cmp-server`, `argocd-git-ask-pass`, `argocd-k8s-auth`)
+- **Upstream**:
+  https://github.com/argoproj/argo-cd/blob/a5038b0e2bbac1715754380ae0084df8e3d5b48c/cmd/main.go#L56 ,
+  https://github.com/argoproj/argo-cd/blob/a5038b0e2bbac1715754380ae0084df8e3d5b48c/cmd/main.go#L65 ,
+  https://github.com/argoproj/argo-cd/blob/a5038b0e2bbac1715754380ae0084df8e3d5b48c/cmd/main.go#L70
+- **Maturity**: GA
+- **Semantics**: Operationally relevant entry points owned by other areas: `argocd-cmp-server` (config-management plugin
+  sidecar server, supports OTLP and gRPC metrics; owner 02), `argocd-git-ask-pass` (Git credential helper talking to the
+  repo-server's local ask-pass socket; owner 03), `argocd-k8s-auth` (exec credential plugin for GCP/AWS/Azure cluster auth;
+  owner 03). Patrol must ship equivalents under the same names for drop-in images/manifests.
+- **Edge cases**: These run in CLI mode (errors silenced, printed by the dispatcher).
+- **Configuration surface**: binary names.
+- **Exposure**: Container/exec plugin.
+- **Tests required**:
+  - Positive: each binary name resolves to its function in the Patrol image.
+
+---
+
+## M. Upgrades and baseline defaults
+
+### OPS-154 Upgrade procedure and versioning policy
+- **Upstream**:
+  https://github.com/argoproj/argo-cd/blob/a5038b0e2bbac1715754380ae0084df8e3d5b48c/docs/operator-manual/upgrading/overview.md#L7 ,
+  https://github.com/argoproj/argo-cd/blob/a5038b0e2bbac1715754380ae0084df8e3d5b48c/docs/operator-manual/upgrading/overview.md#L20 ,
+  https://github.com/argoproj/argo-cd/blob/a5038b0e2bbac1715754380ae0084df8e3d5b48c/docs/operator-manual/installation.md#L118 ,
+  https://github.com/argoproj/argo-cd/blob/a5038b0e2bbac1715754380ae0084df8e3d5b48c/docs/developer-guide/release-process-and-cadence.md#L47
+- **Maturity**: GA
+- **Semantics**: Semver-like policy: patch releases have no breaking changes; minor releases may contain minor breaking
+  changes with workarounds (read every intermediate upgrade note); major releases may break behaviour (take a backup,
+  OPS-144). Upgrade = re-apply the whole manifest set of the target version with
+  `kubectl apply -n argocd --server-side --force-conflicts -f .../<version>/manifests/install.yaml` (or `ha/install.yaml`),
+  not only image changes. Support policy (release process document): only the three most recent minor versions are
+  eligible for patch releases; CVE fixes go to all supported versions.
+- **Edge cases**: Client-side apply fails since 3.3 (OPS-006).
+- **Configuration surface**: none.
+- **Exposure**: Install artifact.
+- **Tests required**:
+  - Positive: upgrade from previous Patrol minor by re-applying manifests keeps all Applications Synced.
+
+### OPS-155 Shipped `argocd-cm` defaults (default resource exclusions and ignoreResourceUpdates, since 3.0)
+- **Upstream**:
+  https://github.com/argoproj/argo-cd/blob/a5038b0e2bbac1715754380ae0084df8e3d5b48c/manifests/base/config/argocd-cm.yaml#L9 ,
+  https://github.com/argoproj/argo-cd/blob/a5038b0e2bbac1715754380ae0084df8e3d5b48c/manifests/base/config/argocd-cm.yaml#L57 ,
+  https://github.com/argoproj/argo-cd/blob/a5038b0e2bbac1715754380ae0084df8e3d5b48c/docs/operator-manual/upgrading/2.14-3.0.md#L67 ,
+  https://github.com/argoproj/argo-cd/blob/a5038b0e2bbac1715754380ae0084df8e3d5b48c/docs/operator-manual/upgrading/2.14-3.0.md#L330
+- **Maturity**: GA
+- **Semantics**: The installed `argocd-cm` (labels `app.kubernetes.io/name: argocd-cm`, `part-of: argocd`) is not empty:
+  `resource.customizations.ignoreResourceUpdates.all` = jsonPointers `/status`;
+  `...argoproj.io_Application` = jq `.metadata.annotations."notified.notifications.argoproj.io"`,
+  `."argocd.argoproj.io/refresh"`, `."argocd.argoproj.io/hydrate"`, `.operation`;
+  `...argoproj.io_Rollout` = `notified.notifications.argoproj.io` annotation;
+  `...autoscaling_HorizontalPodAutoscaler` = annotations `autoscaling.alpha.kubernetes.io/{behavior,conditions,metrics,current-metrics}`;
+  `...ConfigMap` = annotations `cluster-autoscaler.kubernetes.io/last-updated`, `control-plane.alpha.kubernetes.io/leader`;
+  `...apps_ReplicaSet` = annotations `deployment.kubernetes.io/desired-replicas`, `deployment.kubernetes.io/max-replicas`,
+  `rollout.argoproj.io/desired-replicas`; `...discovery.k8s.io_EndpointSlice` = `/metadata`, `/endpoints`, `/ports`;
+  `...Endpoints` = `/metadata`, `/subsets`. `resource.exclusions`: core/discovery `Endpoints`, `EndpointSlice`;
+  `coordination.k8s.io Lease`; authentication/authorization `SelfSubjectReview`, `TokenReview`,
+  `LocalSubjectAccessReview`, `SelfSubjectAccessReview`, `SelfSubjectRulesReview`, `SubjectAccessReview`;
+  `certificates.k8s.io CertificateSigningRequest`; `cert-manager.io CertificateRequest`; `cilium.io CiliumIdentity`,
+  `CiliumEndpoint`, `CiliumEndpointSlice`; `kyverno.io`/`reports.kyverno.io`/`wgpolicyk8s.io` `PolicyReport`,
+  `ClusterPolicyReport`, `EphemeralReport`, `ClusterEphemeralReport`, `AdmissionReport`, `ClusterAdmissionReport`,
+  `BackgroundScanReport`, `ClusterBackgroundScanReport`, `UpdateRequest`. Semantics of exclusions: owner 04.
+- **Edge cases**: Operators overriding `argocd-cm` without these keys revert to 2.x behaviour (more churn/watches).
+- **Configuration surface**: argocd-cm.
+- **Exposure**: Install artifact.
+- **Tests required**:
+  - Positive: golden comparison of the shipped argocd-cm data keys/values.
+  - Positive: with defaults, Endpoints/Lease objects are not watched/cached; Pod status churn of tracked resources does not refresh apps.
+
+### OPS-156 3.0 baseline behaviour changes (register)
+- **Upstream**:
+  https://github.com/argoproj/argo-cd/blob/a5038b0e2bbac1715754380ae0084df8e3d5b48c/docs/operator-manual/upgrading/2.14-3.0.md#L19 ,
+  https://github.com/argoproj/argo-cd/blob/a5038b0e2bbac1715754380ae0084df8e3d5b48c/docs/operator-manual/upgrading/2.14-3.0.md#L84 ,
+  https://github.com/argoproj/argo-cd/blob/a5038b0e2bbac1715754380ae0084df8e3d5b48c/docs/operator-manual/upgrading/2.14-3.0.md#L241 ,
+  https://github.com/argoproj/argo-cd/blob/a5038b0e2bbac1715754380ae0084df8e3d5b48c/docs/operator-manual/upgrading/2.14-3.0.md#L338 ,
+  https://github.com/argoproj/argo-cd/blob/a5038b0e2bbac1715754380ae0084df8e3d5b48c/docs/operator-manual/upgrading/2.14-3.0.md#L432
+- **Maturity**: GA
+- **Semantics**: Defaults Patrol must reproduce (owner in parentheses): fine-grained `update`/`delete` RBAC no longer
+  inherited by sub-resources; `server.rbac.disableApplicationFineGrainedRBACInheritance: false` restores v2 (07); `logs`
+  RBAC always enforced, `server.rbac.log.enforce.enable` removed (07); default `resource.exclusions` (OPS-155, 04);
+  legacy metrics `argocd_app_sync_status`, `argocd_app_health_status`, `argocd_app_created_time` and
+  `ARGOCD_LEGACY_CONTROLLER_METRICS` removed — use `argocd_app_info` labels (OPS-066); Dex RBAC subject =
+  `federated_claims.user_id` via `federated:id` scope instead of `sub` (07); repositories in argocd-cm (`repositories`,
+  `repository.credentials`, `helm.repositories`) no longer supported (03); ApplicationSet `applyNestedSelectors` ignored,
+  nested selectors always applied (06); Helm 3.17.1 null-value semantics (02); default tracking method `annotation`
+  (`application.resourceTrackingMethod: label` opts out) (04); `cluster.inClusterEnabled: "false"` makes in-cluster apps
+  Unknown (03); default ignoreResourceUpdates incl. `/status` (OPS-155); resource health stored outside the Application CR
+  (`status.resourceHealthSource: appTree`; `controller.resource.health.persist: true` restores) (04); empty plugin env
+  vars passed (`ARGOCD_ENV_X=""`) (02); system `ignoreDifferences` also used for ignoring resource updates (OPS-063);
+  `ignoreResourceStatusField` default `all` (04); no default ignore of CRD `spec.preserveUnknownFields` (04); project API
+  responses sanitized (07).
+- **Edge cases**: Label→annotation tracking switch can orphan resources deleted in the first sync after upgrade (doc warning).
+- **Configuration surface**: see owners.
+- **Exposure**: Various.
+- **Tests required**:
+  - Positive: fresh install defaults match each listed 3.0 behaviour (one assertion per bullet, delegated to owner areas).
+  - Negative: legacy metric names absent from `/metrics`.
+
+### OPS-157 3.1 behaviour changes (register)
+- **Upstream**:
+  https://github.com/argoproj/argo-cd/blob/a5038b0e2bbac1715754380ae0084df8e3d5b48c/docs/operator-manual/upgrading/3.0-3.1.md#L3 ,
+  https://github.com/argoproj/argo-cd/blob/a5038b0e2bbac1715754380ae0084df8e3d5b48c/docs/operator-manual/upgrading/3.0-3.1.md#L9 ,
+  https://github.com/argoproj/argo-cd/blob/a5038b0e2bbac1715754380ae0084df8e3d5b48c/docs/operator-manual/upgrading/3.0-3.1.md#L31
+- **Maturity**: GA (v1 actions API: Deprecated)
+- **Semantics**: `--staticassets` symlink confinement (OPS-111); `/api/v1/applications/{name}/resource/actions` deprecated
+  in favour of `.../resource/actions/v2` with JSON body and `resourceActionParameters`; server logs `RunResourceAction was
+  called. RunResourceAction is deprecated ...`; CLI falls back with `RunResourceActionV2 is not supported by the server,
+  falling back to RunResourceAction.` (08); OIDC authorization-code flow with PKCE handled by the server (IdP must allow
+  `/auth/callback`) (07); Helm 3.18.4, Kustomize 5.7.0 at that time (superseded, OPS-162); project API sanitization.
+- **Edge cases**: none beyond owners.
+- **Configuration surface**: see owners.
+- **Exposure**: API/CLI/UI.
+- **Tests required**:
+  - Positive: calling the v1 actions endpoint works and logs the deprecation warning.
+
+### OPS-158 3.2 behaviour changes (register)
+- **Upstream**:
+  https://github.com/argoproj/argo-cd/blob/a5038b0e2bbac1715754380ae0084df8e3d5b48c/docs/operator-manual/upgrading/3.1-3.2.md#L7 ,
+  https://github.com/argoproj/argo-cd/blob/a5038b0e2bbac1715754380ae0084df8e3d5b48c/docs/operator-manual/upgrading/3.1-3.2.md#L41 ,
+  https://github.com/argoproj/argo-cd/blob/a5038b0e2bbac1715754380ae0084df8e3d5b48c/docs/operator-manual/upgrading/3.1-3.2.md#L64 ,
+  https://github.com/argoproj/argo-cd/blob/a5038b0e2bbac1715754380ae0084df8e3d5b48c/docs/operator-manual/upgrading/3.1-3.2.md#L94
+- **Maturity**: GA (hydrator items: Beta)
+- **Semantics**: Source-hydrator sync paths must be non-root (hydrator area); Kustomize version honoured from
+  `.argocd-source.yaml` (02); repo-server gRPC `kustomizeOptions.binaryPath` deprecated in favour of
+  `kustomizeOptions.versions` (warning `kustomizeOptions.binaryPath is deprecated, use KustomizeOptions.versions instead`)
+  (02); built-in CronJob health check (may turn apps Degraded; suspended CronJobs stay Healthy) (04); ApplicationSet
+  `status.resources` capped at 5000 (`applicationsetcontroller.status.max.resources.count`) (06).
+- **Edge cases**: Large monorepo lock contention note (fixed in a later 3.2 patch; not a baseline behaviour).
+- **Configuration surface**: see owners.
+- **Exposure**: Various.
+- **Tests required**:
+  - Positive: appset generating 6000 apps → status lists 5000 resources.
+
+### OPS-159 3.3 behaviour changes (register)
+- **Upstream**:
+  https://github.com/argoproj/argo-cd/blob/a5038b0e2bbac1715754380ae0084df8e3d5b48c/docs/operator-manual/upgrading/3.2-3.3.md#L5 ,
+  https://github.com/argoproj/argo-cd/blob/a5038b0e2bbac1715754380ae0084df8e3d5b48c/docs/operator-manual/upgrading/3.2-3.3.md#L37 ,
+  https://github.com/argoproj/argo-cd/blob/a5038b0e2bbac1715754380ae0084df8e3d5b48c/docs/operator-manual/upgrading/3.2-3.3.md#L77 ,
+  https://github.com/argoproj/argo-cd/blob/a5038b0e2bbac1715754380ae0084df8e3d5b48c/docs/operator-manual/upgrading/3.2-3.3.md#L82 ,
+  https://github.com/argoproj/argo-cd/blob/a5038b0e2bbac1715754380ae0084df8e3d5b48c/docs/operator-manual/upgrading/3.2-3.3.md#L89
+- **Maturity**: GA (hydrator items: Beta; cooldown flag: Deprecated)
+- **Semantics**: Server-side apply required for install/upgrade (OPS-006, OPS-125); source hydrator records state in git
+  notes and only commits when manifests change, and no longer cleans the app path (hydrator area); anonymous Settings API
+  omits `resourceOverrides` (08); new `ARGOCD_K8S_SERVER_SIDE_TIMEOUT` separated from `ARGOCD_K8S_TCP_TIMEOUT` (OPS-047);
+  `--self-heal-backoff-cooldown-seconds` deprecated no-op (05); Helm 3.19.2 at that time and Helm 2 unsupported (no
+  `helm version --client`) (02); Kustomize 5.8.0 (02).
+- **Edge cases**: Users of 3.3.0/3.3.1 with `ClientSideApplyMigration=false` should remove it.
+- **Configuration surface**: see owners.
+- **Exposure**: Various.
+- **Tests required**:
+  - Positive: anonymous `GET /api/v1/settings` has no `resourceOverrides`.
+
+### OPS-160 3.4 behaviour changes (register)
+- **Upstream**:
+  https://github.com/argoproj/argo-cd/blob/a5038b0e2bbac1715754380ae0084df8e3d5b48c/docs/operator-manual/upgrading/3.3-3.4.md#L5 ,
+  https://github.com/argoproj/argo-cd/blob/a5038b0e2bbac1715754380ae0084df8e3d5b48c/docs/operator-manual/upgrading/3.3-3.4.md#L29 ,
+  https://github.com/argoproj/argo-cd/blob/a5038b0e2bbac1715754380ae0084df8e3d5b48c/docs/operator-manual/upgrading/3.3-3.4.md#L47 ,
+  https://github.com/argoproj/argo-cd/blob/a5038b0e2bbac1715754380ae0084df8e3d5b48c/docs/operator-manual/upgrading/3.3-3.4.md#L118 ,
+  https://github.com/argoproj/argo-cd/blob/a5038b0e2bbac1715754380ae0084df8e3d5b48c/docs/operator-manual/upgrading/3.3-3.4.md#L127
+- **Maturity**: GA
+- **Semantics**: Cluster version stored/returned as `vMajor.Minor.Patch` (affects `argocd.argoproj.io/kubernetes-version`
+  auto-labels and cluster generators; CMP `$KUBE_VERSION` unchanged `Major.Minor.Patch`) (03/06); Application health
+  `Missing` only when all resources are missing (04); gRPC DNS TXT service-config lookups disabled by default
+  (`GRPC_ENABLE_TXT_SERVICE_CONFIG=false`, re-enable per component, OPS-021); Dex 2.45 with
+  `ContinueOnConnectorFailure` enabled by default (`dexserver.connector.failure.continue: "false"` disables) (07);
+  go-oidc verifies signature before claims (expired token signed by a rotated-out key → login page instead of SSO
+  redirect) (07); OpenTelemetry SDK 1.42 / semconv 1.40 (renamed OTel metrics/attributes, OPS-085).
+- **Edge cases**: Dashboards relying on old OTel names must be updated.
+- **Configuration surface**: see owners.
+- **Exposure**: Various.
+- **Tests required**:
+  - Positive: `argocd cluster get` shows `v1.x.y` server version format.
+  - Positive: component pods have `GRPC_ENABLE_TXT_SERVICE_CONFIG=false` unless overridden.
+
+### OPS-161 3.5 behaviour changes (register)
+- **Upstream**:
+  https://github.com/argoproj/argo-cd/blob/a5038b0e2bbac1715754380ae0084df8e3d5b48c/docs/operator-manual/upgrading/3.4-3.5.md#L5 ,
+  https://github.com/argoproj/argo-cd/blob/a5038b0e2bbac1715754380ae0084df8e3d5b48c/docs/operator-manual/upgrading/3.4-3.5.md#L46 ,
+  https://github.com/argoproj/argo-cd/blob/a5038b0e2bbac1715754380ae0084df8e3d5b48c/docs/operator-manual/upgrading/3.4-3.5.md#L60 ,
+  https://github.com/argoproj/argo-cd/blob/a5038b0e2bbac1715754380ae0084df8e3d5b48c/docs/operator-manual/upgrading/3.4-3.5.md#L108 ,
+  https://github.com/argoproj/argo-cd/blob/a5038b0e2bbac1715754380ae0084df8e3d5b48c/docs/operator-manual/upgrading/3.4-3.5.md#L131 ,
+  https://github.com/argoproj/argo-cd/blob/a5038b0e2bbac1715754380ae0084df8e3d5b48c/docs/operator-manual/upgrading/3.4-3.5.md#L141 ,
+  https://github.com/argoproj/argo-cd/blob/a5038b0e2bbac1715754380ae0084df8e3d5b48c/docs/operator-manual/upgrading/3.4-3.5.md#L180
+- **Maturity**: GA (GnuPG configuration: Deprecated; `--repo-server-strict-tls`: Deprecated)
+- **Semantics**: Helm 4 (4.2.x): plain-HTTP OCI registries require `insecureOCIForceHttp` on the repo (and on dependency
+  repos); `--insecure-skip-server-verification` together with `--insecure-oci-force-http` silently drops `--plain-http`;
+  `spec.source.helm.version` ignored (02/03); UI extensions must externalize `react/jsx-runtime` (React 19) (08);
+  `ListResourceEvents`/`ListEvents` gRPC methods return Argo CD `EventList` type (REST JSON unchanged; OpenAPI schema
+  `eventsEventList`) (08); impersonation applies to all API server operations (get/patch/delete resource, events, logs,
+  actions) (07); SSH repos without credentials use `argocd-ssh-known-hosts-cm` for host-key verification (03); GnuPG
+  verification replaced by Source Integrity (`sourceIntegrity` in AppProject; legacy config warns) and
+  `verifyResult` deprecated in favour of `sourceIntegrityResult` (02/07); release `sbom.tar.gz` contains
+  `bom-ui-pnpm.spdx.json` (OPS-167); repo-server mTLS (OPS-103); `--repo-server-strict-tls` deprecated (OPS-101).
+- **Edge cases**: gRPC clients of the event APIs must be regenerated.
+- **Configuration surface**: see owners.
+- **Exposure**: Various.
+- **Tests required**:
+  - Positive: REST `GET /api/v1/applications/{name}/events` JSON shape unchanged.
+  - Positive: deprecated strict-TLS flag still works with a warning.
+
+### OPS-162 Bundled tool and image versions
+- **Upstream**:
+  https://github.com/argoproj/argo-cd/blob/a5038b0e2bbac1715754380ae0084df8e3d5b48c/hack/tool-versions.sh#L14 ,
+  https://github.com/argoproj/argo-cd/blob/a5038b0e2bbac1715754380ae0084df8e3d5b48c/Dockerfile#L1 ,
+  https://github.com/argoproj/argo-cd/blob/a5038b0e2bbac1715754380ae0084df8e3d5b48c/Dockerfile#L41 ,
+  https://github.com/argoproj/argo-cd/blob/a5038b0e2bbac1715754380ae0084df8e3d5b48c/manifests/base/kustomization.yaml#L7 ,
+  https://github.com/argoproj/argo-cd/blob/a5038b0e2bbac1715754380ae0084df8e3d5b48c/manifests/base/dex/argocd-dex-server-deployment.yaml#L40 ,
+  https://github.com/argoproj/argo-cd/blob/a5038b0e2bbac1715754380ae0084df8e3d5b48c/manifests/ha/base/redis-ha/chart/values.yaml#L17
+- **Maturity**: GA
+- **Semantics**: v3.5.5 image `quay.io/argoproj/argocd:v3.5.5` built on Ubuntu 26.04, user `argocd` uid/gid 999,
+  entrypoint `tini --`, packages incl. `git`, `gpg`, `openssh-client`, `connect-proxy`; bundled tools Helm 4.2.1,
+  Kustomize 5.8.1, git-lfs 3.7.1 (oras 1.2.0 for tooling); third-party images Dex `ghcr.io/dexidp/dex:v2.45.1`, Redis
+  `8.2.3-alpine`, HAProxy `3.0.8-alpine` (HA). Tool versions define rendering behaviour (owner 02).
+- **Edge cases**: Operators overriding tools via OPS-014 change behaviour.
+- **Configuration surface**: images.
+- **Exposure**: Install artifact.
+- **Tests required**:
+  - Positive: `helm version`/`kustomize version` inside the Patrol repo-server report compatible versions (or documented deviations).
+
+---
+
+## N. Security considerations
+
+### OPS-163 Component privilege separation and repository trust model
+- **Upstream**:
+  https://github.com/argoproj/argo-cd/blob/a5038b0e2bbac1715754380ae0084df8e3d5b48c/docs/operator-manual/security.md#L43 ,
+  https://github.com/argoproj/argo-cd/blob/a5038b0e2bbac1715754380ae0084df8e3d5b48c/docs/operator-manual/security.md#L63 ,
+  https://github.com/argoproj/argo-cd/blob/a5038b0e2bbac1715754380ae0084df8e3d5b48c/docs/operator-manual/security.md#L81 ,
+  https://github.com/argoproj/argo-cd/blob/a5038b0e2bbac1715754380ae0084df8e3d5b48c/docs/operator-manual/security.md#L143 ,
+  https://github.com/argoproj/argo-cd/blob/a5038b0e2bbac1715754380ae0084df8e3d5b48c/docs/operator-manual/security.md#L204 ,
+  https://github.com/argoproj/argo-cd/blob/a5038b0e2bbac1715754380ae0084df8e3d5b48c/manifests/base/repo-server/argocd-repo-server-deployment.yaml#L1
+- **Maturity**: GA
+- **Semantics**: Security properties Patrol must preserve: the repo-server (which executes Helm/Kustomize/plugins on
+  untrusted repo content) has **no Kubernetes privileges** (SA without Role, OPS-008), stores no credentials at rest
+  (credentials are passed per request), runs non-root with a read-only root filesystem and is reachable only from
+  Argo CD components (NetworkPolicy, OPS-010); built-in tools can be disabled (02); remote bases/chart dependencies can
+  pull from repositories outside the allow-list (documented risk); cluster write privileges can be narrowed by editing
+  `argocd-server`/`argocd-application-controller` ClusterRoles while read access stays cluster-wide (OPS-007); webhook
+  payloads are untrusted and only trigger the same refresh that happens periodically (owner 03).
+- **Edge cases**: CMP sidecars with secrets (e.g. decryption keys) weaken the isolation (doc warning).
+- **Configuration surface**: manifests.
+- **Exposure**: Install artifact.
+- **Tests required**:
+  - Authorization: repo-server token cannot read Secrets or list pods.
+  - Negative: Helm chart attempting to read files outside the repo (`../../`) fails / is confined (owner 02 asserts details).
+  - Positive: repo-server container has `readOnlyRootFilesystem: true` and runs as non-root.
+
+### OPS-164 Sensitive data handling (redaction in API and logs)
+- **Upstream**:
+  https://github.com/argoproj/argo-cd/blob/a5038b0e2bbac1715754380ae0084df8e3d5b48c/docs/operator-manual/security.md#L90 ,
+  https://github.com/argoproj/argo-cd/blob/a5038b0e2bbac1715754380ae0084df8e3d5b48c/server/server.go#L937
+- **Maturity**: GA
+- **Semantics**: Cluster credentials, Git credentials, OAuth2 client secrets and Kubernetes Secret values are never
+  returned by the API and are redacted in API payload logs (sensitive methods excluded, OPS-090); Secret manifests in
+  diffs/trees are masked (owner 04/08). Admin password stored as bcrypt in `argocd-secret` (OPS-030).
+- **Edge cases**: SSO debug logging (OPS-089) can reveal tokens.
+- **Configuration surface**: argocd-cm `resource.sensitive.mask.annotations` (owner 04).
+- **Exposure**: API, logs.
+- **Tests required**:
+  - Negative: `GET /api/v1/repositories` and `/clusters` never contain passwords/tokens/private keys.
+  - Negative: managed Secret data shown masked (`++++++++`, distinct values get distinct `+` runs) in diff/live manifest APIs.
+
+### OPS-165 Directory-app memory protection guidance
+- **Upstream**:
+  https://github.com/argoproj/argo-cd/blob/a5038b0e2bbac1715754380ae0084df8e3d5b48c/docs/operator-manual/security.md#L252
+- **Maturity**: GA
+- **Semantics**: Operators should bound repo-server memory for raw YAML/JSON (directory) apps with
+  `reposerver.max.combined.directory.manifests.size` (default `10M`, per app), sizing it as memory limit / (300 ×
+  number of directory apps) because in-memory size can be ~300× the on-disk size for crafted manifests. Enforcement
+  semantics owned by 02.
+- **Edge cases**: Limit is per application; concurrent generations multiply memory use.
+- **Configuration surface**: cmd-params key.
+- **Exposure**: ConfigMap.
+- **Tests required**:
+  - Negative: directory app whose files exceed the limit → manifest generation error naming the limit.
+
+### OPS-166 Managed-cluster credential rotation and revocation procedure
+- **Upstream**:
+  https://github.com/argoproj/argo-cd/blob/a5038b0e2bbac1715754380ae0084df8e3d5b48c/docs/operator-manual/security.md#L102
+- **Maturity**: GA
+- **Semantics**: Cluster Secrets hold the `argocd-manager` ServiceAccount bearer token (or exec/IAM config). Rotation:
+  delete the token Secret on the managed cluster and re-run `argocd cluster add`; revocation: delete the `argocd-manager`
+  SA, ClusterRole `argocd-manager-role` and binding, then `argocd cluster rm`. EKS IAM auth needs no rotation. Owner of
+  cluster registration: 03.
+- **Edge cases**: Non-expiring SA token Secrets are created for ≥1.24 clusters by `cluster add`.
+- **Configuration surface**: managed cluster RBAC.
+- **Exposure**: CLI.
+- **Tests required**:
+  - Positive: after token rotation and re-add, connection status returns to Successful.
+
+### OPS-167 Signed release assets and provenance verification
+- **Upstream**:
+  https://github.com/argoproj/argo-cd/blob/a5038b0e2bbac1715754380ae0084df8e3d5b48c/docs/operator-manual/signed-release-assets.md#L9 ,
+  https://github.com/argoproj/argo-cd/blob/a5038b0e2bbac1715754380ae0084df8e3d5b48c/docs/operator-manual/signed-release-assets.md#L27 ,
+  https://github.com/argoproj/argo-cd/blob/a5038b0e2bbac1715754380ae0084df8e3d5b48c/docs/operator-manual/signed-release-assets.md#L66 ,
+  https://github.com/argoproj/argo-cd/blob/a5038b0e2bbac1715754380ae0084df8e3d5b48c/docs/operator-manual/signed-release-assets.md#L109 ,
+  https://github.com/argoproj/argo-cd/blob/a5038b0e2bbac1715754380ae0084df8e3d5b48c/docs/operator-manual/signed-release-assets.md#L139 ,
+  https://github.com/argoproj/argo-cd/blob/a5038b0e2bbac1715754380ae0084df8e3d5b48c/docs/operator-manual/upgrading/3.4-3.5.md#L180
+- **Maturity**: GA
+- **Semantics**: Container images are keyless-signed with cosign (verifiable with `cosign verify` against the GitHub OIDC
+  issuer/workflow identity) and carry SLSA provenance (verify with `slsa-verifier verify-image`); CLI binaries have a
+  single provenance attestation `argocd-cli.intoto.jsonl`; the SBOM `sbom.tar.gz` (Go modules SPDX, image SPDX, UI pnpm
+  SPDX JSON since 3.5) has `argocd-sbom.intoto.jsonl` provenance plus `.pem`/`.sig`; admission policy controllers can
+  enforce these.
+- **Edge cases**: Release-engineering feature (no runtime code).
+- **Configuration surface**: release pipeline.
+- **Exposure**: Release artifacts.
+- **Tests required**:
+  - Positive: Patrol release images verify with cosign keyless and slsa-verifier; SBOM attestation verifies.
+
+## O. Supplementary observability (workqueue metrics, debug trace logging)
+
+### OPS-168 Application-controller workqueue metrics (`workqueue_*` families on `:8082/metrics`)
+- **Upstream**:
+  https://github.com/argoproj/argo-cd/blob/a5038b0e2bbac1715754380ae0084df8e3d5b48c/controller/metrics/metrics.go#L190 ,
+  https://github.com/argoproj/argo-cd/blob/a5038b0e2bbac1715754380ae0084df8e3d5b48c/controller/metrics/metrics.go#L193 ,
+  https://github.com/argoproj/argo-cd/blob/a5038b0e2bbac1715754380ae0084df8e3d5b48c/controller/appcontroller.go#L200 ,
+  https://github.com/argoproj/argo-cd/blob/a5038b0e2bbac1715754380ae0084df8e3d5b48c/controller/appcontroller.go#L201 ,
+  https://github.com/argoproj/argo-cd/blob/a5038b0e2bbac1715754380ae0084df8e3d5b48c/controller/appcontroller.go#L202 ,
+  https://github.com/argoproj/argo-cd/blob/a5038b0e2bbac1715754380ae0084df8e3d5b48c/controller/appcontroller.go#L203 ,
+  https://github.com/argoproj/argo-cd/blob/a5038b0e2bbac1715754380ae0084df8e3d5b48c/controller/appcontroller.go#L204 ,
+  https://github.com/argoproj/argo-cd/blob/a5038b0e2bbac1715754380ae0084df8e3d5b48c/controller/appcontroller.go#L205 ,
+  https://github.com/argoproj/argo-cd/blob/a5038b0e2bbac1715754380ae0084df8e3d5b48c/controller/appcontroller.go#L998 ,
+  https://github.com/argoproj/argo-cd/blob/a5038b0e2bbac1715754380ae0084df8e3d5b48c/controller/appcontroller.go#L1005 ,
+  https://github.com/argoproj/argo-cd/blob/a5038b0e2bbac1715754380ae0084df8e3d5b48c/controller/appcontroller.go#L1018 ,
+  https://github.com/argoproj/argo-cd/blob/a5038b0e2bbac1715754380ae0084df8e3d5b48c/controller/appcontroller.go#L1022 ,
+  https://github.com/argoproj/argo-cd/blob/a5038b0e2bbac1715754380ae0084df8e3d5b48c/controller/appcontroller.go#L1052 ,
+  https://github.com/argoproj/argo-cd/blob/a5038b0e2bbac1715754380ae0084df8e3d5b48c/controller/appcontroller.go#L1067 ,
+  https://github.com/argoproj/argo-cd/blob/a5038b0e2bbac1715754380ae0084df8e3d5b48c/controller/appcontroller.go#L1885 ,
+  https://github.com/argoproj/argo-cd/blob/a5038b0e2bbac1715754380ae0084df8e3d5b48c/controller/appcontroller.go#L2764 ,
+  https://github.com/argoproj/argo-cd/blob/a5038b0e2bbac1715754380ae0084df8e3d5b48c/controller/appcontroller.go#L2803 ,
+  https://github.com/argoproj/argo-cd/blob/a5038b0e2bbac1715754380ae0084df8e3d5b48c/controller/appcontroller.go#L2816 ,
+  https://github.com/argoproj/argo-cd/blob/a5038b0e2bbac1715754380ae0084df8e3d5b48c/controller/appcontroller.go#L255 ,
+  https://github.com/argoproj/argo-cd/blob/a5038b0e2bbac1715754380ae0084df8e3d5b48c/controller/hydrator_dependencies.go#L112 ,
+  https://github.com/argoproj/argo-cd/blob/a5038b0e2bbac1715754380ae0084df8e3d5b48c/pkg/ratelimiter/ratelimiter.go#L39 ,
+  https://github.com/argoproj/argo-cd/blob/a5038b0e2bbac1715754380ae0084df8e3d5b48c/go.mod#L121 ,
+  https://github.com/argoproj/argo-cd/blob/a5038b0e2bbac1715754380ae0084df8e3d5b48c/go.mod#L130 ,
+  https://github.com/argoproj/argo-cd/blob/a5038b0e2bbac1715754380ae0084df8e3d5b48c/controller/metrics/metrics_test.go#L667 ,
+  https://github.com/argoproj/argo-cd/blob/a5038b0e2bbac1715754380ae0084df8e3d5b48c/controller/metrics/metrics_test.go#L675 ,
+  https://github.com/argoproj/argo-cd/blob/a5038b0e2bbac1715754380ae0084df8e3d5b48c/examples/dashboard.json#L1344 ,
+  https://github.com/argoproj/argo-cd/blob/a5038b0e2bbac1715754380ae0084df8e3d5b48c/docs/proposals/004-scalability-benchmarking.md#L79
+- **Maturity**: GA
+- **Semantics**: The controller `/metrics` handler gathers two registries: the app registry (OPS-066..079) and the
+  controller-runtime registry (`ctrlmetrics.Registry`, commented upstream as "contains workqueue metrics, process and
+  golang metrics"). Controller-runtime v0.24.1 (`go.mod`) registers seven workqueue families in that registry and
+  installs itself as client-go's (v0.36.1) global workqueue metrics provider at process init, so every **named**
+  client-go queue the controller builds is instrumented. Families (label `name` and label `controller` both carry the
+  queue name):
+  - `workqueue_depth` gauge `{name, controller, priority}` — keys waiting to be handed to a worker; `priority` is always
+    the empty string for these non-priority queues (upstream test expects `priority=""`).
+  - `workqueue_adds_total` counter `{name, controller}` — adds that were not already pending (de-duplicated).
+  - `workqueue_queue_duration_seconds` histogram — time from add to `Get` by a worker; buckets
+    `ExponentialBuckets(1e-8, 10, 12)` (10 ns … 1000 s); native-histogram factor 1.1, max 100 buckets, reset 1 h.
+  - `workqueue_work_duration_seconds` histogram — time from `Get` to `Done`; same buckets.
+  - `workqueue_unfinished_work_seconds` gauge — sum of ages of in-flight items; `workqueue_longest_running_processor_seconds`
+    gauge — age of the oldest in-flight item; both refreshed every 500 ms.
+  - `workqueue_retries_total` counter — incremented on every `AddAfter`/`AddRateLimited` call (including zero delay).
+
+  Named queues (all built with the custom app-controller rate limiter, OPS-046):
+  `app_reconciliation_queue` (app refresh/compare; drained by `--status-processors` workers, OPS-038),
+  `app_operation_processing_queue` (operations; `--operation-processors` workers; every processed refresh re-enqueues
+  the app here with `AddRateLimited`), `project_reconciliation_queue` (one worker), `app_hydration_queue` and
+  `manifest_hydration_queue` (source hydrator; workers started only when the hydrator is enabled). Metric children are
+  created when each queue is constructed, so all five queues export zero-valued series from startup even with the
+  hydrator disabled. Most enqueues (informer add/update handlers, `requestAppRefresh` without an explicit delay,
+  post-refresh operation enqueue, hydration dependency enqueue) use `AddRateLimited`, so `workqueue_retries_total`
+  counts rate-limited enqueues, not failures; plain `Add` calls (Application/AppProject delete events) are not counted.
+  With sharding (OPS-040+), each replica exports the queues of its own process only. The published Grafana example
+  graphs `sum(workqueue_depth{name=~"app_.*"}) by (name)` ("Workqueue Depth").
+- **Edge cases**: The comparison-type refresh queue (`appComparisonTypeRefreshQueue`) is unnamed and exports no
+  metrics. Rate-limiter delays happen before an item enters the queue, so they do not show in
+  `workqueue_queue_duration_seconds` (they do increment `workqueue_retries_total`). Re-adding a key while it is being
+  processed increments `adds_total`/`depth` once; re-adding a key that is still pending is a no-op for the metrics. A stuck
+  processor shows as a steadily growing `workqueue_longest_running_processor_seconds`. The provider is first-wins
+  (`SetProvider` uses `sync.Once`) and is set by controller-runtime package init in the multi-call `argocd` binary. The
+  API server, repo-server, notifications controller and commit-server endpoints do not gather the controller-runtime
+  registry and export no `workqueue_*` families (the API server webhook refresh queue is unnamed anyway).
+- **Configuration surface**: none dedicated; values are driven by `--status-processors`, `--operation-processors`,
+  `--hydration-processors` (OPS-038), the workqueue rate-limit flags/env (OPS-046) and hydrator enablement.
+- **Exposure**: Controller metrics endpoint `:8082/metrics` (Service `argocd-metrics`); Grafana example dashboard.
+- **Tests required**:
+  - Positive: a fresh controller exports `workqueue_depth`, `workqueue_adds_total`, `workqueue_queue_duration_seconds`, `workqueue_work_duration_seconds`, `workqueue_unfinished_work_seconds`, `workqueue_longest_running_processor_seconds`, `workqueue_retries_total` for each of the five queue names with `name` = `controller` = queue name and `priority=""` on depth.
+  - Positive: creating an Application increments `workqueue_adds_total{name="app_reconciliation_queue"}` and `workqueue_retries_total{name="app_reconciliation_queue"}`; after it is processed, `app_operation_processing_queue` adds also increase.
+  - Positive: hydrator disabled → `app_hydration_queue`/`manifest_hydration_queue` series exist with value 0.
+  - Negative: no `workqueue_*` series for an unnamed queue; deleting an Application (plain `Add`) does not increment `retries_total`.
+  - Recovery: a reconcile blocked on a slow cluster raises `workqueue_longest_running_processor_seconds{name="app_reconciliation_queue"}`, which falls back to 0 once the item completes.
+  - Positive: with two shards each replica reports only its own queue activity.
+
+### OPS-169 ApplicationSet controller workqueue and controller-runtime reconcile metrics (`applicationset` queue)
+- **Upstream**:
+  https://github.com/argoproj/argo-cd/blob/a5038b0e2bbac1715754380ae0084df8e3d5b48c/applicationset/controllers/applicationset_controller.go#L621 ,
+  https://github.com/argoproj/argo-cd/blob/a5038b0e2bbac1715754380ae0084df8e3d5b48c/applicationset/controllers/applicationset_controller.go#L623 ,
+  https://github.com/argoproj/argo-cd/blob/a5038b0e2bbac1715754380ae0084df8e3d5b48c/cmd/argocd-applicationset-controller/commands/applicationset_controller.go#L164 ,
+  https://github.com/argoproj/argo-cd/blob/a5038b0e2bbac1715754380ae0084df8e3d5b48c/cmd/argocd-applicationset-controller/commands/applicationset_controller.go#L166 ,
+  https://github.com/argoproj/argo-cd/blob/a5038b0e2bbac1715754380ae0084df8e3d5b48c/cmd/argocd-applicationset-controller/commands/applicationset_controller.go#L172 ,
+  https://github.com/argoproj/argo-cd/blob/a5038b0e2bbac1715754380ae0084df8e3d5b48c/cmd/argocd-applicationset-controller/commands/applicationset_controller.go#L294 ,
+  https://github.com/argoproj/argo-cd/blob/a5038b0e2bbac1715754380ae0084df8e3d5b48c/cmd/argocd-applicationset-controller/commands/applicationset_controller.go#L317 ,
+  https://github.com/argoproj/argo-cd/blob/a5038b0e2bbac1715754380ae0084df8e3d5b48c/go.mod#L130
+- **Maturity**: GA
+- **Semantics**: The ApplicationSet controller runs a controller-runtime manager whose metrics server serves the
+  controller-runtime registry on `--metrics-addr` (default `:8080`). Its single controller is built with
+  `For(&ApplicationSet{})` and no explicit name, so the controller and its queue are named `applicationset` (lowercased
+  kind). Argo CD sets no controller options other than `MaxConcurrentReconciles`, so controller-runtime v0.24.1's
+  default priority queue is used: the same seven `workqueue_*` families as OPS-168 with `name="applicationset"`,
+  `controller="applicationset"`; on `workqueue_depth` the `priority` label carries the item priority as a decimal string
+  (`0` for normal events, `-100` for initial-list and unchanged-resourceVersion resync events from the default
+  `For`/`Owns` handlers; more than 25 distinct priorities collapse to `exceeded_cardinality_limit`). Default per-item
+  rate limiter for this queue: exponential 5 ms → 1000 s. Controller-runtime reconcile metrics for the controller
+  (all `{controller="applicationset"}`), pre-initialised when the controller starts: `controller_runtime_reconcile_total{result=error|
+  requeue|requeue_after|success}`, `controller_runtime_reconcile_errors_total`,
+  `controller_runtime_terminal_reconcile_errors_total`, `controller_runtime_reconcile_panics_total`,
+  `controller_runtime_reconcile_timeouts_total`, `controller_runtime_max_concurrent_reconciles` (=
+  `--concurrent-reconciliations`, env `ARGOCD_APPLICATIONSET_CONTROLLER_CONCURRENT_RECONCILIATIONS`, default 10),
+  `controller_runtime_active_workers`, plus the histogram `controller_runtime_reconcile_time_seconds`. With leader
+  election enabled, `leader_election_master_status{name="58ac56fa.applicationsets.argoproj.io"}` reports 1 on the
+  leader. These sit alongside the `argocd_appset_*` families of OPS-080.
+- **Edge cases**: Application (owned) and cluster Secret watch events feed the same `applicationset` queue, so its
+  metrics combine all three event sources. Events filtered out by the namespace event filter never reach the queue.
+  The queue and the reconcile-metric children are created only when the controller starts, so with leader election on,
+  standby replicas export no `applicationset` workqueue or `controller_runtime_*` series at all.
+- **Configuration surface**: `--metrics-addr`; `--concurrent-reconciliations` /
+  `applicationsetcontroller.concurrent.reconciliations.max`; `--enable-leader-election` (OPS-055).
+- **Exposure**: ApplicationSet controller `:8080/metrics`.
+- **Tests required**:
+  - Positive: `/metrics` exposes `workqueue_depth{name="applicationset",controller="applicationset",priority=...}` and the other workqueue families.
+  - Positive: `controller_runtime_max_concurrent_reconciles{controller="applicationset"}` equals the configured concurrency (default 10); `controller_runtime_reconcile_total` has the four `result` series from start.
+  - Positive: a reconcile error increments `controller_runtime_reconcile_errors_total` and `controller_runtime_reconcile_total{result="error"}`.
+  - Positive: on startup with existing ApplicationSets, depth briefly reports items under `priority="-100"`.
+  - Positive: with leader election on, only the leader reports `leader_election_master_status` = 1, and the standby exports no `workqueue_*{name="applicationset"}` series.
+
+### OPS-170 Kubectl debug trace logging (`ARGOCD_TRACING_ENABLED=1`)
+- **Upstream**:
+  https://github.com/argoproj/argo-cd/blob/a5038b0e2bbac1715754380ae0084df8e3d5b48c/util/kube/kubectl.go#L17 ,
+  https://github.com/argoproj/argo-cd/blob/a5038b0e2bbac1715754380ae0084df8e3d5b48c/util/kube/kubectl.go#L18 ,
+  https://github.com/argoproj/argo-cd/blob/a5038b0e2bbac1715754380ae0084df8e3d5b48c/util/kube/kubectl.go#L22 ,
+  https://github.com/argoproj/argo-cd/blob/a5038b0e2bbac1715754380ae0084df8e3d5b48c/util/kube/kubectl.go#L27 ,
+  https://github.com/argoproj/argo-cd/blob/a5038b0e2bbac1715754380ae0084df8e3d5b48c/util/kube/kubectl.go#L31 ,
+  https://github.com/argoproj/argo-cd/blob/a5038b0e2bbac1715754380ae0084df8e3d5b48c/gitops-engine/pkg/utils/tracing/api.go#L9 ,
+  https://github.com/argoproj/argo-cd/blob/a5038b0e2bbac1715754380ae0084df8e3d5b48c/gitops-engine/pkg/utils/tracing/nop.go#L8 ,
+  https://github.com/argoproj/argo-cd/blob/a5038b0e2bbac1715754380ae0084df8e3d5b48c/gitops-engine/pkg/utils/tracing/logging.go#L18 ,
+  https://github.com/argoproj/argo-cd/blob/a5038b0e2bbac1715754380ae0084df8e3d5b48c/gitops-engine/pkg/utils/tracing/logging.go#L40 ,
+  https://github.com/argoproj/argo-cd/blob/a5038b0e2bbac1715754380ae0084df8e3d5b48c/gitops-engine/pkg/utils/kube/ctl.go#L169 ,
+  https://github.com/argoproj/argo-cd/blob/a5038b0e2bbac1715754380ae0084df8e3d5b48c/gitops-engine/pkg/utils/kube/ctl.go#L182 ,
+  https://github.com/argoproj/argo-cd/blob/a5038b0e2bbac1715754380ae0084df8e3d5b48c/gitops-engine/pkg/utils/kube/ctl.go#L206 ,
+  https://github.com/argoproj/argo-cd/blob/a5038b0e2bbac1715754380ae0084df8e3d5b48c/gitops-engine/pkg/utils/kube/ctl.go#L230 ,
+  https://github.com/argoproj/argo-cd/blob/a5038b0e2bbac1715754380ae0084df8e3d5b48c/gitops-engine/pkg/utils/kube/ctl.go#L254 ,
+  https://github.com/argoproj/argo-cd/blob/a5038b0e2bbac1715754380ae0084df8e3d5b48c/gitops-engine/pkg/utils/kube/ctl.go#L302 ,
+  https://github.com/argoproj/argo-cd/blob/a5038b0e2bbac1715754380ae0084df8e3d5b48c/gitops-engine/pkg/utils/kube/ctl.go#L333 ,
+  https://github.com/argoproj/argo-cd/blob/a5038b0e2bbac1715754380ae0084df8e3d5b48c/gitops-engine/pkg/utils/kube/ctl.go#L344 ,
+  https://github.com/argoproj/argo-cd/blob/a5038b0e2bbac1715754380ae0084df8e3d5b48c/gitops-engine/pkg/utils/kube/ctl.go#L356 ,
+  https://github.com/argoproj/argo-cd/blob/a5038b0e2bbac1715754380ae0084df8e3d5b48c/gitops-engine/pkg/utils/kube/resource_ops.go#L263 ,
+  https://github.com/argoproj/argo-cd/blob/a5038b0e2bbac1715754380ae0084df8e3d5b48c/gitops-engine/pkg/utils/kube/resource_ops.go#L320 ,
+  https://github.com/argoproj/argo-cd/blob/a5038b0e2bbac1715754380ae0084df8e3d5b48c/gitops-engine/pkg/utils/kube/resource_ops.go#L337 ,
+  https://github.com/argoproj/argo-cd/blob/a5038b0e2bbac1715754380ae0084df8e3d5b48c/gitops-engine/pkg/utils/kube/resource_ops.go#L361 ,
+  https://github.com/argoproj/argo-cd/blob/a5038b0e2bbac1715754380ae0084df8e3d5b48c/gitops-engine/pkg/utils/kube/resource_ops.go#L391 ,
+  https://github.com/argoproj/argo-cd/blob/a5038b0e2bbac1715754380ae0084df8e3d5b48c/gitops-engine/pkg/cache/cluster.go#L207 ,
+  https://github.com/argoproj/argo-cd/blob/a5038b0e2bbac1715754380ae0084df8e3d5b48c/cmd/argocd-application-controller/commands/argocd_application_controller.go#L181 ,
+  https://github.com/argoproj/argo-cd/blob/a5038b0e2bbac1715754380ae0084df8e3d5b48c/controller/sync.go#L64 ,
+  https://github.com/argoproj/argo-cd/blob/a5038b0e2bbac1715754380ae0084df8e3d5b48c/controller/sync.go#L346 ,
+  https://github.com/argoproj/argo-cd/blob/a5038b0e2bbac1715754380ae0084df8e3d5b48c/controller/hook.go#L182 ,
+  https://github.com/argoproj/argo-cd/blob/a5038b0e2bbac1715754380ae0084df8e3d5b48c/controller/appcontroller.go#L1464 ,
+  https://github.com/argoproj/argo-cd/blob/a5038b0e2bbac1715754380ae0084df8e3d5b48c/server/server.go#L1030 ,
+  https://github.com/argoproj/argo-cd/blob/a5038b0e2bbac1715754380ae0084df8e3d5b48c/server/application/application.go#L1574 ,
+  https://github.com/argoproj/argo-cd/blob/a5038b0e2bbac1715754380ae0084df8e3d5b48c/server/application/application.go#L3029 ,
+  https://github.com/argoproj/argo-cd/blob/a5038b0e2bbac1715754380ae0084df8e3d5b48c/cmd/argocd/commands/admin/app.go#L414 ,
+  https://github.com/argoproj/argo-cd/blob/a5038b0e2bbac1715754380ae0084df8e3d5b48c/util/log/logrus.go#L27 ,
+  https://github.com/argoproj/argo-cd/blob/a5038b0e2bbac1715754380ae0084df8e3d5b48c/gitops-engine/pkg/utils/tracing/logging_test.go#L17 ,
+  https://github.com/argoproj/argo-cd/blob/a5038b0e2bbac1715754380ae0084df8e3d5b48c/docs/developer-guide/debugging-locally.md#L46
+- **Maturity**: GA (undocumented debug switch; no maturity entry)
+- **Semantics**: At process start (`util/kube` package `init`), if env `ARGOCD_TRACING_ENABLED` equals exactly `1`,
+  the package tracer becomes gitops-engine's `LoggingTracer`; otherwise it stays a `NopTracer`. Every `KubectlCmd`
+  created through `util/kube.NewKubectl()` or `util/kube.ManageServerSideDiffDryRuns()` carries that tracer, and the
+  resource-operation objects it creates (`ManageResources`, `ManageServerSideDiffDryRuns`) inherit it. Each traced call
+  opens a span and, when the call returns, logs one entry with message `Trace` and fields `operation_name`, `time_ms`
+  (elapsed milliseconds as a float) plus the span baggage. Span names and baggage: `GetAPIResources`,
+  `GetServerVersion` (no baggage); `GetResource`, `CreateResource`, `PatchResource`, `DeleteResource` (`kind`,
+  `name`); `ConvertToVersion` (`from`, `to` group/version); resource operations `ApplyResource`, `CreateResource`,
+  `ReplaceResource`, `UpdateResource`, `AuthReconcile` (`kind`, `name`). Where it applies: the application controller
+  (sync apply/create/replace/update and RBAC auth-reconcile through gitops-engine sync, hook create/delete, resource
+  deletion during app deletion, server-side-diff dry-run applies), the API server (cluster/app server-version and
+  API-resource discovery, resource get/patch/delete actions, server-side diff) and `argocd admin app
+  get-reconcile-results`. It is separate from OTLP tracing (OPS-085): nothing is exported, only log lines.
+- **Edge cases**: Any value other than `1` (`true`, `yes`, empty) leaves tracing off; the switch is read once and needs a
+  restart. No `argocd-cmd-params-cm` key or manifest maps it, and the env-only register (OPS-032) does not list it. The
+  tracer's logger is built at package-init time from `ARGOCD_LOG_FORMAT`/`ARGOCD_LOG_LEVEL` as present in the process
+  environment *before* `--logformat`/`--loglevel` are applied. With the stock manifests (which set neither variable)
+  trace lines are therefore JSON at info level even when the component runs with `text` format or `warn` level. The same
+  package logger is the `KubectlCmd` logger. The gitops-engine cluster cache builds its own `KubectlCmd` with a
+  `NopTracer`, so cluster-cache discovery/list/watch is never traced. Baggage field order is not stable (map).
+- **Configuration surface**: env `ARGOCD_TRACING_ENABLED` (`1` = on) on argocd-application-controller, argocd-server, or
+  the `argocd admin` process; output format/level follow env `ARGOCD_LOG_FORMAT` / `ARGOCD_LOG_LEVEL`.
+- **Exposure**: Component logs only (no CRD/API/CLI flag/UI).
+- **Tests required**:
+  - Positive: controller with `ARGOCD_TRACING_ENABLED=1` syncing a Deployment logs `Trace` entries with `operation_name="ApplyResource"`, `kind="Deployment"`, `name=<name>` and a numeric `time_ms`.
+  - Positive: API server with the env set logs `PatchResource`/`DeleteResource` traces for UI resource actions, and `GetServerVersion` traces for cluster info.
+  - Negative: env unset or `ARGOCD_TRACING_ENABLED=true` → no `Trace` lines from kubectl operations.
+  - Edge: component started with `--logformat text` and no `ARGOCD_LOG_FORMAT` env still emits the kubectl trace lines in JSON.
+  - Negative: cluster-cache list/watch activity produces no trace lines even with tracing on.
+
+### OPS-171 External command timing trace logs (`exec <binary>` spans)
+- **Upstream**:
+  https://github.com/argoproj/argo-cd/blob/a5038b0e2bbac1715754380ae0084df8e3d5b48c/util/exec/exec.go#L65 ,
+  https://github.com/argoproj/argo-cd/blob/a5038b0e2bbac1715754380ae0084df8e3d5b48c/util/exec/exec.go#L67 ,
+  https://github.com/argoproj/argo-cd/blob/a5038b0e2bbac1715754380ae0084df8e3d5b48c/util/exec/exec.go#L68 ,
+  https://github.com/argoproj/argo-cd/blob/a5038b0e2bbac1715754380ae0084df8e3d5b48c/util/exec/exec.go#L69 ,
+  https://github.com/argoproj/argo-cd/blob/a5038b0e2bbac1715754380ae0084df8e3d5b48c/util/exec/exec.go#L74 ,
+  https://github.com/argoproj/argo-cd/blob/a5038b0e2bbac1715754380ae0084df8e3d5b48c/util/exec/exec.go#L286 ,
+  https://github.com/argoproj/argo-cd/blob/a5038b0e2bbac1715754380ae0084df8e3d5b48c/util/git/client.go#L1840 ,
+  https://github.com/argoproj/argo-cd/blob/a5038b0e2bbac1715754380ae0084df8e3d5b48c/util/helm/cmd.go#L51 ,
+  https://github.com/argoproj/argo-cd/blob/a5038b0e2bbac1715754380ae0084df8e3d5b48c/util/helm/cmd.go#L62 ,
+  https://github.com/argoproj/argo-cd/blob/a5038b0e2bbac1715754380ae0084df8e3d5b48c/util/helm/cmd.go#L184 ,
+  https://github.com/argoproj/argo-cd/blob/a5038b0e2bbac1715754380ae0084df8e3d5b48c/util/helm/client.go#L170 ,
+  https://github.com/argoproj/argo-cd/blob/a5038b0e2bbac1715754380ae0084df8e3d5b48c/util/helm/helm.go#L140 ,
+  https://github.com/argoproj/argo-cd/blob/a5038b0e2bbac1715754380ae0084df8e3d5b48c/util/kustomize/kustomize.go#L28 ,
+  https://github.com/argoproj/argo-cd/blob/a5038b0e2bbac1715754380ae0084df8e3d5b48c/util/sourceintegrity/gpg.go#L235 ,
+  https://github.com/argoproj/argo-cd/blob/a5038b0e2bbac1715754380ae0084df8e3d5b48c/cmpserver/plugin/plugin.go#L90 ,
+  https://github.com/argoproj/argo-cd/blob/a5038b0e2bbac1715754380ae0084df8e3d5b48c/util/cli/cli.go#L186 ,
+  https://github.com/argoproj/argo-cd/blob/a5038b0e2bbac1715754380ae0084df8e3d5b48c/util/log/logrus.go#L27
+- **Maturity**: GA
+- **Semantics**: Always on (not gated by `ARGOCD_TRACING_ENABLED`). Every external command run through
+  `util/exec.Run`, `RunWithRedactor` or `RunWithExecRunOpts` opens a `LoggingTracer` span named `exec <argv[0]>`
+  (e.g. `exec git`, `exec helm`, `exec kustomize`, `exec gpg`) with baggage `dir` (working directory) and `args`
+  (`fmt` rendering of the full argv, e.g. `[git fetch origin --tags --force]`, passed through the redactor when the
+  caller supplies one). When the command returns (success, non-zero exit or timeout kill) one info-level `Trace` log
+  entry is written with `operation_name`, `time_ms`, `dir`, `args`. Users: the git client (all git invocations, no
+  redactor; repo-server and commit-server), Helm (`RunWithRedactor`; the redactor rewrites `--username <v>` and
+  `--password <v>` to `******`), Kustomize and GnuPG (`util/sourceintegrity` key generation/import in the repo-server). The logger is created per call
+  from `ARGOCD_LOG_FORMAT`/`ARGOCD_LOG_LEVEL`, which `SetLogFormat`/`SetLogLevel` export from each component's
+  `--logformat`/`--loglevel`, so these lines follow the component's configured format and level.
+- **Edge cases**: At `--loglevel warn` or higher the lines are suppressed. Git args are logged unredacted (credentials are
+  supplied via askpass/env, not argv). `util/exec.RunCommand`/`RunCommandExt` called directly do not trace, and CMP
+  sidecar plugin commands use their own runner (no `Trace` line). Timeout/termination behaviour (`ARGOCD_EXEC_TIMEOUT`,
+  `ARGOCD_EXEC_FATAL_TIMEOUT`) belongs to OPS-037; the trace still records the elapsed time of a killed command.
+- **Configuration surface**: none (log level/format only).
+- **Exposure**: Component logs (repo-server, commit-server; any process using these helpers).
+- **Tests required**:
+  - Positive: a repo-server manifest generation for a Git+Helm app logs `Trace` entries with `operation_name="exec git"` and `operation_name="exec helm"`, each with `dir`, `args` and numeric `time_ms`.
+  - Positive: a Helm repository with username/password (`helm repo add --username ... --password ...`) logs `args` containing `--username ******` and `--password ******`; registry login uses `--password-stdin`, so no secret appears in its args.
+  - Negative: repo-server at `--loglevel warn` emits no `Trace` lines.
+  - Positive: `--logformat text` renders the trace lines in text format.
+  - Recovery: a git command killed by `ARGOCD_EXEC_TIMEOUT` still produces its `Trace` line.
+
+---
+
+## Unconfirmed
+
+- **OPS-094 runtime diagnostics**: `stats.RegisterStackDumper`, `stats.StartStatsTicker`, `stats.RegisterHeapDumper` come
+  from the external module `github.com/argoproj/pkg/v2/stats`, which is not vendored in the checkout. The exact trigger
+  signals (expected SIGUSR1 for stack dump, SIGUSR2 for heap profile) and the stats log line format could not be read.
+  Paths checked: `util/stats/stats.go` (only `TimingStats`), `cmd/argocd-*/commands/*.go`, `go.mod`.
+- **OPS-079 gRPC metric names**: only `grpc_server_handled_total` and `grpc_server_msg_sent_total` are named in the docs;
+  `grpc_server_started_total`, `grpc_server_msg_received_total` and `grpc_server_handling_seconds` are the standard names
+  of `go-grpc-middleware/providers/prometheus`, whose source is not in the checkout. Paths checked: `server/server.go`,
+  `reposerver/server.go`, `cmpserver/server.go`, `docs/operator-manual/metrics.md`.
+- **OPS-084 notifications metrics**: defined in the external `notifications-engine` module (`controller.NewMetricsRegistry`);
+  names/labels taken from `docs/operator-manual/notifications/monitoring.md` and the notifications Grafana dashboard.
+  Paths checked: `cmd/argocd-notification/commands/argocd_notification.go`, `notification_controller/controller/controller.go`.
+- **OPS-117 GKE ingress**: the statement that the CLI needs `--grpc-web` behind GCLB is an inference (the doc configures only
+  an HTTP backend and does not mention gRPC). Path checked: `docs/operator-manual/ingress.md` (GKE section).
+- **OPS-119 Ambassador**: the claim that the CLI sends the port in the Host header is a doc statement; CLI transport code
+  (`pkg/apiclient`) was not audited for it (owner 08).
+- **OPS-116 AWS ALB**: "argo currently downgrades non-grpc calls to HTTP1" is a doc statement about cmux matching; not
+  separately tested. Path checked: `server/server.go` (cmux setup).
+- **OPS-052 Redis HA**: failover timings and HAProxy health-check behaviour are defined by the generated redis-ha chart
+  templates/values and were not exercised. Paths checked: `manifests/ha/base/redis-ha/chart/values.yaml`,
+  `manifests/ha/base/redis-ha/chart/requirements.yaml`.
+- **OPS-157/158/159/161 upgrade registers**: bundled Helm/Kustomize versions mentioned in older notes (3.18.4, 5.7.0,
+  3.19.2, 5.8.0) are historical; the 3.5.5 baseline versions come from `hack/tool-versions.sh` (OPS-162). Behaviour
+  details of each register item are owned and verified by the owner areas named in each row.
+- **OPS-057 `GOMEMLIMIT`**: pure Go-runtime guidance with no Argo CD code involved (doc-only).
+- **OPS-168/169 dependency-defined details**: workqueue family names, label sets, histogram buckets, the 500 ms
+  unfinished-work refresh, retry counting on `AddAfter`, the priority-queue default, the `applicationset` controller name
+  and the `controller_runtime_*` families come from client-go v0.36.1 and controller-runtime v0.24.1 (versions pinned in
+  `go.mod`), read from a local Go module cache rather than the argo-cd checkout. The argo-cd test
+  `controller/metrics/metrics_test.go` (`TestWorkqueueMetrics`) confirms only the presence of six families and the
+  `name`/`controller`/`priority` labels for a test queue. Paths checked: `controller/metrics/metrics.go`,
+  `controller/appcontroller.go`, `applicationset/controllers/applicationset_controller.go`,
+  `cmd/argocd-applicationset-controller/commands/applicationset_controller.go`, `go.mod`.
+- **`rest_client_requests_total` on controller endpoints**: controller-runtime registers
+  `rest_client_requests_total{code,method,host}` in its registry and hooks client-go's request-result metric at
+  package init; `util/metrics/kubectl/kubectl_metrics.go` (L185) later overwrites that hook directly. So this family
+  should only carry series for requests made before `RegisterWithClientGo()` runs. Not verified at runtime.
+- **OPS-170/171 log-line shape**: the logr→logrus bridge is `github.com/bombsimon/logrusr/v4` v4.1.0 (`go.mod` L28),
+  whose source is not in the checkout or the local module cache. Two points are inferred from the gitops-engine test
+  (`logger.Info(0, "Trace")` with `operation_name`/`time_ms` values) and logr conventions, not read from the adapter:
+  that V(0) `Info` maps to logrus `info`, and that the custom formatter in `util/log/logrus.go` renders every value via
+  `fmt` `%v` (so JSON output would carry `time_ms` as a string). Paths checked: `util/log/logrus.go`,
+  `gitops-engine/pkg/utils/tracing/logging_test.go`.
+
+## Doc/implementation differences
+
+- **`server.metrics.listen.address` (OPS-022)**: the server binds metrics on `--address`'s host; the env value is used as
+  the *flag name* in `StringVar(&metricsHost, env.StringFromEnv("ARGOCD_SERVER_METRICS_LISTEN_ADDRESS","metrics-address"), ...)`
+  and `Listen()` uses `ListenHost` for the metrics listener, so the documented key never changes the metrics bind address.
+- **`reposerver.metrics.listen.address` (OPS-023)**: manifests map it to `ARGOCD_REPO_SERVER_LISTEN_METRICS_ADDRESS` but
+  the binary reads `ARGOCD_REPO_SERVER_METRICS_LISTEN_ADDRESS`; the key has no effect.
+- **`reposerver.parallelism.limit` (OPS-023/035)**: reference yaml shows `"1"`; compiled default is `0` (unlimited).
+- **Workqueue defaults (OPS-046)**: high_availability.md documents base delay 1000 ns (1μs) and max delay 3 s; code
+  defaults are 1 ms and 1 s.
+- **`ARGO_CD_UPDATE_CLUSTER_INFO_TIMEOUT` (OPS-050)**: documented as seconds; code parses a Go duration bounded 10s–1m.
+- **`dexserver.connector.failure.continue` (OPS-025/160)**: reference yaml shows `"false"` with "to fail the entire auth
+  flow ... set this to false"; per the 3.4 note Dex's own default is enabled when the key is unset.
+- **argocd-cm reference (OPS-029/060)**: `timeout.hard.reconciliation` (consumed by manifests), `globalProjects`,
+  `server.rbac.disableApplicationFineGrainedRBACInheritance` and split `extension.config.<name>` keys are not in
+  `argocd-cm.yaml`.
+- **argocd-cmd-params-cm reference (OPS-028)**: keys wired in manifests but absent from the reference
+  (`controller.self.heal.backoff.cooldown.seconds`, `controller.ignore.normalizer.jq.timeout`,
+  `server.content.security.policy`, `server.http.cookie.maxnumber`, `reposerver.helm.manifest.max.extracted.size`,
+  `reposerver.disable.helm.manifest.max.extracted.size`, `reposerver.revision.cache.lock.timeout`,
+  `reposerver.grpc.max.size`, `reposerver.helm.user.agent`, `applicationsetcontroller.repo.server.plaintext/.strict.tls/
+  .timeout.seconds`); `--helm-registry-max-index-size` has an env var but no key (OPS-148).
+- **`controller.metrics.application.labels` (OPS-067)**: metrics.md shows this cmd-params key, but
+  `--metrics-application-labels` has no env binding and no manifest mapping; the key does nothing.
+- **gRPC metrics toggle (OPS-079)**: metrics.md says gRPC metrics only show up with `ARGOCD_ENABLE_GRPC_TIME_HISTOGRAM=true`
+  (and "not exposed by default" on the repo-server); code always registers the gRPC counters, the env only adds the
+  handling-time histogram.
+- **Undocumented metrics (OPS-077/082)**: `argocd_git_lsremote_fail_total` (repo-server) and `argocd_info{version}` (API
+  server) exist in code but not in metrics.md.
+- **Metric names in flag help (OPS-067/068/080)**: help texts mention `argocd_application_labels`,
+  `argocd_application_conditions`, `argocd_applicationset_labels`; real names are `argocd_app_labels`,
+  `argocd_app_condition`, `argocd_appset_labels`.
+- **GitHub API metric labels (OPS-081)**: doc says labels "name and namespace of an applicationset"; real label names are
+  `appset_name`, `appset_namespace` (plus `method`, `endpoint`, `status`, `resource`).
+- **TLS cipher default (OPS-097)**: tls.md lists `TLS_ECDHE_RSA_WITH_AES_256_GCM_SHA384:TLS_RSA_WITH_AES_256_GCM_SHA384`;
+  code default (and generated server-commands docs) is `TLS_ECDHE_RSA_WITH_AES_256_GCM_SHA384` only.
+- **Notifications CA flag name (OPS-101)**: tls.md/mtls.md name `--argocd-repo-server-ca-cert-path` for the notifications
+  controller; the shared helper registers `--repo-server-ca-cert-path` (env `ARGOCD_NOTIFICATION_CONTROLLER_REPO_SERVER_CA_CERT_PATH`).
+- **Legacy strict-TLS mount path (OPS-101)**: the 3.5 note says the deprecated flag loads `/app/config/server/tls/`; that is
+  true only for argocd-server — the controller uses `/app/config/controller/tls/`, appset/notifications
+  `/app/config/reposerver/tls/`. tls.md describes it as auto-discovery "from the Secret" while code reads mounted files.
+- **mTLS auto-mount (OPS-103)**: mtls.md says the Secret is mounted "in every relevant pod"; the dynamic-distribution
+  controller Deployment variant (`manifests/base/application-controller-deployment`) mounts neither
+  `argocd-repo-server-mtls` nor maps `otlp.attrs`. `server-ca.crt` is mounted but unused unless
+  `--repo-server-ca-cert-path` points at it.
+- **Dex strict TLS (OPS-102)**: tls.md describes CA validation; code additionally pins the exact leaf certificate
+  (`dex server certificate does not match`).
+- **Static assets default (OPS-111)**: the 3.1 upgrade note names `/app/shared`; code default is `/shared/app`.
+- **managed-by-url validation (OPS-124)**: the doc says invalid URLs prevent creation/update; validation exists only in
+  the API server create/update path — Applications applied by kubectl or synced by a parent app are accepted and only
+  rendered defensively by the UI.
+- **Security doc TLS claim (OPS-104)**: "All network communication is performed over TLS including service-to-service";
+  the controller→commit-server gRPC, metrics/health endpoints and default Redis traffic are plaintext.
+- **Security doc refresh interval (OPS-058)**: webhook section says regular refresh occurs "at three minute intervals";
+  controller default is 120 s plus up to 60 s jitter (repo-server revision cache default is 3 m).
+- **`argocd admin` examples**: `argocd admin initial-password reset` (no `reset` subcommand; OPS-031);
+  `settings validate --group plugins` (no such group, nil validator; OPS-126); `resource-overrides action list` (command is
+  `list-actions`; OPS-130); `cluster kubeconfig` with 0/1 args or `--delete` (requires exactly 2 args, no `--delete`;
+  OPS-135); `cluster stats target-cluster` (positional ignored; OPS-133); `app get-reconcile-results APPNAME` (takes an
+  output PATH; OPS-132).
+- **Missing generated references (OPS-150/151)**: `docs/operator-manual/server-commands/` has no pages for
+  `argocd-notifications`, `argocd-commit-server`, `argocd-cmp-server`, `argocd-k8s-auth`, `argocd-git-ask-pass`.
+- **Workqueue / controller-runtime metrics (OPS-168/169)**: `docs/operator-manual/metrics.md` documents no
+  `workqueue_*` or `controller_runtime_*` families and none of the queue names (`app_reconciliation_queue`,
+  `app_operation_processing_queue`, `project_reconciliation_queue`, `app_hydration_queue`, `manifest_hydration_queue`,
+  `applicationset`). The shipped example dashboard (`examples/dashboard.json`, "Workqueue Depth") nevertheless queries
+  `workqueue_depth{name=~"app_.*"}`.
+- **`ARGOCD_TRACING_ENABLED` (OPS-170)**: appears only as a line in the developer-guide example env file
+  (`docs/developer-guide/debugging-locally.md` L46). It appears nowhere in the operator manual or any other doc page, and its trace output ignores the component's `--logformat`/`--loglevel` unless
+  `ARGOCD_LOG_FORMAT`/`ARGOCD_LOG_LEVEL` are set in the environment.
+- **Exec trace logs (OPS-171)**: the always-on `Trace` log line for every git/helm/kustomize/gpg invocation is not
+  documented anywhere.

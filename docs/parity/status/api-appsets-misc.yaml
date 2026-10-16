@@ -1,0 +1,276 @@
+# internal/apiserver/services/{applicationsets,notifications,badge,extensions} and their
+# pkg/apiclient types/methods. See docs/architecture/components/api-appsets-misc.md.
+# Evidence: HTTP tests through pkg/apiclient against the real rest route chain with the real
+# auth.TokenService, rbac.Enforcer and settings snapshots, and (ApplicationSets, badge,
+# extensions) an envtest kube-apiserver with the Patrol CRDs; extension backends are local
+# httptest servers. The services are not wired into cmd/patrolcd yet, so nothing is "verified".
+# Commands and results: docs/verification/runs/2026-10-16-api-appsets-misc.txt.
+
+ASET-100:
+  status: implemented
+  impl: [internal/apiserver/services/applicationsets/handlers.go, internal/apiserver/services/applicationsets/watch.go]
+  tests:
+    - internal/apiserver/services/applicationsets/applicationsets_test.go:TestCreateValidation
+    - internal/apiserver/services/applicationsets/applicationsets_test.go:TestGetNoExistenceOracle
+    - internal/apiserver/services/applicationsets/applicationsets_test.go:TestListFiltering
+    - internal/apiserver/services/applicationsets/applicationsets_test.go:TestWatchPerEventAuthorization
+    - internal/apiserver/services/applicationsets/internal_test.go:TestNamespaceEnabled
+  notes: >-
+    API side. The enabled namespaces are Config.Namespaces (names, globs, /regexp/), which the
+    server wiring fills from applicationsetcontroller.namespaces (upstream argocd-server uses
+    application.namespaces). Get, create, generate, tree, events and delete answer 403
+    "namespace '<ns>' is not permitted"; list and watch filter. Delete also checks the namespace
+    (upstream does not). Creation outside the control-plane namespace also requires every
+    project to list the namespace in sourceNamespaces.
+
+ASET-108:
+  status: implemented
+  impl: [internal/apiserver/services/applicationsets/handlers.go]
+  tests:
+    - internal/apiserver/services/applicationsets/applicationsets_test.go:TestCreateValidation
+    - internal/apiserver/services/applicationsets/applicationsets_test.go:TestCreateAuthorization
+    - internal/apiserver/services/applicationsets/limits_projects_test.go:TestActionsOnExistingNeedEveryProject
+    - internal/apiserver/services/applicationsets/generator_internal_test.go:TestRBACObjects
+  notes: >-
+    API side: templated projects (spec.template and generator-level templates) are rejected for
+    create, dry-run and generate; create is authorized on every project of internal/appset
+    Projects, so a generator template cannot escalate into another project. Get, list, watch,
+    tree, events, upsert and delete of an existing ApplicationSet are authorized on every
+    project of appset.Projects as well (a templated project on a kubectl-created object maps
+    to the wildcard project "*", fail closed); upstream checks the template project only.
+
+ASET-109:
+  status: implemented
+  impl: [internal/apiserver/services/applicationsets/handlers.go, internal/apiserver/services/applicationsets/service.go]
+  tests:
+    - internal/apiserver/services/applicationsets/applicationsets_test.go:TestCreateAuthorization
+    - internal/apiserver/services/applicationsets/applicationsets_test.go:TestListFiltering
+    - internal/apiserver/services/applicationsets/applicationsets_test.go:TestUpsertAndIdempotentCreate
+    - internal/apiserver/services/applicationsets/applicationsets_test.go:TestUpsertProjectChange
+    - internal/apiserver/services/applicationsets/internal_test.go:TestRBACObject
+  notes: >-
+    Object <project>/<name> (or <project>/<namespace>/<name>) with the literal template project
+    ("default" when empty; the audited object); ApplicationSets whose generator-level templates
+    use other projects need the action on each of them. Project role tokens and SSO groups
+    covered.
+
+ASET-110:
+  status: implemented
+  impl: [internal/apiserver/services/applicationsets/handlers.go]
+  tests:
+    - internal/apiserver/services/applicationsets/applicationsets_test.go:TestGetNoExistenceOracle
+    - internal/apiserver/services/applicationsets/applicationsets_test.go:TestCreateGetListDelete
+  notes: >-
+    Missing and forbidden ApplicationSets both answer 403 "permission denied" (upstream answers
+    NotFound for missing ones, an existence oracle).
+
+ASET-111:
+  status: implemented
+  impl: [internal/apiserver/services/applicationsets/handlers.go]
+  tests:
+    - internal/apiserver/services/applicationsets/applicationsets_test.go:TestListFiltering
+    - internal/apiserver/services/applicationsets/internal_test.go:TestContinueTokenRoundTrip
+  notes: Sorted by name then namespace; Patrol adds limit/continue pagination (api-contract.md).
+
+ASET-112:
+  status: implemented
+  impl: [internal/apiserver/services/applicationsets/handlers.go]
+  tests:
+    - internal/apiserver/services/applicationsets/applicationsets_test.go:TestUpsertAndIdempotentCreate
+    - internal/apiserver/services/applicationsets/applicationsets_test.go:TestUpsertProjectChange
+    - internal/apiserver/services/applicationsets/applicationsets_test.go:TestDryRunAndGenerate
+    - internal/apiserver/services/applicationsets/applicationsets_test.go:TestCreateValidation
+  notes: >-
+    A metadata.resourceVersion in the body makes the upsert conditional (409 on conflict);
+    without it conflicts are retried (10). The controller's applicationset-finalizer survives
+    an upsert. No informer wait (reads are not served from a server-side cache here).
+
+ASET-113:
+  status: implemented
+  impl: [internal/apiserver/services/applicationsets/handlers.go]
+  tests:
+    - internal/apiserver/services/applicationsets/applicationsets_test.go:TestDeletePropagation
+    - internal/apiserver/services/applicationsets/applicationsets_test.go:TestCreateGetListDelete
+    - internal/apiserver/services/applicationsets/applicationsets_test.go:TestGetNoExistenceOracle
+    - internal/apiserver/services/applicationsets/limits_projects_test.go:TestActionsOnExistingNeedEveryProject
+  notes: >-
+    Delete needs delete on every project the ApplicationSet generates into. Patrol additions: cascade=false (orphan) and propagationPolicy=foreground|background, UID
+    precondition. Missing ApplicationSets answer 403 like forbidden ones (upstream NotFound).
+    No garbage collector in envtest: propagation is verified by the finalizer the API server
+    sets, not by cascading Application deletion.
+
+ASET-114:
+  status: implemented
+  impl: [internal/apiserver/services/applicationsets/handlers.go, internal/apiserver/services/applicationsets/generator.go]
+  tests:
+    - internal/apiserver/services/applicationsets/applicationsets_test.go:TestDryRunAndGenerate
+    - internal/apiserver/services/applicationsets/applicationsets_test.go:TestGenerateBounds
+    - internal/apiserver/services/applicationsets/limits_projects_test.go:TestGenerateBoundsRealGenerator
+    - internal/apiserver/services/applicationsets/generator_internal_test.go:TestBoundedGeneratorMatchesAppset
+    - internal/apiserver/services/applicationsets/generator_internal_test.go:TestBoundedGeneratorStopsAtApplicationLimit
+    - internal/apiserver/services/applicationsets/generator_internal_test.go:TestBoundedGeneratorHonorsDeadline
+    - internal/apiserver/services/applicationsets/generator_internal_test.go:TestBoundedGeneratorLimits
+  notes: >-
+    Bounded while generating (applicationsets.BoundedGenerator over internal/appset generators
+    and templates): the deadline (504) is checked before every generator call and every
+    rendered Application; the total parameter sets of all generator entries, the Applications
+    and their JSON bytes are capped as they are produced (400), and Matrix products are capped
+    as they are built. Equivalence with appset.NewAPIGenerator is tested on List, Matrix, Merge,
+    selectors, generator templates, goTemplate and templatePatch; only the List, Matrix and
+    Merge generators are exercised here, the others are internal/appset's.
+
+ASET-115:
+  status: implemented
+  impl: [internal/apiserver/services/applicationsets/handlers.go]
+  tests:
+    - internal/apiserver/services/applicationsets/applicationsets_test.go:TestResourceTreeAndEvents
+    - internal/apiserver/services/applicationsets/internal_test.go:TestBuildTreeAndStatuses
+  notes: Nodes also carry the Application sync status as an info item ("Sync Status").
+
+ASET-116:
+  status: implemented
+  impl: [internal/apiserver/services/applicationsets/handlers.go]
+  tests:
+    - internal/apiserver/services/applicationsets/applicationsets_test.go:TestResourceTreeAndEvents
+
+ASET-117:
+  status: implemented
+  impl: [internal/apiserver/services/applicationsets/watch.go]
+  tests:
+    - internal/apiserver/services/applicationsets/applicationsets_test.go:TestWatch
+    - internal/apiserver/services/applicationsets/applicationsets_test.go:TestWatchPerEventAuthorization
+    - internal/apiserver/services/applicationsets/applicationsets_test.go:TestWatchRevokedPermissionStopsEvents
+  notes: >-
+    Server-Sent Events; RBAC evaluated per event when sent. A numeric resourceVersion (or
+    Last-Event-ID) also starts the watch there (no missed change between list and watch); an
+    expired one ends the stream with a 410 error event. Both appsetNamespace and appSetNamespace
+    are accepted.
+
+ASET-132:
+  status: implemented
+  impl: [internal/apiserver/services/applicationsets/handlers.go]
+  tests:
+    - internal/apiserver/services/applicationsets/applicationsets_test.go:TestCreateGetListDelete
+    - internal/apiserver/services/applicationsets/applicationsets_test.go:TestUpsertAndIdempotentCreate
+  notes: >-
+    API audit side: audit entries (target ApplicationSet) and Events ResourceCreated /
+    ResourceUpdated / ResourceDeleted with the upstream messages through Deps.Recorder.
+
+API-028:
+  status: implemented
+  impl: [internal/apiserver/services/applicationsets/service.go, pkg/apiclient/applicationsets.go]
+  tests:
+    - internal/apiserver/services/applicationsets/applicationsets_test.go:TestCreateGetListDelete
+    - internal/apiserver/services/applicationsets/applicationsets_test.go:TestDryRunAndGenerate
+    - internal/apiserver/services/applicationsets/applicationsets_test.go:TestWatch
+    - internal/apiserver/services/applicationsets/limits_projects_test.go:TestGenerateBoundsRealGenerator
+    - pkg/apiclient/appsetsmisc_client_test.go:TestApplicationSetClientRequests
+    - pkg/apiclient/appsetsmisc_client_test.go:TestWatchApplicationSetsQuery
+
+NOTIF-101:
+  status: implemented
+  impl: [internal/apiserver/services/notifications/service.go, pkg/apiclient/notifications.go]
+  tests:
+    - internal/apiserver/services/notifications/service_test.go:TestListsConfiguredNamesWithCatalog
+    - internal/apiserver/services/notifications/service_test.go:TestNeverReturnsServiceConfigurationOrSecrets
+    - internal/apiserver/services/notifications/service_test.go:TestMissingConfigMapIsEmpty
+    - internal/apiserver/services/notifications/service_test.go:TestAuthorization
+  notes: Sorted names; reads patrol-notifications-cm from the settings snapshot.
+
+NOTIF-102:
+  status: implemented
+  impl: [internal/apiserver/services/notifications/service.go]
+  tests:
+    - internal/apiserver/services/notifications/service_test.go:TestListsConfiguredNamesWithCatalog
+    - internal/apiserver/services/notifications/service_test.go:TestDisableDefaultCatalog
+    - internal/apiserver/services/notifications/service_test.go:TestInvalidConfigurationIs500AndRecovers
+    - internal/apiserver/services/notifications/service_test.go:TestAuthorization
+  notes: >-
+    Includes the built-in catalog merged by the notifications controller (Config.DisableDefaultCatalog
+    mirrors the controller option). Patrol adds the condition descriptions. An invalid
+    configuration is a 500 with a fixed detail (upstream panics into Internal).
+
+NOTIF-103:
+  status: implemented
+  impl: [internal/apiserver/services/notifications/service.go]
+  tests:
+    - internal/apiserver/services/notifications/service_test.go:TestListsConfiguredNamesWithCatalog
+    - internal/apiserver/services/notifications/service_test.go:TestMissingConfigMapIsEmpty
+    - internal/apiserver/services/notifications/service_test.go:TestAuthorization
+
+API-032:
+  status: implemented
+  impl: [internal/apiserver/services/notifications/service.go, pkg/apiclient/notifications.go]
+  tests:
+    - internal/apiserver/services/notifications/service_test.go:TestAuthorization
+    - pkg/apiclient/appsetsmisc_client_test.go:TestNotificationClient
+
+API-043:
+  status: different-by-design
+  impl: [internal/apiserver/services/badge/service.go, internal/apiserver/services/badge/svg.go, pkg/apiclient/badge.go]
+  tests:
+    - internal/apiserver/services/badge/badge_test.go:TestBadgeDisabledIs404WithoutLookup
+    - internal/apiserver/services/badge/badge_test.go:TestBadgeApplication
+    - internal/apiserver/services/badge/badge_test.go:TestBadgeProjects
+    - internal/apiserver/services/badge/badge_test.go:TestBadgeProjectsPaging
+    - internal/apiserver/services/badge/badge_test.go:TestBadgeValidation
+    - internal/apiserver/services/badge/badge_test.go:TestBadgeIsPublicAndIgnoresCredentials
+    - internal/apiserver/services/badge/svg_internal_test.go:TestRenderEscapesAndStaysWellFormed
+    - pkg/apiclient/appsetsmisc_client_test.go:TestBadgeClient
+  notes: >-
+    Same parameters, colors, sizes and headers as upstream (appNamespace and namespace accepted),
+    but statusbadge.enabled=false answers 404 instead of an "Unknown" badge, and the SVG is
+    Patrol's own drawing (no logo). See docs/architecture/components/api-appsets-misc.md.
+
+API-046:
+  status: implemented
+  impl: [internal/apiserver/services/extensions/service.go]
+  tests:
+    - internal/apiserver/services/extensions/extensions_test.go:TestProxyForwardsWithHeaderContract
+    - internal/apiserver/services/extensions/extensions_test.go:TestProxyDisabled
+    - internal/apiserver/services/extensions/extensions_test.go:TestProxyHeaderValidationAndUnknownExtension
+    - internal/apiserver/services/extensions/extensions_test.go:TestProxyAuthorizationIsUniform
+  notes: Disabled (Config.Enabled=false) answers 404 rather than falling through to the UI.
+
+API-047:
+  status: implemented
+  impl: [internal/apiserver/services/extensions/registry.go, internal/settings/extensions.go]
+  tests:
+    - internal/apiserver/services/extensions/extensions_test.go:TestProxyConfigReloadWithoutRestart
+    - internal/apiserver/services/extensions/extensions_test.go:TestProxyRoutesByDestination
+  notes: >-
+    Backends are rebuilt when the configuration (including resolved Secret values) changes; an
+    extension whose backend URL is not http(s) with a host (or has credentials, a query or a
+    fragment) is not registered while the others keep working.
+
+API-048:
+  status: implemented
+  impl: [internal/apiserver/services/extensions/service.go]
+  tests:
+    - internal/apiserver/services/extensions/extensions_test.go:TestProxyAuthorizationIsUniform
+    - internal/apiserver/services/extensions/extensions_test.go:TestProxyHeaderValidationAndUnknownExtension
+    - internal/apiserver/services/extensions/extensions_test.go:TestProxyCookieRequiresCSRFHeader
+  notes: >-
+    Headers Patrol-Application-Name / Patrol-Project-Name. Every authorization failure is 403
+    permission_denied "Unauthorized extension request" (upstream 401, which the UI would treat as
+    a logged-out session); the Application namespace must also be enabled and allowed by the
+    project's sourceNamespaces.
+
+API-049:
+  status: implemented
+  impl: [internal/apiserver/services/extensions/proxy.go, internal/apiserver/services/extensions/registry.go, internal/apiserver/services/extensions/metrics.go, pkg/apiclient/extensions.go]
+  tests:
+    - internal/apiserver/services/extensions/extensions_test.go:TestProxyForwardsWithHeaderContract
+    - internal/apiserver/services/extensions/extensions_test.go:TestProxyGoClientAndSSOIdentity
+    - internal/apiserver/services/extensions/extensions_test.go:TestProxyRoutesByDestination
+    - internal/apiserver/services/extensions/extensions_test.go:TestProxyLimitsAndFailures
+    - internal/apiserver/services/extensions/extensions_test.go:TestProxyWebSocket
+    - pkg/apiclient/appsetsmisc_client_test.go:TestInvokeExtensionClient
+  notes: >-
+    Outgoing headers Patrol-Namespace, Patrol-Target-Cluster-Name/URL, Patrol-User-Id,
+    Patrol-Username, Patrol-User-Groups. Stricter than upstream: only allow-listed request headers
+    are forwarded (upstream forwards all but Authorization and Cookie), Set-Cookie is removed from
+    responses, bodies are capped, the whole exchange has a timeout, WebSocket upgrades are off by
+    default; a destination is also matched through its resolved cluster's name or server.
+    Metrics patrol_server_extension_requests_total and
+    patrol_server_extension_request_duration_seconds.

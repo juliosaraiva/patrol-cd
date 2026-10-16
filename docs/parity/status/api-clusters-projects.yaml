@@ -1,0 +1,465 @@
+# Cluster and project API services (internal/apiserver/services/clusters,
+# internal/apiserver/services/projects), the shared deep-link evaluator
+# (internal/apiserver/services/links) and their pkg/apiclient types and methods. See
+# docs/architecture/components/api-clusters-projects.md.
+# Evidence: tests through pkg/apiclient against the real route chain (auth.TokenService,
+# rbac.Enforcer, audit) and an envtest kube-apiserver 1.36 with the generated CRDs. Destination
+# clusters are TLS front ends of the envtest API server that authenticate callers themselves;
+# the service-account token controller is emulated by the tests. The services are not wired
+# into the patrol-server command yet, so nothing here is "verified".
+# Commands and results: docs/architecture/components/api-clusters-projects.md#verification.
+
+REPO-077:
+  status: implemented
+  impl: [internal/apiserver/services/clusters/store.go]
+  tests:
+    - internal/apiserver/services/clusters/clusters_test.go:TestClusterDeleteByName
+    - internal/apiserver/services/clusters/clusters_test.go:TestClusterLifecycle
+  notes: >-
+    API part: declarative Cluster objects are listed; servers are compared and returned with
+    trailing slashes trimmed. Malformed configuration cannot be stored (structural CRD schema).
+
+REPO-078:
+  status: implemented
+  impl: [internal/apiserver/services/clusters/validate.go, internal/apiserver/services/clusters/store.go]
+  tests:
+    - internal/apiserver/services/clusters/validate_internal_test.go:TestValidateInput
+    - internal/apiserver/services/clusters/clusters_test.go:TestClusterDeleteByName
+    - internal/apiserver/services/clusters/clusters_test.go:TestClusterLifecycle
+  notes: API create/update default the name to the server; name lookups see every cluster with the name; "in-cluster" resolves to the implicit cluster.
+
+REPO-079:
+  status: in-progress
+  impl: [internal/apiserver/services/clusters/validate.go]
+  tests:
+    - internal/apiserver/services/clusters/validate_internal_test.go:TestValidateInput
+    - internal/apiserver/services/clusters/clusters_test.go:TestClusterLifecycle
+  notes: API part done (entries trimmed, empty ones dropped, DNS-1123 labels, duplicates refused); cache scoping is the controller's.
+
+REPO-081:
+  status: implemented
+  impl: [internal/apiserver/services/clusters/handlers.go, pkg/apiclient/clusters.go]
+  tests:
+    - internal/apiserver/services/clusters/clusters_test.go:TestClusterAuthorization
+    - internal/apiserver/services/clusters/security_test.go:TestClusterInClusterRegistration
+    - internal/apiserver/services/clusters/security_test.go:TestClusterAmbientAuthGate
+    - internal/apiserver/services/clusters/security_test.go:TestClusterPartialUpdateConcurrency
+  notes: >-
+    RBAC object "<project>/<server>" for project-scoped clusters on every route, including the
+    new project on project changes (re-checked when the stored cluster moved project during
+    an update); the project must exist. Destination permission is internal/project. Patrol
+    differences (tenant boundary): a project-scoped grant cannot register the in-cluster
+    server (it counts as existing: update on its unscoped object is required) nor store
+    awsAuthConfig/execProviderConfig (the action on the unscoped "<server>" object is
+    required).
+
+REPO-082:
+  status: in-progress
+  impl: [internal/apiserver/services/clusters/validate.go]
+  tests:
+    - internal/apiserver/services/clusters/validate_internal_test.go:TestValidateInput
+  notes: The API stores the shard (a negative value means unset, as the CLI's -1); sharding is the controller's.
+
+REPO-083:
+  status: implemented
+  impl: [internal/apiserver/services/clusters/validate.go, internal/apiserver/services/clusters/handlers.go]
+  tests:
+    - internal/apiserver/services/clusters/validate_internal_test.go:TestValidateInput
+    - internal/apiserver/services/clusters/validate_internal_test.go:TestSanitize
+    - internal/apiserver/services/clusters/clusters_test.go:TestClusterLifecycle
+  notes: >-
+    Labels and annotations are the Cluster object's; writes replace them (the refresh
+    annotation of a pending invalidation is kept); the last-applied annotation cannot be set
+    and is not returned.
+
+REPO-084:
+  status: implemented
+  impl: [internal/apiserver/services/clusters/validate.go, internal/apiserver/services/clusters/store.go]
+  tests:
+    - internal/apiserver/services/clusters/clusters_test.go:TestClusterLifecycle
+  notes: Write-only; the connection check authenticates with basic credentials against a destination that verifies them; responses carry hasBasicAuth only.
+
+REPO-085:
+  status: implemented
+  impl: [internal/apiserver/services/clusters/validate.go, internal/apiserver/services/clusters/store.go]
+  tests:
+    - internal/apiserver/services/clusters/clusters_test.go:TestClusterLifecycle
+    - internal/apiserver/services/clusters/clusters_test.go:TestClusterCreateRejections
+  notes: Write-only bearer token stored in the owned Secret; responses carry hasBearerToken only.
+
+REPO-086:
+  status: implemented
+  impl: [internal/apiserver/services/clusters/validate.go, internal/apiserver/services/clusters/store.go]
+  tests:
+    - internal/apiserver/services/clusters/clusters_test.go:TestClusterLifecycle
+    - internal/apiserver/services/clusters/clusters_test.go:TestClusterCreateRejections
+  notes: Only insecure and serverName are returned; CA, certificate and key are write-only (presence flags); an unknown CA fails the connection check.
+
+REPO-087:
+  status: implemented
+  impl: [internal/apiserver/services/clusters/validate.go, internal/apiserver/services/clusters/store.go]
+  tests:
+    - internal/apiserver/services/clusters/validate_internal_test.go:TestSanitize
+  notes: API part; awsAuthConfig is not secret and is returned. Token production is internal/clusters.
+
+REPO-088:
+  status: implemented
+  impl: [internal/apiserver/services/clusters/store.go, internal/apiserver/services/clusters/connector.go]
+  tests:
+    - internal/apiserver/services/clusters/validate_internal_test.go:TestSanitize
+    - internal/apiserver/services/clusters/clusters_test.go:TestClusterExecAndInCluster
+    - internal/apiserver/services/clusters/connector_internal_test.go:TestConnectorNoAmbientIdentity
+    - internal/apiserver/services/clusters/security_test.go:TestClusterAmbientAuthGate
+  notes: >-
+    execProviderConfig is removed from every response (hasExecProviderConfig flag). Patrol
+    differences: patrol-server neither runs exec plugins nor mints in-process AWS/GCP/Azure
+    tokens with its own identity to check connectivity unless ConnectorOptions.AllowExec is
+    set (the controller checks such clusters); storing awsAuthConfig or execProviderConfig
+    needs the create/update permission on the unscoped server object.
+
+REPO-089:
+  status: implemented
+  impl: [internal/apiserver/services/clusters/validate.go]
+  tests:
+    - internal/apiserver/services/clusters/validate_internal_test.go:TestValidateInput
+  notes: API part; disableCompression is stored and returned. Transport behavior is internal/clusters.
+
+REPO-090:
+  status: implemented
+  impl: [internal/apiserver/services/clusters/validate.go]
+  tests:
+    - internal/apiserver/services/clusters/validate_internal_test.go:TestValidateInput
+  notes: http, https and socks5 (not socks5h) with the upstream message; proxy URLs with credentials or link-local/metadata hosts are refused (Patrol).
+
+REPO-092:
+  status: implemented
+  impl: [internal/apiserver/services/clusters/store.go, internal/apiserver/services/clusters/handlers.go]
+  tests:
+    - internal/apiserver/services/clusters/clusters_test.go:TestClusterLifecycle
+    - internal/apiserver/services/clusters/clusters_test.go:TestClusterExecAndInCluster
+    - internal/apiserver/services/clusters/security_test.go:TestClusterInClusterRegistration
+  notes: >-
+    The implicit in-cluster cluster is listed; updating it, or registering its server (create
+    with or without upsert), creates an overriding object and needs update on its unscoped
+    object (upstream: create alone); an identical create returns it unchanged; deleting the
+    override restores it; deleting it without an object is NotFound with the upstream message.
+
+REPO-093:
+  status: implemented
+  impl: [internal/apiserver/services/clusters/store.go, internal/apiserver/services/clusters/handlers.go]
+  tests:
+    - internal/apiserver/services/clusters/clusters_test.go:TestClusterCreateRejections
+  notes: >-
+    Disabled ("false" only) hides the in-cluster server from lists, gets return 403 like any
+    missing cluster, creation returns "cannot register cluster: in-cluster has been disabled".
+
+REPO-094:
+  status: in-progress
+  impl: [internal/apiserver/services/clusters/handlers.go]
+  tests:
+    - internal/apiserver/services/clusters/clusters_test.go:TestClusterLifecycle
+  notes: Responses carry Cluster status (connection state, server version, cache info, applications count, assigned shard); create/update/rotate-auth record a Successful check. The cluster-info loop is the controller's.
+
+REPO-096:
+  status: in-progress
+  impl: [internal/apiserver/services/clusters/handlers.go]
+  tests:
+    - internal/apiserver/services/clusters/clusters_test.go:TestClusterLifecycle
+  notes: POST .../invalidate-cache sets cd.patrol.example/refresh to now (RFC 3339); the cache rebuild is the controller's.
+
+REPO-098:
+  status: implemented
+  impl: [internal/apiserver/services/clusters/handlers.go, pkg/apiclient/clusters.go]
+  tests:
+    - internal/apiserver/services/clusters/clusters_test.go:TestClusterLifecycle
+    - internal/apiserver/services/clusters/clusters_test.go:TestClusterAuthorization
+  notes: Filters by id (server, name, name_escaped), name and server keep the first match; per-item RBAC; sanitized items with status; Patrol adds selector and limit/continue.
+
+REPO-099:
+  status: implemented
+  impl: [internal/apiserver/services/clusters/handlers.go, internal/apiserver/services/clusters/store.go]
+  tests:
+    - internal/apiserver/services/clusters/clusters_test.go:TestClusterLifecycle
+    - internal/apiserver/services/clusters/clusters_test.go:TestClusterCreateRejections
+    - internal/apiserver/services/clusters/clusters_test.go:TestClusterAuthorization
+  notes: >-
+    RBAC (wrapped "permission denied while creating cluster: ..."), connection check ("error
+    getting server version: ..."), idempotent identical create, spec diff message, upsert
+    (with the update checks). Differences: credential differences are reported as "Config"
+    only; an existing server the caller cannot see is 409 "cluster ... already exists"; the
+    in-cluster server counts as existing; awsAuthConfig/execProviderConfig need the unscoped
+    grant.
+
+REPO-100:
+  status: implemented
+  impl: [internal/apiserver/services/clusters/handlers.go]
+  tests:
+    - internal/apiserver/services/clusters/clusters_test.go:TestClusterLifecycle
+    - internal/apiserver/services/clusters/clusters_test.go:TestClusterAuthorization
+  notes: By server, name or name_escaped; missing and forbidden clusters return the same 403.
+
+REPO-101:
+  status: implemented
+  impl: [internal/apiserver/services/clusters/handlers.go]
+  tests:
+    - internal/apiserver/services/clusters/clusters_test.go:TestClusterLifecycle
+    - internal/apiserver/services/clusters/clusters_test.go:TestClusterAuthorization
+    - internal/apiserver/services/clusters/security_test.go:TestClusterPartialUpdateConcurrency
+  notes: >-
+    updatedFields (repeated or comma-separated; unknown paths ignored) applied to the latest
+    stored object on every attempt, so concurrent changes of other fields are kept; project
+    change needs update in the new project; connection re-checked; immutable server;
+    resourceVersion conflicts (409).
+
+REPO-102:
+  status: implemented
+  impl: [internal/apiserver/services/clusters/handlers.go]
+  tests:
+    - internal/apiserver/services/clusters/clusters_test.go:TestClusterDeleteByName
+    - internal/apiserver/services/clusters/clusters_test.go:TestClusterAuthorization
+  notes: >-
+    By name every cluster with the name is deleted, each checked against its own project
+    (upstream uses the first cluster's project) before anything is deleted. API-managed
+    credential Secrets are deleted; others kept.
+
+REPO-103:
+  status: implemented
+  impl: [internal/apiserver/services/clusters/handlers.go]
+  tests:
+    - internal/apiserver/services/clusters/clusters_test.go:TestClusterRotateAuth
+  notes: Through internal/clusters.RotateManagerToken against an envtest-backed destination (token controller emulated); non-bearer and non-legacy tokens are refused with 400.
+
+REPO-104:
+  status: implemented
+  impl: [internal/apiserver/services/clusters/store.go]
+  tests:
+    - internal/apiserver/services/clusters/clusters_test.go:TestClusterLifecycle
+  notes: Objects named "cluster-<host>-<fnv32a(server)>"; writes replace the Secret data with the recognized keys only; Secrets not labeled as cluster credentials are never modified (412).
+
+TEN-002:
+  status: in-progress
+  impl: [internal/apiserver/services/projects/crud.go]
+  tests:
+    - internal/apiserver/services/projects/projects_test.go:TestProjectCRUD
+  notes: API refuses deleting "default" with the upstream message; creating it at server start is the server wiring's.
+
+TEN-009:
+  status: implemented
+  impl: [internal/apiserver/services/projects/crud.go, internal/apiserver/services/projects/tokens.go]
+  tests:
+    - internal/apiserver/services/projects/projects_test.go:TestProjectCRUD
+    - internal/apiserver/services/projects/tokens_test.go:TestProjectTokens
+  notes: internal/project validation on create, update and token creation with upstream messages and codes. Patrol difference - an invalid stored project does not block token deletion (revocation).
+
+TEN-017:
+  status: implemented
+  impl: [internal/apiserver/services/projects/crud.go]
+  tests:
+    - internal/apiserver/services/projects/projects_test.go:TestProjectCRUD
+
+TEN-018:
+  status: implemented
+  impl: [internal/apiserver/services/projects/crud.go]
+  tests:
+    - internal/apiserver/services/projects/projects_test.go:TestProjectCRUD
+  notes: Policies are normalized and validated on create and update.
+
+TEN-020:
+  status: implemented
+  impl: [internal/apiserver/services/projects/crud.go]
+  tests:
+    - internal/apiserver/services/projects/tokens_test.go:TestProjectTokens
+  notes: Role policies reach the enforcer when the API changes a project (Deps.Policies); the server must also follow AppProject changes made elsewhere.
+
+TEN-021:
+  status: implemented
+  impl: [internal/apiserver/services/projects/crud.go]
+  tests:
+    - internal/apiserver/services/projects/projects_test.go:TestProjectCRUD
+
+TEN-032:
+  status: implemented
+  impl: [internal/apiserver/services/projects/tokens.go, pkg/apiclient/projects.go]
+  tests:
+    - internal/apiserver/services/projects/tokens_test.go:TestProjectTokens
+  notes: >-
+    projects, update or role group membership; JWT via auth.TokenService; metadata in
+    status.jwtTokensByRole with optimistic concurrency and retries; ids unique over spec and
+    status records. The response also returns the id and times.
+
+TEN-033:
+  status: implemented
+  impl: [internal/apiserver/services/projects/tokens.go]
+  tests:
+    - internal/apiserver/services/projects/tokens_test.go:TestProjectTokens
+  notes: By id or (without id) by iat, from status and the deprecated spec copy; unknown role/token succeed; callers without permission get 403 whether or not the project or role exists.
+
+TEN-034:
+  status: in-progress
+  impl: [internal/apiserver/services/projects/crud.go, internal/apiserver/services/projects/tokens.go]
+  tests:
+    - internal/apiserver/services/projects/tokens_test.go:TestProjectTokens
+  notes: Responses normalize token metadata; create/update never write token records; removed roles lose their records. Startup normalization of every project (NormalizeProjs) is the server wiring's.
+
+TEN-035:
+  status: implemented
+  impl: [internal/apiserver/services/projects/tokens.go]
+  tests:
+    - internal/apiserver/services/projects/tokens_test.go:TestProjectTokens
+  notes: Exercised end to end with auth.TokenService and a registry equivalent to apiserver.ProjectTokenRegistry (deleted token, deleted role, re-created role).
+
+TEN-036:
+  status: implemented
+  impl: [internal/apiserver/services/projects/tokens.go]
+  tests:
+    - internal/apiserver/services/projects/tokens_test.go:TestProjectTokens
+
+TEN-037:
+  status: implemented
+  impl: [internal/apiserver/services/projects/detail.go]
+  tests:
+    - internal/apiserver/services/projects/projects_test.go:TestProjectDetails
+
+TEN-038:
+  status: in-progress
+  impl: [internal/apiserver/services/projects/detail.go]
+  tests:
+    - internal/apiserver/services/projects/projects_test.go:TestProjectDetails
+  notes: The detailed project lists the scoped repositories the caller may get; credential precedence is the repository layer's.
+
+TEN-039:
+  status: in-progress
+  impl: [internal/apiserver/services/projects/detail.go]
+  tests:
+    - internal/apiserver/services/projects/projects_test.go:TestProjectDetails
+  notes: The detailed project lists the scoped clusters the caller may get (sanitized); destination permission is internal/project.
+
+TEN-044:
+  status: implemented
+  impl: [internal/apiserver/services/projects/crud.go]
+  tests:
+    - internal/apiserver/services/projects/projects_test.go:TestProjectCRUD
+    - internal/apiserver/services/projects/projects_test.go:TestProjectAuthorization
+  notes: >-
+    Patrol differences - creation and upsert are held to the update checks (cluster/repository
+    permissions, application impact); an existing project the caller may not get is reported
+    as 409 already_exists without spec comparison.
+
+TEN-045:
+  status: implemented
+  impl: [internal/apiserver/services/projects/crud.go, internal/apiserver/services/projects/detail.go]
+  tests:
+    - internal/apiserver/services/projects/projects_test.go:TestProjectCRUD
+    - internal/apiserver/services/projects/projects_test.go:TestProjectDetails
+
+TEN-046:
+  status: implemented
+  impl: [internal/apiserver/services/projects/escalation.go, internal/apiserver/services/projects/crud.go]
+  tests:
+    - internal/apiserver/services/projects/projects_test.go:TestProjectAuthorization
+    - internal/apiserver/services/projects/escalation_test.go:TestProjectEscalationWidening
+    - internal/apiserver/services/projects/escalation_internal_test.go:TestRequiredGrants
+  notes: >-
+    Upstream checks plus Patrol extensions (upstream gaps): destinations compared whole
+    (server, name, namespace), name entries checked on the servers registered under the name
+    ("*" for name globs, negated or unregistered names), destinationServiceAccounts changes
+    checked, set difference instead of occurrence count; the same checks on the specs with
+    global projects merged, and projects, update on every global project a label change adds
+    or removes; applied to create and upsert too.
+
+TEN-047:
+  status: implemented
+  impl: [internal/apiserver/services/projects/crud.go]
+  tests:
+    - internal/apiserver/services/projects/projects_test.go:TestProjectUpdateImpact
+
+TEN-048:
+  status: implemented
+  impl: [internal/apiserver/services/projects/crud.go]
+  tests:
+    - internal/apiserver/services/projects/projects_test.go:TestProjectCRUD
+  notes: Also refused while ApplicationSets of the control-plane namespace reference the project ("project is referenced by N applicationsets").
+
+TEN-049:
+  status: implemented
+  impl: [internal/apiserver/services/projects/detail.go]
+  tests:
+    - internal/apiserver/services/projects/projects_test.go:TestProjectDetails
+
+TEN-050:
+  status: implemented
+  impl: [internal/apiserver/services/projects/detail.go, internal/apiserver/services/links/links.go]
+  tests:
+    - internal/apiserver/services/projects/projects_test.go:TestProjectDetails
+    - internal/apiserver/services/links/links_test.go:TestEvaluate
+
+TEN-051:
+  status: implemented
+  impl: [internal/apiserver/services/projects/detail.go]
+  tests:
+    - internal/apiserver/services/projects/projects_test.go:TestProjectDetails
+
+TEN-052:
+  status: in-progress
+  impl: [internal/apiserver/services/projects/crud.go, internal/apiserver/services/projects/tokens.go]
+  tests:
+    - internal/apiserver/services/projects/projects_test.go:TestProjectCRUD
+    - internal/apiserver/services/projects/tokens_test.go:TestProjectTokens
+  notes: Project and token mutations annotate the audit record (AppProject target, ResourceCreated/Updated/Deleted, "<user> created project"); Event emission is rest.LogAuditor's recorder (server wiring) and --enable-k8s-event is not implemented.
+
+TEN-082:
+  status: in-progress
+  impl: [internal/apiserver/services/clusters/handlers.go, internal/apiserver/services/projects/detail.go]
+  tests:
+    - internal/apiserver/services/clusters/clusters_test.go:TestClusterAuthorization
+    - internal/apiserver/services/projects/projects_test.go:TestProjectDetails
+  notes: Cluster objects done; repository routes are the repository API's.
+
+API-009:
+  status: in-progress
+  impl: [internal/apiserver/services/clusters/store.go, pkg/apiclient/clusters.go]
+  tests:
+    - internal/apiserver/services/clusters/clusters_test.go:TestClusterLifecycle
+  notes: Cluster ids (URL-encoded server, id.type=name and name_escaped). Repository paths are the repository API's.
+
+API-030:
+  status: implemented
+  impl: [internal/apiserver/services/clusters/service.go, internal/apiserver/services/clusters/handlers.go, pkg/apiclient/clusters.go]
+  tests:
+    - internal/apiserver/services/clusters/clusters_test.go:TestClusterLifecycle
+    - internal/apiserver/services/clusters/clusters_test.go:TestClusterAuthorization
+    - internal/apiserver/services/clusters/clusters_test.go:TestClusterRotateAuth
+    - internal/apiserver/services/clusters/clusters_test.go:TestClusterCreateRejections
+
+API-033:
+  status: implemented
+  impl: [internal/apiserver/services/projects/service.go, internal/apiserver/services/projects/crud.go, pkg/apiclient/projects.go]
+  tests:
+    - internal/apiserver/services/projects/projects_test.go:TestProjectCRUD
+    - internal/apiserver/services/projects/projects_test.go:TestProjectAuthorization
+    - internal/apiserver/services/projects/projects_test.go:TestProjectUpdateImpact
+
+API-034:
+  status: implemented
+  impl: [internal/apiserver/services/projects/tokens.go, pkg/apiclient/projects.go]
+  tests:
+    - internal/apiserver/services/projects/tokens_test.go:TestProjectTokens
+
+API-035:
+  status: implemented
+  impl: [internal/apiserver/services/projects/detail.go, pkg/apiclient/projects.go]
+  tests:
+    - internal/apiserver/services/projects/projects_test.go:TestProjectDetails
+    - internal/apiserver/services/projects/projects_test.go:TestProjectAuthorization
+
+API-045:
+  status: in-progress
+  impl: [internal/apiserver/services/links/links.go]
+  tests:
+    - internal/apiserver/services/links/links_test.go:TestEvaluate
+    - internal/apiserver/services/links/links_test.go:TestManagedByURLValidated
+  notes: >-
+    Shared evaluator (conditions, sprig without env/expandenv/getHostByName, context keys,
+    cluster data restricted, managedByURL validated) used by the project links route. Patrol
+    difference: links that do not render an absolute http(s) URL are skipped. The application
+    and resource link routes belong to the application API.

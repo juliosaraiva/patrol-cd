@@ -1,0 +1,391 @@
+# Application API service (internal/apiserver/services/applications: core application
+# routes) and its pkg/apiclient types and methods. See
+# docs/architecture/components/api-applications.md.
+# Evidence: tests through pkg/apiclient against the real route chain (auth.TokenService,
+# rbac.Enforcer with project policies, audit with a Kubernetes Event recorder), an envtest
+# kube-apiserver 1.36 with the generated CRDs (and the Operation admission policy), the real
+# internal/project lookups and internal/repository resolver, and an Application informer feeding
+# the Broadcaster. The repo-server is an in-process fake of its client interface; no controller
+# runs (tests stand in for it where a reaction is needed). The service is not wired into the
+# patrol-server command yet, so nothing here is "verified".
+# Commands and results: docs/architecture/components/api-applications.md#verification.
+
+APP-049:
+  status: implemented
+  impl: [internal/apiserver/services/applications/crud.go, pkg/apiclient/applications.go]
+  tests:
+    - internal/apiserver/services/applications/crud_test.go:TestCreateApplication
+    - internal/apiserver/services/applications/crud_test.go:TestCreateApplicationDenials
+    - internal/apiserver/services/applications/crud_test.go:TestAppsInAnyNamespace
+    - internal/apiserver/services/applications/concurrency_test.go:TestCreateApplicationUpsertRace
+  notes: >-
+    Create with upsert and validate, idempotent identical create, exact upstream messages,
+    create/update RBAC, namespace gate. A create that loses a race to a concurrent create
+    applies the project change rules to the winning Application before an upsert. Patrol Applications have no operation field (Operation
+    kind); an Application name owned by an Application the caller cannot get answers 409
+    without content (deliberate difference).
+
+APP-050:
+  status: implemented
+  impl: [internal/apiserver/services/applications/crud.go]
+  tests:
+    - internal/apiserver/services/applications/crud_test.go:TestUpdateApplication
+    - internal/apiserver/services/applications/crud_test.go:TestUpdateApplicationProjectChange
+  notes: >-
+    Labels/annotations/finalizers replaced, status ignored; a body resourceVersion makes the update conditional (409), otherwise conflicts are retried (10) while the project is unchanged.
+
+APP-051:
+  status: implemented
+  impl: [internal/apiserver/services/applications/crud.go]
+  tests:
+    - internal/apiserver/services/applications/crud_test.go:TestUpdateApplicationSpec
+    - internal/apiserver/services/applications/concurrency_test.go:TestUpdateApplicationSpecConcurrentMetadata
+  notes: >-
+    Only the spec is written: labels, annotations and finalizers changed concurrently (e.g. the
+    cascade finalizer of an in-flight delete) are kept, conflicts re-apply only the spec.
+
+APP-052:
+  status: implemented
+  impl: [internal/apiserver/services/applications/crud.go]
+  tests:
+    - internal/apiserver/services/applications/crud_test.go:TestPatchApplication
+    - internal/apiserver/services/applications/internal_test.go:TestApplyAppPatch
+    - internal/apiserver/services/applications/internal_test.go:TestApplyAppPatchLimits
+    - internal/apiserver/services/applications/concurrency_test.go:TestPatchApplicationLimits
+  notes: >-
+    A patch setting metadata.resourceVersion is conditional; name and namespace cannot be patched.
+    JSON patches are bounded (1000 operations, 1 MiB added by copy operations, 4 MiB patched
+    document; 413 otherwise).
+
+APP-053:
+  status: implemented
+  impl: [internal/apiserver/services/applications/crud.go, internal/apiserver/services/applications/watch.go, internal/apiserver/services/applications/access.go]
+  tests:
+    - internal/apiserver/services/applications/crud_test.go:TestGetApplicationExistenceHiding
+    - internal/apiserver/services/applications/crud_test.go:TestListApplications
+    - internal/apiserver/services/applications/watch_test.go:TestWatchApplications
+    - internal/apiserver/services/applications/watch_test.go:TestWatchApplicationFilters
+  notes: >-
+    List adds limit/continue pagination (Patrol); the repo filter matches any source of a
+    multi-source Application; the watch sends DELETED (with the last visible state) when an
+    Application leaves the caller's visibility.
+
+APP-054:
+  status: implemented
+  impl: [internal/apiserver/services/applications/validate.go]
+  tests:
+    - internal/apiserver/services/applications/crud_test.go:TestCreateApplicationValidation
+  notes: >-
+    validate=true renders each source (dry source for hydrator Applications) through the
+    repo-server with NoRevisionCache; destination, project permissions, sync options (Patrol,
+    ADR-0013) and managed-by-url are always checked.
+
+APP-056:
+  status: implemented
+  impl: [internal/apiserver/services/applications/crud.go]
+  tests:
+    - internal/apiserver/services/applications/crud_test.go:TestDeleteApplication
+    - internal/apiserver/services/applications/internal_test.go:TestPropagationFinalizer
+  notes: >-
+    Finalizers are changed with an optimistic-lock merge patch and the delete carries a UID precondition.
+
+APP-067:
+  status: in-progress
+  impl: [internal/apiserver/services/applications/deps.go, internal/apiserver/services/applications/access.go]
+  tests:
+    - internal/apiserver/services/applications/crud_test.go:TestAppsInAnyNamespace
+    - internal/apiserver/services/applications/internal_test.go:TestNamespaceMatcher
+  notes: >-
+    API part (application.namespaces globs and /regex/, lists skip disabled namespaces, other operations refused); the controller part is not built.
+
+APP-069:
+  status: in-progress
+  impl: [internal/apiserver/services/applications/access.go]
+  tests:
+    - internal/apiserver/services/applications/crud_test.go:TestAppsInAnyNamespace
+  notes: >-
+    API RBAC objects (<project>/<name>, <project>/<namespace>/<name>) and repo-server instance names; CLI parsing belongs to the CLI.
+
+APP-080:
+  status: in-progress
+  impl: [internal/apiserver/services/applications/crud.go]
+  tests:
+    - internal/apiserver/services/applications/crud_test.go:TestRefreshApplication
+    - internal/apiserver/services/applications/crud_test.go:TestRefreshApplicationTimeout
+  notes: >-
+    API part: refresh needs only get, sets the annotation (hydrate annotation only for hydrator
+    Applications: deliberate difference), forces repo-server app details on hard refresh,
+    waits at most 15 s (504 "application refresh deadline exceeded") and ends when the client
+    disconnects. CLI and UI belong to their workstreams.
+
+APP-102:
+  status: in-progress
+  impl: [internal/apiserver/services/applications/validate.go]
+  tests:
+    - internal/apiserver/services/applications/crud_test.go:TestCreateApplicationValidation
+  notes: >-
+    API validation with the upstream message; tree and UI parts belong to the controller and UI.
+
+APP-141:
+  status: in-progress
+  impl: [internal/apiserver/services/applications/access.go]
+  tests:
+    - internal/apiserver/services/applications/crud_test.go:TestCreateApplication
+    - internal/apiserver/services/applications/crud_test.go:TestUpdateApplication
+    - internal/apiserver/services/applications/crud_test.go:TestDeleteApplication
+    - internal/apiserver/services/applications/operations_test.go:TestSyncApplication
+  notes: >-
+    API events ResourceCreated/Updated/Deleted and OperationStarted with upstream messages (through rest.LogAuditor); controller events are not built.
+
+TEN-010:
+  status: in-progress
+  impl: [internal/apiserver/services/applications/access.go]
+  tests:
+    - internal/apiserver/services/applications/crud_test.go:TestAppsInAnyNamespace
+  notes: >-
+    API enforcement of sourceNamespaces with the vague message; controller part pending.
+
+TEN-036:
+  status: implemented
+  impl: [internal/apiserver/services/applications/access.go]
+  tests:
+    - internal/apiserver/services/applications/crud_test.go:TestProjectTokenIsolation
+  notes: >-
+    Application routes with project-role tokens; a global wildcard policy does not reach another project.
+
+TEN-040:
+  status: in-progress
+  impl: [internal/apiserver/services/applications/validate.go]
+  tests:
+    - internal/apiserver/services/applications/crud_test.go:TestCreateApplicationValidation
+  notes: >-
+    API create/update return "application spec for <app> is invalid: ..."; controller conditions pending.
+
+TEN-043:
+  status: implemented
+  impl: [internal/apiserver/services/applications/validate.go, internal/apiserver/services/applications/crud.go]
+  tests:
+    - internal/apiserver/services/applications/crud_test.go:TestUpdateApplicationProjectChange
+    - internal/apiserver/services/applications/concurrency_test.go:TestCreateApplicationUpsertRace
+  notes: >-
+    Create on the new and update on the old RBAC object (PUT also checks update on the new one, as upstream); the new project must exist and admit the namespace. Also enforced on an upsert whose create lost a race to a concurrent create (upstream checks only the new object there).
+
+TEN-068:
+  status: in-progress
+  impl: [internal/apiserver/services/applications/operations.go]
+  tests:
+    - internal/apiserver/services/applications/operations_test.go:TestSyncApplication
+    - internal/apiserver/services/applications/operations_test.go:TestSyncLocalManifests
+    - internal/apiserver/services/applications/operations_test.go:TestSyncRevisionOverride
+  notes: >-
+    sync for sync/rollback/terminate, override for local manifests, source overrides and (with the setting) revision overrides; action/invoke belong to other services.
+
+TEN-069:
+  status: implemented
+  impl: [internal/apiserver/services/applications/access.go]
+  tests:
+    - internal/apiserver/services/applications/crud_test.go:TestAppsInAnyNamespace
+
+TEN-081:
+  status: implemented
+  impl: [internal/apiserver/services/applications/access.go]
+  tests:
+    - internal/apiserver/services/applications/crud_test.go:TestGetApplicationExistenceHiding
+  notes: >-
+    Full matrix for Application routes, including the timing-equalizing read.
+
+SYNC-001:
+  status: in-progress
+  impl: [internal/apiserver/services/applications/operations.go]
+  tests:
+    - internal/apiserver/services/applications/operations_test.go:TestSyncApplication
+  notes: >-
+    Operation kind (ADR-0011): the API refuses a second non-terminal Operation with 409
+    failed_precondition "another operation is already in progress"; processing is the
+    controller's.
+
+SYNC-002:
+  status: implemented
+  impl: [internal/apiserver/services/applications/operations.go]
+  tests:
+    - internal/apiserver/services/applications/operations_test.go:TestSyncApplication
+    - internal/apiserver/services/applications/operations_test.go:TestSyncPreconditions
+    - internal/apiserver/services/applications/admission_test.go:TestOperationInitiatorAdmission
+  notes: >-
+    Creates an Operation (owner reference, application label, initiatedBy from the verified
+    caller; patrol-server needs the impersonate verb). Deliberate difference: sync permission
+    is checked before sync windows.
+
+SYNC-003:
+  status: in-progress
+  impl: [internal/apiserver/services/applications/operations.go]
+  tests:
+    - internal/apiserver/services/applications/operations_test.go:TestSyncApplication
+    - internal/apiserver/services/applications/operations_test.go:TestSyncRevisionOverride
+  notes: >-
+    API resolution (commit SHA short-circuit, repo-server ResolveRevision without cache, FailedPrecondition on failure); controller resume pending.
+
+SYNC-004:
+  status: in-progress
+  impl: [internal/apiserver/services/applications/operations.go]
+  tests:
+    - internal/apiserver/services/applications/operations_test.go:TestSyncMultiSourceAndOverrides
+  notes: >-
+    API part (positions, per-source resolution, out-of-range error, length mismatch refused); CLI flags pending.
+
+SYNC-005:
+  status: implemented
+  impl: [internal/apiserver/services/applications/operations.go]
+  tests:
+    - internal/apiserver/services/applications/operations_test.go:TestSyncRevisionOverride
+
+SYNC-011:
+  status: in-progress
+  impl: [internal/apiserver/services/applications/operations.go]
+  tests:
+    - internal/apiserver/services/applications/operations_test.go:TestSyncMultiSourceAndOverrides
+  notes: >-
+    The API fills sync.source(s) from the spec and accepts overrides (Patrol addition) that need override and project permission; rendering them is the controller's.
+
+SYNC-012:
+  status: in-progress
+  impl: [internal/apiserver/services/applications/operations.go]
+  tests:
+    - internal/apiserver/services/applications/operations_test.go:TestSyncLocalManifests
+  notes: >-
+    API part (override, auto-sync dry-run rule, source integrity refusal, 1 MiB cap, Secret data masked in responses); CLI and controller pending.
+
+SYNC-013:
+  status: in-progress
+  impl: [internal/apiserver/services/applications/operations.go]
+  tests:
+    - internal/apiserver/services/applications/operations_test.go:TestSyncApplication
+  notes: >-
+    Request options replace the Application's (validated); CLI pending.
+
+SYNC-014:
+  status: in-progress
+  impl: [internal/apiserver/services/applications/operations.go]
+  tests:
+    - internal/apiserver/services/applications/operations_test.go:TestSyncApplication
+    - internal/apiserver/services/applications/internal_test.go:TestRetryValidation
+
+SYNC-016:
+  status: in-progress
+  impl: [internal/apiserver/services/applications/operations.go]
+  tests:
+    - internal/apiserver/services/applications/operations_test.go:TestSyncApplication
+    - internal/apiserver/services/applications/admission_test.go:TestOperationInitiatorAdmission
+  notes: >-
+    info and initiatedBy.username recorded on the Operation; history copy is the controller's.
+
+SYNC-047:
+  status: implemented
+  impl: [internal/apiserver/services/applications/operations.go, internal/apiserver/services/applications/deps.go]
+  tests:
+    - internal/apiserver/services/applications/operations_test.go:TestSyncPreconditions
+    - internal/apiserver/services/applications/internal_test.go:TestConfigFromParams
+
+SYNC-078:
+  status: in-progress
+  impl: [internal/apiserver/services/applications/operations.go]
+  tests:
+    - internal/apiserver/services/applications/operations_test.go:TestTerminateOperation
+  notes: >-
+    The API merge-patches spec.cancel=true on the non-terminal Operation(s) (Patrol has no Terminating phase write by the API); the controller terminates.
+
+SYNC-087:
+  status: in-progress
+  impl: [internal/apiserver/services/applications/operations.go]
+  tests:
+    - internal/apiserver/services/applications/operations_test.go:TestSyncPreconditions
+  notes: >-
+    Enforcement point (1), manual API syncs; the controller points pending.
+
+SYNC-088:
+  status: in-progress
+  impl: [internal/apiserver/services/applications/revisions.go]
+  tests:
+    - internal/apiserver/services/applications/operations_test.go:TestSyncWindowsState
+  notes: >-
+    GET /applications/{name}/syncwindows (plus status and next transition); CLI/UI and the project route belong elsewhere.
+
+SYNC-091:
+  status: in-progress
+  impl: [internal/apiserver/services/applications/operations.go]
+  tests:
+    - internal/apiserver/services/applications/operations_test.go:TestRollbackApplication
+  notes: >-
+    API part: rollback Operation (spec.rollback.id, apply strategy, the Application's sync
+    options, no retry), refusals with upstream messages (the "Argo CD v0.11" wording replaced),
+    multi-source Applications only roll back to multi-source entries. Execution is the
+    controller's.
+
+API-017:
+  status: implemented
+  impl: [internal/apiserver/services/applications/crud.go, internal/apiserver/services/applications/routes.go, pkg/apiclient/applications.go]
+  tests:
+    - internal/apiserver/services/applications/crud_test.go:TestCreateApplication
+    - internal/apiserver/services/applications/crud_test.go:TestListApplications
+    - internal/apiserver/services/applications/crud_test.go:TestGetApplicationExistenceHiding
+    - internal/apiserver/services/applications/crud_test.go:TestPatchApplication
+    - internal/apiserver/services/applications/crud_test.go:TestDeleteApplication
+    - internal/apiserver/services/applications/crud_test.go:TestRefreshApplicationTimeout
+    - pkg/apiclient/applications_test.go:TestApplicationClientRequests
+
+API-018:
+  status: implemented
+  impl: [internal/apiserver/services/applications/watch.go, internal/apiserver/services/applications/events.go]
+  tests:
+    - internal/apiserver/services/applications/watch_test.go:TestWatchApplications
+    - internal/apiserver/services/applications/watch_test.go:TestWatchApplicationFilters
+    - internal/apiserver/services/applications/internal_test.go:TestBroadcaster
+    - pkg/apiclient/applications_test.go:TestApplicationWatchStream
+  notes: >-
+    SSE; a subscriber that falls behind the 1000-event buffer gets a resource_exhausted error event (reconnect).
+
+API-019:
+  status: implemented
+  impl: [internal/apiserver/services/applications/operations.go]
+  tests:
+    - internal/apiserver/services/applications/operations_test.go:TestSyncApplication
+    - internal/apiserver/services/applications/operations_test.go:TestRollbackApplication
+    - internal/apiserver/services/applications/operations_test.go:TestTerminateOperation
+    - internal/apiserver/services/applications/operations_test.go:TestListAndGetOperations
+  notes: >-
+    Responses carry the Operation and the Application; GET /operations and /operations/{op} are Patrol additions.
+
+API-020:
+  status: implemented
+  impl: [internal/apiserver/services/applications/manifests.go]
+  tests:
+    - internal/apiserver/services/applications/manifests_test.go:TestGetManifests
+    - internal/apiserver/services/applications/manifests_test.go:TestManifestsWithFiles
+  notes: >-
+    manifests-with-files takes a gzipped tar body (optional checksum query) instead of a
+    client stream and requires override (deliberate difference); sources the project does not
+    permit are not rendered.
+
+API-025:
+  status: implemented
+  impl: [internal/apiserver/services/applications/revisions.go]
+  tests:
+    - internal/apiserver/services/applications/manifests_test.go:TestRevisionMetadata
+    - internal/apiserver/services/applications/internal_test.go:TestSourceFor
+
+API-026:
+  status: in-progress
+  impl: [internal/apiserver/services/applications/revisions.go]
+  tests:
+    - internal/apiserver/services/applications/operations_test.go:TestSyncWindowsState
+  notes: >-
+    Sync windows done; resource events belong to the resource routes.
+
+API-027:
+  status: in-progress
+  impl: [internal/apiserver/services/applications/links.go]
+  tests:
+    - internal/apiserver/services/applications/manifests_test.go:TestApplicationLinks
+    - internal/apiserver/services/applications/manifests_test.go:TestResourceLinksWithoutLiveAccess
+  notes: >-
+    ListLinks complete; ListResourceLinks works for the Application itself and through the LiveResources interface, whose controller-backed implementation belongs to the resource routes.

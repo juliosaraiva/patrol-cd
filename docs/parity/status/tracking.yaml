@@ -1,0 +1,178 @@
+# internal/tracking (resource tracking library). See docs/architecture/components/tracking.md.
+# Library-level evidence only: no controller, repo-server, cache or hydrator consumes the
+# package yet, so features whose behavior spans those components are in-progress.
+
+APP-069:
+  status: in-progress
+  impl: [internal/tracking/instance.go]
+  tests:
+    - internal/tracking/instance_test.go:TestInstanceName
+    - internal/tracking/instance_test.go:TestParseInstanceName
+    - internal/tracking/instance_test.go:TestInstanceNameFromQualified
+    - internal/tracking/tracker_test.go:TestSetAppInstanceRoundTrip
+    - internal/tracking/envtest_test.go:TestEnvtestAnnotationTracking
+  notes: >-
+    Instance names (name in the control-plane namespace, <namespace>_<name> otherwise) and
+    qualified/instance conversion; tracking ids of apps in other namespaces start with
+    "<ns>_<name>:". CLI name parsing and RBAC object names (internal/rbac.AppObject) are
+    other components.
+
+APP-070:
+  status: in-progress
+  impl: [internal/tracking/tracker.go, internal/tracking/trackingid.go]
+  tests:
+    - internal/tracking/tracker_test.go:TestSetAppInstanceRoundTrip
+    - internal/tracking/tracker_test.go:TestGetAppNameUntrackedOrMalformed
+    - internal/tracking/trackingid_test.go:TestParseTrackingID
+    - internal/tracking/property_test.go:TestPropertyTrackingIDRoundTrip
+    - internal/tracking/envtest_test.go:TestEnvtestAnnotationTracking
+  notes: >-
+    Exact tracking-id format (destination namespace for cluster-scoped resources), parse
+    errors with the upstream message mean not owned, label-only metadata grants no ownership,
+    installation-id written/removed. IsManagedBy excludes objects with ownerReferences, as the
+    upstream managed live set does. Live-set assembly (cache iteration, synthesized owners,
+    adoption of untracked objects matching a target) belongs to internal/cache and the
+    controller.
+
+APP-071:
+  status: implemented
+  impl: [internal/tracking/tracker.go]
+  tests:
+    - internal/tracking/tracker_test.go:TestLabelTrackingDoesNotTruncate
+    - internal/tracking/tracker_test.go:TestSetAppInstanceRoundTrip
+    - internal/tracking/tracker_test.go:TestIsSelfReferencedObject
+    - internal/tracking/envtest_test.go:TestEnvtestLabelLimits
+  notes: >-
+    Label value untruncated (a 70-character instance name is rejected by a real API server in
+    envtest); every object is self-referenced under label tracking. Not yet exercised through
+    a controller sync.
+
+APP-072:
+  status: implemented
+  impl: [internal/tracking/tracker.go, internal/tracking/label.go]
+  tests:
+    - internal/tracking/tracker_test.go:TestAnnotationAndLabelTruncation
+    - internal/tracking/label_test.go:TestTruncateLabel
+    - internal/tracking/property_test.go:TestPropertyTruncateLabel
+    - internal/tracking/envtest_test.go:TestEnvtestLabelLimits
+
+APP-073:
+  status: implemented
+  impl: [internal/tracking/tracker.go]
+  tests:
+    - internal/tracking/tracker_test.go:TestCustomInstanceLabelKey
+    - internal/tracking/tracker_test.go:TestRemoveAppInstance
+    - internal/tracking/normalize_test.go:TestNormalizeCustomLabelKey
+  notes: >-
+    Configurable key (default app.kubernetes.io/instance); RemoveAppInstance removes the
+    default key even with a custom key, as upstream. The legacy key
+    applications.argoproj.io/app-name is not mapped (api/v1alpha1/keys.go), so its pod-template
+    labeling is not reproduced.
+
+APP-074:
+  status: implemented
+  impl: [internal/tracking/tracker.go]
+  tests:
+    - internal/tracking/tracker_test.go:TestInstallationID
+    - internal/tracking/tracker_test.go:TestInstallationIsolation
+    - internal/tracking/property_test.go:TestPropertySetAppInstanceRoundTrip
+    - internal/tracking/envtest_test.go:TestEnvtestAnnotationTracking
+  notes: >-
+    installation-id annotation written when configured, removed otherwise, matched exactly
+    (both empty matches); IsManagedBy is false for other installations' resources. The
+    installation ID is not secret, so it prevents accidental adoption between installations,
+    not deliberate forgery. The controller's prune decision must require IsManagedBy plus
+    AppProject permission checks (not yet wired).
+
+APP-075:
+  status: in-progress
+  impl: [internal/tracking/tracker.go, internal/tracking/trackingid.go]
+  tests:
+    - internal/tracking/tracker_test.go:TestIsSelfReferencedObject
+    - internal/tracking/tracker_test.go:TestCopiedResourceIsNotManaged
+    - internal/tracking/property_test.go:TestPropertyCopiedObjectIsNotManaged
+    - internal/tracking/envtest_test.go:TestEnvtestAnnotationTracking
+  notes: >-
+    Self-reference predicate (desired object first, else live id; cluster-scoped ignores the
+    namespace). Excluding non-self-referenced objects from sync status, pruning and the UI tree
+    is controller work.
+
+APP-076:
+  status: implemented
+  impl: [internal/tracking/tracker.go]
+  tests:
+    - internal/tracking/normalize_test.go:TestNormalize
+    - internal/tracking/property_test.go:TestPropertyNormalize
+    - internal/tracking/envtest_test.go:TestEnvtestTrackingMethodMigration
+  notes: >-
+    Normalize and DiffTrackingKeys (equivalent to internal/diff Options.Tracking, checked by a
+    differential property test). The controller must call one of them before diffing.
+
+DIFF-026:
+  status: implemented
+  impl: [internal/tracking/tracker.go]
+  tests:
+    - internal/tracking/normalize_test.go:TestNormalize
+    - internal/tracking/property_test.go:TestPropertyNormalize
+    - internal/tracking/envtest_test.go:TestEnvtestTrackingMethodMigration
+  notes: Tracking-side normalization; internal/diff.NormalizeTracking implements the same rules inside Diff.
+
+APP-077:
+  status: in-progress
+  impl: [internal/tracking/tracker.go]
+  tests:
+    - internal/tracking/tracker_test.go:TestDetectSharedResource
+  notes: >-
+    Detection (DetectSharedResource) and condition message (SharedResourceMessage). Failing the
+    operation with "Shared resource found: <message>" under FailOnSharedResource is sync-engine
+    work.
+
+APP-038:
+  status: in-progress
+  impl: [internal/tracking/tracker.go]
+  tests:
+    - internal/tracking/tracker_test.go:TestDetectSharedResource
+    - internal/tracking/envtest_test.go:TestEnvtestAnnotationTracking
+  notes: Upstream message wording ("<Kind>/<name> is part of applications <ns/app> and <ns/other>"); the controller emits the condition.
+
+SYNC-080:
+  status: in-progress
+  impl: [internal/tracking/tracker.go]
+  tests:
+    - internal/tracking/tracker_test.go:TestIsSelfReferencedObject
+    - internal/tracking/tracker_test.go:TestCopiedResourceIsNotManaged
+  notes: >-
+    Predicates only (IsSelfReferencedObject; IsManagedBy, which also excludes objects with
+    ownerReferences); the sync resource filter is sync-engine work.
+
+SYNC-082:
+  status: in-progress
+  impl: [internal/tracking/tracker.go]
+  tests:
+    - internal/tracking/tracker_test.go:TestDetectSharedResource
+  notes: Detection and message only; conditions and ownership takeover on sync are controller work.
+
+DIFF-076:
+  status: in-progress
+  impl: [internal/tracking/tracker.go, internal/tracking/metadata.go]
+  tests:
+    - internal/tracking/tracker_test.go:TestGetAppNameUntrackedOrMalformed
+    - internal/tracking/tracker_test.go:TestDetectSharedResource
+    - internal/tracking/tracker_test.go:TestIsManagedByOwnedChild
+    - internal/tracking/tracker_test.go:TestIsManagedByOwnerReferenceShapes
+    - internal/tracking/property_test.go:TestPropertyOwnedObjectIsNotManaged
+    - internal/tracking/envtest_test.go:TestEnvtestOwnedChildIsNotManaged
+  notes: >-
+    Tracking-derived app name, shared-resource detection, and the managed-root predicate
+    IsManagedBy (tracked by the app, no ownerReferences, self-referenced): an owned child
+    carrying the inherited instance label is attributed to the app but not managed (required
+    negative test; envtest with a Deployment-owned ReplicaSet). Live-set assembly (cache
+    iteration, synthesized owners such as Endpoints -> Service, full-manifest caching, adoption
+    of untracked target matches) is internal/cache + controller.
+
+DIFF-087:
+  status: in-progress
+  impl: [internal/tracking/tracker.go]
+  tests:
+    - internal/tracking/tracker_test.go:TestSetAppInstanceRoundTrip
+  notes: GetAppName supplies the tracking-derived app of root objects; owner-chain inheritance and refresh triggering are internal/cache + controller.

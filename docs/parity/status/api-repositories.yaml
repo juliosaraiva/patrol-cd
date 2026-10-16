@@ -1,0 +1,252 @@
+# internal/apiserver/services/repositories (repository, credential template, certificate,
+# GnuPG key and SCM provider routes) and pkg/apiclient/repositories.go.
+# See docs/architecture/components/api-repositories.md.
+# Evidence: tests through pkg/apiclient against envtest (kube-apiserver 1.36, the Patrol
+# CRDs) with the real internal/rbac Enforcer, internal/auth TokenService, internal/repository
+# Lister/Resolver/StatusWriter, and an in-process fake repo-server. The patrol-server wiring
+# (cmd/patrolcd) does not register the service yet and no real repo-server was used, so
+# nothing here is "verified".
+
+API-009:
+  status: implemented
+  impl: [pkg/apiclient/repositories.go, internal/apiserver/services/repositories/service.go]
+  tests:
+    - internal/apiserver/services/repositories/repositories_test.go:TestRepositoryLifecycle
+    - pkg/apiclient/repositories_test.go:TestRepositoryClientRequests
+  notes: >-
+    Repository URLs and template URL prefixes travel as one URL-encoded path segment
+    (/repositories/{repo}, /write-repositories/{repo}, /repocreds/{url}, /write-repocreds/{url});
+    encodeURIComponent-style paths decode to the URL, malformed escapes are refused.
+
+API-029:
+  status: implemented
+  impl: [internal/apiserver/services/repositories/certificates.go, internal/apiserver/services/repositories/configmaps.go, pkg/apiclient/repositories.go]
+  tests:
+    - internal/apiserver/services/repositories/trust_test.go:TestCertificates
+    - internal/apiserver/services/repositories/unit_test.go:TestKnownHostLines
+    - internal/apiserver/services/repositories/unit_test.go:TestApplyCertificates
+  notes: >-
+    certData is plain text (PEM or base64 key), not base64-encoded bytes as in the upstream REST
+    gateway.
+
+API-031:
+  status: implemented
+  impl: [internal/apiserver/services/repositories/gpgkeys.go, pkg/apiclient/repositories.go]
+  tests:
+    - internal/apiserver/services/repositories/trust_test.go:TestGPGKeys
+    - internal/apiserver/services/repositories/unit_test.go:TestSplitArmoredKeysRejectsPrivate
+  notes: >-
+    Delete is DELETE /gpgkeys/{keyID} (api-contract.md) and normalizes a fingerprint to the key
+    ID like get does (upstream DELETE /gpgkeys?keyID= does not).
+
+API-036:
+  status: implemented
+  impl: [internal/apiserver/services/repositories/repocreds.go, internal/apiserver/services/repositories/secrets.go, pkg/apiclient/repositories.go]
+  tests:
+    - internal/apiserver/services/repositories/repocreds_test.go:TestRepoCreds
+    - internal/apiserver/services/repositories/repocreds_test.go:TestWriteRepoCreds
+    - internal/apiserver/services/repositories/consistency_test.go:TestCredentialsFollowObjectUpdate
+    - internal/apiserver/services/repositories/consistency_test.go:TestDeclarativeURLPasswordsMasked
+  notes: >-
+    Templates are RepositoryCredential objects with a managed credentials Secret; update and
+    delete address the exact URL prefix; the write list returns every write template. The
+    template is written before its Secret (a 409 changes no credential); a password in a
+    declarative urlPrefix or proxy is masked in responses.
+
+API-037:
+  status: implemented
+  impl: [internal/apiserver/services/repositories/repositories.go, internal/apiserver/services/repositories/secrets.go, internal/apiserver/services/repositories/validate.go, pkg/apiclient/repositories.go]
+  tests:
+    - internal/apiserver/services/repositories/repositories_test.go:TestRepositoryLifecycle
+    - internal/apiserver/services/repositories/repositories_test.go:TestCreateUnreachable
+    - internal/apiserver/services/repositories/repositories_test.go:TestProjectScopedRepositories
+    - internal/apiserver/services/repositories/repositories_test.go:TestValidateAccess
+    - internal/apiserver/services/repositories/repositories_test.go:TestAuthentication
+    - internal/apiserver/services/repositories/repositories_test.go:TestInputValidation
+    - internal/apiserver/services/repositories/inherit_test.go:TestInheritedTemplateTransport
+    - internal/apiserver/services/repositories/consistency_test.go:TestDeclarativeURLPasswordsMasked
+  notes: >-
+    No deprecated alias routes (single REST surface). Responses are the Repository object plus
+    hasCredentials/inheritedCredentials/connectionState instead of Argo's flat Repository; URL
+    passwords of declaratively created objects are masked (upstream returns them). A
+    repository that would inherit a template's credentials cannot set its own proxy or
+    insecure flags unless the caller may update the template (upstream allows it).
+
+API-038:
+  status: implemented
+  impl: [internal/apiserver/services/repositories/browse.go, pkg/apiclient/repositories.go]
+  tests:
+    - internal/apiserver/services/repositories/browse_test.go:TestBrowse
+    - internal/apiserver/services/repositories/browse_test.go:TestListApps
+    - internal/apiserver/services/repositories/browse_test.go:TestAppDetails
+    - internal/apiserver/services/repositories/unit_test.go:TestSourceInHistory
+
+API-039:
+  status: implemented
+  impl: [internal/apiserver/services/repositories/repositories.go, internal/apiserver/services/repositories/common.go]
+  tests:
+    - internal/apiserver/services/repositories/repositories_test.go:TestWriteRepositories
+  notes: Hydrator disabled answers 501 with code failed_precondition and detail "hydrator is disabled".
+
+REPO-027:
+  status: implemented
+  impl: [internal/apiserver/services/repositories/secrets.go]
+  tests:
+    - internal/apiserver/services/repositories/repositories_test.go:TestRepositoryLifecycle
+    - internal/apiserver/services/repositories/repositories_test.go:TestListAndRecovery
+    - internal/apiserver/services/repositories/consistency_test.go:TestCredentialsFollowObjectUpdate
+  notes: >-
+    Patrol form of the write/delete semantics: credentials live in a Secret managed by the API
+    (secret-type label, managed-by annotation, ownerReference); unknown keys survive updates;
+    a credentials field replaces the recognized keys, its absence keeps them; deleting removes
+    the managed Secret only, a Secret the API does not manage is never modified (upstream
+    strips its label). Malformed bool/int keys do not exist (typed CRD fields). On updates the
+    object is written first and the Secret second; a Secret write failure restores the spec.
+
+REPO-028:
+  status: implemented
+  impl: [internal/apiserver/services/repositories/common.go]
+  tests:
+    - internal/apiserver/services/repositories/unit_test.go:TestObjectNames
+    - internal/apiserver/services/repositories/repositories_test.go:TestProjectScopedRepositories
+  notes: >-
+    Object names repo-, repo-write-, creds-, creds-write-<fnv64a(normalized URL, project)>; the
+    managed Secret is <object>-creds. A Secret of that name not managed for the object is a
+    409, not overwritten.
+
+REPO-035:
+  status: implemented
+  impl: [internal/apiserver/services/repositories/repositories.go]
+  tests:
+    - internal/apiserver/services/repositories/repositories_test.go:TestRepositoryLifecycle
+    - internal/apiserver/services/repositories/repositories_test.go:TestProjectScopedRepositories
+    - internal/apiserver/services/repositories/repositories_test.go:TestListAndRecovery
+
+REPO-036:
+  status: implemented
+  impl: [internal/apiserver/services/repositories/repositories.go]
+  tests:
+    - internal/apiserver/services/repositories/repositories_test.go:TestProjectScopedRepositories
+    - internal/apiserver/services/repositories/repositories_test.go:TestRepositoryLifecycle
+
+REPO-037:
+  status: implemented
+  impl: [internal/apiserver/services/repositories/repositories.go, internal/apiserver/services/repositories/repocreds.go]
+  tests:
+    - internal/apiserver/services/repositories/repositories_test.go:TestRepositoryLifecycle
+    - internal/apiserver/services/repositories/repositories_test.go:TestCreateUnreachable
+    - internal/apiserver/services/repositories/repositories_test.go:TestRepositoryCredsOnly
+    - internal/apiserver/services/repositories/inherit_test.go:TestInheritedTemplateTransport
+    - internal/apiserver/services/repositories/consistency_test.go:TestCredentialsFollowObjectUpdate
+  notes: >-
+    credsOnly creates a credential template (upstream ignores it). Upsert additionally needs
+    update permission. Project-scoped repositories need an existing project. Inheriting a
+    template's credentials with an own proxy or insecure flag needs update on the template.
+
+REPO-038:
+  status: implemented
+  impl: [internal/apiserver/services/repositories/repositories.go]
+  tests:
+    - internal/apiserver/services/repositories/repositories_test.go:TestRepositoryLifecycle
+    - internal/apiserver/services/repositories/repositories_test.go:TestProjectScopedRepositories
+    - internal/apiserver/services/repositories/repositories_test.go:TestMoveIntoProject
+    - internal/apiserver/services/repositories/consistency_test.go:TestCredentialsFollowObjectUpdate
+    - internal/apiserver/services/repositories/inherit_test.go:TestInheritedTemplateTransport
+  notes: >-
+    Moving between projects works (upstream requires the target secret to exist already);
+    metadata.resourceVersion gives optimistic concurrency (409), and an update refused by the
+    API server changes no credential (the Repository is written before its Secret); the
+    connection is checked and recorded after an update.
+
+REPO-039:
+  status: implemented
+  impl: [internal/apiserver/services/repositories/repositories.go]
+  tests:
+    - internal/apiserver/services/repositories/repositories_test.go:TestRepositoryLifecycle
+    - internal/apiserver/services/repositories/repositories_test.go:TestListAndRecovery
+
+REPO-040:
+  status: implemented
+  impl: [internal/apiserver/services/repositories/repositories.go]
+  tests:
+    - internal/apiserver/services/repositories/repositories_test.go:TestValidateAccess
+    - internal/apiserver/services/repositories/inherit_test.go:TestInheritedTemplateTransport
+  notes: >-
+    The body is a Repository object plus credentials (every RepoAccessQuery field has a spec or
+    credentials counterpart). Without credentials of its own, a proxy or insecure flag that
+    differs from the inherited template's is refused (403) unless the caller may update the
+    template (upstream sends the template's credentials with the request's proxy and flags).
+
+REPO-041:
+  status: implemented
+  impl: [internal/apiserver/services/repositories/repositories.go]
+  tests:
+    - internal/apiserver/services/repositories/repositories_test.go:TestWriteRepositories
+
+REPO-042:
+  status: implemented
+  impl: [internal/apiserver/services/repositories/browse.go]
+  tests:
+    - internal/apiserver/services/repositories/browse_test.go:TestBrowse
+    - internal/apiserver/services/repositories/browse_test.go:TestListApps
+    - internal/apiserver/services/repositories/browse_test.go:TestAppDetails
+    - internal/apiserver/services/repositories/repositories_test.go:TestListAndRecovery
+
+REPO-043:
+  status: implemented
+  impl: [internal/apiserver/services/repositories/repositories.go]
+  tests:
+    - internal/apiserver/services/repositories/repositories_test.go:TestRepositoryLifecycle
+    - internal/apiserver/services/repositories/repositories_test.go:TestListAndRecovery
+  notes: >-
+    The recorded Repository.status replaces the server cache: reads check again when no state
+    is recorded, it describes another generation, or it is older than ConnectionStateTTL
+    (default 1h, upstream cache expiration); forceRefresh always checks.
+
+REPO-045:
+  status: implemented
+  impl: [internal/apiserver/services/repositories/repocreds.go]
+  tests:
+    - internal/apiserver/services/repositories/repocreds_test.go:TestRepoCreds
+  notes: >-
+    Update/delete address the exact prefix (upstream resolves the longest matching template,
+    which can act on an object outside the RBAC object of the request).
+
+REPO-046:
+  status: implemented
+  impl: [internal/apiserver/services/repositories/repocreds.go]
+  tests:
+    - internal/apiserver/services/repositories/repocreds_test.go:TestWriteRepoCreds
+  notes: >-
+    The write list returns every write template the caller may get (upstream lists only
+    password-based write templates whose URL is also a read template URL).
+
+REPO-059:
+  status: implemented
+  impl: [internal/apiserver/services/repositories/certificates.go]
+  tests:
+    - internal/apiserver/services/repositories/trust_test.go:TestCertificates
+    - internal/apiserver/services/repositories/unit_test.go:TestCertificateSelectors
+
+REPO-060:
+  status: implemented
+  impl: [internal/apiserver/services/repositories/certificates.go]
+  tests:
+    - internal/apiserver/services/repositories/trust_test.go:TestCertificates
+    - internal/apiserver/services/repositories/unit_test.go:TestApplyCertificates
+  notes: >-
+    Only the certificate blocks are stored; private keys are refused; duplicates answer 409.
+
+REPO-061:
+  status: implemented
+  impl: [internal/apiserver/services/repositories/certificates.go]
+  tests:
+    - internal/apiserver/services/repositories/trust_test.go:TestCertificates
+    - internal/apiserver/services/repositories/unit_test.go:TestKnownHostLines
+  notes: A TLS entry whose data cannot be parsed is removed and reported as "invalid" (upstream aborts).
+
+REPO-065:
+  status: implemented
+  impl: [internal/apiserver/services/repositories/gpgkeys.go]
+  tests:
+    - internal/apiserver/services/repositories/trust_test.go:TestGPGKeys

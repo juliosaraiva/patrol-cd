@@ -1,0 +1,231 @@
+# Web UI: application creation wizard, ApplicationSets pages, notifications catalog and
+# subscription editor, help page, UI extensions host (workstream create-appsets-ext).
+# See docs/architecture/components/ui.md ("UI extensions" and "Application creation,
+# ApplicationSets, notifications and help").
+# Evidence level: vitest + Testing Library against MSW mocks of the API contract. Nothing here has
+# run against patrol-server or in a browser (Playwright journeys in
+# ui/e2e/create-appsets-ext.spec.ts are written but not executed), so no entry is verified.
+# Commands and results: docs/verification/log.md V-UICAE-01..04.
+# Every mount requested from other workstreams has landed (ui.md, "Pending mounts"); the tests
+# listed for API-111/120/122/123 render the mounted app (real routes, shell and pages).
+
+API-091:
+  status: implemented
+  impl:
+    - ui/src/pages/create/ApplicationCreateForm.tsx
+    - ui/src/pages/create/SourceFields.tsx
+    - ui/src/pages/create/ParametersFields.tsx
+    - ui/src/pages/create/model.ts
+    - ui/src/pages/create/CreateApplicationPanel.tsx
+    - ui/src/api/hooks/create.ts
+  tests:
+    - ui/src/pages/create/ApplicationCreateForm.test.tsx
+    - ui/src/pages/create/model.test.ts
+  notes: >-
+    Form and YAML modes over one draft (bidirectional, inline YAML errors), project picker,
+    application namespace (apps in any namespace), sync policy (manual/automatic, prune, self
+    heal, allow empty), sync options incl. Replace only when allowed, prune propagation, retry,
+    deletion finalizer, registered-repository picker, branches/tags (refs), Helm chart and
+    version pickers, OCI tags, path suggestions (repositories/{repo}/apps), source type and
+    Helm/Kustomize/Directory/Plugin parameters from appdetails, multi-source with ref keys,
+    source hydrator, destination by URL or name, upsert/validate, server error guidance,
+    navigation to the new app. YAML that parses but has the wrong shape (missing repoURL,
+    sourceHydrator: {}, a string where a list is expected, numeric revisions) yields a draft with
+    empty fields or a line-specific error, never a render failure. Reached from the applications
+    list ("New application", ?new=1), which mounts CreateApplicationPanel.
+
+API-118:
+  status: implemented
+  impl:
+    - ui/src/pages/applicationsets/ApplicationSetsListPage.tsx
+    - ui/src/pages/applicationsets/ApplicationSetDetailsPage.tsx
+    - ui/src/pages/applicationsets/PreviewPanel.tsx
+    - ui/src/pages/applicationsets/model.ts
+    - ui/src/pages/applicationsets/diff.ts
+  tests:
+    - ui/src/pages/applicationsets/ApplicationSetsListPage.test.tsx
+    - ui/src/pages/applicationsets/ApplicationSetDetailsPage.test.tsx
+    - ui/src/pages/applicationsets/model.test.ts
+    - ui/src/pages/applicationsets/diff.test.ts
+  notes: >-
+    Table view only (no tiles, no favorites). Owner badge / parent ApplicationSet node in the
+    application view belong to ASET-127 (applications pages).
+
+ASET-124:
+  status: implemented
+  impl: [ui/src/pages/applicationsets/ApplicationSetsListPage.tsx]
+  tests: [ui/src/pages/applicationsets/ApplicationSetsListPage.test.tsx]
+  notes: >-
+    Live list (watch), search (with "/"), health/project/namespace/label filters in the URL,
+    health summary counts, conditions and generated-application counts, empty/error/loading
+    states. RBAC filtering is the server's.
+
+ASET-125:
+  status: implemented
+  impl:
+    - ui/src/pages/applicationsets/ApplicationSetDetailsPage.tsx
+    - ui/src/pages/applicationsets/parts.tsx
+    - ui/src/pages/applicationsets/GeneratorSummary.tsx
+  tests: [ui/src/pages/applicationsets/ApplicationSetDetailsPage.test.tsx]
+  notes: >-
+    Status bar (health, conditions, application count, strategy, last update), generated
+    applications with health, sync and progressive sync step, conditions with guidance,
+    resource tree of generated applications (list form, not a graph), events.
+
+ASET-126:
+  status: implemented
+  impl:
+    - ui/src/pages/applicationsets/PreviewPanel.tsx
+    - ui/src/pages/applicationsets/diff.ts
+    - ui/src/pages/applicationsets/DeleteApplicationSetDialog.tsx
+  tests:
+    - ui/src/pages/applicationsets/ApplicationSetDetailsPage.test.tsx
+    - ui/src/pages/applicationsets/PreviewPanel.test.tsx
+    - ui/src/pages/applicationsets/diff.test.ts
+  notes: >-
+    Summary, read-only manifest, events and Preview (edited spec rendered by
+    POST /applicationsets/generate, diffed against the owned Applications; falls back to the
+    saved spec's output when they cannot be listed; permission-denied explained). Tabs live in
+    the page rather than a slide-out panel. Large sets: classification compares canonical JSON;
+    YAML and line diffs are computed only for rows shown (50 per page, collapsed when more than 5
+    change, 400 diff rows before "Show all"); manifests are paged 25 at a time.
+
+API-133:
+  status: in-progress
+  impl: [ui/src/pages/applicationsets/ApplicationSetsListPage.tsx]
+  tests: [ui/src/pages/applicationsets/ApplicationSetsListPage.test.tsx]
+  notes: >-
+    ApplicationSets list half ("/" focuses and selects the page search, Esc via SearchInput). The
+    applications list half belongs to the applications pages.
+
+API-109:
+  status: implemented
+  impl: [ui/src/pages/help/HelpPage.tsx, ui/src/pages/help/help.ts]
+  tests: [ui/src/pages/help/HelpPage.test.tsx]
+  notes: >-
+    Server binary link download/patrol-linux labelled with the server architecture, one link
+    per known help.download.<os>-<arch> key (unknown keys and non-http(s) URLs dropped), API
+    reference link (swagger-ui, served per API-012), CLI login snippet, version and tool
+    versions. Documentation links appear only when the build sets VITE_PATROL_DOCS_URL.
+
+API-111:
+  status: implemented
+  impl: [ui/src/pages/help/ChatButton.tsx, ui/src/pages/help/help.ts, ui/src/shell/AppShell.tsx]
+  tests: [ui/src/pages/help/HelpPage.test.tsx, ui/src/shell/shell.test.tsx]
+  notes: >-
+    help.chatUrl ("url" or "title|url") with help.chatText (default "Chat now!"); invalid URLs
+    render a disabled control ("Invalid URL provided"). The shell mounts <ChatButton floating />
+    once (fixed bottom-right, every shell page); nothing renders without help.chatUrl. On /help
+    the floating button is left out because the page's "Get help" section shows the same link
+    (upstream has no help-page copy, only the floating button).
+
+NOTIF-109:
+  status: implemented
+  impl:
+    - ui/src/pages/notifications/SubscriptionEditor.tsx
+    - ui/src/pages/notifications/subscriptions.ts
+    - ui/src/api/hooks/notifications.ts
+  tests:
+    - ui/src/pages/notifications/SubscriptionEditor.test.tsx
+    - ui/src/pages/notifications/subscriptions.test.ts
+  notes: >-
+    Rows for subscribe.<trigger>.<service> annotations with trigger/service suggestions, free
+    text when the catalog fails, recipient validation, JSON merge patch of changed keys only,
+    read-only display without applications/update. Differs from upstream on purpose: names
+    with digits, "_" and dotted services are editable (the engine accepts them), and a
+    duplicate trigger/service pair is an error instead of silently replacing the other row.
+    The application summary panel mounts the editor.
+
+API-120:
+  status: implemented
+  impl: [ui/src/extensions/registry.ts, ui/src/extensions/loader.ts, ui/src/extensions/slots.tsx, ui/src/main.tsx]
+  tests:
+    - ui/src/extensions/registry.test.ts
+    - ui/src/extensions/loader.test.ts
+    - ui/src/extensions/slots.test.tsx
+    - ui/src/main.test.tsx
+  notes: >-
+    window.extensionsAPI with the five registration functions, registration events (slots
+    re-render), error boundaries, extensions.js loaded with a classic script tag (an empty
+    script or a failed fetch of it means no extensions and logs nothing). main.tsx calls
+    initExtensions() after the first render is scheduled, so the globals exist and extensions.js
+    is requested at startup on every page (as upstream), not only when a slot renders.
+    main.test.tsx runs the real bootstrap in jsdom (which does not execute the script).
+
+API-121:
+  status: implemented
+  impl: [ui/src/extensions/slots.tsx, ui/src/extensions/glob.ts]
+  tests: [ui/src/extensions/slots.test.tsx, ui/src/extensions/glob.test.ts]
+  notes: >-
+    Minimatch-compatible group/kind globs ("**" matches the core group), tabs sorted by title,
+    props {application, resource, tree}, error boundary message as upstream; argoproj.io
+    Application tabs also match Patrol Applications. The resource details panel mounts
+    useResourceExtensionTabs().
+
+API-122:
+  status: implemented
+  impl: [ui/src/extensions/slots.tsx, ui/src/app/routes.tsx, ui/src/shell/AppShell.tsx, ui/src/shell/nav.tsx]
+  tests: [ui/src/extensions/slots.test.tsx, ui/src/shell/shell.test.tsx]
+  notes: >-
+    Sidebar items (sidebar and mobile drawer, after the built-in sections) via
+    useSystemExtensionNavItems() and pages via <SystemExtensionRoutes> on the catch-all route
+    (heading, document title and breadcrumb = extension title; nested paths under the extension
+    path render it); built-in routes win over colliding paths and other unknown paths still 404.
+    Registrations after the first render (late bundles) update the nav, page and breadcrumb.
+
+API-123:
+  status: implemented
+  impl:
+    - ui/src/extensions/slots.tsx
+    - ui/src/pages/applications/details/ApplicationViews.tsx
+    - ui/src/pages/applications/details/ResourceViewsSlot.tsx
+  tests: [ui/src/extensions/slots.test.tsx, ui/src/pages/applications/details/ResourceViewsSlot.test.tsx]
+  notes: >-
+    useAppViewExtensions() (shouldDisplay applied) and <AppViewExtensions view=...>. With at least
+    one extension view for the application, the details page renders one switcher (Tree, Pods,
+    Network, List, then extension titles) bound to ?view= (built-in id or title, as upstream);
+    the extension gets {application, tree} with the live resource tree. ?view= naming a hidden or
+    unknown view falls back to the built-in default; the default-view annotation may name an
+    extension. Icons are a generic glyph (no Font Awesome). The resource drawer (?node=) is not
+    shown while an extension view is selected.
+
+API-124:
+  status: implemented
+  impl: [ui/src/extensions/slots.tsx]
+  tests: [ui/src/extensions/slots.test.tsx]
+  notes: >-
+    Status panel items with openFlyout() opening a drawer, deep-linkable with ?extension=<id>; the
+    status panel mounts <StatusPanelExtensions>.
+
+API-125:
+  status: implemented
+  impl: [ui/src/extensions/slots.tsx]
+  tests: [ui/src/extensions/slots.test.tsx]
+  notes: >-
+    Action-bar buttons (middle or end group), shouldDisplay gating, flyout drawer; the details
+    action bar mounts <TopBarExtensionActions>.
+
+API-126:
+  status: implemented
+  impl: [ui/src/extensions/registry.ts, ui/src/extensions/loader.ts]
+  tests: [ui/src/extensions/registry.test.ts]
+  notes: >-
+    window.extensions = {resources: {}} converted once into "More" tabs on the first lookup.
+
+API-131:
+  status: in-progress
+  impl: [ui/src/extensions/loader.ts]
+  tests: [ui/src/extensions/loader.test.ts, ui/src/extensions/slots.test.tsx]
+  notes: >-
+    window.React, window.ReactDOM (react-dom main entry) and window.ReactJSXRuntime are the host
+    instances; per-bundle failure isolation and the "Extension <name> failed to load:" prefix.
+    window.Moment is not provided (no moment dependency); the per-file try/catch wrapping of
+    extensions.js is the server's (API-050).
+
+API-132:
+  status: implemented
+  impl: [ui/src/extensions/loader.ts]
+  tests: [ui/src/extensions/loader.test.ts, ui/src/extensions/slots.test.tsx]
+  notes: >-
+    React 19 host; an automatic-runtime extension using hooks through window.ReactJSXRuntime
+    registers and renders; an evaluation TypeError is logged and isolated.

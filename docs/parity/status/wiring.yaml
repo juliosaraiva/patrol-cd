@@ -1,0 +1,352 @@
+# internal/server (component assembly, configuration precedence, observability, shutdown)
+# and cmd/patrolcd (multi-call binary). See docs/architecture/components/wiring.md; commands
+# and results in docs/verification/runs/2026-10-16-wiring.txt.
+# Evidence levels: the smoke tests run every entry point against a real kube-apiserver
+# (envtest 1.36, generated CRDs, real Leases) with real HTTP; nothing here was run in a
+# kind cluster (Docker blocked, see TASKS.md), so pod-level behavior (probes, mounts,
+# Services, RBAC) is not verified. A status here can only lower a feature's merged status
+# where another workstream claims more.
+
+OPS-009:
+  status: implemented
+  impl: [internal/server/commands.go, internal/server/server.go, internal/server/controller.go, internal/server/appset.go, internal/server/notifications.go, internal/server/components.go]
+  tests:
+    - cmd/patrolcd/main_test.go:TestHelpGolden
+    - internal/server/smoke_test.go:TestServerRunSmoke
+    - internal/server/smoke_test.go:TestControllerRunSmoke
+  notes: >-
+    Default listeners server 8080/8083, repo-server 8081/8084, controller 8082 (+ tree API 8090,
+    ADR-0004/0008), appset 8080/8081 (webhook listener off by default), notifications 9001,
+    commit-server 8086/8087; no Dex or Redis. Defaults are pinned by the help goldens; the
+    smoke tests bind port 0. Services are the manifests owner's.
+
+OPS-011:
+  status: in-progress
+  impl: [internal/server/observe.go, internal/server/server.go, internal/server/controller.go]
+  tests:
+    - internal/server/runtime_test.go:TestObservability
+    - internal/server/smoke_test.go:TestServerRunSmoke
+    - internal/server/smoke_test.go:TestControllerRunSmoke
+    - internal/server/smoke_test.go:TestRepoServerRunSmoke
+  notes: >-
+    /healthz and /readyz (readiness, 503 while draining), /livez on every metrics listener,
+    optional --healthz-addr; repo-server keeps its own probe listener with ?full=true. Missing:
+    patrol-server /healthz?full=true cluster listing.
+
+OPS-017:
+  status: implemented
+  impl: [internal/server/params.go, internal/server/runtime.go]
+  tests:
+    - internal/server/params_test.go:TestParamPrecedence
+    - internal/server/params_test.go:TestParamValidation
+    - internal/server/params_test.go:TestReadCmdParams
+    - internal/server/smoke_test.go:TestBootstrapReadsCmdParams
+  notes: >-
+    Flag > PATROL_* environment > patrol-cmd-params-cm > default for every key of
+    settings.ParamsForComponent; components with Kubernetes access also read the ConfigMap
+    directly at startup (Forbidden/NotFound ignored); repo-server and commit-server rely on the
+    environment projection as upstream. Restart needed for changes (upstream).
+
+OPS-030:
+  status: implemented
+  impl: [internal/server/server.go]
+  tests: [internal/server/smoke_test.go:TestServerRunSmoke]
+  notes: >-
+    patrol-server calls settings.EnsureServerSecretKey at startup and waits for the signing
+    key to reach the settings snapshot. The self-signed certificate is not persisted (see
+    OPS-096) and the initial admin password Secret is not generated here.
+
+OPS-040:
+  status: implemented
+  impl: [internal/server/controller.go]
+  tests: [internal/server/smoke_test.go:TestControllerRunSmoke]
+  notes: >-
+    Controller wiring: sharding.ConfigFromEnv (parameters fed through the lookup), a
+    LeaseManager on every replica, Ownership as core.Deps.OwnsCluster, Applications and
+    non-terminal Operations requeued after acquisitions, losses and assignment changes,
+    caches/engines of lost clusters dropped. Single-replica Lease acquisition and release on
+    shutdown run against envtest; multi-replica failover is the sharding package's envtest.
+
+OPS-045:
+  status: implemented
+  impl: [internal/server/controller.go, internal/server/commands.go]
+  tests: [cmd/patrolcd/main_test.go:TestHelpGolden]
+  notes: >-
+    --dynamic-cluster-distribution-enabled / PATROL_ENABLE_DYNAMIC_CLUSTER_DISTRIBUTION select
+    sharding.WorkloadReplicas (controller StatefulSet replicas); not run against a workload in
+    the wiring tests.
+
+OPS-055:
+  status: verified
+  impl: [internal/server/appset.go, internal/server/commands.go]
+  tests: [internal/server/smoke_test.go:TestAppSetControllerRunSmoke]
+  notes: >-
+    applicationsetcontroller.enable.leader.election (--enable-leader-election) runs the
+    ApplicationSet controller behind a controller-runtime Lease, released on cancel; verified
+    against envtest (Lease acquired by the running controller).
+
+OPS-056:
+  status: implemented
+  impl: [internal/server/observe.go]
+  tests:
+    - internal/server/runtime_test.go:TestObservability
+    - internal/server/smoke_test.go:TestServerRunSmoke
+  notes: >-
+    /debug/pprof/{,cmdline,profile,symbol,trace} on the metrics listener of server, controller,
+    appset, notifications and commit-server; per-request check of the file named by
+    PATROL_ENABLE_PROFILER_FILE_PATH (default /home/patrol/params/profiler.enabled) for
+    "true", else 401 with the upstream message; --enable-pprof forces it on. Not on the
+    repo-server probe listener (owned by internal/reposerver).
+
+OPS-065:
+  status: implemented
+  impl: [internal/server/observe.go]
+  tests:
+    - internal/server/smoke_test.go:TestServerRunSmoke
+    - internal/server/smoke_test.go:TestRepoServerRunSmoke
+    - internal/server/smoke_test.go:TestCommitServerRunSmoke
+  notes: >-
+    One registry per process (Go and process collectors plus the component libraries'),
+    plain-HTTP /metrics on the metrics listener of every component.
+
+OPS-085:
+  status: in-progress
+  impl: [internal/server/observe.go, internal/server/clients.go, internal/server/commands.go]
+  tests: []
+  notes: >-
+    otlp.address/.insecure/.headers/.attrs configure an OTLP/gRPC tracer provider
+    (AlwaysSample, W3C propagation, service.name patrol-server/-controller/-repo-server,
+    malformed attrs skipped with the upstream warning, setup failure fatal). Client spans wrap
+    repo-server, tree API and commit-server calls; the tree API listener continues traces.
+    Missing: server-side spans of patrol-server and the repo-server (their HTTP servers are
+    built inside internal/apiserver and internal/reposerver); not exercised against a collector.
+
+OPS-086:
+  status: implemented
+  impl: [internal/server/logging.go, internal/server/runtime.go]
+  tests: [internal/server/params_test.go:TestLogOptions]
+  notes: >-
+    <component>.log.level/.log.format/log.format.timestamp via flag, environment and
+    ConfigMap; applicationsetcontroller.debug forces debug; unknown format is a startup error.
+    Difference: when the format is configured nowhere, text outside a pod (JSON in a pod).
+
+OPS-096:
+  status: in-progress
+  impl: [internal/server/server.go, internal/server/tlsutil.go]
+  tests: [internal/server/runtime_test.go:TestFileCertificateReload]
+  notes: >-
+    --tls-cert/--tls-key (a mounted patrol-server-tls Secret) win over patrol-secret
+    tls.crt/tls.key, which win over a generated self-signed certificate; files are re-read
+    when they change and an invalid update keeps the previous pair. The self-signed
+    certificate is not persisted into patrol-secret.
+
+OPS-097:
+  status: implemented
+  impl: [internal/server/commands.go, internal/server/server.go, internal/server/tlsutil.go, internal/server/components.go]
+  tests:
+    - internal/server/runtime_test.go:TestTLSConfigs
+    - internal/server/server_test.go:TestAPICipherSuites
+    - internal/server/smoke_test.go:TestServerRunDefaultTLS
+    - internal/server/smoke_test.go:TestRepoServerRunSmoke
+  notes: >-
+    server.tls.* and reposerver.tls.* (min/max version, TLS 1.2 ciphers, insecure suites
+    refused) reach the listeners. patrol-server's listener offers HTTP/2: a TLS 1.2 list without
+    an HTTP/2-required AES-128-GCM suite (the upstream default is one) gets
+    TLS_ECDHE_ECDSA_WITH_AES_128_GCM_SHA256 and TLS_ECDHE_RSA_WITH_AES_128_GCM_SHA256 appended
+    (logged), otherwise net/http refused to serve and the default start exited 1; min 1.3
+    ignores the list with upstream's warning. TestServerRunDefaultTLS runs server.Run with the
+    compiled defaults against envtest: TLS 1.3 + HTTP/2 and TLS 1.2 handshakes succeed, a
+    client offering only other suites is refused. Not covered here: the `list` value and the
+    exact upstream startup messages.
+
+OPS-099:
+  status: implemented
+  impl: [internal/server/components.go]
+  tests: [internal/server/smoke_test.go:TestRepoServerRunSmoke]
+  notes: >-
+    Repo-server certificate: --tls-cert/--tls-key, else the mounted patrol-repo-server-tls pair
+    (/app/config/reposerver/tls) when present, else a generated self-signed certificate.
+
+OPS-101:
+  status: implemented
+  impl: [internal/server/clients.go, internal/server/tlsutil.go]
+  tests: [internal/server/runtime_test.go:TestTLSConfigs]
+  notes: >-
+    <component>.repo.server.plaintext / .strict.tls (deprecated, hidden) / .ca.cert.path for
+    server, controller, appset and notifications clients; without a CA or strict TLS the
+    certificate is not verified (upstream).
+
+OPS-102:
+  status: in-progress
+  impl: [internal/server/server_api.go, internal/server/commands.go]
+  tests: [internal/server/server_test.go:TestDexConnection]
+  notes: >-
+    server.dex.server, .plaintext and .strict.tls select the transport of the Dex proxy and
+    server-side Dex discovery. Strict TLS verifies against --dex-server-ca-cert-path and pins
+    the leaf to --dex-server-cert-path (defaults /app/config/dex/tls/{ca.crt,tls.crt}); missing
+    files stop the server with a message naming them (it used to fail on every start). The test
+    performs real TLS handshakes against stub HTTPS servers (simulated Dex): plaintext,
+    unverified default, pinned certificate accepted, same-CA other certificate rejected with
+    "dex server certificate does not match", foreign CA rejected. In progress: no SSO login
+    through a real Dex; the pinning lives in the wiring until core.DexTransport takes a pin
+    (integration finding W-13).
+
+OPS-103:
+  status: implemented
+  impl: [internal/server/clients.go, internal/server/components.go]
+  tests: [internal/server/runtime_test.go:TestTLSConfigs]
+  notes: >-
+    Client certificates from <component>.repo.server.client.cert(.key).path when the files
+    exist; the repo-server requires and verifies them with reposerver.client.ca.path or
+    --tls-client-ca (absent file: no mTLS, upstream).
+
+OPS-105:
+  status: implemented
+  impl: [internal/server/commands.go, internal/server/server.go]
+  tests:
+    - internal/server/server_test.go:TestEffectiveBaseHRef
+    - internal/server/smoke_test.go:TestServerRunRootPath
+    - internal/apiserver/server_test.go:TestServeTLSRedirectMetricsAndShutdown
+  notes: >-
+    server.rootpath / server.basehref reach apiserver.Config. With a root path the base href is
+    the root path (upstream forces it; a differing --basehref, the default / included, logs
+    upstream's conflict warning); it used to stay "/" behind a sub-path. TestServerRunRootPath
+    (server.Run against envtest, default --basehref): <base href="/patrol/">, session cookie
+    Path=/patrol after an admin login, /healthz at the bare path, 404 outside the prefix. The
+    HTTP to HTTPS redirect with the prefix is tested in internal/apiserver.
+
+OPS-111:
+  status: in-progress
+  impl: [internal/server/server.go]
+  tests:
+    - internal/server/server_test.go:TestStaticAssets
+    - internal/server/smoke_test.go:TestServerRunRootPath
+  notes: >-
+    server.staticassets (default /shared/app) is opened with os.OpenRoot and looked up after
+    the embedded UI (upstream composableFS order); links inside the directory (ConfigMap ..data)
+    work; links escaping it (absolute, relative, through a linked directory, /etc/passwd) are
+    never served. Before this change os.DirFS followed them and served /etc/passwd. Missing
+    directory: upstream's warning; other open errors are fatal. In progress: an escaping link
+    answers 404 (or the index page for HTML requests) instead of upstream's 500, because the
+    apiserver UI handler maps every open error to "not found" (integration finding W-14).
+
+OPS-112:
+  status: implemented
+  impl: [internal/server/server_routes.go]
+  tests: [internal/server/routes_test.go:TestDownloads]
+  notes: >-
+    /download/patrol-<os>-<arch>[.exe] from --download-dir, patrol-linux alias of the server
+    architecture, fallback to the patrol binary in PATH on Linux for patrol-linux[-<arch>].
+
+OPS-145:
+  status: in-progress
+  impl: [cmd/patrolcd/main.go, internal/server/commands.go, internal/server/runtime.go]
+  tests:
+    - cmd/patrolcd/main_test.go:TestBinaryNameDispatch
+    - internal/server/runtime_test.go:TestResolveArgs
+  notes: >-
+    Dispatch by executable name or PATROL_BINARY_NAME; --kubeconfig, --context and -n with
+    client-go namespace defaulting. Missing: the other kubectl client flags.
+
+OPS-146:
+  status: in-progress
+  impl: [internal/server/commands.go]
+  tests: [cmd/patrolcd/main_test.go:TestHelpGolden]
+  notes: >-
+    Controller flags of every controller parameter plus --metrics-port, --tree-api-addr,
+    --dynamic-cluster-distribution-enabled. Missing upstream flags without parameters:
+    --app-resync*, --wq-*, --metrics-application-*, --metrics-cluster-labels,
+    --enable-k8s-event, --gloglevel; Redis flags are hidden (no effect).
+
+OPS-147:
+  status: in-progress
+  impl: [internal/server/commands.go]
+  tests: [cmd/patrolcd/main_test.go:TestHelpGolden]
+  notes: >-
+    Server flags of every server parameter (incl. the --appset helpers under their parameter
+    names), --port, --metrics-port, --extensions-dir, --download-dir, controller tree API
+    routing flags. Accepted without effect: --enable-gzip, --api-content-types,
+    --oidc-cache-expiration, cache expirations, --glob-cache-size (warned at startup).
+    Missing: --login-attempts-expiration, --enable-k8s-event, --gloglevel; `version` is a
+    patrolcd subcommand.
+
+OPS-148:
+  status: implemented
+  impl: [internal/server/commands.go, internal/server/components.go]
+  tests:
+    - cmd/patrolcd/main_test.go:TestHelpGolden
+    - internal/server/smoke_test.go:TestRepoServerRunSmoke
+  notes: >-
+    Every repo-server parameter flag plus ports, trust material and working directories;
+    --helm-registry-max-index-size is not offered (no index size limit in internal/helm).
+
+OPS-149:
+  status: implemented
+  impl: [internal/server/commands.go, internal/server/appset.go]
+  tests:
+    - cmd/patrolcd/main_test.go:TestHelpGolden
+    - internal/server/smoke_test.go:TestAppSetControllerRunSmoke
+  notes: >-
+    Parameter flags keep their register names (--repo-server instead of --argocd-repo-server);
+    probes on --healthz-addr (upstream --probe-addr); webhook listener only with --webhook-addr.
+
+OPS-150:
+  status: implemented
+  impl: [internal/server/commands.go, internal/server/notifications.go]
+  tests:
+    - cmd/patrolcd/main_test.go:TestHelpGolden
+    - internal/server/smoke_test.go:TestNotificationsControllerRunSmoke
+  notes: --repo-server (upstream --argocd-repo-server), --config-map-name, --secret-name, --app-label-selector, metrics :9001, optional --enable-leader-election.
+
+OPS-151:
+  status: implemented
+  impl: [internal/server/commands.go, internal/server/components.go]
+  tests:
+    - cmd/patrolcd/main_test.go:TestHelpGolden
+    - internal/server/smoke_test.go:TestCommitServerRunSmoke
+  notes: --address/--port 8086, --metrics-address/--metrics-port 8087, optional TLS/mTLS, work/credentials directories and trust material.
+
+OPS-153:
+  status: implemented
+  impl: [internal/server/commands.go, internal/server/helpers.go]
+  tests:
+    - cmd/patrolcd/main_test.go:TestHelperModesAreDispatched
+    - internal/server/helpers_test.go:TestEveryHelperMainIsDispatched
+    - internal/server/smoke_test.go:TestCMPServerRunSmoke
+  notes: >-
+    cmp-server and k8s-auth subcommands (and patrol-cmp-server / patrol-k8s-auth names); the
+    git askpass helper is a hidden mode of the same binary selected by PATROL_GIT_ASKPASS_FILE.
+
+API-014:
+  status: implemented
+  impl: [internal/server/server_routes.go]
+  tests: [internal/server/routes_test.go:TestDownloads]
+  notes: See OPS-112; file names are patrol-* instead of argocd-*.
+
+API-050:
+  status: verified
+  impl: [internal/server/server_routes.go]
+  tests:
+    - internal/server/routes_test.go:TestExtensionsBundle
+    - internal/server/smoke_test.go:TestServerRunSmoke
+  notes: >-
+    Concatenation of extension*.js below --extensions-dir (default /tmp/extensions) with the
+    upstream wrapper, symlinks skipped, missing directory -> empty 200, served by the running
+    patrol-server against envtest. Content-Type text/javascript (RFC 9239) instead of
+    application/javascript.
+
+TEN-002:
+  status: implemented
+  impl: [internal/server/server_api.go]
+  tests:
+    - internal/server/bootstrap_test.go:TestEnsureDefaultProject
+    - internal/server/smoke_test.go:TestServerRunSmoke
+  notes: >-
+    Created at every start when missing (permissive upstream spec), never overwritten;
+    created by the running server against envtest.
+
+TEN-034:
+  status: implemented
+  impl: [internal/server/server_api.go]
+  tests: [internal/server/bootstrap_test.go:TestNormalizeProjectTokens]
+  notes: Startup normalization of every project (project.NormalizeJWTTokens, 3 conflict retries); a failure is logged instead of exiting.

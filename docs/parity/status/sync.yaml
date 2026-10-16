@@ -1,0 +1,510 @@
+# internal/sync (sync planning and execution engine). See docs/architecture/components/sync.md.
+# Library-level evidence: the Operation reconciler, API, CLI and UI do not use the engine yet,
+# so features with surfaces outside the engine are in-progress. envtest tests run against a
+# real kube-apiserver 1.36 without controllers; hook completion there uses a fake HealthFunc.
+# Commands and results: docs/architecture/components/sync.md#verification.
+
+SYNC-006:
+  status: in-progress
+  impl: [internal/sync/exec.go, internal/sync/step.go]
+  tests:
+    - internal/sync/step_test.go:TestStepSingleWaveSucceedsAfterApply
+    - internal/sync/step_test.go:TestStepPruneOptions
+    - internal/sync/envtest_test.go:TestEnvApplyAndPruneClientSide
+    - internal/sync/envtest_test.go:TestEnvPruneLastAndPruneOptions
+  notes: >-
+    Engine: Pruned "pruned", PruneSkipped "ignored (requires pruning)", objects already being
+    deleted are not deleted again, prune failures fail the wave. The CLI "<n> resources require
+    pruning" exit check is not implemented here.
+
+SYNC-007:
+  status: in-progress
+  impl: [internal/sync/exec.go, internal/sync/step.go]
+  tests:
+    - internal/sync/step_test.go:TestStepPruneOptions
+    - internal/sync/step_test.go:TestStepNamespaceCreation
+    - internal/sync/envtest_test.go:TestEnvDryRunOperation
+  notes: >-
+    Every mutation is a server-side dry run (upstream uses kubectl client dry run): "pruned
+    (dry run)", Running results reported Succeeded, cluster unchanged. Skipping history and
+    the post-operation refresh is the reconciler's job.
+
+SYNC-008:
+  status: in-progress
+  impl: [internal/sync/input.go, internal/sync/plan.go]
+  tests:
+    - internal/sync/plan_test.go:TestPlanHooks
+    - internal/sync/step_test.go:TestStepSelectiveSyncSkipsHooks
+  notes: The apply strategy and selective syncs skip hooks. API/CLI/UI surfaces are elsewhere.
+
+SYNC-009:
+  status: in-progress
+  impl: [internal/sync/exec.go, internal/sync/kubeclient.go]
+  tests:
+    - internal/sync/envtest_test.go:TestEnvReplaceAndForce
+  notes: Strategy force → client-side apply delete/re-create on Invalid/Conflict, replace --force. CLI/UI elsewhere.
+
+SYNC-010:
+  status: in-progress
+  impl: [internal/sync/input.go, internal/sync/plan.go]
+  tests:
+    - internal/sync/plan_test.go:TestPlanSelectiveSync
+    - internal/sync/plan_test.go:TestMatchesResources
+    - internal/sync/step_test.go:TestStepSelectiveSyncSkipsHooks
+    - internal/sync/envtest_test.go:TestEnvSelectiveSync
+  notes: >-
+    Server-side filter honors "*" wildcards as documented on v1alpha1.SyncOperationResource
+    (upstream matches exactly) and the defaulted namespace of new resources. History, CLI
+    filters and UI are elsewhere.
+
+SYNC-029:
+  status: implemented
+  impl: [internal/sync/options.go]
+  tests:
+    - internal/sync/options_test.go:TestParseOptions
+    - internal/sync/options_test.go:TestAnnotationOptions
+    - internal/sync/options_test.go:TestOptionPrecedence
+
+SYNC-030:
+  status: implemented
+  impl: [internal/sync/options.go, internal/sync/exec.go]
+  tests:
+    - internal/sync/step_test.go:TestStepPruneOptions
+    - internal/sync/envtest_test.go:TestEnvPruneLastAndPruneOptions
+
+SYNC-031:
+  status: in-progress
+  impl: [internal/sync/options.go, internal/sync/exec.go, internal/sync/results.go, internal/sync/plan.go]
+  tests:
+    - internal/sync/step_test.go:TestStepPruneConfirmation
+    - internal/sync/step_test.go:TestStepPendingWaveRequeuesWithPollInterval
+    - internal/sync/plan_test.go:TestPlanPruneConfirmation
+    - internal/sync/options_test.go:TestDeletionApproved
+  notes: >-
+    Wave gate and exact message; approval = cd.patrol.example/deletion-approved RFC 3339 at or
+    after the operation start; Plan.PendingConfirmation lists blocked resources; the wait
+    requeues after PollInterval. Resource status requiresDeletionConfirmation, CLI
+    confirm-deletion and UI are elsewhere.
+
+SYNC-032:
+  status: in-progress
+  impl: [internal/sync/options.go]
+  tests:
+    - internal/sync/options_test.go:TestOptionPrecedence
+    - internal/sync/envtest_test.go:TestEnvPruneLastAndPruneOptions
+  notes: Options.DeleteDisabled helper (resource overrides app); the cascading deletion flow is the controller's. Delete=false does not affect pruning (envtest).
+
+SYNC-033:
+  status: in-progress
+  impl: [internal/sync/options.go]
+  tests:
+    - internal/sync/options_test.go:TestOptionPrecedence
+    - internal/sync/options_test.go:TestDeletionApproved
+  notes: Options.RequiresDeletionConfirmation and DeletionApproved helpers; the deletion wait is the controller's.
+
+SYNC-034:
+  status: implemented
+  impl: [internal/sync/options.go, internal/sync/exec.go, internal/sync/kubeclient.go]
+  tests:
+    - internal/sync/step_test.go:TestStepValidateFalse
+    - internal/sync/envtest_test.go:TestEnvValidateFalse
+  notes: Field validation Strict vs Ignore on create/patch/apply, dry run and wet run.
+
+SYNC-035:
+  status: implemented
+  impl: [internal/sync/plan.go, internal/sync/exec.go]
+  tests:
+    - internal/sync/plan_test.go:TestPlanValidation
+    - internal/sync/plan_test.go:TestPlanDependencyAdjustment
+    - internal/sync/step_test.go:TestStepCRDAndCustomResource
+    - internal/sync/envtest_test.go:TestEnvCRDAndCustomResourceInOneSync
+  notes: >-
+    The app-level option arrives through Operation syncOptions, which no reconciler passes
+    yet; envtest covers the annotation and the automatic CRD-in-same-sync rule. Because the
+    dry run is server-side (SYNC-071), Patrol also skips the dry run of custom resources
+    whose CRD the same sync changes (upstream's client dry run validates no schema).
+
+SYNC-036:
+  status: implemented
+  impl: [internal/sync/plan.go, internal/sync/step.go]
+  tests:
+    - internal/sync/plan_test.go:TestPlanNamespaceAutoCreation
+    - internal/sync/step_test.go:TestStepNamespaceCreation
+    - internal/sync/envtest_test.go:TestEnvCreateNamespaceWithManagedMetadata
+
+SYNC-037:
+  status: in-progress
+  impl: [internal/sync/plan.go]
+  tests:
+    - internal/sync/plan_test.go:TestPlanNamespaceAutoCreation
+    - internal/sync/envtest_test.go:TestEnvCreateNamespaceWithManagedMetadata
+  notes: >-
+    Labels/annotations applied with server-side apply on every sync, foreign labels survive,
+    StepResult.ManagedNamespaceMetadata for syncResult. Optional tracking via
+    Input.TrackManagedNamespace. OutOfSync detection and the no-prune bookkeeping belong to
+    the comparison.
+
+SYNC-038:
+  status: implemented
+  impl: [internal/sync/plan.go, internal/sync/options.go]
+  tests:
+    - internal/sync/plan_test.go:TestPlanPruneWaves
+    - internal/sync/envtest_test.go:TestEnvPruneLastAndPruneOptions
+
+SYNC-039:
+  status: implemented
+  impl: [internal/sync/options.go, internal/sync/exec.go]
+  tests:
+    - internal/sync/options_test.go:TestParseOptions
+    - internal/sync/step_test.go:TestStepPruneOptions
+    - internal/sync/envtest_test.go:TestEnvPrunePropagationPolicies
+  notes: Used for prune and hook deletions; envtest shows the foreground/orphan GC finalizers (no garbage collector there).
+
+SYNC-040:
+  status: implemented
+  impl: [internal/sync/plan.go, internal/sync/step.go]
+  tests:
+    - internal/sync/plan_test.go:TestPlanApplyOutOfSyncOnlyAndPreview
+    - internal/sync/step_test.go:TestStepApplyOutOfSyncOnly
+    - internal/sync/envtest_test.go:TestEnvApplyOutOfSyncOnly
+  notes: Diff results are an input (Input.DiffResults) computed by the comparison.
+
+SYNC-041:
+  status: implemented
+  impl: [internal/sync/exec.go, internal/sync/kubeclient.go, internal/sync/options.go]
+  tests:
+    - internal/sync/step_test.go:TestStepReplaceForceSSAAndMigration
+    - internal/sync/step_test.go:TestStepReplaceForceIsIdempotentWithinAnAttempt
+    - internal/sync/envtest_test.go:TestEnvReplaceAndForce
+    - internal/sync/envtest_test.go:TestEnvReplaceForceIsIdempotentWithinAnAttempt
+    - internal/sync/envtest_test.go:TestEnvCRDAndCustomResourceInOneSync
+  notes: >-
+    Replace=true creates and forced replaces stamp cd.patrol.example/operation; a restarted
+    step does not delete and re-create an object already replaced by the same attempt
+    (sync-state-machine.md idempotency rule).
+
+SYNC-042:
+  status: implemented
+  impl: [internal/sync/options.go, internal/sync/exec.go, internal/sync/kubeclient.go]
+  tests:
+    - internal/sync/options_test.go:TestOptionPrecedence
+    - internal/sync/envtest_test.go:TestEnvReplaceAndForce
+    - internal/sync/envtest_test.go:TestEnvReplaceForceIsIdempotentWithinAnAttempt
+  notes: >-
+    Client-side apply and replace paths. With server-side apply the engine ignores force
+    (conflicts are always forced) where upstream's kubectl options fail with "--force cannot
+    be used with --server-side"; see docs/architecture/components/sync.md.
+
+SYNC-043:
+  status: implemented
+  impl: [internal/sync/options.go, internal/sync/exec.go, internal/sync/kubeclient.go]
+  tests:
+    - internal/sync/step_test.go:TestStepReplaceForceSSAAndMigration
+    - internal/sync/envtest_test.go:TestEnvServerSideApplyAndMigration
+  notes: Field manager patrol-controller with force conflicts. Dry runs also use server-side apply (server-side dry run). The diff strategy switch is the comparison's.
+
+SYNC-044:
+  status: implemented
+  impl: [internal/sync/exec.go, internal/sync/kubeclient.go]
+  tests:
+    - internal/sync/step_test.go:TestStepReplaceForceSSAAndMigration
+    - internal/sync/step_test.go:TestStepClientSideApplyMigrationWithoutManagedFields
+    - internal/sync/envtest_test.go:TestEnvServerSideApplyAndMigration
+    - internal/sync/envtest_test.go:TestEnvServerSideApplyMigrationWithStrippedLiveState
+  notes: >-
+    Live objects without managedFields (internal/cache default) trigger a migration check
+    on a fresh read. The custom manager annotation is covered with the fake only; the
+    Application annotation reaches the engine through a reconciler that does not exist yet.
+
+SYNC-045:
+  status: implemented
+  impl: [internal/sync/normalize.go]
+  tests:
+    - internal/sync/plan_test.go:TestRespectIgnoreDifferences
+
+SYNC-046:
+  status: implemented
+  impl: [internal/sync/plan.go, internal/sync/step.go]
+  tests:
+    - internal/sync/plan_test.go:TestPlanSharedResource
+  notes: Ownership comes from the Input.SharedWith tracking callback on target-paired live objects instead of the last SharedResourceWarning condition; message format is upstream's.
+
+SYNC-048:
+  status: implemented
+  impl: [internal/sync/hooks.go, internal/sync/plan.go, internal/sync/step.go]
+  tests:
+    - internal/sync/step_test.go:TestStepHookLifecycleAndDeletePolicies
+    - internal/sync/envtest_test.go:TestEnvHookLifecycle
+    - internal/sync/envtest_test.go:TestEnvSyncFailHooksOnFailure
+
+SYNC-049:
+  status: implemented
+  impl: [internal/sync/step.go]
+  tests:
+    - internal/sync/step_test.go:TestStepSyncFailHooks
+    - internal/sync/step_test.go:TestStepSyncFailHooksNotRunOnSuccess
+    - internal/sync/step_test.go:TestExecuteSyncFailPhaseMessages
+    - internal/sync/envtest_test.go:TestEnvSyncFailHooksOnFailure
+
+SYNC-050:
+  status: implemented
+  impl: [internal/sync/hooks.go, internal/sync/plan.go]
+  tests:
+    - internal/sync/hooks_test.go:TestHookTypes
+    - internal/sync/plan_test.go:TestPlanIgnoredAndSkippedObjects
+
+SYNC-051:
+  status: in-progress
+  impl: [internal/sync/hooks.go]
+  tests:
+    - internal/sync/hooks_test.go:TestDeleteHooksPartition
+  notes: IsPreDeleteHook and PartitionTargets only; hook execution during Application deletion is the controller's.
+
+SYNC-052:
+  status: in-progress
+  impl: [internal/sync/hooks.go]
+  tests:
+    - internal/sync/hooks_test.go:TestDeleteHooksPartition
+  notes: IsPostDeleteHook and PartitionTargets only; hook execution during Application deletion is the controller's.
+
+SYNC-053:
+  status: implemented
+  impl: [internal/sync/hooks.go, internal/sync/plan.go]
+  tests:
+    - internal/sync/hooks_test.go:TestHookTypes
+    - internal/sync/plan_test.go:TestPlanIgnoredAndSkippedObjects
+
+SYNC-054:
+  status: implemented
+  impl: [internal/sync/step.go, internal/sync/task.go]
+  tests:
+    - internal/sync/step_test.go:TestStepHookLifecycleAndDeletePolicies
+    - internal/sync/step_test.go:TestStepHookDeletedOnFailure
+    - internal/sync/envtest_test.go:TestEnvHookLifecycle
+
+SYNC-055:
+  status: implemented
+  impl: [internal/sync/step.go, internal/sync/task.go]
+  tests:
+    - internal/sync/step_test.go:TestStepHookDeletedOnFailure
+    - internal/sync/step_test.go:TestStepTerminateCompletedHooks
+    - internal/sync/envtest_test.go:TestEnvSyncFailHooksOnFailure
+
+SYNC-056:
+  status: implemented
+  impl: [internal/sync/exec.go, internal/sync/task.go]
+  tests:
+    - internal/sync/step_test.go:TestStepBeforeHookCreation
+    - internal/sync/step_test.go:TestStepDryRunSkipsStateReplacedBySync
+    - internal/sync/envtest_test.go:TestEnvHookLifecycle
+    - internal/sync/envtest_test.go:TestEnvDryRunBeforeHookCreationImmutableChange
+
+SYNC-057:
+  status: different-by-design
+  impl: [internal/sync/hooks.go, internal/sync/plan.go]
+  tests:
+    - internal/sync/hooks_test.go:TestHookName
+    - internal/sync/plan_test.go:TestPlanHooks
+    - internal/sync/property_test.go:TestPropertyHookName
+    - internal/sync/envtest_test.go:TestEnvRestartRecovery
+  notes: >-
+    Names are generateName + first 8 hex of sha256("<operationUID>/<phase>/<wave>/<index>")
+    per docs/architecture/sync-state-machine.md (Idempotency and restart recovery) instead of
+    "<rev7>-<phase>-<start unix>"; still deterministic per operation and unique per phase.
+    Named hooks keep their name. See docs/architecture/components/sync.md.
+
+SYNC-058:
+  status: implemented
+  impl: [internal/sync/exec.go, internal/sync/step.go, internal/sync/plan.go]
+  tests:
+    - internal/sync/step_test.go:TestStepHookLifecycleAndDeletePolicies
+    - internal/sync/step_test.go:TestStepBeforeHookCreation
+    - internal/sync/step_test.go:TestStepTerminate
+    - internal/sync/envtest_test.go:TestEnvHookLifecycle
+    - internal/sync/envtest_test.go:TestEnvTerminateRunningHooks
+  notes: The finalizer is removed only after the hook's completion was persisted (one extra immediate step).
+
+SYNC-059:
+  status: implemented
+  impl: [internal/sync/step.go]
+  tests:
+    - internal/sync/step_test.go:TestStepHookLifecycleAndDeletePolicies
+    - internal/sync/step_test.go:TestStepRunningResourceMissing
+    - internal/sync/step_test.go:TestStepMultiWaveHealthGating
+  notes: Health (built-in and Lua) is injected as HealthFunc.
+
+SYNC-060:
+  status: implemented
+  impl: [internal/sync/hooks.go]
+  tests:
+    - internal/sync/hooks_test.go:TestHookTypes
+
+SYNC-061:
+  status: implemented
+  impl: [internal/sync/hooks.go]
+  tests:
+    - internal/sync/hooks_test.go:TestDeletePolicies
+    - internal/sync/hooks_test.go:TestWave
+
+SYNC-062:
+  status: implemented
+  impl: [internal/sync/hooks.go, internal/sync/task.go, internal/sync/step.go]
+  tests:
+    - internal/sync/plan_test.go:TestPlanOrdering
+    - internal/sync/step_test.go:TestStepMultiWaveHealthGating
+    - internal/sync/envtest_test.go:TestEnvMultiWaveWithRequeue
+  notes: status.resources[].syncWave is the comparison's.
+
+SYNC-063:
+  status: implemented
+  impl: [internal/sync/step.go]
+  tests:
+    - internal/sync/step_test.go:TestStepMultiWaveHealthGating
+    - internal/sync/step_test.go:TestStepDegradedSingleStepStillSucceeds
+    - internal/sync/step_test.go:TestStepPruneWaitsForDeletionBeforeNextWave
+    - internal/sync/envtest_test.go:TestEnvPruneWaitsForTerminatingObjects
+
+SYNC-064:
+  status: implemented
+  impl: [internal/sync/engine.go, internal/sync/step.go]
+  tests:
+    - internal/sync/step_test.go:TestStepWaveDelay
+    - internal/sync/step_test.go:TestStepPendingWaveRequeuesWithPollInterval
+    - internal/sync/options_test.go:TestWaveDelayFromEnv
+    - internal/sync/envtest_test.go:TestEnvMultiWaveWithRequeue
+  notes: >-
+    PATROL_SYNC_WAVE_DELAY (WaveDelayFromEnv); the engine returns RequeueAfter and gates
+    health assessment on status.progress.startedAt instead of sleeping. Pending waves
+    requeue after PollInterval, never immediately.
+
+SYNC-065:
+  status: implemented
+  impl: [internal/sync/task.go]
+  tests:
+    - internal/sync/plan_test.go:TestPlanOrdering
+    - internal/sync/plan_test.go:TestKindOrder
+    - internal/sync/property_test.go:TestPropertyPlanSorted
+    - internal/sync/property_test.go:TestPropertyTaskOrderIsTotal
+    - internal/sync/property_test.go:TestPropertyPlanDeterministic
+  notes: Ties broken by kind, group, namespace and apply-before-prune (upstream order is unspecified there).
+
+SYNC-066:
+  status: implemented
+  impl: [internal/sync/task.go]
+  tests:
+    - internal/sync/plan_test.go:TestPlanDependencyAdjustment
+    - internal/sync/envtest_test.go:TestEnvCRDAndCustomResourceInOneSync
+
+SYNC-067:
+  status: implemented
+  impl: [internal/sync/exec.go]
+  tests:
+    - internal/sync/step_test.go:TestStepSingleWaveSucceedsAfterApply
+    - internal/sync/step_test.go:TestStepBeforeHookCreation
+
+SYNC-068:
+  status: implemented
+  impl: [internal/sync/plan.go, internal/sync/step.go]
+  tests:
+    - internal/sync/plan_test.go:TestPlanPruneWaves
+    - internal/sync/step_test.go:TestStepPruneWaitsForDeletionBeforeNextWave
+    - internal/sync/step_test.go:TestStepPruneOptions
+
+SYNC-071:
+  status: different-by-design
+  impl: [internal/sync/step.go, internal/sync/exec.go, internal/sync/plan.go, internal/sync/engine.go]
+  tests:
+    - internal/sync/step_test.go:TestStepDryRunFailureStopsEverything
+    - internal/sync/step_test.go:TestStepDryRunSkipsStateReplacedBySync
+    - internal/sync/step_test.go:TestStepTransientErrorDuringDryRunRepeatsDryRun
+    - internal/sync/envtest_test.go:TestEnvValidateFalse
+    - internal/sync/envtest_test.go:TestEnvDryRunBeforeHookCreationImmutableChange
+    - internal/sync/envtest_test.go:TestEnvDryRunCRDSchemaChangeInSameSync
+  notes: >-
+    Server-side dry run (dryRun=All, required by docs/architecture/sync-state-machine.md)
+    instead of kubectl's local client dry run. Tasks that would be validated against state
+    the sync replaces are not sent: objects in a namespace the sync creates, hooks
+    re-created by BeforeHookCreation, custom resources whose CRD the sync creates or
+    changes. Remaining differences (immutable-field changes of patched objects fail before
+    anything is applied; admission sees current state; SSA dry runs use SSA) are listed in
+    docs/architecture/components/sync.md ("Known gaps and deviations", Dry run). A
+    transient error before the dry run completed reports no rows, so the dry run is never
+    skipped.
+
+SYNC-072:
+  status: implemented
+  impl: [internal/sync/plan.go, internal/sync/results.go, internal/sync/kubeclient.go]
+  tests:
+    - internal/sync/step_test.go:TestStepInvalidTasks
+    - internal/sync/plan_test.go:TestAugmentMessages
+    - internal/sync/envtest_test.go:TestEnvCRDAndCustomResourceInOneSync
+    - internal/sync/envtest_test.go:TestEnvKubeClientDiscovery
+  notes: CRD readiness also waits until discovery serves the kind.
+
+SYNC-073:
+  status: in-progress
+  impl: [internal/sync/plan.go]
+  tests:
+    - internal/sync/plan_test.go:TestPlanValidation
+  notes: >-
+    Every task (including prunes and custom resources of a CRD in the same sync) goes through
+    Input.Permission with the discovery scope; the project rules and messages live in
+    internal/project.
+
+SYNC-074:
+  status: implemented
+  impl: [internal/sync/kubeclient.go, internal/sync/plan.go]
+  tests:
+    - internal/sync/envtest_test.go:TestEnvApplyAndPruneClientSide
+    - internal/sync/envtest_test.go:TestEnvRBACRoleRefChange
+    - internal/sync/plan_test.go:TestPlanOrdering
+  notes: >-
+    kubectl-equivalent client-side apply in process; kubectl auth reconcile is approximated
+    (namespace existence check, roleRef change re-creates the binding).
+
+SYNC-075:
+  status: implemented
+  impl: [internal/sync/results.go]
+  tests:
+    - internal/sync/step_test.go:TestStepSingleWaveSucceedsAfterApply
+    - internal/sync/envtest_test.go:TestEnvHookLifecycle
+  notes: Rows are rebuilt from Input.Previous each step; persisting them is the reconciler's.
+
+SYNC-076:
+  status: in-progress
+  impl: [internal/sync/step.go, internal/sync/results.go]
+  tests:
+    - internal/sync/step_test.go:TestRunningMessage
+    - internal/sync/step_test.go:TestStepMultiWaveHealthGating
+  notes: Engine phases and messages only; controller-level Error messages are the reconciler's.
+
+SYNC-077:
+  status: in-progress
+  impl: [internal/sync/engine.go, internal/sync/step.go, internal/sync/plan.go, internal/sync/exec.go]
+  tests:
+    - internal/sync/step_test.go:TestStepRestartAdoptsHookCreatedBeforeCrash
+    - internal/sync/step_test.go:TestStepTransientErrorDuringDryRunRepeatsDryRun
+    - internal/sync/step_test.go:TestStepReplaceForceIsIdempotentWithinAnAttempt
+    - internal/sync/envtest_test.go:TestEnvRestartRecovery
+    - internal/sync/envtest_test.go:TestEnvReplaceForceIsIdempotentWithinAnAttempt
+  notes: >-
+    Re-entrant engine with restart recovery (including crashes before persisting; forced
+    replaces once per attempt); persistence, events and refresh are the reconciler's.
+    Re-executing completed tasks whose live state diverged (sync-state-machine.md) is not
+    implemented; see docs/architecture/components/sync.md.
+
+SYNC-078:
+  status: in-progress
+  impl: [internal/sync/step.go]
+  tests:
+    - internal/sync/step_test.go:TestStepTerminate
+    - internal/sync/step_test.go:TestStepTerminateCompletedHooks
+    - internal/sync/envtest_test.go:TestEnvTerminateRunningHooks
+  notes: Engine Terminate ends Cancelled (Patrol state machine) instead of Failed; API/CLI/UI elsewhere.
+
+SYNC-080:
+  status: in-progress
+  impl: [internal/sync/plan.go]
+  tests:
+    - internal/sync/plan_test.go:TestPlanSelfReferencedFilter
+  notes: The engine filters with Input.IsSelfReferenced; the tracking-id decision is internal/tracking's.

@@ -1,0 +1,266 @@
+# internal/notifications/controller (notifications controller). See
+# docs/architecture/components/notifications-controller.md.
+# Evidence: unit tests plus envtest (real kube-apiserver 1.36 with the generated CRDs, httptest
+# webhook receivers). The patrolcd command, its flags, the metrics HTTP server, install
+# manifests and the CLI are not built yet, so features exposed through them are at most
+# implemented. Commands and results: notifications-controller.md#verification.
+
+NOTIF-001:
+  status: in-progress
+  impl: [internal/notifications/controller/run.go]
+  tests:
+    - internal/notifications/controller/envtest_test.go:TestControllerDeliversOnTransitionsAndDeduplicatesAcrossRestart
+    - internal/notifications/controller/envtest_config_test.go:TestConcurrentProcessorsWithLeaderElection
+    - internal/notifications/controller/envtest_config_test.go:TestRunRejectsInvalidConfiguration
+  notes: >-
+    Run(ctx, Config) starts informers for Applications, AppProjects and the notifications
+    ConfigMap/Secret, waits for sync, returns nil on cancellation after recording deliveries.
+    Optional leader election (Patrol runs it leader-elected; upstream has none). The
+    patrolcd multi-call command and its error messages are not built.
+
+NOTIF-002:
+  status: implemented
+  impl: [internal/notifications/controller/scope.go, internal/notifications/controller/run.go, internal/notifications/controller/reconciler.go]
+  tests:
+    - internal/notifications/controller/scope_test.go:TestNamespaceMatcher
+    - internal/notifications/controller/scope_test.go:TestNamespaceMatcherInvalidPatterns
+    - internal/notifications/controller/config_test.go:TestConfigCompleteWarnsAboutUnsupportedNamespaceExpressions
+    - internal/notifications/controller/envtest_test.go:TestApplicationScopeAndLabelSelector
+    - internal/notifications/controller/envtest_test.go:TestSelfServiceNamespaceConfigurationIsolation
+    - internal/notifications/controller/envtest_test.go:TestProjectLevelSubscriptions
+    - internal/notifications/controller/reconciler_test.go:TestReconcileScope
+  notes: >-
+    Globs and /regexp/ entries; literal lists restrict the cache to those namespaces. An
+    entry that cannot be compiled is logged and never matches; the start is not failed.
+    Different by design: regular expressions are Go RE2, upstream uses regexp2, so
+    lookaround entries (e.g. the documented /^((?!not-allowed).)*$/) match upstream but never
+    here, as in internal/webhook and internal/project (notifications-controller.md#deviations-deliberate).
+    Flag/env wiring is the command's.
+
+NOTIF-003:
+  status: implemented
+  impl: [internal/notifications/controller/run.go, internal/notifications/controller/config.go]
+  tests:
+    - internal/notifications/controller/envtest_test.go:TestApplicationScopeAndLabelSelector
+    - internal/notifications/controller/config_test.go:TestConfigCompleteValidation
+  notes: A malformed selector fails Config validation before any informer starts.
+
+NOTIF-004:
+  status: implemented
+  impl: [internal/notifications/controller/run.go, internal/notifications/controller/config.go]
+  tests:
+    - internal/notifications/controller/envtest_config_test.go:TestConcurrentProcessorsWithLeaderElection
+    - internal/notifications/controller/config_test.go:TestConfigCompleteDefaults
+  notes: >-
+    Config.Processors (default 1, at most 1024) = concurrent reconciles; one Application is
+    never processed concurrently. Env/cmd-params parsing is the command's.
+
+NOTIF-006:
+  status: implemented
+  impl: [internal/notifications/controller/engines.go, internal/notifications/controller/run.go]
+  tests:
+    - internal/notifications/controller/envtest_config_test.go:TestCustomConfigNamesHotReloadAndInvalidConfiguration
+    - internal/notifications/controller/engines_test.go:TestEngineFactoryReloadAndInvalidConfiguration
+  notes: >-
+    Field-selected informers for the configured names; custom names, hot reload, objects with
+    other names ignored, missing objects = empty configuration, recovery after a broken
+    ConfigMap is fixed. Flags are the command's.
+
+NOTIF-009:
+  status: implemented
+  impl: [internal/notifications/controller/config.go]
+  tests:
+    - internal/notifications/controller/config_test.go:TestConfigCompleteDefaults
+  notes: >-
+    QPS 50 / burst 100 and user agent patrol-notifications-controller when the caller sets
+    none (the command should add version and platform).
+
+NOTIF-010:
+  status: implemented
+  impl: [internal/notifications/controller/reconciler.go, internal/notifications/env.go]
+  tests:
+    - internal/notifications/controller/envtest_test.go:TestControllerDeliversOnTransitionsAndDeduplicatesAcrossRestart
+    - internal/notifications/controller/dryrun_test.go:TestDryRunEvaluate
+  notes: >-
+    The gate (engine SyncStatusRefreshed) is applied by the controller to the Argo CD view
+    of the Application; on-sync-succeeded is held until reconciledAt passes finishedAt, then
+    sent once. Depends on the Application controller maintaining reconciledAt.
+
+NOTIF-014:
+  status: implemented
+  impl: [internal/notifications/controller/engines.go]
+  tests:
+    - internal/notifications/controller/envtest_config_test.go:TestCustomConfigNamesHotReloadAndInvalidConfiguration
+    - internal/notifications/controller/engines_test.go:TestEngineFactoryReloadAndInvalidConfiguration
+  notes: >-
+    Controller side only (hot reload by ConfigMap/Secret version, invalid configuration
+    reported as an Event); key grammar and parsing are the engine's.
+
+NOTIF-018:
+  status: implemented
+  impl: [internal/notifications/controller/engines.go]
+  tests:
+    - internal/notifications/controller/envtest_test.go:TestControllerDeliversOnTransitionsAndDeduplicatesAcrossRestart
+    - internal/notifications/controller/envtest_test.go:TestSelfServiceNamespaceConfigurationIsolation
+    - internal/notifications/controller/engines_test.go:TestEngineFactorySelfService
+  notes: .secrets available without self-service, hidden for every configuration with it.
+
+NOTIF-025:
+  status: implemented
+  impl: [internal/notifications/controller/reconciler.go]
+  tests:
+    - internal/notifications/controller/envtest_test.go:TestControllerDeliversOnTransitionsAndDeduplicatesAcrossRestart
+    - internal/notifications/controller/envtest_config_test.go:TestCatalogTriggerOnCancelledOperation
+  notes: Controller persistence of oncePer state (engine semantics in internal/notifications).
+
+NOTIF-026:
+  status: implemented
+  impl: [internal/notifications/controller/reconciler.go, internal/notifications/controller/state.go]
+  tests:
+    - internal/notifications/controller/envtest_test.go:TestControllerDeliversOnTransitionsAndDeduplicatesAcrossRestart
+    - internal/notifications/controller/envtest_config_test.go:TestDeletingDeliveryStateResendsOnce
+  notes: Dedup across controller restarts and re-arming through the persisted state.
+
+NOTIF-032:
+  status: implemented
+  impl: [internal/notifications/controller/appmap.go, internal/notifications/controller/operations.go]
+  tests:
+    - internal/notifications/controller/appmap_test.go:TestTemplateApplicationEnrichesOperationState
+    - internal/notifications/controller/appmap_test.go:TestTemplateApplicationEdgeCases
+    - internal/notifications/controller/appmap_test.go:TestTemplateApplicationMapsCancelledPhase
+    - internal/notifications/controller/appmap_test.go:TestTemplateApplicationDoesNotAliasInput
+    - internal/notifications/controller/envtest_test.go:TestControllerDeliversOnTransitionsAndDeduplicatesAcrossRestart
+    - internal/notifications/controller/envtest_config_test.go:TestCatalogTriggerOnCancelledOperation
+  notes: >-
+    .app is the Argo CD view: operationState completed from the Operation (syncResult
+    resources, requested operation, top-level operation while running), Argo CD condition
+    shape, Cancelled shown as Failed "Operation terminated". Exercised with statuses written
+    by tests; the Application controller does not produce them yet.
+
+NOTIF-033:
+  status: implemented
+  impl: [internal/notifications/controller/repo.go]
+  tests:
+    - internal/notifications/controller/envtest_test.go:TestProjectLevelSubscriptions
+    - internal/notifications/controller/repo_test.go:TestProjectGetter
+  notes: AppProject read from the controller cache in the control-plane namespace.
+
+NOTIF-047:
+  status: implemented
+  impl: [internal/notifications/controller/reconciler.go]
+  tests:
+    - internal/notifications/controller/envtest_test.go:TestControllerDeliversOnTransitionsAndDeduplicatesAcrossRestart
+    - internal/notifications/controller/envtest_test.go:TestDeliveryFailureEmitsEventAndMetricThenRetries
+  notes: Through the CRD (annotations); API/UI surfaces are other components.
+
+NOTIF-050:
+  status: implemented
+  impl: [internal/notifications/controller/run.go, internal/notifications/controller/repo.go]
+  tests:
+    - internal/notifications/controller/envtest_test.go:TestProjectLevelSubscriptions
+  notes: >-
+    Project annotations apply to all of its Applications (any namespace; empty project =
+    default); annotation changes re-enqueue the project's Applications.
+
+NOTIF-051:
+  status: implemented
+  impl: [internal/notifications/controller/reconciler.go]
+  tests:
+    - internal/notifications/controller/envtest_config_test.go:TestConcurrentProcessorsWithLeaderElection
+    - internal/notifications/controller/envtest_test.go:TestSelfServiceNamespaceConfigurationIsolation
+  notes: Controller side (selector against labels, per configuration); parsing is the engine's.
+
+NOTIF-052:
+  status: implemented
+  impl: [internal/notifications/controller/reconciler.go, internal/notifications/controller/state.go]
+  tests:
+    - internal/notifications/controller/envtest_test.go:TestControllerDeliversOnTransitionsAndDeduplicatesAcrossRestart
+    - internal/notifications/controller/envtest_test.go:TestPersistMergesConcurrentStateChanges
+    - internal/notifications/controller/envtest_config_test.go:TestDeletingDeliveryStateResendsOnce
+    - internal/notifications/controller/state_test.go:TestDeltaRoundTripProperty
+  notes: >-
+    Merge patch guarded by resourceVersion, conflict re-merge, persisted on shutdown, no
+    re-send after restart, one re-send after the annotation is deleted. ApplicationSet
+    preservation and ignoreResourceUpdates belong to other components.
+
+NOTIF-053:
+  status: implemented
+  impl: [internal/notifications/controller/reconciler.go]
+  tests:
+    - internal/notifications/controller/envtest_test.go:TestDeliveryFailureEmitsEventAndMetricThenRetries
+    - internal/notifications/controller/envtest_test.go:TestTenantNamespaceEventsAndEgressIsolation
+    - internal/notifications/controller/reconciler_test.go:TestReport
+    - internal/notifications/controller/reconciler_test.go:TestFailureNote
+  notes: >-
+    Failure → log, succeeded="false", Warning Event; retried with 5s doubling backoff
+    (capped by resync) until delivered; other destinations unaffected. Events (a Patrol
+    addition) about Applications outside the failing configuration's namespace carry only
+    trigger, service and failure class, never the control-plane URL or response body.
+
+NOTIF-054:
+  status: implemented
+  impl: [internal/notifications/controller/engines.go, internal/notifications/controller/reconciler.go, internal/notifications/controller/run.go]
+  tests:
+    - internal/notifications/controller/envtest_test.go:TestSelfServiceNamespaceConfigurationIsolation
+    - internal/notifications/controller/envtest_test.go:TestTenantNamespaceEventsAndEgressIsolation
+    - internal/notifications/controller/engines_test.go:TestEngineFactorySelfService
+    - internal/notifications/controller/engines_test.go:TestEngineFactoryTenantEgress
+    - internal/notifications/controller/config_test.go:TestConfigCompleteTenantNetwork
+    - internal/notifications/controller/reconciler_test.go:TestSuppressFailure
+  notes: >-
+    Namespace configurations apply only to their namespace's Applications, resolve $keys only
+    from their own Secret, .secrets hidden everywhere; disabled flag ignores them. They always
+    deliver through the SSRF-guarded dialer opened only by TenantEgressAllowedPrefixes (the
+    control-plane AllowPrivateEgress/EgressAllowedPrefixes never apply; upstream has no
+    guard). Flag wiring is the command's.
+
+NOTIF-055:
+  status: implemented
+  impl: [internal/notifications/controller/reconciler.go]
+  tests:
+    - internal/notifications/controller/envtest_test.go:TestDeliveryFailureEmitsEventAndMetricThenRetries
+    - internal/notifications/controller/envtest_config_test.go:TestCustomConfigNamesHotReloadAndInvalidConfiguration
+    - internal/notifications/controller/reconciler_test.go:TestReport
+  notes: >-
+    Unknown service → failed delivery metric + Event; undefined trigger → Event without a
+    delivery metric; the valid destination still delivers.
+
+NOTIF-057:
+  status: implemented
+  impl: [internal/notifications/controller/reconciler.go, internal/notifications/metrics.go]
+  tests:
+    - internal/notifications/controller/envtest_test.go:TestControllerDeliversOnTransitionsAndDeduplicatesAcrossRestart
+    - internal/notifications/controller/envtest_test.go:TestDeliveryFailureEmitsEventAndMetricThenRetries
+    - internal/notifications/controller/reconciler_test.go:TestReport
+  notes: patrol_ prefix; the /metrics endpoint is the command's (NOTIF-056).
+
+NOTIF-058:
+  status: implemented
+  impl: [internal/notifications/controller/reconciler.go, internal/notifications/metrics.go]
+  tests:
+    - internal/notifications/controller/envtest_test.go:TestControllerDeliversOnTransitionsAndDeduplicatesAcrossRestart
+    - internal/notifications/controller/reconciler_test.go:TestEvalMetricsForwardsOnlyEvaluations
+  notes: Skipped (out of scope, stale) Applications are not evaluated.
+
+NOTIF-104:
+  status: in-progress
+  impl: [internal/notifications/controller/dryrun.go]
+  tests:
+    - internal/notifications/controller/dryrun_test.go:TestLoadConfigAndGetApplication
+    - internal/notifications/controller/dryrun_test.go:TestParseApplication
+  notes: Library support (in-cluster config loading, manifest files); the CLI is not built.
+
+NOTIF-106:
+  status: in-progress
+  impl: [internal/notifications/controller/dryrun.go]
+  tests:
+    - internal/notifications/controller/dryrun_test.go:TestDryRunTemplateNotify
+    - internal/notifications/controller/dryrun_test.go:TestParseRecipient
+  notes: DryRun.TemplateNotify (default console:stdout, real delivery otherwise); CLI not built.
+
+NOTIF-108:
+  status: in-progress
+  impl: [internal/notifications/controller/dryrun.go]
+  tests:
+    - internal/notifications/controller/dryrun_test.go:TestDryRunTriggerRun
+  notes: DryRun.TriggerRun on the controller's Application view; CLI not built.

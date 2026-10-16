@@ -1,0 +1,192 @@
+# Web UI, application resource views (ui/src/pages/applications/resources/): tree, pods, network
+# and list views, resource filters, the resource details drawer (summary, live/desired manifest,
+# diff, events, logs, terminal, actions, delete) and the app-level diff panel. Mounted by the
+# details page through ui/src/pages/applications/resources/contract.ts. Evidence is vitest +
+# Testing Library against MSW mocks of the /api/v1 contract (pnpm -C ui test): implemented, not
+# verified end to end. Playwright journeys for a real server live in ui/e2e/apps-resources.spec.ts
+# and have not been run. Kind icons are Patrol's own drawings (no upstream assets).
+
+API-092:
+  status: implemented
+  impl:
+    - ui/src/pages/applications/resources/ResourceViews.tsx
+    - ui/src/pages/applications/resources/contract.ts
+    - ui/src/pages/applications/resources/model/filters.ts
+    - ui/src/pages/applications/resources/model/treeGraph.ts
+    - ui/src/pages/applications/resources/graph/layout.ts
+    - ui/src/pages/applications/resources/graph/GraphCanvas.tsx
+    - ui/src/pages/applications/resources/views/TreeView.tsx
+    - ui/src/pages/applications/resources/views/OutlineTree.tsx
+    - ui/src/pages/applications/resources/views/PodsView.tsx
+    - ui/src/pages/applications/resources/views/NetworkView.tsx
+    - ui/src/pages/applications/resources/views/ResourceListView.tsx
+    - ui/src/pages/applications/resources/views/ResourceFilters.tsx
+  tests:
+    - ui/src/pages/applications/resources/ResourceViews.test.tsx:shows a loading state, then the tree with the application root and managed resources
+    - ui/src/pages/applications/resources/ResourceViews.test.tsx:switches views with the keyboard and keeps the view in the URL
+    - ui/src/pages/applications/resources/ResourceViews.test.tsx:honors the default-view annotation and the view URL parameter
+    - ui/src/pages/applications/resources/ResourceViews.test.tsx:filters from URL parameters and clears them
+    - ui/src/pages/applications/resources/ResourceViews.test.tsx:filters by name with wildcards, sync status (hooks always shown) and health from the menus
+    - ui/src/pages/applications/resources/ResourceViews.test.tsx:shows orphaned resources only when the toggle is on
+    - ui/src/pages/applications/resources/ResourceViews.test.tsx:hides the orphaned toggle when the project does not monitor orphaned resources
+    - ui/src/pages/applications/resources/ResourceViews.test.tsx:navigates the graph with the keyboard and opens details with Enter
+    - ui/src/pages/applications/resources/ResourceViews.test.tsx:collapses and expands a node with the arrow keys
+    - ui/src/pages/applications/resources/ResourceViews.test.tsx:renders the accessible outline with the same items
+    - ui/src/pages/applications/resources/ResourceViews.test.tsx:groups pods by node with node resources, and by parent resource
+    - ui/src/pages/applications/resources/ResourceViews.test.tsx:draws the network and lists external endpoints with safe links
+    - ui/src/pages/applications/resources/graph/GraphCanvas.test.tsx:renders only the nodes near the viewport of a graph with thousands of nodes
+    - ui/src/pages/applications/resources/graph/GraphCanvas.test.tsx:zooms with buttons and keys, resets and fits
+    - ui/src/pages/applications/resources/model/model.test.ts:groups many same-kind leaves, pages wide parents and counts collapsed descendants
+    - ui/src/pages/applications/resources/model/model.test.ts:lays out thousands of nodes quickly
+    - ui/src/pages/applications/resources/model/model.test.ts:matches wildcard edge cases like an anchored glob
+    - ui/src/pages/applications/resources/model/model.test.ts:matches pathological wildcard patterns from a shared link in linear-ish time
+  notes: >-
+    Tree (layered left-to-right SVG graph with Patrol's own layout: longest-path layering,
+    tidy rows, bus edge routing; viewport culling, level of detail, zoom/pan by pointer, wheel
+    and keyboard, fit to screen, zoom persisted), Pods (by node with host resources and
+    propagated node labels, by parent, by top-level resource; `podSortMode` param and
+    `pref.cd.patrol.example/default-pod-sort`), Network and List views; `view` param and
+    `pref.cd.patrol.example/default-view`. Filters in URL params (`name` with wildcards, `kind`,
+    `sync` where OutOfSync includes Unknown and hooks ignore the sync filter, `health`,
+    `namespace`, `orphaned` offered when the project monitors orphaned resources, `hooks`).
+    Group similar nodes, "show N more" per parent, collapse/expand, and an ARIA tree outline.
+    The tree is live through the resource-tree SSE stream. App View extensions are API-123.
+    The health filter applies to each node (not to the application root). The `name` wildcard
+    filter is a two-pointer glob matcher (O(name x pattern)), not a RegExp, so a crafted link
+    cannot stall the page.
+
+API-095:
+  status: implemented
+  impl:
+    - ui/src/pages/applications/resources/details/ResourceDetailsDrawer.tsx
+    - ui/src/pages/applications/resources/details/SummaryTab.tsx
+    - ui/src/pages/applications/resources/details/ManifestTabs.tsx
+    - ui/src/pages/applications/resources/details/DiffTab.tsx
+    - ui/src/pages/applications/resources/details/EventsTab.tsx
+    - ui/src/pages/applications/resources/details/ActionsTab.tsx
+    - ui/src/pages/applications/resources/details/DeleteResourceDialog.tsx
+    - ui/src/pages/applications/resources/model/manifest.ts
+    - ui/src/api/hooks/apps-resources.ts
+  tests:
+    - ui/src/pages/applications/resources/details/ResourceDetailsDrawer.test.tsx:opens from a deep link with the tabs a Deployment offers
+    - ui/src/pages/applications/resources/details/ResourceDetailsDrawer.test.tsx:summarizes fields, health message, owner chain, safe links and labels
+    - ui/src/pages/applications/resources/details/ResourceDetailsDrawer.test.tsx:lists only http(s) resource links, opening in a new tab
+    - ui/src/pages/applications/resources/details/ResourceDetailsDrawer.test.tsx:edits the live manifest and applies a merge patch after reviewing the diff
+    - ui/src/pages/applications/resources/details/ResourceDetailsDrawer.test.tsx:marks Secrets as masked and does not offer editing
+    - ui/src/pages/applications/resources/details/ResourceDetailsDrawer.test.tsx:hides editing and logs without permission
+    - ui/src/pages/applications/resources/details/ResourceDetailsDrawer.test.tsx:offers editing with only the fine-grained update permission the server checks
+    - ui/src/pages/applications/resources/details/ResourceDetailsDrawer.test.tsx:warns when only the application-wide update permission is granted
+    - ui/src/pages/applications/resources/details/ResourceDetailsDrawer.test.tsx:names the fine-grained permission when the server refuses the patch
+    - ui/src/pages/applications/resources/details/ResourceDetailsDrawer.test.tsx:lists events with a warning count in the tab
+    - ui/src/pages/applications/resources/details/ResourceDetailsDrawer.test.tsx:runs a resource action after confirmation and reports the result
+    - ui/src/pages/applications/resources/details/ResourceDetailsDrawer.test.tsx:sends parameters of a parameterized action
+    - ui/src/pages/applications/resources/details/ResourceDetailsDrawer.test.tsx:deletes a resource with the chosen propagation after typing its name
+    - ui/src/pages/applications/resources/details/ResourceDetailsDrawer.test.tsx:offers the terminal for pods only when exec is enabled and permitted
+    - ui/src/pages/applications/resources/details/ResourceDetailsDrawer.test.tsx:explains missing resources and unknown deep links
+    - ui/src/pages/applications/resources/details/ResourceDetailsDrawer.test.tsx:closes with Escape and clears the deep link
+  notes: >-
+    Deep links `node=<group/kind/namespace/name>` and `tab=`. Summary (fields, health message,
+    sync, wave, hook, pruning, owner chain, images, info items, labels, annotations, links from
+    ListResourceLinks limited to http(s)); Live manifest (hide managed fields, wrap, edit as YAML
+    applied as an RFC 7386 merge patch after a diff review; Secrets flagged as masked and not
+    editable; Edit is offered from can-i on the fine-grained action the server enforces,
+    `applications, update/<group>/<kind>/<namespace>/<name>` (sent as one encoded path segment),
+    with a warning when only plain `update` is granted, which counts only when
+    server.rbac.disableApplicationFineGrainedRBACInheritance is "false", and a 403 on apply names
+    the permission); Desired manifest; Diff; Events with a
+    warning badge; Logs (can-i logs get); Terminal (exec.enabled and can-i exec create); Actions
+    (parameterized by name, as upstream discovery declares no defaults; confirmed); Delete (foreground, force, orphan; typed confirmation); optional
+    selective Sync through the slot's onSyncResources. Extension tabs are API-121; the
+    ApplicationSet PREVIEW tab does not apply to applications.
+
+API-096:
+  status: in-progress
+  impl: [ui/src/pages/applications/resources/details/LogsViewer.tsx]
+  tests:
+    - ui/src/pages/applications/resources/details/LogsViewer.test.tsx:streams a pod log, filters it and reports the end of the stream
+    - ui/src/pages/applications/resources/details/LogsViewer.test.tsx:restarts the stream with the chosen container, previous and tail options
+    - ui/src/pages/applications/resources/details/LogsViewer.test.tsx:aggregates workload logs with pod names and loads containers from the live manifest
+    - ui/src/pages/applications/resources/details/LogsViewer.test.tsx:shows timestamps, wraps lines and offers a full-screen link only when asked to
+    - ui/src/pages/applications/resources/details/ResourceDetailsDrawer.test.tsx:links the logs to full screen only when the details page says the route renders them
+    - ui/src/pages/applications/resources/details/LogsViewer.test.tsx:downloads the shown lines as a file
+    - ui/src/pages/applications/resources/details/LogsViewer.test.tsx:explains a permission error with a retry
+    - ui/src/pages/applications/resources/details/LogsViewer.test.tsx:follows a live stream until it is closed
+  notes: >-
+    Viewer done: SSE pod and aggregated workload logs, container and init-container picker,
+    previous, since, tail, follow with auto-scroll and "jump to latest", text filter with `!`
+    inversion and match case (client side), wrap, timestamps, pod names, copy, download,
+    windowed output (50,000-line buffer), reconnect status. Missing: the full-screen route page
+    (ui/src/pages/applications/ApplicationLogsPage.tsx, owned by apps-core) must mount
+    ResourceLogsViewer from contract.ts with `fullscreen`, and the details page must then pass
+    `fullscreenLogs` to ResourceViewsSlot; until then the drawer hides "Open full screen". No
+    per-viewer dark mode (follows the app theme) and no pod highlight toggle.
+
+API-097:
+  status: implemented
+  impl: [ui/src/pages/applications/resources/details/TerminalPanel.tsx]
+  tests:
+    - ui/src/pages/applications/resources/details/TerminalPanel.test.tsx:connects to the terminal WebSocket, relays stdout and stdin and resizes
+    - ui/src/pages/applications/resources/details/TerminalPanel.test.tsx:reconnects with the chosen container and shell
+    - ui/src/pages/applications/resources/details/TerminalPanel.test.tsx:reconnects when the server asks for it
+    - ui/src/pages/applications/resources/details/TerminalPanel.test.tsx:ignores a forbidden close of a replaced socket that arrives after the new one opened
+    - ui/src/pages/applications/resources/details/TerminalPanel.test.tsx:does not report the closed socket after unmounting
+    - ui/src/pages/applications/resources/details/TerminalPanel.test.tsx:shows the forbidden and disconnected states with recovery guidance
+    - ui/src/pages/applications/resources/details/TerminalPanel.test.tsx:keeps Escape in the shell and leaves with Shift+Escape
+    - ui/src/pages/applications/resources/details/ResourceDetailsDrawer.test.tsx:offers the terminal for pods only when exec is enabled and permitted
+  notes: >-
+    xterm.js 6 (lazy chunk) over /terminal: stdin/resize/stdout TerminalMessage frames, reconnect
+    on a server Code message (the replaced socket's handlers are detached before it closes, so
+    its late close event cannot mark the new session disconnected), container and shell
+    pickers, forbidden (close 1008/4003 or a
+    permission reason) and disconnected states, screen reader mode, Shift+Escape leaves the
+    terminal. Tests use a fake WebSocket and a mocked xterm. xterm's DOM renderer injects style
+    elements, which a `style-src 'self'` CSP without a nonce would block; not checked against the
+    server's headers.
+
+API-127:
+  status: in-progress
+  impl: [ui/src/pages/applications/resources/model/kinds.ts, ui/src/pages/applications/resources/shared/KindIcon.tsx]
+  tests:
+    - ui/src/pages/applications/resources/model/model.test.ts:resolves special kinds, the kind map, then initials
+  notes: >-
+    Resolution order for the bundled parts: node, Application, ApplicationSet, then the kind map,
+    then initials (kind without ASCII lowercase letters) in a filled circle; drawn by Patrol.
+    The API-group icon registry (API-128) is not bundled.
+
+API-129:
+  status: implemented
+  impl: [ui/src/pages/applications/resources/model/kinds.ts, ui/src/pages/applications/resources/shared/KindIcon.tsx]
+  tests:
+    - ui/src/pages/applications/resources/model/model.test.ts:resolves special kinds, the kind map, then initials
+  notes: >-
+    The 32 kind entries (case-sensitive, group-agnostic; `Quote` kept so ResourceQuota shows
+    initials RQ) map to Patrol-drawn icons rather than the baseline SVG assets.
+
+API-130:
+  status: implemented
+  impl: [ui/src/pages/applications/resources/model/kinds.ts]
+  tests:
+    - ui/src/pages/applications/resources/model/model.test.ts:abbreviates known kinds and lowercases others
+  notes: Captions under icons on tree nodes (not the root), outline, list view and pod group headers.
+
+DIFF-042:
+  status: implemented
+  impl:
+    - ui/src/pages/applications/resources/views/AppDiffPanel.tsx
+    - ui/src/pages/applications/resources/details/DiffTab.tsx
+    - ui/src/pages/applications/resources/shared/DiffViewer.tsx
+    - ui/src/pages/applications/resources/model/diff.ts
+    - ui/src/pages/applications/resources/model/diffItems.ts
+  tests:
+    - ui/src/pages/applications/resources/views/AppDiffPanel.test.tsx:lists out-of-sync resources with paths, skipping hooks and identical renderings
+    - ui/src/pages/applications/resources/views/AppDiffPanel.test.tsx:collapses and expands entries and toggles the diff layout
+    - ui/src/pages/applications/resources/views/AppDiffPanel.test.tsx:marks changes with text, not color only, and collapses unchanged lines in compact mode
+    - ui/src/pages/applications/resources/views/AppDiffPanel.test.tsx:renders only a window of very long diffs
+    - ui/src/pages/applications/resources/details/ResourceDetailsDrawer.test.tsx:shows the diff with markers and persists the compact and inline toggles
+    - ui/src/pages/applications/resources/model/model.test.ts:selects out-of-sync diffs for the app-level panel (DIFF-042)
+  notes: >-
+    normalizedLiveState vs predictedLiveState (falling back to liveState/targetState) as YAML;
+    hooks and identical renderings skipped; `group/kind/namespace/name` headers (none for a
+    single resource); compact (2 lines of context, expandable) and inline/side-by-side toggles
+    persisted per browser; Myers line diff with a bounded edit budget and windowed rendering for
+    large manifests.

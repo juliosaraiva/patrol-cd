@@ -1,0 +1,315 @@
+# internal/cli/admin (`patrol admin`). See docs/architecture/components/cli-admin.md.
+# Commands that talk to Kubernetes are tested against a real kube-apiserver (envtest 1.36) through
+# the cobra command tree; offline commands are tested with real inputs and no fakes. The command
+# group is not wired into cmd/patrol yet (CLI core workstream).
+
+API-076:
+  status: verified
+  impl: [internal/cli/admin/admin.go, internal/cli/admin/factory.go, internal/cli/admin/kube.go]
+  tests:
+    - internal/cli/admin/misc_test.go:TestAdminHelpListsCommands
+  notes: >-
+    admin.Register(root, factory) adds the group with kubectl connection flags; --logformat and
+    --loglevel are accepted on admin itself as upstream. Not yet registered by cmd/patrol.
+
+API-077:
+  status: verified
+  impl: [internal/cli/admin/app.go, internal/cli/admin/appspec.go, internal/cli/admin/reconcile.go]
+  tests:
+    - internal/cli/admin/app_test.go:TestAppGenerateSpecGolden
+    - internal/cli/admin/app_test.go:TestAppGenerateSpecVariants
+    - internal/cli/admin/app_test.go:TestAppGenerateSpecInline
+    - internal/cli/admin/app_test.go:TestDiffReconcileResults
+    - internal/cli/admin/app_test.go:TestGetReconcileResults
+  notes: >-
+    get-reconcile-results --refresh runs the comparison in-process against envtest with a real
+    repo-server (internal/reposerver over HTTP) and a local git repository.
+
+API-078:
+  status: verified
+  impl: [internal/cli/admin/cluster.go, internal/cli/admin/clusterspec.go]
+  tests:
+    - internal/cli/admin/cluster_test.go:TestClusterStatsAndShards
+    - internal/cli/admin/cluster_test.go:TestClusterNamespacesAndNamespacedMode
+    - internal/cli/admin/cluster_test.go:TestClusterKubeconfig
+    - internal/cli/admin/cluster_test.go:TestClusterGenerateSpec
+    - internal/cli/admin/cluster_test.go:TestClusterGenerateSpecBearerToken
+  notes: >-
+    No Redis (ADR-0004): stats/shards read Cluster.status written by the controller (seeded in the
+    tests) and accept the Redis flags with a warning. generate-spec emits a Cluster plus credentials
+    Secret (ADR-0003). kubeconfig also accepts one argument (redacted stdout). The SA token
+    controller is emulated in the --generate-bearer-token test (envtest has none).
+
+API-079:
+  status: implemented
+  impl: [internal/cli/admin/dashboard.go, internal/cli/admin/portforward.go]
+  tests:
+    - internal/cli/admin/dashboard_test.go:TestDashboardProxiesThroughPortForward
+    - internal/cli/admin/dashboard_test.go:TestDashboardVerifiesPatrolServer
+    - internal/cli/admin/dashboard_test.go:TestPortForwardProtocol
+    - internal/cli/admin/dashboard_test.go:TestDashboardClusterLookups
+  notes: >-
+    Different by design (docs/architecture/components/cli-admin.md#dashboard): a loopback proxy to a
+    running patrol-server through pods/portforward, login required, TLS verified (pinned tls.crt of
+    patrol-secret). The WebSocket port-forward was only exercised against a protocol-faithful fake
+    (no kubelet in envtest, no kind cluster available), hence implemented.
+
+API-080:
+  status: verified
+  impl: [internal/cli/admin/export.go, internal/cli/admin/import.go, internal/cli/admin/backup.go]
+  tests:
+    - internal/cli/admin/backup_test.go:TestExportImportRoundTrip
+    - internal/cli/admin/backup_test.go:TestImportDryRunAndPrune
+    - internal/cli/admin/backup_test.go:TestExportWithoutSecretsAndWithOperations
+    - internal/cli/admin/backup_test.go:TestExportRequiresSettingsConfigMaps
+    - internal/cli/admin/backup_test.go:TestImportRefusesForeignGroups
+    - internal/cli/admin/backup_test.go:TestImportDropsDanglingOwnerReferences
+    - internal/cli/admin/backup_test.go:TestImportPruneOfSecretlessBackupKeepsSecrets
+    - internal/cli/admin/backup_test.go:TestImportPruneSecretScope
+    - internal/cli/admin/backup_test.go:TestImportPruneReleasesOwnedObjects
+    - internal/cli/admin/backup_test.go:TestIsPatrolSecret
+  notes: >-
+    Prune differences from upstream (safety): Secrets are pruned only when the backup contains
+    Secrets (--include-secrets=false backups prune none), only Patrol-managed Secrets (upstream
+    isArgoCDSecret rule; referenced-only Secrets are exported and restored but never pruned),
+    patrol-secret and patrol-notifications-secret are never pruned, and objects owned by a
+    pruned ApplicationSet/Repository/RepositoryCredential/Cluster/SCMProvider are released
+    (owner reference removed) before the owner is deleted, so nothing cascades.
+
+API-081:
+  status: verified
+  impl: [internal/cli/admin/password.go]
+  tests:
+    - internal/cli/admin/misc_test.go:TestInitialPassword
+    - internal/cli/admin/misc_test.go:TestRedisInitialPassword
+  notes: >-
+    initial-password matches upstream; redis-initial-password is a not-applicable no-op (exit 0)
+    because Patrol CD has no Redis (ADR-0004, see OPS-141).
+
+API-082:
+  status: verified
+  impl: [internal/cli/admin/notifications.go, internal/cli/admin/reposerver.go]
+  tests:
+    - internal/cli/admin/notifications_test.go:TestNotificationsOffline
+    - internal/cli/admin/notifications_test.go:TestNotificationsCluster
+  notes: >-
+    Webhook deliveries go to an httptest server. template notify only renders services other than
+    console unless --dry-run=false (upstream always sends).
+
+API-083:
+  status: verified
+  impl: [internal/cli/admin/proj.go]
+  tests:
+    - internal/cli/admin/proj_test.go:TestProjGenerateSpec
+    - internal/cli/admin/proj_test.go:TestUpdateRolePolicies
+    - internal/cli/admin/proj_test.go:TestProjUpdateRolePolicyCommand
+    - internal/cli/admin/proj_test.go:TestProjGenerateAllowList
+
+API-084:
+  status: verified
+  impl: [internal/cli/admin/repo.go]
+  tests:
+    - internal/cli/admin/repo_test.go:TestRepoGenerateSpec
+    - internal/cli/admin/repo_test.go:TestRepoGenerateSpecOutputFileAndErrors
+  notes: >-
+    Emits a Repository object plus <name>-creds Secret (ADR-0003) instead of an Argo CD repository
+    Secret; credentials are redacted on stdout and complete with --output-file (mode 0600).
+
+API-085:
+  status: verified
+  impl: [internal/cli/admin/settings.go, internal/cli/admin/resourceoverrides.go, internal/cli/admin/rbac.go]
+  tests:
+    - internal/cli/admin/settings_test.go:TestSettingsValidateExamples
+    - internal/cli/admin/settings_test.go:TestSettingsValidateBadFixture
+    - internal/cli/admin/settings_test.go:TestSettingsValidateClusterSettings
+    - internal/cli/admin/settings_test.go:TestResourceOverrides
+    - internal/cli/admin/settings_test.go:TestRBACCanAndValidate
+    - internal/cli/admin/settings_test.go:TestRBACFromNamespace
+
+OPS-031:
+  status: in-progress
+  impl: [internal/cli/admin/password.go]
+  tests:
+    - internal/cli/admin/misc_test.go:TestInitialPassword
+  notes: >-
+    CLI part (admin initial-password) verified against envtest; creating
+    patrol-initial-admin-secret at first start belongs to patrol-server.
+
+OPS-123:
+  status: implemented
+  impl: [internal/cli/admin/dashboard.go, internal/cli/admin/portforward.go]
+  tests:
+    - internal/cli/admin/dashboard_test.go:TestDashboardProxiesThroughPortForward
+    - internal/cli/admin/dashboard_test.go:TestDashboardVerifiesPatrolServer
+    - internal/cli/admin/dashboard_test.go:TestPortForwardProtocol
+    - internal/cli/admin/dashboard_test.go:TestDashboardClusterLookups
+  notes: >-
+    See API-079: proxy to patrol-server (login required) instead of an unauthenticated in-process
+    server; port forwarding not exercised against a real kubelet.
+
+OPS-126:
+  status: verified
+  impl: [internal/cli/admin/settings.go]
+  tests:
+    - internal/cli/admin/settings_test.go:TestSettingsValidateExamples
+    - internal/cli/admin/settings_test.go:TestSettingsValidateBadFixture
+    - internal/cli/admin/settings_test.go:TestSettingsValidateClusterSettings
+  notes: >-
+    Flags --patrol-cm-path/--patrol-secret-path (hidden --argocd-* aliases); Patrol addition
+    --settings-file for the other settings objects.
+
+OPS-127:
+  status: verified
+  impl: [internal/cli/admin/resourceoverrides.go]
+  tests: [internal/cli/admin/settings_test.go:TestResourceOverrides]
+
+OPS-128:
+  status: verified
+  impl: [internal/cli/admin/resourceoverrides.go]
+  tests: [internal/cli/admin/settings_test.go:TestResourceOverrides]
+
+OPS-129:
+  status: verified
+  impl: [internal/cli/admin/resourceoverrides.go]
+  tests: [internal/cli/admin/settings_test.go:TestResourceOverrides]
+
+OPS-130:
+  status: verified
+  impl: [internal/cli/admin/resourceoverrides.go]
+  tests: [internal/cli/admin/settings_test.go:TestResourceOverrides]
+
+OPS-131:
+  status: verified
+  impl: [internal/cli/admin/app.go, internal/cli/admin/appspec.go]
+  tests:
+    - internal/cli/admin/app_test.go:TestAppGenerateSpecGolden
+    - internal/cli/admin/app_test.go:TestAppGenerateSpecVariants
+    - internal/cli/admin/app_test.go:TestAppGenerateSpecInline
+
+OPS-132:
+  status: verified
+  impl: [internal/cli/admin/app.go, internal/cli/admin/reconcile.go]
+  tests:
+    - internal/cli/admin/app_test.go:TestGetReconcileResults
+    - internal/cli/admin/app_test.go:TestDiffReconcileResults
+
+OPS-133:
+  status: implemented
+  impl: [internal/cli/admin/cluster.go]
+  tests: [internal/cli/admin/cluster_test.go:TestClusterStatsAndShards]
+  notes: >-
+    Statistics are read from Cluster.status (ADR-0004, no Redis cache); the test seeds that status
+    instead of a running controller writing it.
+
+OPS-134:
+  status: implemented
+  impl: [internal/cli/admin/cluster.go]
+  tests: [internal/cli/admin/cluster_test.go:TestClusterStatsAndShards]
+  notes: >-
+    As OPS-133: shard resource counts from Cluster.status, distribution by internal/controller/sharding.
+
+OPS-135:
+  status: verified
+  impl: [internal/cli/admin/clusterspec.go]
+  tests: [internal/cli/admin/cluster_test.go:TestClusterKubeconfig]
+  notes: >-
+    The generated kubeconfig authenticates against envtest. Also accepts CLUSTER_URL alone
+    (credentials redacted on stdout); files are written with mode 0600.
+
+OPS-136:
+  status: verified
+  impl: [internal/cli/admin/clusterspec.go]
+  tests:
+    - internal/cli/admin/cluster_test.go:TestClusterGenerateSpec
+    - internal/cli/admin/cluster_test.go:TestClusterGenerateSpecBearerToken
+  notes: >-
+    Emits a Cluster object plus credentials Secret (ADR-0003); token controller emulated for
+    --generate-bearer-token.
+
+OPS-137:
+  status: verified
+  impl: [internal/cli/admin/cluster.go]
+  tests: [internal/cli/admin/cluster_test.go:TestClusterNamespacesAndNamespacedMode]
+
+OPS-138:
+  status: verified
+  impl: [internal/cli/admin/repo.go]
+  tests:
+    - internal/cli/admin/repo_test.go:TestRepoGenerateSpec
+    - internal/cli/admin/repo_test.go:TestRepoGenerateSpecOutputFileAndErrors
+
+OPS-139:
+  status: verified
+  impl: [internal/cli/admin/proj.go]
+  tests:
+    - internal/cli/admin/proj_test.go:TestProjGenerateSpec
+    - internal/cli/admin/proj_test.go:TestUpdateRolePolicies
+    - internal/cli/admin/proj_test.go:TestProjUpdateRolePolicyCommand
+
+OPS-140:
+  status: verified
+  impl: [internal/cli/admin/proj.go]
+  tests: [internal/cli/admin/proj_test.go:TestProjGenerateAllowList]
+
+OPS-141:
+  status: different-by-design
+  impl: [internal/cli/admin/password.go]
+  tests: [internal/cli/admin/misc_test.go:TestRedisInitialPassword]
+  notes: >-
+    Patrol CD has no Redis (docs/architecture/adr/0004-no-redis.md): the command is kept for
+    scripts, prints a not-applicable message and exits 0
+    (docs/architecture/components/cli-admin.md#differences-from-upstream).
+
+OPS-142:
+  status: verified
+  impl: [internal/cli/admin/export.go, internal/cli/admin/backup.go]
+  tests:
+    - internal/cli/admin/backup_test.go:TestExportImportRoundTrip
+    - internal/cli/admin/backup_test.go:TestExportWithoutSecretsAndWithOperations
+    - internal/cli/admin/backup_test.go:TestExportRequiresSettingsConfigMaps
+
+OPS-143:
+  status: verified
+  impl: [internal/cli/admin/import.go, internal/cli/admin/backup.go]
+  tests:
+    - internal/cli/admin/backup_test.go:TestExportImportRoundTrip
+    - internal/cli/admin/backup_test.go:TestImportDryRunAndPrune
+    - internal/cli/admin/backup_test.go:TestImportRefusesForeignGroups
+    - internal/cli/admin/backup_test.go:TestImportDropsDanglingOwnerReferences
+    - internal/cli/admin/backup_test.go:TestImportPruneOfSecretlessBackupKeepsSecrets
+    - internal/cli/admin/backup_test.go:TestImportPruneSecretScope
+    - internal/cli/admin/backup_test.go:TestImportPruneReleasesOwnedObjects
+
+NOTIF-104:
+  status: verified
+  impl: [internal/cli/admin/notifications.go]
+  tests:
+    - internal/cli/admin/notifications_test.go:TestNotificationsOffline
+    - internal/cli/admin/notifications_test.go:TestNotificationsCluster
+
+NOTIF-105:
+  status: verified
+  impl: [internal/cli/admin/notifications.go]
+  tests: [internal/cli/admin/notifications_test.go:TestNotificationsOffline]
+
+NOTIF-106:
+  status: verified
+  impl: [internal/cli/admin/notifications.go]
+  tests:
+    - internal/cli/admin/notifications_test.go:TestNotificationsOffline
+    - internal/cli/admin/notifications_test.go:TestNotificationsCluster
+  notes: >-
+    Webhook delivery verified against an httptest endpoint. Services other than console are only
+    rendered unless --dry-run=false (upstream always sends).
+
+NOTIF-107:
+  status: verified
+  impl: [internal/cli/admin/notifications.go]
+  tests: [internal/cli/admin/notifications_test.go:TestNotificationsOffline]
+
+NOTIF-108:
+  status: verified
+  impl: [internal/cli/admin/notifications.go]
+  tests:
+    - internal/cli/admin/notifications_test.go:TestNotificationsOffline
+    - internal/cli/admin/notifications_test.go:TestNotificationsCluster

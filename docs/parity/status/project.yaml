@@ -1,0 +1,414 @@
+# internal/project — AppProject policy evaluation and Application spec validation.
+# Library-level evidence: `go test -race ./internal/project/` (envtest-backed integration tests
+# included when KUBEBUILDER_ASSETS is set). Nothing here is wired into the API server or the
+# controller yet, so no feature is "verified".
+
+TEN-004:
+  status: implemented
+  impl: [internal/project/source.go, internal/project/giturl.go, internal/project/validate_project.go]
+  tests:
+    - internal/project/source_test.go:TestIsSourcePermitted
+    - internal/project/source_test.go:TestNormalizeGitURL
+    - internal/project/validate_app_test.go:TestValidateApplication
+    - internal/project/validate_project_test.go:TestValidateProjectRules
+    - internal/project/property_test.go:TestPropertySourceAllowMonotonicAndOrderIndependent
+  notes: Matching, normalization, per-source conditions (multi-source, hydrator dry/sync) and duplicate/!* rejection. Repository listing filtered by project (GetPermittedRepos) is not in this package.
+TEN-005:
+  status: implemented
+  impl: [internal/project/source.go]
+  tests:
+    - internal/project/source_test.go:TestIsNegatedSourcePermitted
+    - internal/project/source_test.go:TestNegatedStarQuirk
+    - internal/project/property_test.go:TestPropertySourceDenyWins
+    - internal/project/property_test.go:TestPropertySourceDenyLineMonotonic
+  notes: Upstream code semantics, which differ from this inventory entry and the upstream docs - a "!" entry that does not match the source counts as a match, so a deny-only list permits every other repository (pinned by tests). "!*" (kubectl-applied) permits every URL containing '/'.
+TEN-006:
+  status: implemented
+  impl: [internal/project/destination.go, internal/project/clusterindex.go]
+  tests:
+    - internal/project/destination_test.go:TestIsDestinationPermitted
+    - internal/project/destination_test.go:TestResolveDestination
+    - internal/project/validate_app_test.go:TestValidateApplication
+    - internal/project/envtest_test.go:TestEnvtestValidateApplication
+TEN-007:
+  status: implemented
+  impl: [internal/project/destination.go]
+  tests:
+    - internal/project/destination_test.go:TestIsDestinationPermitted
+    - internal/project/destination_test.go:TestIsAppDestinationPermitted
+TEN-008:
+  status: implemented
+  impl: [internal/project/destination.go]
+  tests:
+    - internal/project/destination_test.go:TestIsNegatedDestinationPermitted
+    - internal/project/destination_test.go:TestNegatedDestinationDocExample
+    - internal/project/property_test.go:TestPropertyDestinationDenyWins
+    - internal/project/property_test.go:TestPropertyDestinationAllowMonotonicAndOrderIndependent
+  notes: As upstream code and unit tests, a negation-only entry permits every non-matching destination; the inventory's "negation-only project permits nothing" does not hold upstream.
+TEN-009:
+  status: implemented
+  impl: [internal/project/validate_project.go, internal/project/errors.go]
+  tests:
+    - internal/project/validate_project_test.go:TestValidateProjectRules
+    - internal/project/validate_project_test.go:TestValidateProjectAcceptsValidProject
+    - internal/project/envtest_test.go:TestEnvtestCRDAdmissionVersusValidation
+  notes: Errors carry upstream messages and a Code (InvalidArgument/AlreadyExists/OutOfRange). Sync window parse errors are InvalidArgument (upstream returns a plain error, i.e. gRPC Unknown). The policy syntax check uses internal/rbac, so its message text differs from Casbin's.
+TEN-010:
+  status: in-progress
+  impl: [internal/project/source.go, internal/project/glob.go]
+  tests:
+    - internal/project/source_test.go:TestIsAppNamespacePermitted
+    - internal/project/source_test.go:TestCheckAppNamespace
+    - internal/project/envtest_test.go:TestEnvtestValidateApplication
+  notes: Glob and /regex/ entries work, but regular expressions are RE2 (upstream regexp2), so the documented lookahead example /^((?!not-allowed).)*$/ never matches (fails closed).
+TEN-011:
+  status: implemented
+  impl: [internal/project/resources.go]
+  tests: [internal/project/resources_test.go:TestIsGroupKindNamePermitted]
+TEN-012:
+  status: implemented
+  impl: [internal/project/resources.go]
+  tests: [internal/project/resources_test.go:TestIsGroupKindNamePermitted]
+TEN-013:
+  status: implemented
+  impl: [internal/project/resources.go]
+  tests:
+    - internal/project/resources_test.go:TestIsGroupKindNamePermitted
+    - internal/project/envtest_test.go:TestEnvtestCRDAdmissionVersusValidation
+TEN-014:
+  status: implemented
+  impl: [internal/project/resources.go]
+  tests:
+    - internal/project/resources_test.go:TestIsGroupKindNamePermitted
+    - internal/project/resources_test.go:TestValidateSyncPermissions
+TEN-015:
+  status: in-progress
+  impl: [internal/project/orphaned.go]
+  tests: [internal/project/orphaned_integrity_test.go:TestOrphanedResources]
+  notes: Settings evaluation, candidate filter and warning message only; namespace listing, hierarchy walk and ownership checks belong to the controller.
+TEN-016:
+  status: implemented
+  impl: [internal/project/orphaned.go]
+  tests: [internal/project/orphaned_integrity_test.go:TestOrphanedResources]
+TEN-017:
+  status: implemented
+  impl: [internal/project/validate_project.go, internal/project/roles.go]
+  tests:
+    - internal/project/validate_project_test.go:TestValidateRoleName
+    - internal/project/validate_project_test.go:TestValidateProjectRules
+    - internal/project/roles_test.go:TestRolesAndPolicies
+TEN-018:
+  status: implemented
+  impl: [internal/project/validate_project.go, internal/project/roles.go]
+  tests:
+    - internal/project/validate_project_test.go:TestValidateRolePolicy
+    - internal/project/roles_test.go:TestRolesAndPolicies
+TEN-019:
+  status: in-progress
+  impl: [internal/project/validate_project.go, internal/project/roles.go]
+  tests:
+    - internal/project/validate_project_test.go:TestValidateGroupName
+    - internal/project/roles_test.go:TestRolesAndPolicies
+  notes: Group validation and add/remove helpers; runtime group binding is internal/rbac.
+TEN-020:
+  status: in-progress
+  impl: [internal/project/roles.go]
+  tests: [internal/project/roles_test.go:TestRolesAndPolicies]
+  notes: ProjectPoliciesString (for `proj role get`) and RBACRoles adapter; the runtime policy is compiled by internal/rbac.
+TEN-021:
+  status: implemented
+  impl: [internal/project/validate_project.go, internal/project/syncwindows.go]
+  tests:
+    - internal/project/validate_project_test.go:TestValidateProjectRules
+    - internal/project/validate_project_test.go:TestValidateSyncWindowAndEdits
+    - internal/project/validate_project_test.go:TestSyncWindowIdentityHash
+    - internal/project/syncwindows_test.go:TestScheduleParsing
+    - internal/project/envtest_test.go:TestEnvtestCRDAdmissionVersusValidation
+  notes: Upstream parser options (no descriptors). The Patrol CRD pattern admits descriptors (rejected here, as upstream) and rejects "TZ=" prefixes (accepted upstream); reported as an API defect. The duplicate hash value differs from upstream (FNV over JSON); only equality matters.
+TEN-022:
+  status: implemented
+  impl: [internal/project/syncwindows.go]
+  tests: [internal/project/syncwindows_test.go:TestMatchSyncWindows]
+TEN-023:
+  status: implemented
+  impl: [internal/project/syncwindows.go]
+  tests:
+    - internal/project/syncwindows_test.go:TestCanSyncWithWindows
+    - internal/project/syncwindows_test.go:TestCanSyncAndActiveWindowsForApp
+    - internal/project/property_test.go:TestPropertyCanSyncMonotonic
+  notes: Evaluation and the enforcement messages; the API and controller enforcement points are not wired yet.
+TEN-024:
+  status: implemented
+  impl: [internal/project/syncwindows.go]
+  tests: [internal/project/syncwindows_test.go:TestSyncOverrunScenarios]
+TEN-025:
+  status: implemented
+  impl: [internal/project/syncwindows.go, internal/project/validate_project.go]
+  tests:
+    - internal/project/syncwindows_test.go:TestSyncWindowTimeZoneDST
+    - internal/project/syncwindows_test.go:TestActiveSyncWindows
+    - internal/project/property_test.go:TestPropertyWindowMatchesWallClockOracle
+    - internal/project/property_test.go:TestPropertyFixedOffsetZoneEquivalentToShiftedUTC
+    - internal/project/property_test.go:TestPropertyWindowsLocationIndependent
+  notes: The offset is taken at the evaluation instant passed by the caller (upstream - wall-clock now). Invalid zones evaluate as UTC; NormalizeSyncWindowTimeZones rewrites them on the API write path.
+TEN-026:
+  status: in-progress
+  impl: [internal/project/integrity.go]
+  tests: [internal/project/orphaned_integrity_test.go:TestEffectiveSourceIntegrity]
+  notes: EffectiveSourceIntegrity (all four branches). CLI key-ID normalization is not in this package.
+TEN-027:
+  status: in-progress
+  impl: [internal/project/integrity.go]
+  tests: [internal/project/orphaned_integrity_test.go:TestGitVerificationFor]
+  notes: Policy selection (negated URLs, 0/1/multiple matches, git-only, gpg disabled); signature verification belongs to the repo-server.
+TEN-028:
+  status: implemented
+  impl: [internal/project/destination.go]
+  tests:
+    - internal/project/destination_test.go:TestPermitOnlyProjectScopedClusters
+    - internal/project/effective_test.go:TestEffectiveProjectScopedResources
+    - internal/project/envtest_test.go:TestEnvtestValidateApplication
+TEN-029:
+  status: implemented
+  impl: [internal/project/serviceaccount.go, internal/project/validate_project.go]
+  tests:
+    - internal/project/serviceaccount_test.go:TestDeriveServiceAccount
+    - internal/project/validate_project_test.go:TestValidateProjectRules
+TEN-030:
+  status: implemented
+  impl: [internal/project/serviceaccount.go]
+  tests: [internal/project/serviceaccount_test.go:TestSelectServiceAccount]
+  notes: Settings rules and the selection decision; applying impersonation to the REST config is the controller's job.
+TEN-031:
+  status: implemented
+  impl: [internal/project/validate_app.go]
+  tests:
+    - internal/project/effective_test.go:TestResolveAppProject
+    - internal/project/validate_app_test.go:TestValidateApplication
+TEN-032:
+  status: in-progress
+  impl: [internal/project/roles.go]
+  tests:
+    - internal/project/roles_test.go:TestJWTTokenLifecycle
+    - internal/project/envtest_test.go:TestEnvtestJWTTokenStorage
+  notes: Token metadata recording and id reuse check only; JWT issuance and the API are elsewhere.
+TEN-033:
+  status: in-progress
+  impl: [internal/project/roles.go]
+  tests:
+    - internal/project/roles_test.go:TestJWTTokenLifecycle
+    - internal/project/roles_test.go:TestJWTTokenRevocationWithSameIssuedAt
+  notes: Metadata removal by id, or by iat when no id is given (CLI delete-token); the API is elsewhere. Deliberate security difference - an unknown id does not fall back to the iat, so it never removes another token of the role.
+TEN-034:
+  status: implemented
+  impl: [internal/project/roles.go]
+  tests:
+    - internal/project/roles_test.go:TestNormalizeJWTTokens
+    - internal/project/envtest_test.go:TestEnvtestJWTTokenStorage
+  notes: Ties in iat are ordered by id (upstream order is map-random).
+TEN-035:
+  status: in-progress
+  impl: [internal/project/roles.go]
+  tests:
+    - internal/project/roles_test.go:TestJWTTokenLifecycle
+    - internal/project/roles_test.go:TestJWTTokenRevocationWithSameIssuedAt
+  notes: GetJWTToken lookup by jti, or by iat only for tokens without a jti; token verification is internal/auth. Deliberate security difference - upstream falls back to the iat when the jti is not found, so a revoked token keeps authenticating while another token of the role has the same iat second; here it is rejected.
+TEN-037:
+  status: implemented
+  impl: [internal/project/effective.go]
+  tests:
+    - internal/project/effective_test.go:TestGlobalProjects
+    - internal/project/effective_test.go:TestParseGlobalProjectSettings
+    - internal/project/envtest_test.go:TestEnvtestValidateApplication
+  notes: Selection uses the project's own labels instead of listing projects by selector (same result); evaluation-stopping problems are returned to the caller to log.
+TEN-038:
+  status: in-progress
+  impl: [internal/project/effective.go, internal/project/kube.go]
+  tests:
+    - internal/project/effective_test.go:TestEffectiveProjectScopedResources
+    - internal/project/effective_test.go:TestEffectiveProjectScopedResourcesAreExact
+    - internal/project/property_test.go:TestPropertyScopedRepositoriesWidenByExactlyThemselves
+    - internal/project/envtest_test.go:TestEnvtestValidateApplication
+    - internal/project/envtest_test.go:TestEnvtestScopedResourcesAreExact
+  notes: Scoped repository URLs join the effective sourceRepos; credential precedence is internal/repository. Deliberate security difference - a scoped URL permits exactly itself; URLs that read as globs, negations or do not parse are ignored (upstream appends them as patterns, so a scoped "*" or "!x" opens the project to every repository).
+TEN-039:
+  status: in-progress
+  impl: [internal/project/effective.go, internal/project/clusterindex.go]
+  tests:
+    - internal/project/effective_test.go:TestEffectiveProjectScopedResources
+    - internal/project/effective_test.go:TestEffectiveProjectScopedResourcesAreExact
+    - internal/project/property_test.go:TestPropertyScopedClustersWidenByExactlyThemselves
+    - internal/project/envtest_test.go:TestEnvtestValidateApplication
+    - internal/project/envtest_test.go:TestEnvtestScopedResourcesAreExact
+  notes: Destinations from scoped clusters; the <project>/<server> RBAC object is not in this package. Deliberate security difference - the server and namespaces of a scoped cluster are escaped literals (upstream appends them as patterns, so a scoped server "https://*" opens every cluster; IPv6 servers such as https://[fd00::1]:6443 never matched themselves upstream).
+TEN-040:
+  status: implemented
+  impl: [internal/project/validate_app.go]
+  tests:
+    - internal/project/validate_app_test.go:TestValidateApplication
+    - internal/project/validate_app_test.go:TestValidatePermissionsLookupFailure
+    - internal/project/envtest_test.go:TestEnvtestValidateApplication
+  notes: Produces the conditions; the controller and API server do not call it yet.
+TEN-041:
+  status: in-progress
+  impl: [internal/project/resources.go]
+  tests:
+    - internal/project/resources_test.go:TestValidateSyncPermissions
+    - internal/project/resources_test.go:TestIsLiveResourcePermitted
+  notes: Permission checks and messages; failing sync tasks and dropping live objects is the controller's.
+TEN-051:
+  status: in-progress
+  impl: [internal/project/syncwindows.go]
+  tests: [internal/project/syncwindows_test.go:TestActiveSyncWindows]
+  notes: ActiveSyncWindows over the raw project windows; the endpoint is the API server's.
+APP-002:
+  status: in-progress
+  impl: [internal/project/effective.go, internal/project/validate_app.go, internal/project/errors.go]
+  tests:
+    - internal/project/effective_test.go:TestResolveAppProject
+    - internal/project/validate_app_test.go:TestValidateApplication
+  notes: Project resolution, conditions and the vague API message; spec normalization and status handling are the controller's/API's.
+APP-003:
+  status: in-progress
+  impl: [internal/project/destination.go, internal/project/validate_app.go]
+  tests:
+    - internal/project/destination_test.go:TestResolveDestination
+    - internal/project/validate_app_test.go:TestValidateApplication
+  notes: Resolution, trailing slash, messages; destination-change refresh is the controller's.
+APP-004:
+  status: implemented
+  impl: [internal/project/destination.go, internal/project/clusterindex.go]
+  tests:
+    - internal/project/destination_test.go:TestResolveDestination
+    - internal/project/destination_test.go:TestClusterIndexInCluster
+    - internal/project/envtest_test.go:TestEnvtestValidateApplication
+APP-005:
+  status: in-progress
+  impl: [internal/project/resources.go, internal/project/destination.go]
+  tests:
+    - internal/project/resources_test.go:TestMissingNamespaceMessage
+    - internal/project/destination_test.go:TestIsDestinationPermitted
+  notes: Destination namespace check and the missing-namespace message; defaulting and comparison are the controller's.
+APP-014:
+  status: in-progress
+  impl: [internal/project/validate_app.go]
+  tests: [internal/project/validate_app_test.go:TestValidateApplication]
+  notes: Per-source field and permission validation; the nested option structs in the source rendering of the message are abbreviated.
+APP-015:
+  status: in-progress
+  impl: [internal/project/validate_app.go]
+  tests: [internal/project/validate_app_test.go:TestValidateRefSources]
+  notes: Static checks with upstream messages (ref names, duplicates, unknown $ref, chart ref, two revisions of one repository); available refs are listed sorted. The resolved-revision check needs the repo-server.
+APP-017:
+  status: in-progress
+  impl: [internal/project/validate_app.go]
+  tests: [internal/project/validate_app_test.go:TestValidateSourceNames]
+APP-026:
+  status: in-progress
+  impl: [internal/project/validate_app.go]
+  tests: [internal/project/validate_app_test.go:TestValidateApplication]
+  notes: Hydrator required-field messages and dry/sync repository permission.
+APP-033:
+  status: in-progress
+  impl: [internal/project/validate_app.go]
+  tests: [internal/project/validate_app_test.go:TestValidateApplication]
+APP-036:
+  status: in-progress
+  impl: [internal/project/validate_app.go]
+  tests:
+    - internal/project/validate_app_test.go:TestValidatePermissionsLookupFailure
+    - internal/project/effective_test.go:TestResolveAppProject
+APP-041:
+  status: in-progress
+  impl: [internal/project/orphaned.go]
+  tests: [internal/project/orphaned_integrity_test.go:TestOrphanedResources]
+APP-068:
+  status: in-progress
+  impl: [internal/project/source.go, internal/project/effective.go]
+  tests:
+    - internal/project/source_test.go:TestIsAppNamespacePermitted
+    - internal/project/effective_test.go:TestResolveAppProject
+    - internal/project/envtest_test.go:TestEnvtestValidateApplication
+  notes: RE2 regular expressions (see TEN-010).
+SYNC-073:
+  status: in-progress
+  impl: [internal/project/resources.go]
+  tests: [internal/project/resources_test.go:TestValidateSyncPermissions]
+  notes: Per-task check with upstream messages; the sync engine must call it for every task.
+SYNC-083:
+  status: implemented
+  impl: [internal/project/validate_project.go, internal/project/syncwindows.go]
+  tests:
+    - internal/project/validate_project_test.go:TestValidateProjectRules
+    - internal/project/syncwindows_test.go:TestActiveSyncWindows
+    - internal/project/syncwindows_test.go:TestInactiveAllowSyncWindows
+    - internal/project/syncwindows_test.go:TestSyncWindowActive
+SYNC-084:
+  status: implemented
+  impl: [internal/project/syncwindows.go]
+  tests: [internal/project/syncwindows_test.go:TestMatchSyncWindows]
+SYNC-085:
+  status: implemented
+  impl: [internal/project/syncwindows.go]
+  tests:
+    - internal/project/syncwindows_test.go:TestCanSyncWithWindows
+    - internal/project/syncwindows_test.go:TestGetApplicationSyncWindowsState
+SYNC-086:
+  status: implemented
+  impl: [internal/project/syncwindows.go]
+  tests: [internal/project/syncwindows_test.go:TestSyncOverrunScenarios]
+SYNC-087:
+  status: in-progress
+  impl: [internal/project/syncwindows.go]
+  tests: [internal/project/syncwindows_test.go:TestCanSyncWithWindows]
+  notes: Messages and the manual/automated/operation-start decision; the API and controller enforcement points are not wired.
+SYNC-088:
+  status: in-progress
+  impl: [internal/project/syncwindows.go, internal/project/validate_project.go]
+  tests:
+    - internal/project/syncwindows_test.go:TestGetApplicationSyncWindowsState
+    - internal/project/validate_project_test.go:TestValidateSyncWindowAndEdits
+  notes: Application window state (assigned/active/canSync/status), window add/update/delete helpers with CLI messages, and NextTransition (Patrol addition). CLI/UI are elsewhere.
+SYNC-093:
+  status: in-progress
+  impl: [internal/project/serviceaccount.go]
+  tests: [internal/project/serviceaccount_test.go:TestDeriveServiceAccount]
+SYNC-094:
+  status: in-progress
+  impl: [internal/project/serviceaccount.go]
+  tests: [internal/project/serviceaccount_test.go:TestSelectServiceAccount]
+REPO-004:
+  status: in-progress
+  impl: [internal/project/effective.go, internal/project/kube.go]
+  tests:
+    - internal/project/effective_test.go:TestEffectiveProjectScopedResources
+    - internal/project/effective_test.go:TestEffectiveProjectScopedResourcesAreExact
+  notes: Project membership (effective sourceRepos) only; a scoped URL permits exactly itself (see TEN-038).
+REPO-068:
+  status: implemented
+  impl: [internal/project/integrity.go]
+  tests: [internal/project/orphaned_integrity_test.go:TestGitVerificationFor]
+REPO-072:
+  status: implemented
+  impl: [internal/project/integrity.go]
+  tests: [internal/project/orphaned_integrity_test.go:TestEffectiveSourceIntegrity]
+REPO-073:
+  status: in-progress
+  impl: [internal/project/integrity.go]
+  tests: [internal/project/orphaned_integrity_test.go:TestGitVerificationFor]
+  notes: HasSourceIntegrityCriteria follows upstream code - mode "none" is not a criterion (the inventory says it is).
+REPO-078:
+  status: in-progress
+  impl: [internal/project/clusterindex.go]
+  tests:
+    - internal/project/destination_test.go:TestClusterIndexInCluster
+    - internal/project/destination_test.go:TestResolveDestination
+  notes: Name lookups returning several servers and the in-cluster default for destination resolution; the cluster registry itself is internal/clusters.
+REPO-081:
+  status: in-progress
+  impl: [internal/project/effective.go, internal/project/destination.go]
+  tests:
+    - internal/project/effective_test.go:TestEffectiveProjectScopedResources
+    - internal/project/effective_test.go:TestEffectiveProjectScopedResourcesAreExact
+    - internal/project/destination_test.go:TestPermitOnlyProjectScopedClusters
+  notes: RBAC objects for scoped clusters are not in this package; scoped clusters permit exactly themselves (see TEN-039).

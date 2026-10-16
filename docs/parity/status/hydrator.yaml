@@ -1,0 +1,203 @@
+# internal/hydrator (source hydrator controllers). See docs/architecture/components/hydrator.md.
+# Unit tests use the controller-runtime fake client; integration tests run the controllers
+# in a manager against envtest (kube-apiserver 1.36, generated CRDs) with a fake
+# repo-server and the real commit-server (HTTP) writing to a local bare repository. The
+# hydrator is not wired into patrolcd controller yet, so nothing here is "verified".
+
+APP-113:
+  status: in-progress
+  impl: [internal/hydrator/hydrator.go, internal/hydrator/deps.go]
+  tests:
+    - internal/hydrator/key_test.go:TestNewValidatesDeps
+    - internal/hydrator/envtest_test.go:TestEnvHydrationLifecycle
+  notes: >-
+    Setup registers nothing when Deps.Enabled (hydrator.enabled) is false; with it on,
+    Applications get status.sourceHydrator. Missing: controller/cmd wiring of the flag and
+    commit.server address, settings API hydratorEnabled, UI gating.
+
+APP-114:
+  status: implemented
+  impl: [internal/hydrator/evaluate.go]
+  tests:
+    - internal/hydrator/evaluate_test.go:TestEvaluate
+    - internal/hydrator/evaluate_test.go:TestReconcileAppRecordsComparedRevision
+    - internal/hydrator/evaluate_test.go:TestAppPredicate
+    - internal/hydrator/process_test.go:TestReconcileKeySpecChangeDuringHydrationIsNotLost
+    - internal/hydrator/envtest_test.go:TestEnvHydrationLifecycle
+  notes: >-
+    Upstream decision order. A spec change made while the group is hydrating is hydrated
+    next (in-memory request coverage compares the spec the processing hydrated). Triggers: creation/initial listing, generation, hydrate and
+    manifest-generate-paths annotations, status.sourceHydrator changes, and RequeueAfter
+    polling (timeout.reconciliation). lastComparedDryRevision is written when no hydration
+    follows; a hydration records the dry SHA it used (upstream writes it on every
+    evaluation).
+
+APP-115:
+  status: implemented
+  impl: [internal/hydrator/evaluate.go, internal/hydrator/status.go, internal/hydrator/process.go]
+  tests:
+    - internal/hydrator/evaluate_test.go:TestReconcileAppConsumesHydrateRequest
+    - internal/hydrator/evaluate_test.go:TestReconcileAppRecordsComparedRevision
+    - internal/hydrator/process_test.go:TestReconcileKeySkipsAlreadyHydratedDrySHA
+    - internal/hydrator/envtest_test.go:TestEnvHydrationLifecycle
+  notes: >-
+    hard forces hydration and always calls the commit-server (no commit when output is
+    unchanged); any other value is normal (revision cache bypassed, failed hydration
+    retried). Removed with a JSON patch test operation so newer requests survive; consumed
+    without effect while Hydrating. Setting it from the API/webhooks is elsewhere.
+
+APP-116:
+  status: implemented
+  impl: [internal/hydrator/key.go, internal/hydrator/process.go, internal/hydrator/queue.go]
+  tests:
+    - internal/hydrator/key_test.go:TestKeyOf
+    - internal/hydrator/process_test.go:TestReconcileKeyHydratesGroupInOneCommit
+    - internal/hydrator/process_test.go:TestReconcileKeyRenderFailureFailsGroup
+    - internal/hydrator/process_test.go:TestReconcileKeySelectsGroup
+    - internal/hydrator/process_test.go:TestReconcileKeySkipsAlreadyHydratedDrySHA
+    - internal/hydrator/process_test.go:TestReconcileKeyCoverage
+    - internal/hydrator/process_test.go:TestReconcileKeySpecChangeDuringHydrationIsNotLost
+    - internal/hydrator/envtest_test.go:TestEnvHydrationLifecycle
+    - internal/hydrator/envtest_test.go:TestEnvHydrationFailureFailsGroup
+  notes: >-
+    Key and generic error messages as upstream; group sorted by qualified name. The
+    already-hydrated skip requires every member (not only the first) to have hydrated the
+    dry SHA with its current configuration, so added apps and changed paths are written
+    without a new dry commit.
+
+APP-117:
+  status: implemented
+  impl: [internal/hydrator/process.go]
+  tests:
+    - internal/hydrator/process_test.go:TestReconcileKeyValidation
+    - internal/hydrator/envtest_test.go:TestEnvHydrationFailureFailsGroup
+  notes: >-
+    Upstream messages for project, dry repo, root path, destination repo and duplicate
+    destination; Patrol also rejects paths outside the repository per app.
+
+APP-118:
+  status: implemented
+  impl: [internal/hydrator/render.go]
+  tests:
+    - internal/hydrator/process_test.go:TestReconcileKeyHydratesGroupInOneCommit
+    - internal/hydrator/envtest_test.go:TestEnvHydrationLifecycle
+  notes: >-
+    NoCache/NoRevisionCache, tracking metadata stripped (tracking-id, installation-id, or the
+    instance label), commands recorded per path, upstream error prefixes. Renders go
+    through a fake repo-server in tests (Helm valueFiles/parameters not exercised). The
+    destination Kubernetes version is sent when Deps.ClusterInfo is set (upstream sends
+    none; nil reproduces upstream).
+
+APP-123:
+  status: in-progress
+  impl: [internal/hydrator/key.go, internal/hydrator/process.go]
+  tests:
+    - internal/hydrator/envtest_test.go:TestEnvHydrateToStagingBranch
+    - internal/hydrator/key_test.go:TestKeyOf
+  notes: >-
+    Commits land on hydrateTo.targetBranch (created from the bootstrapped sync branch).
+    The comparison error suffix "waiting for an external process ..." belongs to the
+    application controller and is not implemented here.
+
+APP-124:
+  status: in-progress
+  impl: [internal/hydrator/key.go, internal/hydrator/process.go]
+  tests:
+    - internal/hydrator/key_test.go:TestKeyOf
+    - internal/hydrator/process_test.go:TestReconcileKeyValidation
+    - internal/hydrator/envtest_test.go:TestEnvHydrationLifecycle
+  notes: >-
+    Destination repository from syncSource.repoURL (normalized for grouping), permitted by
+    the project, write credentials looked up for it. Syncing from it is the application
+    controller's.
+
+APP-125:
+  status: in-progress
+  impl: [internal/hydrator/process.go, internal/hydrator/adapters.go]
+  tests:
+    - internal/hydrator/process_test.go:TestReconcileKeyWriteCredentialProject
+    - internal/hydrator/process_test.go:TestReconcileKeyGroupErrors
+  notes: >-
+    Project-scoped write credentials only when the whole group has one project; no
+    credentials → anonymous push with a warning; lookup errors fail the group with
+    "failed to get hydrator credentials: ...". Write-secret resolution is internal/repository
+    (Repositories adapter); a push with real write credentials is not exercised yet.
+
+APP-130:
+  status: implemented
+  impl: [internal/hydrator/evaluate.go, internal/hydrator/process.go]
+  tests:
+    - internal/hydrator/evaluate_test.go:TestEvaluate
+    - internal/hydrator/evaluate_test.go:TestRequeueAfter
+    - internal/hydrator/process_test.go:TestReconcileKeyRenderFailureFailsGroup
+    - internal/hydrator/envtest_test.go:TestEnvHydrationFailureFailsGroup
+  notes: >-
+    Fixed 2-minute cooldown (RequeueAfter at its end), explicit request retries now, new dry
+    commit retries now when a baseline exists, dry SHA recorded on failure.
+
+APP-131:
+  status: implemented
+  impl: [internal/hydrator/evaluate.go, internal/hydrator/process.go]
+  tests:
+    - internal/hydrator/evaluate_test.go:TestReconcileAppRecoversStaleHydrating
+    - internal/hydrator/process_test.go:TestReconcileKeyKeepsStartTimeOfHydratingApps
+  notes: >-
+    Stale timeout = timeout.reconciliation (Deps.StaleTimeout overrides); startedAt kept on
+    re-mark, snapshot refreshed to the spec rendered now.
+
+APP-132:
+  status: in-progress
+  impl: [internal/hydrator/process.go, internal/hydrator/status.go]
+  tests:
+    - internal/hydrator/process_test.go:TestReconcileKeyHydratesGroupInOneCommit
+    - internal/hydrator/envtest_test.go:TestEnvHydrationLifecycle
+  notes: >-
+    Hydrated status and a normal refresh request (refresh annotation, not downgrading a
+    pending hard refresh). Comparing and auto-syncing the hydrated commit is the application
+    controller's; GetManifests rendering the dry source is the API server's.
+
+APP-133:
+  status: implemented
+  impl: [internal/hydrator/evaluate.go, internal/hydrator/key.go]
+  tests:
+    - internal/hydrator/evaluate_test.go:TestEvaluate
+    - internal/hydrator/evaluate_test.go:TestEvaluateManifestGeneratePathsRequest
+    - internal/hydrator/key_test.go:TestRefreshPaths
+  notes: >-
+    Paths resolved against drySource.path and compared with lastComparedDryRevision through
+    repo-server UpdateRevisionForPaths (only for full-depth repositories); exercised against
+    a fake repo-server.
+
+APP-134:
+  status: implemented
+  impl: [internal/hydrator/render.go]
+  tests:
+    - internal/hydrator/process_test.go:TestReconcileKeySourceIntegrity
+  notes: >-
+    Upstream messages; the failed-check detail lists the repo-server's check problems. Fails
+    closed: GPG criteria enforced with the zero Deps (Deps.DisableGPG mirrors
+    ARGOCD_GPG_ENABLED=false), and a result reporting problems always fails the hydration.
+    Exercised with a fake repo-server result; real GPG verification is the repo-server's.
+
+APP-136:
+  status: implemented
+  impl: [internal/hydrator/deps.go, internal/hydrator/hydrator.go]
+  tests:
+    - internal/hydrator/key_test.go:TestProcessorsDefaults
+    - internal/hydrator/envtest_test.go:TestEnvHydrationLifecycle
+  notes: >-
+    Processors (default 5, below 1 coerced to 1 with a warning) workers of a typed
+    controller-runtime controller keyed by hydration key; AppProcessors default 1. Flag
+    wiring is the cmd owner's.
+
+APP-137:
+  status: implemented
+  impl: [internal/hydrator/process.go, internal/hydrator/status.go]
+  tests:
+    - internal/hydrator/process_test.go:TestReconcileKeyHydratesGroupInOneCommit
+    - internal/hydrator/envtest_test.go:TestEnvHydrationLifecycle
+    - internal/hydrator/envtest_test.go:TestEnvHydrationFailureFailsGroup
+  notes: >-
+    Hydrating → Hydrated/Failed with startedAt, finishedAt, drySHA, hydratedSHA, message and
+    the configuration snapshot; JSON merge patches of the status subresource with
+    resourceVersion preconditions (conflicts re-read and retried).

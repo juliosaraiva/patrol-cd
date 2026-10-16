@@ -1,0 +1,73 @@
+# CLI core mode (internal/cli/core, server.NewCoreHandler in internal/server/core*.go,
+# transport.PodDialer, the PATROL_CORE / conflict handling in internal/cli/cmdutil).
+# See docs/architecture/components/cli-core-mode.md.
+# Evidence: the real cobra root command runs in-process in core mode against an envtest
+# kube-apiserver 1.36 (CRDs, Operation admission policy, audit log) with namespace-scoped
+# RBAC users; the in-process server is the real patrol-server route table. The repo-server
+# (real repo-server HTTP handler over a fake service) and the controller tree API (real
+# handler over a stand-in state) are reached through the Endpoints override on loopback,
+# and a controller stand-in executes Operations, so the status stays below verified.
+
+API-054:
+  status: in-progress
+  impl: [internal/cli/transport/podstream.go, internal/cli/transport/portforward.go, internal/cli/core/pods.go]
+  tests:
+    - internal/cli/core/pods_internal_test.go:TestPortForwardRouting
+    - internal/cli/core/pods_internal_test.go:TestPodRouterRepoServer
+    - internal/cli/core/pods_internal_test.go:TestPodRouterController
+    - internal/cli/transport/podstream_test.go:TestPodDialerArgumentsAndClose
+  notes: >-
+    Core mode reaches the repo-server and the controller tree API through the port-forward
+    machinery of --port-forward without a local listener (PodDialer: one v4.channel.k8s.io
+    WebSocket stream per connection, in-memory net.Conn). Pod selection, controller pod
+    verification (label or StatefulSet owner, Running and Ready), caching, reselection after a
+    failed dial and 403 handling are tested with a fake clientset and a fake Kubernetes API
+    speaking the WebSocket protocol. Live verification against kubelet-backed port-forwards on a
+    kind cluster is pending (Docker Desktop disk full, TASKS.md blockers).
+
+API-055:
+  status: implemented
+  impl:
+    - internal/cli/core/core.go
+    - internal/cli/core/memtransport.go
+    - internal/cli/core/register.go
+    - internal/cli/core/kubecontexts.go
+    - internal/cli/core/endpoints.go
+    - internal/server/core.go
+    - internal/server/core_support.go
+    - internal/server/core_clusters.go
+    - internal/cli/cmdutil/flags.go
+    - internal/cli/cmdutil/client.go
+    - internal/cli/cmdutil/kube.go
+    - cmd/patrol/main.go
+  tests:
+    - internal/cli/core/e2e_test.go:TestCoreAppLifecycle
+    - internal/cli/core/e2e_test.go:TestCoreKubernetesRBACIsTheAuthorization
+    - internal/cli/core/kubeflags_e2e_test.go:TestCoreNamespaceFlag
+    - internal/cli/core/kubeflags_e2e_test.go:TestCoreClusterCommandsUseCallerCredentials
+    - internal/cli/core/register_test.go:TestKubectlFlagsOnSubcommands
+    - internal/cli/core/shutdown_test.go:TestCoreConnectionInProcessAndCleanShutdown
+    - internal/cli/core/register_test.go:TestConflictingFlags
+    - internal/cli/core/register_test.go:TestUnsupportedCommands
+    - internal/cli/core/memtransport_test.go:TestHandlerTransportStreams
+    - internal/cli/core/memtransport_test.go:TestHandlerTransportWebSocket
+    - internal/cli/core/endpoints_internal_test.go:TestNamespaceAndDestinations
+    - internal/server/core_test.go:TestCoreHandlerEnvtest
+    - internal/server/core_test.go:TestCoreHandlerDegrades
+    - internal/server/core_test.go:TestCoreRoutesMatchTheServer
+    - internal/server/core_clusters_test.go:TestCoreClusterConnectionsUseCallerCredentials
+  notes: >-
+    --core, PATROL_CORE, PATROL_OPTS --core and a stored core context run the patrol-server API
+    in the CLI process (no listener; in-memory RoundTripper) with authentication and Patrol RBAC
+    disabled; every Kubernetes call uses the kubeconfig credentials (audit log checked: only the
+    caller, no impersonation), destination clusters included: cluster connection checks and
+    rotate-auth use the caller's kubeconfig context for the server, never the stored Cluster
+    Secret credentials (without a context: no check, rotate-auth refused; upstream uses the
+    stored credentials). Namespace from -n/--namespace (persistent kubectl flags, accepted by
+    every subcommand; upstream only on the group command), the kube context, else "patrol"
+    (upstream: "default"). Operation spec.initiatedBy is the SelfSubjectReview user (admitted by the
+    admission policy without the impersonate verb). Session commands (relogin, account
+    update-password/generate-token/delete-token/session-token) and admin dashboard --core are
+    refused with explicit messages (dashboard: different by design, no unauthenticated
+    in-process UI). --core with --server/--port-forward and core mode with --auth-token are
+    refused. No Redis (ADR-0004). Live repo-server/controller access depends on API-054.

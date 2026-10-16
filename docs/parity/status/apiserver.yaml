@@ -1,0 +1,373 @@
+# internal/apiserver (framework, session/SSO/account/settings/version routes, server
+# lifecycle) and pkg/apiclient (Go client base). See docs/architecture/components/apiserver.md.
+# Evidence: HTTP tests through the real route chain with internal/auth TokenService,
+# internal/rbac Enforcer and internal/settings snapshots; envtest for the patrol-secret store;
+# an in-process OIDC provider and a fake Dex for SSO. The patrol-server command wiring
+# (cmd/patrolcd) and the resource services do not exist yet, so nothing here is "verified".
+# Commands and results: docs/architecture/components/apiserver.md#verification.
+
+API-001:
+  status: in-progress
+  impl: [internal/apiserver/core/routes.go, internal/apiserver/rest/route.go, api/openapi/openapi.json]
+  tests:
+    - internal/apiserver/server_test.go:TestCoreRouteTable
+    - internal/apiserver/server_test.go:TestOpenAPIUpToDate
+  notes: >-
+    Route table framework plus the account, session, settings and version families (16
+    operations). Application, ApplicationSet, project, repository, cluster, certificate, GPG
+    key and notification services are registered by their own packages later.
+
+API-002:
+  status: in-progress
+  impl: [internal/apiserver/server.go, internal/apiserver/tls.go]
+  tests:
+    - internal/apiserver/server_test.go:TestServeTLSRedirectMetricsAndShutdown
+    - internal/apiserver/server_test.go:TestServeTLSShutdownIdle
+    - internal/apiserver/tls_internal_test.go:TestSplitListenerCloseIdempotent
+    - internal/apiserver/server_test.go:TestTLSHelpers
+  notes: >-
+    HTTPS with the patrol-secret certificate read per handshake (rotation without restart) or a
+    generated self-signed certificate, min/max TLS version and cipher suites, plain HTTP on the
+    TLS port answered with 307 to https (root path kept once), --insecure plain HTTP. gRPC and
+    gRPC-Web multiplexing are not provided (ADR-0005: JSON over HTTP).
+
+API-003:
+  status: in-progress
+  impl: [internal/apiserver/rest/decode.go, internal/apiserver/rest/csrf.go]
+  tests:
+    - internal/apiserver/rest/rest_test.go:TestDecodeErrors
+    - internal/apiserver/rest/rest_test.go:TestCSRF
+  notes: >-
+    Request bodies must be application/json (or +json), else 415 "Invalid content type";
+    cookie-authenticated mutations need X-Requested-With: patrol. Not done: fields= projection
+    and gzip.
+
+API-004:
+  status: in-progress
+  impl: [internal/apiserver/rest/sse.go, pkg/apiclient/stream.go]
+  tests:
+    - internal/apiserver/rest/sse_test.go:TestSSEEventsHeartbeatsAndFiltering
+    - internal/apiserver/rest/sse_test.go:TestSSEWithClient
+    - internal/apiserver/rest/sse_test.go:TestSSERevokedSessionEndsStream
+    - internal/apiserver/rest/sse_test.go:TestSSESlowConsumerIsDropped
+    - pkg/apiclient/client_test.go:TestStream
+  notes: >-
+    SSE framework (heartbeats, per-event authorization, credential re-check, bounded queue,
+    disconnect handling, Last-Event-ID) and the Go client reader. The watch and log routes and
+    log download belong to the application API.
+
+API-005:
+  status: implemented
+  impl: [internal/apiserver/rest/auth.go, internal/apiserver/rest/mount.go, internal/apiserver/server.go]
+  tests:
+    - internal/apiserver/rest/rest_test.go:TestAuthMatrix
+    - internal/apiserver/rest/rest_test.go:TestAnonymousAccess
+    - internal/apiserver/rest/rest_test.go:TestDisableAuth
+    - internal/apiserver/rest/rest_test.go:TestSessionRenewal
+    - internal/apiserver/core/session_test.go:TestNoRenewalOnSessionEndingRoutes
+    - internal/apiserver/core/settings_test.go:TestPluginSettings
+  notes: >-
+    Bearer header then patrol.token cookie chunks; "no session information" / "invalid
+    session: ..." 401s; anonymous identity with policy.default; --disable-auth; renewal of
+    login sessions near expiry as a refreshed cookie or the Patrol-Renew-Token header (no gRPC
+    renew-token header), never on logout or password change; session, settings and version routes public, settings/plugins
+    authenticated.
+
+API-008:
+  status: in-progress
+  impl: [internal/apiserver/rest/middleware.go, internal/apiserver/rest/errors.go, internal/apiserver/rest/metrics.go]
+  tests:
+    - internal/apiserver/rest/rest_test.go:TestPanicRecovery
+    - internal/apiserver/rest/rest_test.go:TestProblemFor
+    - internal/apiserver/rest/rest_test.go:TestAccessLogOmitsSecrets
+  notes: >-
+    Panic recovery, request IDs, access log without bodies/queries/tokens, Prometheus
+    metrics, Kubernetes error translation to problem documents. Not done: tracing spans.
+
+API-009:
+  status: in-progress
+  impl: [internal/apiserver/rest/decode.go, pkg/apiclient/client.go]
+  tests:
+    - internal/apiserver/rest/roundtrip_test.go:TestClientServerRoundTripProperty
+    - pkg/apiclient/client_test.go:TestDoBuildsRequests
+  notes: >-
+    Escaped single-segment path values (%2F) and multi-segment wildcards decode exactly; the
+    repository and cluster routes (and id.type) belong to their services.
+
+API-010:
+  status: implemented
+  impl: [internal/apiserver/server.go, internal/apiserver/static.go, pkg/apiclient/client.go]
+  tests:
+    - internal/apiserver/server_test.go:TestHandlerRootPathBaseHRefAndUI
+    - internal/apiserver/server_test.go:TestHandlerBaseHRefOverrideAndHeaders
+    - pkg/apiclient/client_test.go:TestNewClientOptions
+  notes: >-
+    --rootpath mounts the server under a prefix with /healthz also at the root; --basehref
+    (default: the root path) injected as <base href> into index.html; cookies use it as path;
+    the client honors RootPath / GRPCWebRootPath.
+
+API-011:
+  status: in-progress
+  impl: [internal/apiserver/server.go]
+  tests:
+    - internal/apiserver/server_test.go:TestHealthzReadiness
+    - internal/apiserver/server_test.go:TestServeTLSRedirectMetricsAndShutdown
+  notes: >-
+    /healthz 200 "ok", 503 while not ready and during shutdown. ?full=true cluster listing,
+    gRPC health and reflection are not provided (no gRPC, ADR-0005).
+
+API-012:
+  status: in-progress
+  impl: [internal/apiserver/openapi/generate.go, internal/apiserver/openapi_doc.go, internal/apiserver/cmd/genopenapi/main.go]
+  tests:
+    - internal/apiserver/openapi/generate_test.go:TestGenerateDocument
+    - internal/apiserver/openapi/generate_test.go:TestCheckedInDocumentRefsResolve
+    - internal/apiserver/server_test.go:TestOpenAPIUpToDate
+  notes: >-
+    OpenAPI 3.1 document generated from the route table and checked in (stale check in
+    tests). Serving it (/swagger.json, a docs page) is not done.
+
+API-013:
+  status: implemented
+  impl: [internal/apiserver/static.go, internal/apiserver/server.go, internal/apiserver/rest/middleware.go]
+  tests:
+    - internal/apiserver/server_test.go:TestHandlerRootPathBaseHRefAndUI
+    - internal/apiserver/server_test.go:TestHandlerBaseHRefOverrideAndHeaders
+    - internal/apiserver/rest/rest_test.go:TestSecurityHeadersAndMaxBody
+  notes: >-
+    UI from an fs.FS (embedded build) with an OverlayFS for a static-assets directory,
+    history-routing fallback to index.html for HTML requests, immutable caching of hashed
+    assets/, X-Frame-Options (default sameorigin) and Content-Security-Policy (default
+    "default-src 'self'; frame-ancestors 'self'", stricter than upstream), both disabled by
+    empty values. X-XSS-Protection is not sent (obsolete header).
+
+API-015:
+  status: in-progress
+  impl: [internal/apiserver/server.go, internal/apiserver/core/routes.go]
+  tests:
+    - internal/apiserver/server_test.go:TestCoreRouteTable
+    - internal/apiserver/core/sso_test.go:TestSSOLoginErrors
+  notes: >-
+    /healthz, /api/dex, /api/v1/auth/login and /api/v1/auth/callback (404 without SSO), static
+    UI. Badge, terminal, extensions, webhook and download endpoints belong to other services.
+
+API-016:
+  status: implemented
+  impl: [internal/apiserver/core/account.go, pkg/apiclient/core.go]
+  tests:
+    - internal/apiserver/core/account_test.go:TestListAndGetAccounts
+    - internal/apiserver/core/account_test.go:TestCanI
+    - internal/apiserver/core/account_test.go:TestAccountTokenLifecycle
+    - internal/apiserver/core/account_test.go:TestUpdatePassword
+  notes: >-
+    CanI (validated resource/action, project object normalization), UpdatePassword (self,
+    RBAC, current password of the caller, SSO token age, passwordPattern), ListAccounts and
+    GetAccount (self always visible to local sessions, RBAC before existence), CreateToken and
+    DeleteToken persisted in patrol-secret with optimistic concurrency.
+
+API-040:
+  status: implemented
+  impl: [internal/apiserver/core/session.go, pkg/apiclient/core.go]
+  tests:
+    - internal/apiserver/core/session_test.go:TestLocalLogin
+    - internal/apiserver/core/session_test.go:TestLoginCookie
+    - internal/apiserver/core/session_test.go:TestLogoutRevokesSession
+    - internal/apiserver/core/session_test.go:TestUserInfoAnonymousAndGroups
+  notes: >-
+    Create (login with lockout, concurrency limit, metrics, optional cookie), Delete (revokes
+    login/SSO sessions; see TEN-107), GetUserInfo. The legacy "token" request field is
+    rejected as an unknown field (400) instead of upstream's 401 message.
+
+API-041:
+  status: implemented
+  impl: [internal/apiserver/core/settings.go]
+  tests:
+    - internal/apiserver/core/settings_test.go:TestSettingsPublicVersusAuthenticated
+    - internal/apiserver/core/settings_test.go:TestSettingsLoginsDisabledAndAuthDisabled
+    - internal/apiserver/core/settings_test.go:TestSettingsDexConnectors
+    - internal/apiserver/core/settings_test.go:TestPluginSettings
+
+API-042:
+  status: implemented
+  impl: [internal/apiserver/core/version.go]
+  tests:
+    - internal/apiserver/core/settings_test.go:TestVersion
+    - internal/apiserver/core/settings_test.go:TestBuildVersionInfo
+  notes: >-
+    Served at /api/v1/version and /api/version; kubectl and jsonnet report the linked client-go
+    and go-jsonnet library versions.
+
+TEN-052:
+  status: in-progress
+  impl: [internal/apiserver/rest/audit.go]
+  tests:
+    - internal/apiserver/rest/rest_test.go:TestLogAuditorEvents
+    - internal/apiserver/rest/rest_test.go:TestRBACDenialIsAudited
+  notes: >-
+    Audit framework emits Kubernetes Events for Application and AppProject targets (created,
+    updated, deleted, access denied); the application and project handlers that set targets
+    are not written yet.
+
+TEN-081:
+  status: in-progress
+  impl: [internal/apiserver/rest/authorize.go, internal/apiserver/core/account.go]
+  tests:
+    - internal/apiserver/rest/rest_test.go:TestRBACDenialIsAudited
+    - internal/apiserver/core/account_test.go:TestListAndGetAccounts
+  notes: >-
+    Upstream denial message shape and RBAC-before-existence checks for accounts; the
+    application and project information-hiding rules belong to their services.
+
+TEN-085:
+  status: implemented
+  impl: [internal/apiserver/rest/auth.go, internal/apiserver/rest/authorize.go, internal/apiserver/server.go]
+  tests:
+    - internal/apiserver/rest/rest_test.go:TestDisableAuth
+    - internal/apiserver/core/settings_test.go:TestSettingsLoginsDisabledAndAuthDisabled
+
+TEN-089:
+  status: implemented
+  impl: [internal/apiserver/core/account.go]
+  tests:
+    - internal/apiserver/core/account_test.go:TestCanI
+  notes: API part; the CLI command is not written yet.
+
+TEN-096:
+  status: implemented
+  impl: [internal/apiserver/core/account.go]
+  tests:
+    - internal/apiserver/core/account_test.go:TestUpdatePassword
+
+TEN-097:
+  status: implemented
+  impl: [internal/apiserver/core/session.go]
+  tests:
+    - internal/apiserver/core/session_test.go:TestLocalLogin
+    - internal/apiserver/core/session_test.go:TestLoginCookie
+  notes: >-
+    Messages as upstream except a blank password with a username, reported as "no credentials
+    supplied" by internal/auth.
+
+TEN-098:
+  status: implemented
+  impl: [internal/apiserver/core/session.go]
+  tests:
+    - internal/apiserver/core/session_test.go:TestLoginLockout
+  notes: Lockout logic lives in internal/auth; this is the API path.
+
+TEN-101:
+  status: implemented
+  impl: [internal/apiserver/core/account.go, internal/apiserver/core/secretstore.go]
+  tests:
+    - internal/apiserver/core/account_test.go:TestAccountTokenLifecycle
+    - internal/apiserver/core/secretstore_test.go:TestKubeSecretStoreRetriesConflicts
+    - internal/apiserver/core/secretstore_test.go:TestEnvtestSecretStoreConcurrency
+
+TEN-103:
+  status: implemented
+  impl: [internal/apiserver/core/account.go]
+  tests:
+    - internal/apiserver/core/account_test.go:TestListAndGetAccounts
+
+TEN-104:
+  status: implemented
+  impl: [internal/apiserver/rest/auth.go, internal/apiserver/core/version.go]
+  tests:
+    - internal/apiserver/rest/rest_test.go:TestAnonymousAccess
+    - internal/apiserver/core/settings_test.go:TestVersion
+
+TEN-106:
+  status: implemented
+  impl: [internal/apiserver/core/session.go]
+  tests:
+    - internal/apiserver/core/session_test.go:TestUserInfoAnonymousAndGroups
+    - internal/apiserver/core/sso_test.go:TestSSOLoginFlow
+  notes: >-
+    iss is "patrol" for every Patrol-issued session (SSO logins mint Patrol sessions, ADR-0009)
+    and the IdP issuer for IdP tokens presented directly.
+
+TEN-107:
+  status: different-by-design
+  impl: [internal/apiserver/core/session.go]
+  tests:
+    - internal/apiserver/core/session_test.go:TestLogoutRevokesSession
+    - internal/apiserver/core/session_test.go:TestNoRenewalOnSessionEndingRoutes
+  notes: >-
+    DELETE /session also revokes the login or SSO session (upstream only clears the cookie and
+    revokes in /auth/logout), so a replayed token is rejected; the logout response never
+    carries a renewed session token, also inside the renewal window. See
+    docs/architecture/components/apiserver.md#differences-and-gaps.
+
+TEN-108:
+  status: in-progress
+  impl: [internal/apiserver/core/session.go]
+  tests:
+    - internal/apiserver/core/session_test.go:TestLogoutRevokesSession
+    - internal/apiserver/core/sso_test.go:TestSSOLoginFlow
+  notes: >-
+    Revocation and the IdP logout URL are returned by DELETE /session; the /auth/logout
+    redirect endpoint is not provided and {{token}} is empty (the IdP ID token is not kept).
+
+TEN-113:
+  status: implemented
+  impl: [internal/apiserver/core/sso.go]
+  tests:
+    - internal/apiserver/core/sso_test.go:TestSSOLoginErrors
+    - internal/apiserver/core/sso_test.go:TestDexProxy
+  notes: >-
+    SSO routes answer 404 without SSO; configuration changes rebuild the relying party on the
+    next request instead of restarting the server.
+
+TEN-115:
+  status: implemented
+  impl: [internal/apiserver/core/sso.go]
+  tests:
+    - internal/apiserver/core/sso_test.go:TestDexProxy
+    - internal/apiserver/core/sso_test.go:TestDexTransport
+  notes: >-
+    Strict TLS verifies Dex against its CA (no certificate pinning). Headers are forwarded as
+    upstream, including Dex's own Authorization credentials (client_secret_basic, Dex access
+    tokens); patrol.token cookies and Patrol-issued bearer tokens are stripped.
+
+TEN-121:
+  status: in-progress
+  impl: [internal/apiserver/core/sso.go, internal/apiserver/core/settings.go]
+  tests:
+    - internal/apiserver/core/sso_test.go:TestOIDCExchange
+  notes: >-
+    cliClientID is exposed by settings and accepted as an audience by the exchange endpoint;
+    the CLI flow is not written yet.
+
+TEN-123:
+  status: in-progress
+  impl: [internal/apiserver/core/session.go]
+  tests:
+    - internal/apiserver/core/sso_test.go:TestSSOLoginFlow
+  notes: logoutURL with {{logoutRedirectURL}} returned on logout; {{token}} is empty.
+
+TEN-127:
+  status: implemented
+  impl: [internal/apiserver/core/sso.go]
+  tests:
+    - internal/apiserver/core/sso_test.go:TestSSOLoginFlow
+    - internal/apiserver/core/sso_test.go:TestSSOLoginErrors
+  notes: >-
+    Authorization-code flow with state, nonce and optional PKCE; the browser gets a Patrol SSO
+    session cookie (ADR-0009). Implicit flow and ARGOCD_SSO_DEBUG are not supported.
+
+TEN-128:
+  status: in-progress
+  impl: [internal/apiserver/core/sso.go]
+  tests:
+    - internal/apiserver/core/sso_test.go:TestIdPTokenAsBearer
+    - internal/apiserver/core/sso_test.go:TestOIDCExchange
+  notes: >-
+    IdP ID tokens are accepted as bearer tokens through SSO.ExternalVerifier (wired by the
+    server command, which does not exist yet) and exchanged by the CLI endpoint.
+
+TEN-129:
+  status: implemented
+  impl: [internal/apiserver/rest/auth.go, internal/apiserver/core/sso.go]
+  tests:
+    - internal/apiserver/core/sso_test.go:TestSSOLoginFlow
+    - internal/apiserver/core/sso_test.go:TestIdPTokenAsBearer

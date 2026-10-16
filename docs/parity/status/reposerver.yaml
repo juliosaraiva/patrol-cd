@@ -1,0 +1,390 @@
+# internal/reposerver (repo-server service, HTTP API and typed client). See
+# docs/architecture/components/reposerver.md. Evidence: package tests through the real HTTP
+# client against httptest servers with real git/helm/kustomize/gpg binaries, local bare
+# repositories, an httptest Helm repository and the in-process OCI registry. The controller,
+# API server and ApplicationSet controller do not call the repo-server over HTTP yet, so
+# features stay "implemented".
+
+SRC-090:
+  status: implemented
+  impl: [internal/reposerver/gitops.go]
+  tests:
+    - internal/reposerver/gitops_test.go:TestListPlugins
+    - internal/reposerver/plugin_test.go:TestPluginSource
+  notes: Repo-server ListPlugins RPC over HTTP (socket names from internal/render).
+
+SRC-094:
+  status: implemented
+  impl: [internal/reposerver/generate.go]
+  tests:
+    - internal/reposerver/generate_test.go:TestGenerateManifestMultiSourceRefs
+    - internal/reposerver/generate_test.go:TestGenerateManifestRefValuesHelm
+  notes: >-
+    Ref-only short circuit (no checkout) and per-source generation; concatenation and
+    duplicate handling across sources are the controller's.
+
+SRC-095:
+  status: implemented
+  impl: [internal/reposerver/generate.go, internal/reposerver/details.go]
+  tests:
+    - internal/reposerver/generate_test.go:TestGenerateManifestRefValuesHelm
+  notes: >-
+    `$ref` repositories resolved before the cache lookup (their commits are part of the key),
+    checked out with their own depth, symlink-scanned and locked together with the main
+    checkout in path order; GetAppDetails resolves git `$ref` value files too. Tested with a
+    chart in git plus a git values repository (push to the values repo regenerates; escape
+    rejected).
+
+SRC-096:
+  status: implemented
+  impl: [internal/reposerver/generate.go]
+  tests:
+    - internal/reposerver/generate_test.go:TestGenerateManifestMultiSourceRefs
+  notes: Upstream error texts; the available-sources list is sorted (upstream map order).
+
+SRC-097:
+  status: implemented
+  impl: [internal/reposerver/generate.go]
+  tests:
+    - internal/reposerver/helmoci_test.go:TestOCISource
+
+SRC-098:
+  status: implemented
+  impl: [internal/reposerver/generate.go, internal/reposerver/gitops.go]
+  tests:
+    - internal/reposerver/helmoci_test.go:TestOCISource
+
+SRC-102:
+  status: implemented
+  impl: [internal/reposerver/helmoci.go]
+  tests:
+    - internal/reposerver/helmoci_test.go:TestOCISource
+
+SRC-103:
+  status: implemented
+  impl: [internal/reposerver/gitops.go]
+  tests:
+    - internal/reposerver/helmoci_test.go:TestOCISource
+  notes: Tag lists cached per location and credentials for the revision cache expiration.
+
+SRC-104:
+  status: implemented
+  impl: [internal/reposerver/service.go, internal/reposerver/gitops.go]
+  tests:
+    - internal/reposerver/gitops_test.go:TestResolveRevision
+
+SRC-105:
+  status: implemented
+  impl: [internal/reposerver/service.go]
+  tests:
+    - internal/reposerver/gitops_test.go:TestResolveRevision
+
+SRC-106:
+  status: implemented
+  impl: [internal/reposerver/service.go]
+  tests:
+    - internal/reposerver/gitops_test.go:TestResolveRevision
+
+SRC-107:
+  status: implemented
+  impl: [internal/reposerver/service.go]
+  tests:
+    - internal/reposerver/generate_test.go:TestGenerateManifestCache
+    - internal/reposerver/generate_test.go:TestCheckoutStrategy
+  notes: >-
+    Shared git.RefCache per replica (coalescing tested in internal/git); noRevisionCache and
+    noCache refresh it. No distributed lock (ADR-0004).
+
+SRC-108:
+  status: implemented
+  impl: [internal/reposerver/service.go]
+  tests:
+    - internal/reposerver/generate_test.go:TestCheckoutStrategy
+
+SRC-110:
+  status: implemented
+  impl: [internal/reposerver/cache.go, internal/reposerver/generate.go]
+  tests:
+    - internal/reposerver/generate_test.go:TestGenerateManifestCache
+    - internal/reposerver/cache_test.go:TestManifestKeyStability
+    - internal/reposerver/cache_test.go:TestLRUProperties
+  notes: >-
+    In-memory LRU bounded by entries and bytes (no Redis, no integrity hash needed); key over
+    every rendering input, the resolved revision and the resolved `$ref` commits.
+
+SRC-111:
+  status: implemented
+  impl: [internal/reposerver/generate.go, internal/reposerver/errors.go]
+  tests:
+    - internal/reposerver/generate_test.go:TestGenerateManifestErrorCaching
+    - internal/reposerver/generate_test.go:TestGenerateManifestErrorCachingSkipsContentFailures
+  notes: >-
+    As upstream, only failures after the content is obtained are counted (`$ref` checkouts,
+    source integrity, rendering); main checkout/fetch, OCI pull and Helm chart download
+    failures are returned uncached, so a recovered remote or rotated credential renders at once.
+
+SRC-112:
+  status: implemented
+  impl: [internal/reposerver/generate.go]
+  tests:
+    - internal/reposerver/generate_test.go:TestGenerateManifestCache
+    - internal/reposerver/helmoci_test.go:TestHelmChartSourceGenerateAndDetails
+
+SRC-113:
+  status: implemented
+  impl: [internal/reposerver/cache.go, internal/reposerver/gitops.go, internal/reposerver/details.go, internal/reposerver/helmoci.go]
+  tests:
+    - internal/reposerver/helmoci_test.go:TestGetAppDetailsGit
+    - internal/reposerver/gitops_test.go:TestGetGitFiles
+    - internal/reposerver/gitops_test.go:TestGetRevisionMetadata
+    - internal/reposerver/helmoci_test.go:TestOCISource
+  notes: Secondary caches are keyed by credential fingerprint as well (stricter than upstream).
+
+SRC-114:
+  status: implemented
+  impl: [internal/reposerver/generate.go]
+  tests:
+    - internal/reposerver/generate_test.go:TestGenerateManifestParallelismLimit
+
+SRC-116:
+  status: implemented
+  impl: [internal/reposerver/service.go, internal/reposerver/generate.go]
+  tests:
+    - internal/reposerver/generate_test.go:TestGenerateManifestParallelRenders
+  notes: >-
+    git.RepoLock per working copy; renders of one revision always share it because Kustomize
+    edits run in scratch copies (internal/render), so no exclusive holds are needed. Multi-repo
+    requests lock in path order.
+
+SRC-117:
+  status: implemented
+  impl: [internal/reposerver/service.go, internal/reposerver/generate.go]
+  tests:
+    - internal/reposerver/generate_test.go:TestGenerateManifestOutOfBoundsSymlinks
+    - internal/reposerver/withfiles_test.go:TestGenerateManifestWithFilesRejectsTraversal
+
+SRC-118:
+  status: implemented
+  impl: [internal/reposerver/workdir.go, internal/reposerver/errors.go]
+  tests:
+    - internal/reposerver/generate_test.go:TestErrorPathSanitization
+    - internal/reposerver/generate_test.go:TestGenerateManifestCredentialSeparation
+    - internal/reposerver/cache_test.go:TestWorkdirsEviction
+    - internal/reposerver/generate_test.go:TestWorkingCopyLockStateIsReleased
+  notes: >-
+    Random working-copy names under a 0300 root, 0000 when idle, `<path to cached source>`
+    sanitization. Different by design: clones of a previous process are discarded at startup
+    (working copies are keyed by credential HMACs with a per-process key) instead of re-used.
+
+SRC-119:
+  status: implemented
+  impl: [internal/reposerver/server.go, internal/reposerver/generate.go, internal/reposerver/apiclient/client.go]
+  tests:
+    - internal/reposerver/withfiles_test.go:TestGenerateManifestWithFilesRoundTrip
+    - internal/reposerver/withfiles_test.go:TestGenerateManifestWithFilesRejectsTraversal
+    - internal/reposerver/withfiles_test.go:TestGenerateManifestWithFilesLimits
+    - internal/reposerver/withfiles_test.go:TestGenerateManifestWithFilesChecksum
+  notes: Repo-server side only; the API server endpoint and CLI are other workstreams.
+
+SRC-121:
+  status: implemented
+  impl: [internal/reposerver/generate.go, internal/reposerver/server.go]
+  tests:
+    - internal/reposerver/generate_test.go:TestGenerateManifestHTTPRoundTrip
+    - internal/reposerver/helmoci_test.go:TestHelmChartSourceGenerateAndDetails
+    - internal/reposerver/helmoci_test.go:TestOCISource
+    - internal/reposerver/plugin_test.go:TestPluginSource
+
+SRC-122:
+  status: implemented
+  impl: [internal/reposerver/details.go]
+  tests:
+    - internal/reposerver/helmoci_test.go:TestGetAppDetailsGit
+    - internal/reposerver/helmoci_test.go:TestHelmChartSourceGenerateAndDetails
+    - internal/reposerver/generate_test.go:TestGenerateManifestRefValuesHelm
+
+SRC-123:
+  status: implemented
+  impl: [internal/reposerver/details.go]
+  tests:
+    - internal/reposerver/helmoci_test.go:TestGetAppDetailsGit
+    - internal/reposerver/helmoci_test.go:TestGetAppDetailsRemoteBaseCredentials
+  notes: >-
+    Kustomize remote bases get the repository's git credentials only for git sources (upstream
+    also offers Helm/OCI repository credentials; Patrol does not).
+
+SRC-124:
+  status: implemented
+  impl: [internal/reposerver/details.go]
+  tests:
+    - internal/reposerver/plugin_test.go:TestPluginSource
+
+SRC-126:
+  status: implemented
+  impl: [internal/reposerver/gitops.go]
+  tests:
+    - internal/reposerver/gitops_test.go:TestListRefs
+
+SRC-127:
+  status: implemented
+  impl: [internal/reposerver/gitops.go]
+  tests:
+    - internal/reposerver/gitops_test.go:TestListApps
+
+SRC-128:
+  status: implemented
+  impl: [internal/reposerver/gitops.go]
+  tests:
+    - internal/reposerver/gitops_test.go:TestGetRevisionMetadata
+    - internal/reposerver/integrity_test.go:TestSourceIntegrity
+
+SRC-129:
+  status: implemented
+  impl: [internal/reposerver/helmoci.go]
+  tests:
+    - internal/reposerver/helmoci_test.go:TestHelmChartSourceGenerateAndDetails
+
+SRC-130:
+  status: implemented
+  impl: [internal/reposerver/helmoci.go]
+  tests:
+    - internal/reposerver/helmoci_test.go:TestHelmRepositoryOperations
+
+SRC-131:
+  status: implemented
+  impl: [internal/reposerver/gitops.go]
+  tests:
+    - internal/reposerver/gitops_test.go:TestResolveRevision
+    - internal/reposerver/helmoci_test.go:TestHelmRepositoryOperations
+    - internal/reposerver/helmoci_test.go:TestOCISource
+
+SRC-132:
+  status: implemented
+  impl: [internal/reposerver/gitops.go]
+  tests:
+    - internal/reposerver/gitops_test.go:TestGetGitFiles
+  notes: >-
+    Legacy mode runs `git ls-files` through internal/sandbox; files are read through os.Root,
+    so symlinks leaving the repository are never followed (stricter than upstream legacy mode).
+
+SRC-133:
+  status: implemented
+  impl: [internal/reposerver/gitops.go]
+  tests:
+    - internal/reposerver/gitops_test.go:TestGetGitDirectories
+  notes: "`.git` is never listed, even with hidden directories included."
+
+SRC-134:
+  status: implemented
+  impl: [internal/reposerver/paths.go, internal/reposerver/cache.go]
+  tests:
+    - internal/reposerver/paths_test.go:TestUpdateRevisionForPaths
+    - internal/reposerver/paths_test.go:TestUpdateRevisionForPathsSiblingCacheMiss
+    - internal/reposerver/paths_test.go:TestUpdateRevisionForPathsRefSources
+    - internal/reposerver/cache_test.go:TestManifestCacheMoveRevision
+  notes: >-
+    Cached renderings of the source identity are copied to the new revision (every cluster
+    configuration, not only one recomputed key); results carrying a source integrity verdict
+    are re-verified instead. Needs UpdateRevisionForPathsRequest.SyncedRefSources (added).
+
+APP-090:
+  status: implemented
+  impl: [internal/reposerver/paths.go]
+  tests:
+    - internal/reposerver/paths_test.go:TestRefreshPaths
+    - internal/reposerver/paths_test.go:TestAppFilesHaveChanged
+  notes: >-
+    RefreshPaths/AppFilesHaveChanged helpers; skipping shallow repositories and hydrator
+    path selection are the controller's.
+
+REPO-044:
+  status: implemented
+  impl: [internal/reposerver/gitops.go]
+  tests:
+    - internal/reposerver/gitops_test.go:TestTestRepository
+    - internal/reposerver/helmoci_test.go:TestHelmRepositoryOperations
+    - internal/reposerver/helmoci_test.go:TestOCISource
+  notes: "verifiedRepository is true on success (upstream always returns false)."
+
+REPO-057:
+  status: implemented
+  impl: [internal/reposerver/creds.go, internal/reposerver/config.go]
+  tests:
+    - internal/reposerver/creds_test.go:TestTrustMaterialAndCredentialMapping
+    - internal/reposerver/config_test.go:TestConfigTrustMaterialDefaults
+    - internal/reposerver/config_test.go:TestServiceUsesTrustMaterialDefaults
+  notes: >-
+    Repo-server side only (mounted file re-read on change, passed to SSH credentials; default
+    /app/config/ssh/ssh_known_hosts).
+
+REPO-058:
+  status: implemented
+  impl: [internal/reposerver/creds.go, internal/reposerver/config.go]
+  tests:
+    - internal/reposerver/creds_test.go:TestTrustMaterialAndCredentialMapping
+    - internal/reposerver/config_test.go:TestConfigTrustMaterialDefaults
+    - internal/reposerver/config_test.go:TestServiceUsesTrustMaterialDefaults
+  notes: >-
+    Repo-server side only (per-host PEM file from the mounted directory for git, Helm and OCI;
+    default /app/config/tls).
+
+REPO-064:
+  status: implemented
+  impl: [internal/reposerver/gpg.go, internal/reposerver/config.go]
+  tests:
+    - internal/reposerver/integrity_test.go:TestSourceIntegrity
+    - internal/reposerver/config_test.go:TestServiceUsesTrustMaterialDefaults
+  notes: >-
+    Repo-server keyring sync: a private GnuPG home rebuilt from the mounted directory (default
+    /app/config/gpg/source) when its content changes (adding and removing keys tested without
+    restart); no transient private key.
+
+REPO-068:
+  status: implemented
+  impl: [internal/reposerver/integrity.go]
+  tests:
+    - internal/reposerver/integrity_test.go:TestSourceIntegrity
+  notes: Matching is internal/project.GitVerificationFor; repo-server applies it to git and `$ref` sources.
+
+REPO-069:
+  status: implemented
+  impl: [internal/reposerver/integrity.go]
+  tests:
+    - internal/reposerver/integrity_test.go:TestSourceIntegrity
+
+REPO-070:
+  status: implemented
+  impl: [internal/reposerver/integrity.go]
+  tests:
+    - internal/reposerver/integrity_test.go:TestSourceIntegrity
+  notes: >-
+    Allowed, unallowed, unsigned and signed-annotated-tag-on-unsigned-commit cases tested; the
+    primary key of a signing subkey is also accepted.
+
+REPO-071:
+  status: blocked
+  impl: [internal/reposerver/integrity.go]
+  notes: >-
+    Needs a history walk with seal commits (upstream LsSignatures) in internal/git; until then
+    strict mode fails closed with a GIT/GPG problem.
+
+REPO-076:
+  status: implemented
+  impl: [internal/reposerver/integrity.go, internal/reposerver/config.go]
+  tests:
+    - internal/reposerver/integrity_test.go:TestSourceIntegrity
+  notes: >-
+    Config.DisableGPG skips verification consistently (upstream's "only the first lookup is
+    skipped" quirk is not reproduced).
+
+OPS-011:
+  status: in-progress
+  impl: [internal/reposerver/run.go]
+  tests:
+    - internal/reposerver/server_test.go:TestServeMutualTLS
+    - internal/reposerver/server_test.go:TestProbeHandler
+  notes: >-
+    Repo-server part only: the plain-HTTP probe listener (MetricsAddress, upstream 8084) serves
+    /healthz, /healthz?full=true (self check of the API listener with an ephemeral client
+    certificate under mTLS; 503 when it fails), /readyz and /metrics. Other components and the
+    probe definitions in the install manifests belong to their workstreams.

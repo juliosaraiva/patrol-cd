@@ -1,0 +1,234 @@
+# internal/cmp (config management plugin sidecar server, `patrolcd cmp-server`).
+# See docs/architecture/components/cmp.md. Library-level evidence: tests run the server on real
+# unix sockets with real sh/find/sleep and drive it with the repo-server's CMP client
+# (internal/render). Not yet exercised through the `patrolcd cmp-server` binary, the repo-server
+# RPCs or a cluster (cmd/patrolcd and the Helm chart do not wire it yet), hence `implemented`.
+
+SRC-069:
+  status: implemented
+  impl: [internal/cmp/config.go, internal/cmp/options.go]
+  tests:
+    - internal/cmp/config_test.go:TestParsePluginConfigUpstreamExample
+    - internal/cmp/config_test.go:TestParsePluginConfigValidation
+    - internal/cmp/config_test.go:TestParsePluginConfigMinimalAndWarnings
+    - internal/cmp/config_test.go:TestReadPluginConfig
+    - internal/cmp/options_test.go:TestRunRejectsInvalidConfig
+    - internal/cmp/options_test.go:TestRunEndToEnd
+  notes: >-
+    Sidecar side. apiVersion argoproj.io/v1alpha1 and cd.patrol.example/v1alpha1 accepted
+    (others with a warning); unknown fields and lockRepo are accepted with warnings; Patrol also
+    rejects name/version values that are not file-name components. Default config dir
+    /home/patrol/cmp-server/config.
+
+SRC-070:
+  status: implemented
+  impl: [internal/cmp/server.go, internal/cmp/options.go]
+  tests:
+    - internal/cmp/server_test.go:TestSocketLifecycle
+    - internal/cmp/server_test.go:TestShutdown
+    - internal/cmp/options_test.go:TestRunEndToEnd
+  notes: >-
+    cmpwire HTTP over the unix socket instead of gRPC (ADR-0006); socket mode 0600. Socket is
+    removed when the serve context ends; mapping SIGINT/SIGTERM to that context is the job of
+    cmd/patrolcd (not wired yet). A live socket with the same name stops startup instead of being
+    clobbered (documented difference).
+
+SRC-071:
+  status: implemented
+  impl: [internal/cmp/ops.go]
+  tests:
+    - internal/cmp/server_test.go:TestAutoDiscoveryEndToEnd
+    - internal/cmp/server_test.go:TestGenerateEndToEnd
+  notes: >-
+    Sidecar side of named selection (discovery answer for a named plugin), exercised with the
+    internal/render client and real sidecars.
+
+SRC-072:
+  status: implemented
+  impl: [internal/cmp/ops.go]
+  tests:
+    - internal/cmp/server_test.go:TestDiscovery
+  notes: >-
+    filepath.Glob of <app>/<fileName>; bad patterns report "error finding filename match for
+    pattern" with the configured pattern (upstream prints the joined temporary path).
+
+SRC-073:
+  status: implemented
+  impl: [internal/cmp/ops.go]
+  tests:
+    - internal/cmp/server_test.go:TestDiscovery
+    - internal/cmp/server_test.go:TestAutoDiscoveryEndToEnd
+  notes: >-
+    doublestar ('**') relative to the app directory, symlinks not followed during traversal (as
+    zglob); patterns leaving the app directory are rejected.
+
+SRC-074:
+  status: implemented
+  impl: [internal/cmp/ops.go, internal/cmp/exec.go]
+  tests:
+    - internal/cmp/server_test.go:TestDiscovery
+  notes: >-
+    Runs in the application directory with plugin env + request env; exit 0 and non-empty
+    output means supported.
+
+SRC-075:
+  status: implemented
+  impl: [internal/cmp/ops.go, internal/cmp/server.go]
+  tests:
+    - internal/cmp/server_test.go:TestAutoDiscoveryEndToEnd
+  notes: >-
+    Three real sidecars in one socket directory: lexical order, plugins without discovery never
+    auto-selected, no-match error.
+
+SRC-076:
+  status: implemented
+  impl: [internal/cmp/ops.go, internal/cmp/exec.go]
+  tests:
+    - internal/cmp/server_test.go:TestGenerateEndToEnd
+    - internal/cmp/server_test.go:TestGenerateOutputHandling
+  notes: >-
+    init runs before generate in the app directory with the same env; output ignored; failure
+    message "`<args>` failed exit status N: <stderr>".
+
+SRC-077:
+  status: implemented
+  impl: [internal/cmp/ops.go, internal/cmp/manifests.go, internal/cmp/exec.go]
+  tests:
+    - internal/cmp/server_test.go:TestGenerateEndToEnd
+    - internal/cmp/server_test.go:TestGenerateOutputHandling
+    - internal/cmp/server_test.go:TestGenerateErrorThroughClient
+    - internal/cmp/manifests_test.go:TestSplitManifests
+    - internal/cmp/manifests_test.go:TestSplitManifestsRoundTrip
+  notes: >-
+    Sidecar side (running generate, splitting YAML/JSON streams, empty output, errors). Stderr is
+    logged at debug level only (upstream: info).
+
+SRC-078:
+  status: different-by-design
+  impl: [internal/cmp/exec.go, internal/cmp/server.go, internal/cmp/options.go]
+  tests:
+    - internal/cmp/server_test.go:TestGenerateEndToEnd
+    - internal/cmp/server_test.go:TestEnvironmentIsolation
+    - internal/cmp/server_test.go:TestEnvironmentIsolationProcessEnv
+    - internal/cmp/server_test.go:TestEnvironmentPassAll
+    - internal/cmp/options_test.go:TestRunEndToEnd
+  notes: >-
+    Sidecar side. Different by design (ADR-0007 allow-list env): by default plugin commands get
+    PATH/HOME/TMPDIR/LANG, not the sidecar's whole process environment as upstream
+    (cmpserver/plugin/plugin.go append(os.Environ(), ...)), so plugins reading sidecar variables
+    (argocd-vault-plugin AVP_*/VAULT_ADDR, proxies) need PATROL_CMP_PASS_ENV; `*` restores
+    upstream (TestEnvironmentPassAll); the active mode is logged at startup. As upstream in
+    every mode: the request env (build vars, KUBE_VERSION, KUBE_API_VERSIONS, ARGOCD_ENV_*,
+    PARAM_*) follows the plugin env and wins on duplicates. See
+    docs/architecture/components/cmp.md#migrating-plugins-from-argo-cd. The merged matrix row
+    shows the client side's `implemented` (render.yaml) because hack/parity applies
+    different-by-design only when every overlay agrees.
+
+SRC-079:
+  status: implemented
+  impl: [internal/cmp/exec.go]
+  tests:
+    - internal/cmp/server_test.go:TestGenerateEndToEnd
+  notes: >-
+    Sidecar side: ARGOCD_ENV_* visible to commands; ARGOCD_ENV_PATH does not override PATH.
+
+SRC-080:
+  status: implemented
+  impl: [internal/cmp/exec.go]
+  tests:
+    - internal/cmp/server_test.go:TestGenerateEndToEnd
+  notes: >-
+    Sidecar side: PARAM_* variables visible to commands.
+
+SRC-081:
+  status: implemented
+  impl: [internal/cmp/config.go, internal/cmp/ops.go]
+  tests:
+    - internal/cmp/config_test.go:TestParsePluginConfigUpstreamExample
+    - internal/cmp/server_test.go:TestParametersEndToEnd
+  notes: >-
+    All announcement fields round-trip from plugin.yaml through the internal/render client;
+    GetAppDetails exposure is the repo-server's.
+
+SRC-082:
+  status: implemented
+  impl: [internal/cmp/ops.go]
+  tests:
+    - internal/cmp/server_test.go:TestParametersEndToEnd
+    - internal/cmp/server_test.go:TestParametersErrors
+  notes: >-
+    Dynamic then static; upstream error messages.
+
+SRC-083:
+  status: implemented
+  impl: [internal/cmp/server.go]
+  tests:
+    - internal/cmp/server_test.go:TestPreserveFileMode
+  notes: >-
+    Default strips execute bits (sandbox StripExecBits); true keeps them as 0755/0644 (sandbox
+    masks modes; upstream keeps exact modes).
+
+SRC-084:
+  status: different-by-design
+  impl: [internal/cmp/config.go, internal/cmp/server.go]
+  tests:
+    - internal/cmp/server_test.go:TestSocketLifecycle
+    - internal/cmp/config_test.go:TestParsePluginConfigMinimalAndWarnings
+  notes: >-
+    provideGitCreds is parsed, reported by the config endpoint and warned about; plugins never
+    receive repository credentials (docs/architecture/adr/0007-rendering-isolation.md,
+    docs/architecture/components/cmp.md).
+
+SRC-085:
+  status: implemented
+  impl: [internal/cmp/server.go]
+  tests:
+    - internal/cmp/server_test.go:TestRejectedStreams
+    - internal/cmp/server_test.go:TestGenerateEndToEnd
+    - internal/cmp/receive_test.go:TestStalledStream
+  notes: >-
+    Receiving side: metadata validation, bounded body and archive (Patrol adds compressed,
+    extracted and entry-count limits; upstream has none), checksum/size verification, safe
+    extraction, out-of-bounds appRelPath rejection. Reception ends at the client deadline
+    (as upstream's per-chunk context check) or after PATROL_CMP_RECEIVE_TIMEOUT (5 min); a
+    connection read deadline interrupts stalled reads. HTTP stream instead of gRPC chunks.
+
+SRC-088:
+  status: implemented
+  impl: [internal/cmp/server.go, internal/cmp/exec.go]
+  tests:
+    - internal/cmp/server_test.go:TestExecTimeout
+    - internal/cmp/server_test.go:TestClientDeadline
+    - internal/cmp/exec_test.go:TestRunnerErrors
+    - internal/cmp/receive_test.go:TestStalledStream
+    - internal/cmp/receive_test.go:TestReceiveDeadlineDoesNotBoundCommands
+  notes: >-
+    Client deadline minus 100 ms bounds the receive phase (stalled streams answered 504 at the
+    deadline) and the commands: SIGTERM then SIGKILL after 5 s to the process group
+    (grandchildren verified dead by PID). Patrol also enforces a per-command exec timeout
+    (PATROL_EXEC_TIMEOUT / ARGOCD_EXEC_TIMEOUT, default 90 s), which upstream documents but its
+    cmp-server does not apply.
+
+SRC-089:
+  status: implemented
+  impl: [internal/cmp/server.go]
+  tests:
+    - internal/cmp/server_test.go:TestConcurrentRequestsIsolated
+    - internal/cmp/server_test.go:TestNewInitializesWorkDir
+    - internal/cmp/server_test.go:TestRejectedStreams
+    - internal/cmp/server_test.go:TestShutdown
+    - internal/cmp/receive_test.go:TestStalledStream
+  notes: >-
+    <PATROL_CMP_WORKDIR|ARGOCD_CMP_WORKDIR|TMPDIR>/_cmp_server wiped and recreated (0700) at
+    startup; one random directory per request, removed after success, failure, a stalled
+    stream (at the receive deadline) and forced shutdown (through os.Root, repairing permissions plugins removed).
+
+SRC-090:
+  status: implemented
+  impl: [internal/cmp/server.go]
+  tests:
+    - internal/cmp/options_test.go:TestRunEndToEnd
+    - internal/cmp/server_test.go:TestAutoDiscoveryEndToEnd
+  notes: >-
+    Real sidecars listed by internal/render ListPlugins (names include versions); the API
+    exposure is the API server's.

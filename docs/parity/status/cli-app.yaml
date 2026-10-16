@@ -1,0 +1,254 @@
+# `patrol app` and `patrol appset` command groups (internal/cli/app). See
+# docs/architecture/components/cli-app.md.
+# Evidence: unit tests of the package and end-to-end tests that run the real CLI root command
+# (internal/cli/clitest) against the real patrol API server with the applications and
+# applicationsets services, real auth (login session tokens) and RBAC, the real controller
+# tree API handler and client, and an envtest kube-apiserver 1.36 with the generated CRDs. The
+# repo-server is an in-process fake and a controller stand-in compares and applies manifests
+# (no real controller or sync engine). Nothing is "verified" yet: the group is not registered
+# in cmd/patrol (request to cli-core), the API services are not wired into patrol-server, and
+# operations run against the stand-in.
+
+API-063:
+  status: implemented
+  impl:
+    - internal/cli/app/app.go
+    - internal/cli/app/create.go
+    - internal/cli/app/get.go
+    - internal/cli/app/list.go
+    - internal/cli/app/set.go
+    - internal/cli/app/unset.go
+    - internal/cli/app/edit.go
+    - internal/cli/app/delete.go
+    - internal/cli/app/sync.go
+    - internal/cli/app/wait.go
+    - internal/cli/app/ops.go
+    - internal/cli/app/diff.go
+    - internal/cli/app/manifests.go
+    - internal/cli/app/resources.go
+    - internal/cli/app/logs.go
+    - internal/cli/app/sources.go
+  tests:
+    - internal/cli/app/e2e_test.go:TestE2EAppLifecycle
+    - internal/cli/app/e2e_test.go:TestE2EAppResourceCommands
+    - internal/cli/app/e2e_test.go:TestE2EAppLocal
+    - internal/cli/app/e2e_test.go:TestE2EAppSyncFlags
+    - internal/cli/app/e2e_test.go:TestE2EAppAuthorization
+    - internal/cli/app/e2e_test.go:TestE2EAppCreateFromFiles
+    - internal/cli/app/units_test.go:TestLogsCommand
+  notes: >-
+    Every subcommand with the upstream flags, messages and exit codes. Patrol additions:
+    create --apply-spec-patch, sync/manifests --server-side-generate and --local-include,
+    rollback --dry-run. Sync and wait follow Operation objects (ADR-0011); --resource
+    selectors (wildcards, exclusions) are expanded on the client. The default diff output is
+    diff(1)'s normal format computed in-process. logs is unit-tested only (envtest has no
+    kubelet). Client-side --local rendering refuses plugin and Helm chart repository sources;
+    Jsonnet needs jsonnet.MaybeJsonnetMain in cmd/patrol (requested).
+
+API-064:
+  status: implemented
+  impl: [internal/cli/app/actions.go]
+  tests:
+    - internal/cli/app/e2e_test.go:TestE2EAppResourceCommands
+    - internal/cli/app/units_test.go:TestParseActionParams
+  notes: >-
+    actions list (table/json/yaml) and run with the built-in Lua actions executed by the
+    server against envtest objects: restart and scale (--param, a Patrol addition), ambiguous
+    match without --all fails with the upstream message, --all runs on every match. No V1
+    fallback (Patrol has one action route).
+
+API-065:
+  status: implemented
+  impl: [internal/cli/app/appset.go]
+  tests:
+    - internal/cli/app/e2e_test.go:TestE2EAppSet
+  notes: >-
+    get, list, create (multi-document files/URLs, strict decoding, --upsert, --dry-run,
+    --wait), generate (one ApplicationSet per file, as upstream), delete (--yes, --wait;
+    --cascade and --propagation-policy are Patrol additions), with RBAC denials.
+
+APP-018:
+  status: implemented
+  impl: [internal/cli/app/app.go, internal/cli/app/sources.go, internal/cli/app/appopts.go]
+  tests:
+    - internal/cli/app/e2e_test.go:TestE2EAppMultiSource
+    - internal/cli/app/appopts_test.go:TestSpecMapperSourcePositions
+  notes: >-
+    add-source, remove-source (by position and name), set/unset/get --source-position and
+    --source-name with every upstream error message and exit code.
+
+APP-080:
+  status: implemented
+  impl: [internal/cli/app/app.go, internal/cli/app/get.go]
+  tests:
+    - internal/cli/app/e2e_test.go:TestE2EAppLifecycle
+    - internal/cli/app/e2e_test.go:TestE2EAppSyncFlags
+  notes: >-
+    CLI part (--refresh, --hard-refresh, get --timeout retry without refresh); the stand-in controller clears the annotation.
+
+APP-138:
+  status: implemented
+  impl: [internal/cli/app/appopts.go, internal/cli/app/specmut.go, internal/cli/app/unset.go]
+  tests:
+    - internal/cli/app/e2e_test.go:TestE2EAppHydratorFlags
+    - internal/cli/app/appopts_test.go:TestSpecMapperHydratorFlags
+    - internal/cli/app/appopts_test.go:TestSpecMapperHydratorSourceOptions
+    - internal/cli/app/appopts_test.go:TestSetParameterOverrides
+    - internal/cli/app/units_test.go:TestSetUnsetSourceHydratorApp
+  notes: >-
+    Hydrator flags as upstream. Difference: upstream ignores plain source flags next to
+    hydrator flags, and on an existing hydrator Application it edits a detached copy, so the
+    change is lost while the command succeeds. Patrol stores tool options and -p in
+    spec.sourceHydrator.drySource (set, unset, create -f FILE). It rejects --repo, --path,
+    --revision, --helm-chart, --tag-prefix, --ref, --source-name and --source-position > 0
+    with exit 20 and sends no change. See docs/architecture/components/cli-app.md.
+
+APP-140:
+  status: implemented
+  impl: [internal/cli/app/app.go, internal/cli/app/create.go, internal/cli/app/edit.go, internal/cli/app/ops.go, internal/cli/app/delete.go]
+  tests:
+    - internal/cli/app/e2e_test.go:TestE2EAppLifecycle
+    - internal/cli/app/e2e_test.go:TestE2EAppLocal
+    - internal/cli/app/e2e_test.go:TestE2EAppResourceCommands
+    - internal/cli/app/e2e_test.go:TestE2EAppCreateFromFiles
+  notes: >-
+    create/get/list/set/unset/edit ($EDITOR)/patch/delete/history/confirm-deletion/
+    add-source/remove-source/terminate-op round-trips with qualified names.
+
+SYNC-012:
+  status: implemented
+  impl: [internal/cli/app/sync.go, internal/cli/app/localrender.go, internal/cli/app/manifests.go]
+  tests:
+    - internal/cli/app/e2e_test.go:TestE2EAppLocal
+    - internal/cli/app/e2e_test.go:TestE2EAppMultiSource
+  notes: >-
+    CLI part: sync --local renders on the client and sends the manifests; refused for multi-source Applications as upstream.
+
+SYNC-092:
+  status: implemented
+  impl: [internal/cli/app/ops.go, internal/cli/app/print.go]
+  tests:
+    - internal/cli/app/e2e_test.go:TestE2EAppLifecycle
+    - internal/cli/app/units_test.go:TestPrintHistoryTable
+  notes: >-
+    history (-o wide|id) and rollback (ID or previous, --prune, --dry-run Patrol addition) against stand-in history.
+
+SYNC-095:
+  status: implemented
+  impl: [internal/cli/app/sync.go, internal/cli/app/selector.go]
+  tests:
+    - internal/cli/app/e2e_test.go:TestE2EAppSyncFlags
+    - internal/cli/app/e2e_test.go:TestE2EAppLifecycle
+    - internal/cli/app/selector_test.go:TestIncludeResource
+  notes: >-
+    All flags reach the Operation (prune, dry-run, strategy, force, server-side, replace,
+    apply-out-of-sync-only, retry, info, resources); selector and project syncs, --async,
+    --preview-changes with confirmation, --assumeYes. Operations completed by a stand-in.
+
+SYNC-096:
+  status: implemented
+  impl: [internal/cli/app/appopts.go]
+  tests:
+    - internal/cli/app/appopts_test.go:TestSpecMapperSpecFlags
+    - internal/cli/app/e2e_test.go:TestE2EAppLifecycle
+
+SYNC-098:
+  status: implemented
+  impl: [internal/cli/app/wait.go, internal/cli/app/watch.go]
+  tests:
+    - internal/cli/app/e2e_test.go:TestE2EAppSyncFlags
+    - internal/cli/app/e2e_test.go:TestE2EAppResourceCommands
+    - internal/cli/app/units_test.go:TestCheckResourceStatus
+    - internal/cli/app/units_test.go:TestNeedsReconcile
+  notes: >-
+    --sync/--health/--suspended/--degraded/--operation/--delete/--hydrated/--resource/-l/--timeout over the watch stream with polling fallback; operations from a stand-in.
+
+SYNC-099:
+  status: implemented
+  impl: [internal/cli/app/ops.go]
+  tests:
+    - internal/cli/app/e2e_test.go:TestE2EAppResourceCommands
+  notes: >-
+    Sets cd.patrol.example/deletion-approved; acting on it is the controller's.
+
+SYNC-106:
+  status: implemented
+  impl: [internal/cli/app/actions.go]
+  tests:
+    - internal/cli/app/e2e_test.go:TestE2EAppResourceCommands
+
+DIFF-040:
+  status: implemented
+  impl: [internal/cli/app/diff.go, internal/cli/app/difftext.go]
+  tests:
+    - internal/cli/app/e2e_test.go:TestE2EAppLifecycle
+    - internal/cli/app/e2e_test.go:TestE2EAppLocal
+    - internal/cli/app/diff_test.go:TestDiffCommandExitCodes
+    - internal/cli/app/diff_test.go:TestDiffCommandRevisionExcludesSecrets
+    - internal/cli/app/diff_test.go:TestComputeDiffServerSideBatches
+    - internal/cli/app/diff_test.go:TestPrintResourceDiffExternalProgram
+    - internal/cli/app/diff_test.go:TestNormalDiff
+    - internal/cli/app/diff_test.go:TestDiffOutputSanitizesRenderedNames
+    - internal/cli/app/e2e_test.go:TestE2EAppDiffSanitizesRenderedNames
+  notes: >-
+    Exit codes 0/1(--diff-exit-code)/2, --exit-code=false, live/revision(s)/local/
+    server-side-generate targets, server-side diff batching, KUBECTL_EXTERNAL_DIFF (and
+    PATROL_DIFF_PROGRAM), Secrets excluded for non-live targets. Built-in output is diff(1)'s
+    normal format computed in-process instead of executing diff. Resource headers and
+    warnings are sanitized. Upstream prints them raw. Rendered names are untrusted.
+
+DIFF-088:
+  status: implemented
+  impl: [internal/cli/app/resources.go, internal/cli/app/tree.go]
+  tests:
+    - internal/cli/app/e2e_test.go:TestE2EAppLifecycle
+  notes: >-
+    CLI part only (app resources, --orphaned, --output tree|tree=detailed, get -o tree).
+
+ASET-118:
+  status: implemented
+  impl: [internal/cli/app/appset.go]
+  tests: [internal/cli/app/e2e_test.go:TestE2EAppSet]
+
+ASET-119:
+  status: implemented
+  impl: [internal/cli/app/appset.go]
+  tests: [internal/cli/app/e2e_test.go:TestE2EAppSet]
+
+ASET-120:
+  status: implemented
+  impl: [internal/cli/app/appset.go]
+  tests: [internal/cli/app/e2e_test.go:TestE2EAppSet]
+  notes: >-
+    --wait waits for ResourcesUpToDate (set by the stand-in in tests).
+
+ASET-121:
+  status: implemented
+  impl: [internal/cli/app/appset.go]
+  tests: [internal/cli/app/e2e_test.go:TestE2EAppSet]
+
+ASET-122:
+  status: implemented
+  impl: [internal/cli/app/appset.go]
+  tests: [internal/cli/app/e2e_test.go:TestE2EAppSet]
+  notes: >-
+    Rendered by the real generator through the API server.
+
+SRC-119:
+  status: implemented
+  impl: [internal/cli/app/localtar.go, internal/cli/app/diff.go, internal/cli/app/manifests.go]
+  tests:
+    - internal/cli/app/localtar_test.go:TestBuildLocalArchiveIncludesAndIgnoreRules
+    - internal/cli/app/localtar_test.go:TestBuildLocalArchiveSymlinks
+    - internal/cli/app/e2e_test.go:TestE2EAppLocal
+  notes: >-
+    CLI part (archive with include/ignore rules, checksum, limits); rendering by the fake repo-server in tests.
+
+SRC-120:
+  status: implemented
+  impl: [internal/cli/app/localrender.go]
+  tests:
+    - internal/cli/app/e2e_test.go:TestE2EAppLocal
+  notes: >-
+    internal/render on the client (Directory exercised end-to-end); plugin and Helm chart
+    repository sources refused; Jsonnet needs jsonnet.MaybeJsonnetMain in cmd/patrol.

@@ -1,0 +1,122 @@
+# internal/commitserver (source hydrator commit-server). See docs/architecture/components/commitserver.md.
+# Tests run the service against local bare repositories with the real git CLI and the HTTP
+# API end to end. The patrolcd commit-server subcommand is not wired yet, so features whose
+# surface is the deployed component stay "implemented".
+
+APP-119:
+  status: verified
+  impl: [internal/commitserver/write.go, internal/commitserver/metadata.go, internal/commitserver/service.go]
+  tests:
+    - internal/commitserver/service_test.go:TestCommitBootstrapsOrphanSyncBranch
+    - internal/commitserver/service_test.go:TestCommitFileContents
+    - internal/commitserver/service_test.go:TestCommitPathCleaning
+    - internal/commitserver/service_test.go:TestCommitRefusesSymlinkedPathComponents
+    - internal/commitserver/service_test.go:TestCommitRefusesDirectoryAtOwnedFile
+    - internal/commitserver/service_test.go:TestCommitRejectsPathsOverlappingOwnedFiles
+    - internal/commitserver/write_test.go:TestReplaceFile
+    - internal/commitserver/write_test.go:TestWriteTreeKeepsEveryPathProperty
+    - internal/commitserver/metadata_test.go:TestEncodeManifests
+  notes: >-
+    Library-level: manifest.yaml (YAML stream, render order, sorted keys), per-path
+    hydrator.metadata and README.md only when manifest.yaml changed, root hydrator.metadata
+    and .gitattributes, other files in the path never deleted. Paths that are the root,
+    escape the repository, enter .git or traverse symbolic links are refused (upstream maps
+    "." to the root). A directory at an owned file name fails the request and is kept;
+    paths overlapping another path's owned files are rejected.
+
+APP-120:
+  status: verified
+  impl: [internal/commitserver/service.go, internal/commitserver/write.go]
+  tests:
+    - internal/commitserver/service_test.go:TestCommitBootstrapsOrphanSyncBranch
+    - internal/commitserver/service_test.go:TestCommitCreatesTargetBranchFromSyncBranch
+    - internal/commitserver/service_test.go:TestCommitRejectsInvalidRequests
+  notes: >-
+    Library-level: orphan sync branch with "Initial commit for <branch>", target branch
+    created from the sync branch, request validation before any git work.
+
+APP-121:
+  status: verified
+  impl: [internal/commitserver/service.go]
+  tests:
+    - internal/commitserver/service_test.go:TestCommitIdempotence
+    - internal/commitserver/service_test.go:TestCommitRetriesRejectedPush
+    - internal/commitserver/service_test.go:TestCommitConcurrentWriters
+    - internal/commitserver/service_test.go:TestCommitSerializesPerRepository
+  notes: >-
+    Note namespace hydrator.metadata. The note also records a manifests digest so the same
+    dry SHA with different manifests is written; a malformed note is overwritten (upstream
+    errors). Rejected pushes of the branch or the notes ref are retried on a fresh clone
+    with backoff (re-applying the request), not only the note push.
+
+APP-122:
+  status: implemented
+  impl: [internal/commitserver/service.go, internal/commitserver/write.go, internal/hydrator/process.go]
+  tests:
+    - internal/commitserver/service_test.go:TestCommitIdempotence
+    - internal/hydrator/envtest_test.go:TestEnvHydrationLifecycle
+  notes: >-
+    No empty commits; the note for the new dry SHA is attached to the unchanged head and the
+    Application ends Hydrated with the previous hydrated SHA (envtest with a fake
+    repo-server). Not yet exercised through the deployed controller.
+
+APP-126:
+  status: implemented
+  impl: [internal/commitserver/metadata.go, internal/hydrator/process.go]
+  tests:
+    - internal/commitserver/metadata_test.go:TestRenderCommitMessage
+    - internal/hydrator/process_test.go:TestReconcileKeyHydratesGroupInOneCommit
+    - internal/hydrator/process_test.go:TestReconcileKeyGroupErrors
+    - internal/hydrator/envtest_test.go:TestEnvHydrationLifecycle
+  notes: >-
+    Template data {metadata: <hydrator metadata as JSON map>}, Sprig generic functions minus
+    env/expandenv/getHostByName, output capped at 1 MiB; execution errors fail the group
+    ("failed to get hydrator commit templated message: ..."). Parse errors are rejected
+    earlier by internal/settings (falls back to the default template).
+
+APP-127:
+  status: implemented
+  impl: [internal/commitserver/metadata.go, internal/commitserver/write.go]
+  tests:
+    - internal/commitserver/metadata_test.go:TestRenderReadme
+    - internal/commitserver/service_test.go:TestCommitFileContents
+    - internal/hydrator/envtest_test.go:TestEnvHydrationLifecycle
+  notes: >-
+    README data is the per-path metadata (RepoURL, DrySHA, Commands), as upstream. RepoURL is
+    the dry repository (DryRepoURL) rather than upstream's destination repository.
+
+APP-128:
+  status: implemented
+  impl: [internal/commitserver/types.go, internal/commitserver/write.go, internal/hydrator/process.go]
+  tests:
+    - internal/commitserver/service_test.go:TestCommitAuthor
+    - internal/hydrator/envtest_test.go:TestEnvHydrationLifecycle
+  notes: >-
+    Name and email defaulted independently (Patrol CD / patrol-cd@example.com); used for the
+    hydrated commit, the orphan initial commit and notes. Commits are not signed.
+
+APP-129:
+  status: implemented
+  impl: [internal/commitserver/metadata.go]
+  tests:
+    - internal/commitserver/service_test.go:TestCommitFileContents
+    - internal/commitserver/metadata_test.go:TestRenderCommitMessage
+  notes: >-
+    Root hydrator.metadata carries author, date, subject, body (valid reference trailers
+    removed with internal/git ParseReferences) and references from the dry commit metadata
+    returned by the repo-server. Trailer parsing itself belongs to internal/git.
+
+APP-135:
+  status: implemented
+  impl: [internal/commitserver/server.go, internal/commitserver/client.go, internal/commitserver/run.go, internal/commitserver/metrics.go]
+  tests:
+    - internal/commitserver/server_test.go:TestHTTPCommitRoundTrip
+    - internal/commitserver/server_test.go:TestHTTPHandler
+    - internal/commitserver/server_test.go:TestClientHandlesUnexpectedResponses
+    - internal/commitserver/run_test.go:TestRun
+    - internal/commitserver/service_test.go:TestCommitMetrics
+  notes: >-
+    JSON over HTTP with bearer token (ADR-0006) instead of gRPC; health at /healthz; ports
+    8086/8087; metrics with the patrol_ prefix (no userinfo duration metric, which upstream
+    never observes). Fresh temp dir per request. The patrolcd commit-server subcommand and
+    its flags are not wired yet (cmd owner).

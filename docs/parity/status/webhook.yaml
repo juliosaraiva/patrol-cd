@@ -1,0 +1,307 @@
+# internal/webhook (SCM and registry webhook ingestion). See
+# docs/architecture/components/webhook.md. The handler is tested through ServeHTTP with fake
+# and envtest API servers but is not yet mounted by patrol-server (internal/apiserver), so
+# endpoint features are `implemented`, not `verified`. Settings parsing of the same keys is
+# tracked in settings.yaml.
+
+REPO-114:
+  status: implemented
+  impl: [internal/webhook/handler.go, internal/webhook/providers.go, internal/webhook/config.go]
+  tests:
+    - internal/webhook/handler_test.go:TestHTTPSemantics
+    - internal/webhook/handler_test.go:TestProviderDeliveries
+    - internal/webhook/handler_test.go:TestStartLifecycle
+    - internal/webhook/ghcr_test.go:TestWorkerPanicRecovery
+    - internal/webhook/hardening_test.go:TestInFlightBodyBudget
+    - internal/webhook/hardening_test.go:TestLogValuesBounded
+    - internal/webhook/envtest_test.go:TestEnvtestWebhookRefresh
+  notes: >-
+    /api/webhook with upstream header detection order (Azure DevOps, Gitea, Gogs, GitHub,
+    GitLab, Bitbucket Cloud, Bitbucket Server, GHCR) and /api/webhook/{provider}; upstream
+    status codes and bodies (400 unknown event, 405, 400 valid-JSON-under-N-MB with the
+    effective limit, 401 GHCR, 503 queue full); asynchronous workers with panic recovery and
+    draining on shutdown. Additions: 404 for unknown provider paths, 429 per-source rate
+    limit, 503 "Webhook server is busy" when the global in-flight body budget is exhausted,
+    byte-bounded queue, untrusted values clipped in logs. Not yet mounted by patrol-server.
+
+REPO-115:
+  status: different-by-design
+  impl: [internal/webhook/handler.go, internal/webhook/config.go]
+  tests:
+    - internal/webhook/handler_test.go:TestProviderDeliveries
+    - internal/webhook/handler_test.go:TestHTTPSemantics
+    - internal/webhook/hardening_test.go:TestEffectivePayloadLimit
+  notes: >-
+    Raw body read with the webhook.maxPayloadSizeMB cap (Content-Length checked first, then
+    limit+1 bytes read) before parsing; "0 MB" for limits below 1 MB as upstream; read per
+    request, so changes apply without a restart. Difference: the setting is clamped to
+    25 MiB, the cap every pkg/scm verifier enforces (GitHub's own delivery limit), so the
+    default (50) and larger values behave as 25 MiB and the 400 body says "under 25 MB"
+    (upstream "under 50 MB"); values up to 25 behave as upstream; GHCR uses the same limit.
+    See docs/architecture/components/webhook.md#gaps-and-intentional-differences (item 13).
+
+REPO-116:
+  status: implemented
+  impl: [internal/webhook/secrets.go, internal/webhook/providers.go, internal/webhook/handler.go]
+  tests:
+    - internal/webhook/handler_test.go:TestSCMProviderSecrets
+    - internal/webhook/handler_test.go:TestProviderDeliveries
+    - internal/webhook/envtest_test.go:TestEnvtestWebhookRefresh
+    - internal/webhook/hardening_test.go:TestUnsignedPolicy
+  notes: >-
+    patrol-secret webhook keys plus SCMProvider webhook.secretRef secrets (several candidates
+    for rotation, fail closed when unreadable, tenant namespaces untrusted by default).
+    Settings are read per request, so rotation (Azure DevOps credentials included) needs no
+    restart. While patrol-secret was never loaded deliveries are answered 503 unless an
+    SCMProvider secret verifies them. Unsigned deliveries are accepted when no webhook
+    secret is configured anywhere (upstream). Intentional difference: once any webhook
+    secret is configured (any provider, patrol-secret or trusted SCMProvider), unsigned
+    deliveries are rejected for every provider, because the provider route comes from
+    request headers and the repository from the unsigned payload (a forged delivery through
+    a provider without a secret would bypass another provider's secret);
+    AllowUnsignedPerProvider restores upstream, RequireSignatures rejects all unsigned
+    deliveries. See docs/architecture/components/webhook.md#secrets-repo-116-t9 and item 14
+    of the differences.
+
+REPO-117:
+  status: implemented
+  impl: [internal/webhook/providers.go, internal/webhook/process.go]
+  tests:
+    - internal/webhook/handler_test.go:TestProviderDeliveries
+    - internal/webhook/providers_test.go:TestProviderPushNormalization
+    - internal/webhook/providers_test.go:TestProviderEventVariants
+    - internal/webhook/handler_test.go:TestHTTPSemantics
+    - internal/webhook/process_test.go:TestPushRefreshesApplications
+  notes: >-
+    push (web URL, revision, default branch, changed files; tag pushes never touch HEAD) and
+    ping (200, ignored); other events 400; signature mismatch 400. Parsing is pkg/scm/github.
+
+REPO-118:
+  status: implemented
+  impl: [internal/webhook/providers.go]
+  tests:
+    - internal/webhook/handler_test.go:TestProviderDeliveries
+    - internal/webhook/providers_test.go:TestProviderPushNormalization
+    - internal/webhook/providers_test.go:TestProviderEventVariants
+  notes: >-
+    Push, Tag Push and System Hook (push, tag_push, merge_request) deliveries; token mismatch
+    400. Parsing is pkg/scm/gitlab.
+
+REPO-119:
+  status: implemented
+  impl: [internal/webhook/bitbucket.go, internal/webhook/providers.go]
+  tests:
+    - internal/webhook/bitbucket_test.go:TestBitbucketCloudCallback
+    - internal/webhook/bitbucket_test.go:TestBitbucketCloudPushRefreshesByChangedFiles
+    - internal/webhook/handler_test.go:TestProviderDeliveries
+  notes: >-
+    repo:push with UUID verification; diffstat and main-branch callback for verified pushes
+    with repository credentials (x-token-auth bearer, basic, bearer token, anonymous),
+    tested against a fake Bitbucket API. Differences: the callback API base must be
+    allow-listed (default https://api.bitbucket.org/2.0) because links.self is not
+    authenticated; renamed files report old and new paths. Credentials lookup is supplied by
+    the API server wiring.
+
+REPO-120:
+  status: implemented
+  impl: [internal/webhook/providers.go]
+  tests:
+    - internal/webhook/handler_test.go:TestProviderDeliveries
+    - internal/webhook/providers_test.go:TestProviderPushNormalization
+    - internal/webhook/providers_test.go:TestProviderEventVariants
+  notes: >-
+    repo:refs_changed with both clone links matched separately (.git kept: a repoURL
+    without .git does not match, as upstream), touchedHead true, no changed files;
+    diagnostics:ping acknowledged and ignored. Patrol requires the signature for every
+    event when a secret is configured.
+
+REPO-121:
+  status: implemented
+  impl: [internal/webhook/providers.go]
+  tests:
+    - internal/webhook/handler_test.go:TestProviderDeliveries
+    - internal/webhook/providers_test.go:TestProviderPushNormalization
+    - internal/webhook/handler_test.go:TestHTTPSemantics
+  notes: >-
+    Gogs push with webhook.gogs.secret, routed before GitHub although GitHub headers are
+    present; a payload without repository is ignored. Gitea deliveries are parsed by the
+    Gitea verifier and also verified with webhook.gogs.secret (upstream treats them as Gogs).
+
+REPO-122:
+  status: implemented
+  impl: [internal/webhook/providers.go]
+  tests:
+    - internal/webhook/handler_test.go:TestProviderDeliveries
+    - internal/webhook/providers_test.go:TestProviderPushNormalization
+    - internal/webhook/providers_test.go:TestProviderEventVariants
+  notes: >-
+    git.push with optional basic auth (webhook.azuredevops.username/password, or an
+    SCMProvider secret holding "username:password"); wrong credentials 400. Credential
+    rotation applies without a restart (upstream needs one).
+
+REPO-123:
+  status: implemented
+  impl: [internal/webhook/ghcr.go, internal/webhook/process.go, internal/webhook/match.go]
+  tests:
+    - internal/webhook/ghcr_test.go:TestRegistryMatching
+    - internal/webhook/ghcr_test.go:TestRegistrySkippedEvents
+    - internal/webhook/handler_test.go:TestProviderDeliveries
+    - internal/webhook/match_test.go:TestNormalizeOCI
+  notes: >-
+    GHCR package events: X-Hub-Signature-256 HMAC (401 on failure), published container
+    tags only (others 200), OCI URL normalization and semver table (1.2.3, ^1.2.0, ~1.2.0,
+    >=1.0.0). hydrate=normal is written only when the matching source is a hydrator dry
+    source (upstream writes it on every matched app, where it is a no-op without a hydrator).
+
+REPO-124:
+  status: verified
+  impl: [internal/webhook/match.go]
+  tests:
+    - internal/webhook/match_test.go:TestWebURLRegex
+    - internal/webhook/match_test.go:TestWebURLRegexProperty
+    - internal/webhook/providers_test.go:TestProviderPushNormalization
+    - internal/webhook/envtest_test.go:TestEnvtestWebhookRefresh
+  notes: >-
+    Library-level: the full upstream Test_GetWebURLRegex table plus a property test; URLs
+    over 2048 bytes are rejected before building expressions.
+
+REPO-125:
+  status: verified
+  impl: [internal/webhook/match.go]
+  tests:
+    - internal/webhook/match_test.go:TestSourceRevisionHasChanged
+    - internal/webhook/process_test.go:TestMatchAppPush
+  notes: >-
+    Library-level: the upstream TestAppRevisionHasChanged table (15 cases) plus caret/tilde
+    constraints.
+
+APP-090:
+  status: in-progress
+  impl: [internal/webhook/match.go, internal/webhook/process.go]
+  tests:
+    - internal/webhook/match_test.go:TestRefreshPaths
+    - internal/webhook/match_test.go:TestFilesHaveChanged
+    - internal/webhook/process_test.go:TestMatchAppPush
+    - internal/webhook/bitbucket_test.go:TestBitbucketCloudPushRefreshesByChangedFiles
+    - internal/webhook/envtest_test.go:TestEnvtestWebhookRefresh
+  notes: >-
+    Webhook part only (REPO-126): manifest-generate-paths parsing (absolute, relative, ".",
+    ";"-separated with spaces, globs), changed-file filtering per source (multi-source,
+    hydrator sync source uses its own path), empty or truncated file lists refresh. The
+    controller part (UpdateRevisionForPaths reuse) belongs to the controller.
+
+REPO-127:
+  status: implemented
+  impl: [internal/webhook/process.go, internal/webhook/refresh.go]
+  tests:
+    - internal/webhook/process_test.go:TestMatchAppPush
+    - internal/webhook/process_test.go:TestPushRefreshesApplications
+    - internal/webhook/process_test.go:TestPatchRetries
+    - internal/webhook/hardening_test.go:TestRefreshConditionalPatch
+    - internal/webhook/envtest_test.go:TestEnvtestWebhookRefresh
+    - internal/webhook/envtest_test.go:TestEnvtestRefreshConditionalPatch
+  notes: >-
+    Dry source among candidate sources; a dry-source match sets refresh and hydrate to
+    normal, a sync-branch push refreshes only; merge patch with conflict retries (5 x 100 ms;
+    429 and server timeouts also retried). Difference: the Application refresh patch carries
+    the resourceVersion read through Config.APIReader (optimistic lock), so a hard
+    refresh/hydrate requested or consumed between read and patch yields a real 409 and is
+    re-decided (verified against envtest); upstream RefreshApp patches unconditionally.
+    A persistently stale APIReader makes the refresh fail (counted as error) rather than
+    overwrite a newer value.
+
+REPO-128:
+  status: different-by-design
+  notes: >-
+    Manifest-cache warming by the webhook is not implemented (no cache access from the
+    webhook; ARGOCD_WEBHOOK_MANIFEST_CACHE_WARM_DISABLED and the repository flag have no
+    effect here). Applications whose paths did not change are left to the controller's
+    manifest-generate-paths handling (APP-090). See
+    docs/architecture/components/webhook.md#gaps-and-intentional-differences.
+
+REPO-129:
+  status: implemented
+  impl: [internal/webhook/process.go, internal/webhook/refresh.go, internal/webhook/handler.go]
+  tests:
+    - internal/webhook/process_test.go:TestRefreshJitter
+    - internal/webhook/process_test.go:TestPushRefreshesApplications
+  notes: >-
+    Delaying, de-duplicating refresh queue with RefreshWorkers workers; per repository URL
+    the first webhook.refresh.jitter.threshold refreshes are immediate and later ones
+    delayed by a uniform random duration below webhook.refresh.jitter; Workers event
+    workers.
+
+REPO-130:
+  status: implemented
+  impl: [internal/webhook/namespaces.go, internal/webhook/process.go]
+  tests:
+    - internal/webhook/match_test.go:TestNamespaceMatcher
+    - internal/webhook/process_test.go:TestPushRefreshesApplications
+    - internal/webhook/envtest_test.go:TestEnvtestWebhookRefresh
+  notes: >-
+    Control-plane namespace always; other namespaces only when matching
+    ApplicationNamespaces (glob or /regex/, RE2 instead of upstream's regexp2).
+
+REPO-131:
+  status: different-by-design
+  impl: [internal/webhook/metrics.go]
+  tests:
+    - internal/webhook/handler_test.go:TestProviderDeliveries
+    - internal/webhook/handler_test.go:TestHTTPSemantics
+  notes: >-
+    patrol_webhook_requests_total{provider,result}, patrol_webhook_refreshes_total{kind,result},
+    patrol_webhook_events_in_flight and patrol_webhook_event_duration_seconds. No
+    per-repository label (untrusted, unbounded) and no cache-warming counter (REPO-128). See
+    docs/architecture/components/webhook.md#metrics.
+
+ASET-104:
+  status: different-by-design
+  impl: [internal/webhook/handler.go, internal/webhook/appsets.go, internal/webhook/refresh.go]
+  tests:
+    - internal/webhook/appsets_test.go:TestEventsRefreshApplicationSets
+    - internal/webhook/handler_test.go:TestHTTPSemantics
+    - internal/webhook/envtest_test.go:TestEnvtestWebhookRefresh
+  notes: >-
+    Served by patrol-server /api/webhook together with Application refreshes instead of a
+    separate ApplicationSet controller port (:7000); every provider is accepted; secrets apply
+    without a restart; ApplicationSets are filtered by ApplicationSetNamespaces (upstream
+    lists all visible ones). Refresh is a merge patch of
+    cd.patrol.example/application-set-refresh=true. See
+    docs/architecture/components/webhook.md#gaps-and-intentional-differences.
+
+ASET-105:
+  status: implemented
+  impl: [internal/webhook/appsets.go, internal/webhook/match.go]
+  tests:
+    - internal/webhook/appsets_test.go:TestAppSetGitGenerator
+    - internal/webhook/match_test.go:TestGeneratorRevisionHasChanged
+    - internal/webhook/appsets_test.go:TestEventsRefreshApplicationSets
+    - internal/webhook/envtest_test.go:TestEnvtestWebhookRefresh
+  notes: >-
+    Git generators (top level and in Matrix/Merge) on pushes from every provider (upstream:
+    GitHub, GitLab push, Azure DevOps; GitLab tag pushes also refresh here).
+
+ASET-106:
+  status: implemented
+  impl: [internal/webhook/appsets.go]
+  tests:
+    - internal/webhook/appsets_test.go:TestAppSetPullRequestGenerator
+    - internal/webhook/appsets_test.go:TestEventsRefreshApplicationSets
+    - internal/webhook/match_test.go:TestAPIHostMatches
+  notes: >-
+    Upstream actions per provider; GitHub owner/repo case-insensitive with API host check
+    (providerRef APIs resolved from SCMProviders); GitLab target project ID and API host;
+    Azure DevOps project/repo. Extensions: GitHub Enterprise API bases with a path match by
+    host, GitLab project paths, Gitea and Bitbucket pull request events.
+
+ASET-107:
+  status: in-progress
+  impl: [internal/webhook/appsets.go]
+  tests:
+    - internal/webhook/appsets_test.go:TestAppSetCombinationGenerators
+    - internal/webhook/appsets_test.go:TestEventsRefreshApplicationSets
+  notes: >-
+    Plugin (top level, Matrix child 1), Matrix and Merge including nested generators,
+    tested with a stub GeneratorEvaluator. internal/appset must provide the evaluator to the
+    API server wiring; without it templated Matrix children are wildcards
+    (over-approximation).

@@ -1,0 +1,713 @@
+# internal/appset (ApplicationSet controller, generators, templating, progressive syncs).
+# See docs/architecture/components/appset.md. Controller features are exercised with the
+# controller-runtime fake client and, through the real Run entry point, against an envtest
+# kube-apiserver 1.36 (no garbage collector, application controller simulated by writing
+# Application status). The controller is not yet wired into cmd/patrolcd, the API server or the
+# webhook handler, so nothing is marked verified. SCM provider behavior itself is tested in
+# pkg/scm; here only the generator wiring is tested, against pkg/scm/fake.
+
+ASET-002:
+  status: implemented
+  impl: [internal/appset/generate.go, internal/appset/template/render.go]
+  tests:
+    - internal/appset/generate_test.go:TestGenerateApplications
+    - internal/appset/reconciler_test.go:TestReconcileCreatesApplications
+    - internal/appset/reconciler_test.go:TestReconcileGenerationError
+    - internal/appset/envtest_test.go:TestEnvtestLifecycle
+  notes: Namespace forced to the ApplicationSet's; a failing generator prevents every write in that reconcile.
+
+ASET-003:
+  status: implemented
+  impl: [internal/appset/template/merge.go, internal/appset/generators/generator.go]
+  tests:
+    - internal/appset/template/render_test.go:TestMergeTemplate
+    - internal/appset/generate_test.go:TestGenerateApplications
+
+ASET-004:
+  status: implemented
+  impl: [internal/appset/template/render.go]
+  tests:
+    - internal/appset/template/render_test.go:TestRenderApplicationFinalizers
+    - internal/appset/generate_test.go:TestGenerateApplications
+    - internal/appset/generate_test.go:TestGenerateApplicationsErrors
+
+ASET-005:
+  status: implemented
+  impl: [internal/appset/apply.go]
+  tests:
+    - internal/appset/reconciler_test.go:TestReconcileAdoptionAndConflict
+    - internal/appset/envtest_test.go:TestEnvtestLifecycle
+  notes: Owner reference apiVersion cd.patrol.example/v1alpha1; owned Applications found through the OwnerIndex field index in the ApplicationSet namespace.
+
+ASET-006:
+  status: implemented
+  impl: [internal/appset/generators/generator.go, internal/appset/generators/combine.go]
+  tests:
+    - internal/appset/generators/combine_test.go:TestMultipleGeneratorsInOneEntry
+    - internal/appset/generators/combine_test.go:TestMatrixGeneratorErrorsAndNesting
+    - internal/appset/generate_test.go:TestGenerateApplications
+
+ASET-007:
+  status: implemented
+  impl: [internal/appset/generate.go]
+  tests:
+    - internal/appset/generate_test.go:TestCheckInvalidGenerators
+    - internal/appset/generate_test.go:TestValidateForAPI
+    - internal/appset/generate_test.go:TestProjectsCoverGeneratorTemplates
+  notes: Controller logs a warning; ValidateForAPI is provided for the API server (not wired yet). The smallest key is reported where upstream picks a random one.
+
+ASET-008:
+  status: implemented
+  impl: [internal/appset/reconciler.go]
+  tests:
+    - internal/appset/reconciler_test.go:TestReconcileValidation
+    - internal/appset/reconciler_test.go:TestReconcileValidationDestination
+    - internal/appset/reconciler_test.go:TestReconcileTemplatedProjectEscalation
+    - internal/appset/envtest_test.go:TestEnvtestTemplatedProjectEscalation
+  notes: >-
+    Stricter than upstream: destinations must also be permitted by the project and, outside the
+    control-plane namespace, the project must list the ApplicationSet namespace in
+    sourceNamespaces. Duplicate names apply the first occurrence (upstream code drops all).
+
+ASET-009:
+  status: implemented
+  impl: [internal/appset/reconciler.go, internal/appset/generators/generator.go]
+  tests:
+    - internal/appset/generators/combine_test.go:TestMinRequeueAfter
+    - internal/appset/generators/git_test.go:TestGitRequeue
+    - internal/appset/reconciler_test.go:TestReconcileRefreshAnnotationAndRequeue
+    - internal/appset/reconciler_test.go:TestReconcileGenerationError
+    - internal/appset/reconciler_test.go:TestReconcileValidation
+  notes: Negative requeueAfterSeconds disables time-based requeue (upstream loops). The env/cmd-params default is mapped by the caller (Generators.DefaultRequeueAfter).
+
+ASET-010:
+  status: implemented
+  impl: [internal/appset/watch.go, internal/appset/run.go]
+  tests:
+    - internal/appset/watch_test.go:TestShouldRequeueForApplication
+    - internal/appset/watch_test.go:TestShouldRequeueForApplicationSet
+    - internal/appset/watch_test.go:TestClusterEventHandler
+    - internal/appset/envtest_test.go:TestEnvtestClusterWatch
+    - internal/appset/envtest_test.go:TestEnvtestLifecycle
+  notes: Cluster objects (not cluster Secrets) of the control-plane namespace trigger ApplicationSets with Clusters generators.
+
+ASET-011:
+  status: implemented
+  impl: [internal/appset/reconciler.go, internal/appset/generators/git.go]
+  tests:
+    - internal/appset/reconciler_test.go:TestReconcileRefreshAnnotationAndRequeue
+    - internal/appset/reconciler_test.go:TestReconcileGenerationError
+    - internal/appset/generators/git_test.go:TestGitProjectAndRefresh
+    - internal/appset/envtest_test.go:TestEnvtestLifecycle
+
+ASET-012:
+  status: implemented
+  impl: [internal/appset/generators/list.go]
+  tests: [internal/appset/generators/list_cluster_test.go:TestListGenerator]
+
+ASET-013:
+  status: implemented
+  impl: [internal/appset/generators/list.go]
+  tests: [internal/appset/generators/list_cluster_test.go:TestListGenerator]
+
+ASET-014:
+  status: implemented
+  impl: [internal/appset/generators/cluster.go]
+  tests: [internal/appset/generators/list_cluster_test.go:TestClusterGenerator]
+  notes: Reads Cluster objects (Patrol resource model) instead of cluster Secrets.
+
+ASET-015:
+  status: implemented
+  impl: [internal/appset/generators/cluster.go]
+  tests: [internal/appset/generators/list_cluster_test.go:TestClusterGenerator, internal/appset/envtest_test.go:TestEnvtestClusterWatch]
+
+ASET-016:
+  status: implemented
+  impl: [internal/appset/generators/cluster.go, internal/appset/generators/params.go]
+  tests: [internal/appset/generators/list_cluster_test.go:TestClusterGenerator]
+
+ASET-017:
+  status: implemented
+  impl: [internal/appset/generators/cluster.go]
+  tests: [internal/appset/generators/list_cluster_test.go:TestClusterGenerator]
+
+ASET-018:
+  status: implemented
+  impl: [internal/appset/generators/git.go, internal/appset/generators/repos.go]
+  tests: [internal/appset/generators/git_test.go:TestGitDirectories, internal/appset/generators/git_test.go:TestRepoServerService]
+  notes: Directory listing (hidden directories, revision resolution) is the repo-server's; tested here with an in-memory repo service.
+
+ASET-019:
+  status: implemented
+  impl: [internal/appset/generators/git.go]
+  tests: [internal/appset/generators/git_test.go:TestGitDirectories]
+
+ASET-020:
+  status: implemented
+  impl: [internal/appset/generators/git.go]
+  tests: [internal/appset/generators/git_test.go:TestGitFiles]
+
+ASET-021:
+  status: implemented
+  impl: [internal/appset/generators/git.go]
+  tests: [internal/appset/generators/git_test.go:TestGitFiles]
+
+ASET-022:
+  status: in-progress
+  impl: [internal/appset/generators/repos.go]
+  tests: [internal/appset/generators/git_test.go:TestRepoServerService]
+  notes: The generator forwards NewGitFileGlobbing to the repo-server; the globbing itself is the repo-server's.
+
+ASET-023:
+  status: implemented
+  impl: [internal/appset/generators/git.go]
+  tests: [internal/appset/generators/git_test.go:TestGitDirectories, internal/appset/generators/git_test.go:TestGitFiles]
+
+ASET-024:
+  status: implemented
+  impl: [internal/appset/generators/git.go, internal/appset/generators/params.go]
+  tests: [internal/appset/generators/git_test.go:TestGitDirectories, internal/appset/generators/git_test.go:TestGitFiles]
+
+ASET-025:
+  status: in-progress
+  impl: [internal/appset/generators/git.go]
+  tests: [internal/appset/generators/git_test.go:TestGitRequeue, internal/appset/generators/git_test.go:TestGitProjectAndRefresh]
+  notes: Polling and noRevisionCache implemented; revision resolution and caching are the repo-server's.
+
+ASET-026:
+  status: in-progress
+  impl: [internal/appset/generators/git.go, internal/appset/generators/generator.go, internal/appset/generators/repos.go]
+  tests:
+    - internal/appset/generators/git_test.go:TestGitProjectAndRefresh
+    - internal/appset/generators/git_test.go:TestGitProjectScopeTenantBoundary
+    - internal/appset/envtest_test.go:TestEnvtestGitCredentialScope
+  notes: >-
+    Project lookup and source-integrity verification flag implemented; credential resolution is
+    pluggable (RepositoryResolver) and defaults to anonymous until wired. Stricter than upstream:
+    the scoping project is the one of the entry's effective template (generator-level project
+    included) and must permit the ApplicationSet namespace (docs/architecture/components/appset.md#security).
+
+ASET-027:
+  status: implemented
+  impl: [internal/appset/generators/scm.go, internal/appset/generators/scmconfig.go]
+  tests:
+    - internal/appset/generators/scm_test.go:TestSCMProviderParams
+    - internal/appset/generators/scm_test.go:TestSCMProviderCredentialsAndPolicy
+    - internal/appset/generators/scm_test.go:TestSCMProviderRefThroughRegistry
+
+ASET-028:
+  status: implemented
+  impl: [internal/appset/generators/scm.go]
+  tests: [internal/appset/generators/scm_test.go:TestSCMProviderAllowListWithRealProvider, internal/appset/generators/scm_test.go:TestSCMProviderParams]
+  notes: GitHub API behavior (pagination, archived) is pkg/scm/github's.
+
+ASET-029:
+  status: different-by-design
+  impl: [internal/appset/generators/scmconfig.go, internal/appset/generators/scm.go, internal/appset/generators/pullrequest.go]
+  tests: [internal/appset/generators/scm_test.go:TestSCMProviderCredentialsAndPolicy, internal/appset/generators/pullrequest_test.go:TestPullRequestProviders]
+  notes: >-
+    appSecretName (a control-plane Secret) is honored only for ApplicationSets in the control-plane
+    namespace; tenant ApplicationSets get ErrAppSecretNotPermitted and use providerRef instead
+    (docs/architecture/components/appset.md#security).
+
+ASET-030:
+  status: implemented
+  impl: [internal/appset/generators/scm.go]
+  tests: [internal/appset/generators/scm_test.go:TestSCMProviderCredentialsAndPolicy]
+
+ASET-031:
+  status: implemented
+  impl: [internal/appset/generators/scm.go]
+  tests: [internal/appset/generators/scm_providers_test.go:TestSCMProviderBlocks, internal/appset/generators/scm_test.go:TestSCMProviderCredentialsAndPolicy]
+
+ASET-032:
+  status: implemented
+  impl: [internal/appset/generators/scm.go]
+  tests: [internal/appset/generators/scm_test.go:TestSCMProviderCredentialsAndPolicy, internal/appset/generators/scm_providers_test.go:TestSCMProviderBlocks]
+
+ASET-033:
+  status: implemented
+  impl: [internal/appset/generators/scm.go]
+  tests: [internal/appset/generators/scm_test.go:TestSCMProviderCredentialsAndPolicy]
+
+ASET-034:
+  status: implemented
+  impl: [internal/appset/generators/scm.go]
+  tests: [internal/appset/generators/scm_providers_test.go:TestSCMProviderBlocks]
+
+ASET-035:
+  status: in-progress
+  impl: [internal/appset/generators/scm.go]
+  tests: [internal/appset/generators/scm_providers_test.go:TestSCMProviderBlocks]
+  notes: Generator wiring only (region, role, tag filters); discovery is pkg/scm/awscodecommit's and needs AWS credentials.
+
+ASET-036:
+  status: implemented
+  impl: [internal/appset/generators/scm.go]
+  tests: [internal/appset/generators/scm_test.go:TestSCMProviderFilters]
+
+ASET-037:
+  status: implemented
+  impl: [internal/appset/generators/scm.go]
+  tests: [internal/appset/generators/scm_test.go:TestSCMProviderFilters]
+
+ASET-038:
+  status: implemented
+  impl: [internal/appset/generators/scm.go]
+  tests: [internal/appset/generators/scm_test.go:TestSCMProviderFilters]
+
+ASET-039:
+  status: implemented
+  impl: [internal/appset/generators/scm.go]
+  tests: [internal/appset/generators/scm_test.go:TestSCMProviderFilters]
+
+ASET-040:
+  status: implemented
+  impl: [internal/appset/generators/scm.go]
+  tests: [internal/appset/generators/scm_test.go:TestSCMProviderFilters]
+
+ASET-041:
+  status: implemented
+  impl: [internal/appset/generators/scm.go]
+  tests: [internal/appset/generators/scm_test.go:TestSCMProviderFilters]
+
+ASET-042:
+  status: implemented
+  impl: [internal/appset/generators/scm.go]
+  tests: [internal/appset/generators/scm_test.go:TestSCMProviderParams]
+  notes: Per-provider URL selection is pkg/scm's.
+
+ASET-043:
+  status: implemented
+  impl: [internal/appset/generators/scm.go]
+  tests: [internal/appset/generators/scm_test.go:TestSCMProviderFilters]
+
+ASET-044:
+  status: implemented
+  impl: [internal/appset/generators/scmconfig.go, internal/appset/generators/scm.go, internal/appset/generators/pullrequest.go]
+  tests:
+    - internal/appset/generators/scm_test.go:TestSCMProviderCredentialsAndPolicy
+    - internal/appset/generators/scm_providers_test.go:TestSCMProviderBlocks
+    - internal/appset/generators/pullrequest_test.go:TestPullRequestProviders
+
+ASET-045:
+  status: implemented
+  impl: [internal/appset/generators/scm.go, internal/appset/generators/pullrequest.go]
+  tests: [internal/appset/generators/scm_test.go:TestSCMProviderCredentialsAndPolicy]
+  notes: Proxy settings passed to pkg/scm providers (GitHub, GitLab, Gitea, Bitbucket Server).
+
+ASET-046:
+  status: implemented
+  impl: [internal/appset/generators/pullrequest.go]
+  tests: [internal/appset/generators/pullrequest_test.go:TestPullRequestParams, internal/appset/generators/pullrequest_test.go:TestPullRequestPolicy]
+
+ASET-047:
+  status: implemented
+  impl: [internal/appset/generators/pullrequest.go]
+  tests: [internal/appset/generators/pullrequest_test.go:TestPullRequestProviders]
+
+ASET-048:
+  status: implemented
+  impl: [internal/appset/generators/pullrequest.go]
+  tests: [internal/appset/generators/pullrequest_test.go:TestPullRequestProviders, internal/appset/generators/pullrequest_test.go:TestGitLabProjectRef]
+
+ASET-049:
+  status: implemented
+  impl: [internal/appset/generators/pullrequest.go]
+  tests: [internal/appset/generators/pullrequest_test.go:TestPullRequestProviderLabelsAndRepoNotFound]
+
+ASET-050:
+  status: implemented
+  impl: [internal/appset/generators/pullrequest.go]
+  tests: [internal/appset/generators/pullrequest_test.go:TestPullRequestProviders]
+
+ASET-051:
+  status: implemented
+  impl: [internal/appset/generators/pullrequest.go]
+  tests: [internal/appset/generators/pullrequest_test.go:TestPullRequestProviders]
+
+ASET-052:
+  status: implemented
+  impl: [internal/appset/generators/pullrequest.go]
+  tests: [internal/appset/generators/pullrequest_test.go:TestPullRequestProviders]
+
+ASET-053:
+  status: implemented
+  impl: [internal/appset/generators/pullrequest.go]
+  tests: [internal/appset/generators/pullrequest_test.go:TestPullRequestFilters]
+
+ASET-054:
+  status: implemented
+  impl: [internal/appset/generators/pullrequest.go]
+  tests: [internal/appset/generators/pullrequest_test.go:TestPullRequestFilters]
+
+ASET-055:
+  status: implemented
+  impl: [internal/appset/generators/pullrequest.go]
+  tests: [internal/appset/generators/pullrequest_test.go:TestPullRequestFilters]
+
+ASET-056:
+  status: implemented
+  impl: [internal/appset/generators/pullrequest.go]
+  tests: [internal/appset/generators/pullrequest_test.go:TestPullRequestProviderLabelsAndRepoNotFound]
+
+ASET-057:
+  status: implemented
+  impl: [internal/appset/generators/pullrequest.go]
+  tests: [internal/appset/generators/pullrequest_test.go:TestPullRequestProviderLabelsAndRepoNotFound]
+
+ASET-058:
+  status: implemented
+  impl: [internal/appset/generators/duck.go]
+  tests: [internal/appset/generators/duck_test.go:TestDuckTypeGenerator, internal/appset/generators/duck_test.go:TestDuckTypeGeneratorErrors, internal/appset/generators/duck_test.go:TestDuckTypeGeneratorPaging]
+  notes: Resources are listed in pages of 250; more than 1000 matching resources fail the generation instead of returning a partial list.
+
+ASET-059:
+  status: implemented
+  impl: [internal/appset/generators/duck.go]
+  tests: [internal/appset/generators/duck_test.go:TestDuckTypeGenerator, internal/appset/generators/duck_test.go:TestDuckTypeGeneratorByName]
+
+ASET-060:
+  status: implemented
+  impl: [internal/appset/generators/plugin.go]
+  tests: [internal/appset/generators/plugin_test.go:TestPluginGeneratorTokenReferences]
+  notes: Token "$<key>" reads patrol-secret; "$<secret>:<key>" reads that Secret.
+
+ASET-061:
+  status: implemented
+  impl: [internal/appset/generators/plugin.go]
+  tests: [internal/appset/generators/plugin_test.go:TestPluginGenerator, internal/appset/generators/plugin_test.go:TestPluginGeneratorFailures]
+  notes: Responses capped at 16 MiB.
+
+ASET-062:
+  status: implemented
+  impl: [internal/appset/generators/plugin.go]
+  tests: [internal/appset/generators/plugin_test.go:TestPluginGenerator]
+
+ASET-063:
+  status: implemented
+  impl: [internal/appset/generators/combine.go, internal/appset/generators/generator.go]
+  tests: [internal/appset/generators/combine_test.go:TestMatrixGenerator, internal/appset/generators/combine_test.go:TestMatrixGeneratorErrorsAndNesting, internal/appset/generators/combine_test.go:TestParameterSetBound]
+  notes: Every generator, and a Matrix product before it is built, is bounded by generators.Config.MaxParameterSets (default 20000; upstream has no bound).
+
+ASET-064:
+  status: implemented
+  impl: [internal/appset/generators/combine.go, internal/appset/template/interpolate.go]
+  tests:
+    - internal/appset/generators/combine_test.go:TestMatrixGenerator
+    - internal/appset/template/render_test.go:TestInterpolateGenerator
+    - internal/appset/template/render_test.go:TestInterpolateGeneratorNested
+
+ASET-065:
+  status: implemented
+  impl: [internal/appset/generators/combine.go]
+  tests: [internal/appset/generators/combine_test.go:TestMergeGenerator]
+
+ASET-066:
+  status: implemented
+  impl: [internal/appset/generators/combine.go, internal/appset/generators/generator.go]
+  tests: [internal/appset/generators/combine_test.go:TestMatrixGeneratorErrorsAndNesting]
+
+ASET-067:
+  status: implemented
+  impl: [internal/appset/generators/selector.go, internal/appset/generators/params.go]
+  tests: [internal/appset/generators/combine_test.go:TestSelectorPostFilter]
+
+ASET-068:
+  status: implemented
+  impl: [internal/appset/generators/combine.go]
+  tests: [internal/appset/generators/combine_test.go:TestSelectorPostFilter]
+  notes: Ignored; nested selectors always apply (as upstream).
+
+ASET-069:
+  status: implemented
+  impl: [internal/appset/generators/params.go, internal/appset/template/interpolate.go]
+  tests:
+    - internal/appset/generators/list_cluster_test.go:TestClusterGenerator
+    - internal/appset/generators/git_test.go:TestGitDirectories
+    - internal/appset/template/render_test.go:TestInterpolateGenerator
+
+ASET-070:
+  status: implemented
+  impl: [internal/appset/template/replace.go]
+  tests: [internal/appset/template/replace_test.go:TestReplaceFasttemplate, internal/appset/template/render_test.go:TestRenderApplicationFasttemplate]
+
+ASET-071:
+  status: implemented
+  impl: [internal/appset/template/replace.go]
+  tests: [internal/appset/template/replace_test.go:TestReplaceGoTemplate, internal/appset/template/render_test.go:TestRenderApplicationGoTemplate]
+
+ASET-072:
+  status: implemented
+  impl: [internal/appset/template/replace.go]
+  tests: [internal/appset/template/replace_test.go:TestReplaceGoTemplate, internal/appset/generate_test.go:TestGenerateApplicationsErrors]
+
+ASET-073:
+  status: implemented
+  impl: [internal/appset/template/replace.go, internal/appset/template/limits.go]
+  tests:
+    - internal/appset/template/replace_test.go:TestReplaceGoTemplate
+    - internal/appset/template/limits_test.go:TestEvaluationLimitsHostileTemplates
+    - internal/appset/template/limits_test.go:TestEvaluationLimitsAllowOrdinaryTemplates
+  notes: >-
+    Same function set; functions run under evaluation limits (steps, value size estimates,
+    sequence length, nesting, acyclic set/merge, output per string and per Application), see
+    docs/architecture/components/appset.md#security.
+
+ASET-074:
+  status: implemented
+  impl: [internal/appset/template/functions.go]
+  tests:
+    - internal/appset/template/replace_test.go:TestSanitizeName
+    - internal/appset/template/replace_test.go:TestSlugify
+    - internal/appset/template/replace_test.go:TestPropertySanitizeAndSlug
+  notes: Transliteration covers Latin-1 and Latin Extended-A only.
+
+ASET-075:
+  status: implemented
+  impl: [internal/appset/template/functions.go]
+  tests: [internal/appset/template/replace_test.go:TestReplaceGoTemplate]
+
+ASET-076:
+  status: implemented
+  impl: [internal/appset/template/render.go]
+  tests: [internal/appset/template/render_test.go:TestRenderApplicationGoTemplate, internal/appset/template/render_test.go:TestRenderApplicationValuesObjectYAML]
+
+ASET-077:
+  status: implemented
+  impl: [internal/appset/template/render.go, internal/appset/generate.go]
+  tests:
+    - internal/appset/template/render_test.go:TestApplyTemplatePatch
+    - internal/appset/template/render_test.go:TestApplyTemplatePatchErrors
+    - internal/appset/generate_test.go:TestGenerateApplicationsTemplatePatch
+
+ASET-078:
+  status: implemented
+  impl: [internal/appset/reconciler.go, internal/appset/apply.go]
+  tests: [internal/appset/reconciler_test.go:TestReconcilePolicies, internal/appset/envtest_test.go:TestEnvtestPolicies]
+
+ASET-079:
+  status: implemented
+  impl: [internal/appset/config.go]
+  tests:
+    - internal/appset/config_test.go:TestEffectivePolicy
+    - internal/appset/config_test.go:TestParsePolicy
+    - internal/appset/reconciler_test.go:TestReconcilePolicyOverrideDisabled
+  notes: The process flag/env parsing and exit belong to cmd/patrolcd (not wired); DefaultEnablePolicyOverride gives the default.
+
+ASET-080:
+  status: implemented
+  impl: [internal/appset/apply.go]
+  tests: [internal/appset/reconciler_test.go:TestReconcilePreservedFields, internal/appset/envtest_test.go:TestEnvtestLifecycle]
+
+ASET-081:
+  status: implemented
+  impl: [internal/appset/apply.go]
+  tests: [internal/appset/reconciler_test.go:TestReconcilePreservedFields]
+
+ASET-082:
+  status: implemented
+  impl: [internal/appset/apply.go]
+  tests: [internal/appset/reconciler_test.go:TestReconcilePreservedFields]
+
+ASET-083:
+  status: implemented
+  impl: [internal/appset/normalize.go, internal/appset/apply.go]
+  tests:
+    - internal/appset/normalize_test.go:TestIgnoreDiffer
+    - internal/appset/reconciler_test.go:TestReconcileIgnoreApplicationDifferences
+    - internal/appset/envtest_test.go:TestEnvtestLifecycle
+
+ASET-084:
+  status: implemented
+  impl: [internal/appset/apply.go, internal/appset/normalize.go]
+  tests:
+    - internal/appset/reconciler_test.go:TestReconcileCreatesApplications
+    - internal/appset/reconciler_test.go:TestReconcileStaleCacheCreate
+    - internal/appset/normalize_test.go:TestNormalizeApplicationSpec
+    - internal/appset/envtest_test.go:TestEnvtestLifecycle
+
+ASET-085:
+  status: implemented
+  impl: [internal/appset/reconciler.go]
+  tests: [internal/appset/reconciler_test.go:TestReconcileDryRun]
+  notes: Config.DryRun wraps the client with server-side dry run; flag wiring is cmd/patrolcd's.
+
+ASET-086:
+  status: implemented
+  impl: [internal/appset/apply.go, internal/appset/config.go, internal/appset/run.go]
+  tests: [internal/appset/reconciler_test.go:TestReconcileConcurrentUpdatesDeterministic, internal/appset/config_test.go:TestConfigComplete]
+
+ASET-087:
+  status: implemented
+  impl: [internal/appset/reconciler.go, internal/appset/apply.go]
+  tests: [internal/appset/reconciler_test.go:TestReconcileDeletionPolicies, internal/appset/envtest_test.go:TestEnvtestDeletion]
+  notes: >-
+    Finalizer cd.patrol.example/applicationset-finalizer (the migrated resources finalizer is
+    honored); also added for preserveResourcesOnDeletion, which strips the resources finalizers
+    of the Applications. Only owner references to this ApplicationSet are removed. Garbage
+    collection is not exercised (envtest has no GC).
+
+ASET-088:
+  status: implemented
+  impl: [internal/appset/apply.go]
+  tests: [internal/appset/reconciler_test.go:TestReconcileDeleteInvalidDestination]
+
+ASET-089:
+  status: implemented
+  impl: [internal/appset/reconciler.go]
+  tests:
+    - internal/appset/reconciler_test.go:TestReconcileProgressiveSyncsDisabledClearsStatus
+    - internal/appset/progressive_test.go:TestProgressiveSyncSwitchToAllAtOnce
+
+ASET-090:
+  status: implemented
+  impl: [internal/appset/progressive.go]
+  tests:
+    - internal/appset/progressive_test.go:TestBuildSteps
+    - internal/appset/progressive_test.go:TestAppsToSync
+    - internal/appset/progressive_test.go:TestProgressiveSyncStepProgression
+    - internal/appset/envtest_test.go:TestEnvtestRollingSync
+
+ASET-091:
+  status: implemented
+  impl: [internal/appset/progressive.go]
+  tests:
+    - internal/appset/progressive_test.go:TestMaxUpdateValue
+    - internal/appset/progressive_test.go:TestProgressiveSyncMaxUpdate
+    - internal/appset/progressive_test.go:TestProgressiveSyncMaxUpdateZeroBlocks
+
+ASET-092:
+  status: implemented
+  impl: [internal/appset/progressive.go, internal/appset/status.go]
+  tests:
+    - internal/appset/progressive_test.go:TestProgressiveSyncStepProgression
+    - internal/appset/progressive_test.go:TestProgressiveSyncSameSecondStart
+    - internal/appset/progressive_test.go:TestProgressiveSyncApplicationError
+    - internal/appset/envtest_test.go:TestEnvtestRollingSync
+  notes: >-
+    Application status simulated (the application controller is not built yet). targetRevisions
+    changes are persisted too. Pending → Progressing recognizes the RollingSync Operation by name
+    (upstream compares second-precision timestamps and stalls when the sync starts in the same
+    second).
+
+ASET-093:
+  status: different-by-design
+  impl: [internal/appset/progressive.go]
+  tests:
+    - internal/appset/progressive_test.go:TestProgressiveSyncStepProgression
+    - internal/appset/progressive_test.go:TestProgressiveSyncRejectedOperationRetried
+    - internal/appset/progressive_test.go:TestProgressiveSyncCreateOnlyNeverTriggers
+    - internal/appset/envtest_test.go:TestEnvtestRollingSync
+  notes: >-
+    Syncs are Operation objects (ADR-0011) owned by the Application with the upstream initiator,
+    info, prune, syncOptions and retry; automated sync is disabled with automated.enabled=false.
+    See docs/architecture/components/appset.md#progressive-syncs-rollingsync.
+
+ASET-094:
+  status: implemented
+  impl: [internal/appset/progressive.go, internal/appset/status.go]
+  tests:
+    - internal/appset/progressive_test.go:TestProgressiveSyncStepProgression
+    - internal/appset/progressive_test.go:TestProgressiveSyncSwitchToAllAtOnce
+    - internal/appset/status_test.go:TestRolloutConditionRemovedWithoutRollingSync
+
+ASET-095:
+  status: implemented
+  impl: [internal/appset/progressive.go, internal/appset/reconciler.go]
+  tests:
+    - internal/appset/progressive_test.go:TestReverseDeletion
+    - internal/appset/progressive_test.go:TestReverseDeletionStuckApplication
+    - internal/appset/envtest_test.go:TestEnvtestRollingSync
+  notes: deletionOrder is exact-case (admission). Stale cache entries are resolved with an uncached read; no informer eviction.
+
+ASET-096:
+  status: implemented
+  impl: [internal/appset/status.go, internal/appset/reconciler.go]
+  tests:
+    - internal/appset/status_test.go:TestConditionsSuccessPath
+    - internal/appset/status_test.go:TestConditionsGenerationFailure
+    - internal/appset/reconciler_test.go:TestReconcileCreatesApplications
+    - internal/appset/reconciler_test.go:TestReconcileGenerationError
+
+ASET-097:
+  status: implemented
+  impl: [internal/appset/status.go, internal/appset/apply.go]
+  tests:
+    - internal/appset/reconciler_test.go:TestReconcileResourcesStatusLimit
+    - internal/appset/reconciler_test.go:TestReconcileCreatesApplications
+    - internal/appset/reconciler_test.go:TestReconcileDeleteInvalidDestination
+
+ASET-098:
+  status: implemented
+  impl: [internal/appset/status.go]
+  tests: [internal/appset/status_test.go:TestCalculateHealth]
+
+ASET-099:
+  status: implemented
+  impl: [internal/appset/config.go, internal/appset/run.go, internal/appset/watch.go]
+  tests:
+    - internal/appset/config_test.go:TestNamespaceMatcher
+    - internal/appset/config_test.go:TestConfigComplete
+    - internal/appset/reconciler_test.go:TestReconcileIgnoredNamespace
+    - internal/appset/envtest_test.go:TestEnvtestLifecycle
+  notes: Invalid namespace patterns are startup errors; RE2 has no look-around.
+
+ASET-101:
+  status: implemented
+  impl: [internal/appset/generators/scmconfig.go]
+  tests:
+    - internal/appset/generators/scm_test.go:TestSCMProviderCredentialsAndPolicy
+    - internal/appset/generators/scm_test.go:TestSCMProviderAllowListWithRealProvider
+    - internal/appset/generators/pullrequest_test.go:TestPullRequestPolicy
+
+ASET-102:
+  status: implemented
+  impl: [internal/appset/generators/scm.go, internal/appset/generators/pullrequest.go]
+  tests: [internal/appset/generators/scm_test.go:TestSCMProviderCredentialsAndPolicy, internal/appset/generators/pullrequest_test.go:TestPullRequestPolicy]
+
+ASET-103:
+  status: implemented
+  impl: [internal/appset/generators/scmconfig.go, internal/appset/generate.go]
+  tests: [internal/appset/generators/scm_test.go:TestSCMProviderCredentialsAndPolicy, internal/appset/generate_test.go:TestAPIGenerator]
+
+ASET-108:
+  status: implemented
+  impl: [internal/appset/generate.go, internal/appset/reconciler.go, internal/appset/template/render.go, internal/appset/generators/git.go]
+  tests:
+    - internal/appset/generate_test.go:TestValidateForAPI
+    - internal/appset/generate_test.go:TestProjectsCoverGeneratorTemplates
+    - internal/appset/generate_test.go:TestGenerateApplicationsTemplatePatch
+    - internal/appset/reconciler_test.go:TestReconcileTemplatedProjectEscalation
+    - internal/appset/envtest_test.go:TestEnvtestTemplatedProjectEscalation
+    - internal/appset/envtest_test.go:TestEnvtestGitCredentialScope
+  notes: >-
+    The controller additionally requires the project to permit a tenant ApplicationSet namespace.
+    ValidateForAPI also rejects templated generator-level projects, and Projects lists every
+    project the API server must authorize (upstream checks only spec.template.spec.project).
+
+ASET-114:
+  status: in-progress
+  impl: [internal/appset/generate.go]
+  tests: [internal/appset/generate_test.go:TestAPIGenerator]
+  notes: APIGenerator and ValidateForAPI exist; the API endpoint and RBAC check are the API server's (not wired).
+
+ASET-128:
+  status: in-progress
+  impl: [internal/appset/metrics.go]
+  tests: [internal/appset/metrics_test.go:TestMetrics]
+  notes: Metrics registered on Config.Registry (patrol_appset_*); serving them is cmd/patrolcd's (not wired).
+
+ASET-130:
+  status: in-progress
+  impl: [internal/appset/run.go, internal/appset/config.go]
+  tests: [internal/appset/run_test.go:TestRunValidation, internal/appset/envtest_test.go:TestEnvtestLifecycle]
+  notes: RunConfig covers leader election, cache sync period and concurrency; flags/env/cmd-params mapping is cmd/patrolcd's.
+
+ASET-132:
+  status: implemented
+  impl: [internal/appset/apply.go]
+  tests:
+    - internal/appset/reconciler_test.go:TestReconcileCreatesApplications
+    - internal/appset/reconciler_test.go:TestReconcileDeleteInvalidDestination
+  notes: Controller events only; API audit events belong to the API server.

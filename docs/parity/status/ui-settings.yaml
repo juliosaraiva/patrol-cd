@@ -1,0 +1,136 @@
+# Web UI, Settings area (ui/src/pages/settings). See docs/architecture/components/ui.md.
+# Evidence is vitest + Testing Library against MSW mocks of the /api/v1 contract (pnpm -C ui test):
+# the pages are implemented, not verified end to end. Types come from the published
+# api/openapi/openapi.json, and ui/src/api/contract.test.ts checks every client request and every
+# default mock answer against that document (simulated server, not a real one). Playwright
+# journeys for a real server live in ui/e2e/settings.spec.ts and have not been run.
+
+API-101:
+  status: implemented
+  impl:
+    - ui/src/pages/settings/repositories/RepositoriesPage.tsx
+    - ui/src/pages/settings/repositories/RepositoryForm.tsx
+    - ui/src/pages/settings/repositories/model.ts
+    - ui/src/pages/settings/repocreds/RepoCredsPage.tsx
+    - ui/src/api/hooks/settings.ts
+  tests:
+    - ui/src/pages/settings/repositories/RepositoriesPage.test.tsx:connects an HTTPS repository after a successful connection test
+    - ui/src/pages/settings/repositories/RepositoriesPage.test.tsx:explains a failed connection test and allows saving anyway
+    - ui/src/pages/settings/repositories/RepositoriesPage.test.tsx:saves the credentials as a template for the URL prefix
+    - ui/src/pages/settings/repositories/RepositoriesPage.test.tsx:disconnects a repository after confirmation
+    - ui/src/pages/settings/repositories/RepositoriesPage.test.tsx:refreshes connection status with forceRefresh
+    - ui/src/pages/settings/repositories/RepositoriesPage.test.tsx:lists and connects write repositories when the hydrator is enabled
+    - ui/src/pages/settings/repocreds/RepoCredsPage.test.tsx:creates an SSH template with a URL prefix
+    - ui/src/pages/settings/repocreds/RepoCredsPage.test.tsx:lists templates with their prefix, authentication and whether credentials are stored
+    - ui/src/pages/settings/repositories/RepositoriesPage.test.tsx:shows a loading state, then repositories with type, project and connection status
+    - ui/src/pages/settings/common/settingsLogic.test.ts:builds method-specific specs and credentials
+    - ui/src/api/contract.test.ts
+  notes: >-
+    Methods HTTPS (basic or bearer, TLS client cert, force basic auth, LFS, proxy/no-proxy,
+    depth, Azure workload identity), SSH (insecureIgnoreHostKey with warning), GitHub App (or an
+    SCMProvider reference), Helm (OCI), OCI, Google Cloud and Azure service principal. Connect
+    validates with POST .../validate first and explains failures. Lists show RepositoryInfo /
+    RepositoryCredentialInfo: connection state and whether credentials are stored or inherited
+    from a template (hasCredentials, inheritedCredentials), never values. Secrets are write-only
+    (`credentials` of the write request); spec.credentialsRef is server-managed and only
+    repeated unchanged on updates. Upstream's "Create application" row action is not provided.
+    Write repositories/templates are shown only when settings.hydratorEnabled.
+
+API-102:
+  status: implemented
+  impl: [ui/src/pages/settings/certificates/CertificatesPage.tsx, ui/src/pages/settings/common/trustData.ts]
+  tests:
+    - ui/src/pages/settings/certificates/CertificatesPage.test.tsx:validates and adds a TLS certificate
+    - ui/src/pages/settings/certificates/CertificatesPage.test.tsx:parses known hosts, previews fingerprints and adds one entry per host
+    - ui/src/pages/settings/certificates/CertificatesPage.test.tsx:removes an entry after confirmation
+  notes: >-
+    certData is plain PEM text / the base64 SSH key, as the published document defines (not
+    base64-wrapped as upstream's gRPC gateway requires); the list route omits certData. SSH
+    fingerprints are computed in the browser for the preview and read from certInfo for stored
+    entries.
+
+API-103:
+  status: implemented
+  impl: [ui/src/pages/settings/gpgkeys/GPGKeysPage.tsx]
+  tests:
+    - ui/src/pages/settings/gpgkeys/GPGKeysPage.test.tsx:rejects private keys and adds an armored public key
+    - ui/src/pages/settings/gpgkeys/GPGKeysPage.test.tsx:removes a key after confirmation
+
+API-104:
+  status: implemented
+  impl:
+    - ui/src/pages/settings/clusters/ClustersPage.tsx
+    - ui/src/pages/settings/clusters/ClusterDetailsPage.tsx
+    - ui/src/pages/settings/clusters/clusterUtil.ts
+  tests:
+    - ui/src/pages/settings/clusters/Clusters.test.tsx:edits name, namespaces and labels sending only the changed fields
+    - ui/src/pages/settings/clusters/Clusters.test.tsx:invalidates the cache and rotates credentials with a confirmation
+    - ui/src/pages/settings/clusters/Clusters.test.tsx:removes a cluster after typing its name, warning about its applications
+  notes: >-
+    Details poll every 5 s (upstream: 1 s). Adding a cluster is CLI/declarative only, as upstream;
+    the UI shows the commands and a Cluster + Secret example. Reads are RegisteredCluster
+    (credential flags only); edits send the flat ClusterInput with updatedFields, never the
+    write-only config. A 403 for an unknown cluster (the server answers 403 for missing and
+    forbidden clusters) is shown as "Cluster not found".
+
+API-105:
+  status: implemented
+  impl:
+    - ui/src/pages/settings/projects/ProjectsPage.tsx
+    - ui/src/pages/settings/projects/ProjectDetailsPage.tsx
+    - ui/src/pages/settings/projects/SummaryTab.tsx
+    - ui/src/pages/settings/projects/ResourcesTab.tsx
+    - ui/src/pages/settings/projects/RolesTab.tsx
+    - ui/src/pages/settings/projects/SyncWindowsTab.tsx
+    - ui/src/pages/settings/projects/IntegrityTab.tsx
+    - ui/src/pages/settings/projects/OrphanedTab.tsx
+    - ui/src/pages/settings/projects/EventsTab.tsx
+    - ui/src/pages/settings/common/cron.ts
+  tests:
+    - ui/src/pages/settings/projects/ProjectsPage.test.tsx:creates a project and opens it
+    - ui/src/pages/settings/projects/ProjectDetails.test.tsx:adds a destination with validation and saves the whole project with its resourceVersion
+    - ui/src/pages/settings/projects/ProjectDetails.test.tsx:creates a token shown once, then deletes it
+    - ui/src/pages/settings/projects/ProjectDetails.test.tsx:adds a window with cron validation and a preview of the next windows
+    - ui/src/pages/settings/projects/ProjectDetails.test.tsx:deletes an unused project and returns to the list
+    - ui/src/pages/settings/projects/ProjectDetails.test.tsx:handles a concurrent change (409) with a reload action
+    - ui/src/pages/settings/projects/ProjectDetails.test.tsx:deletes all expired tokens of a role
+    - ui/src/pages/settings/projects/ProjectDetails.test.tsx:shows http(s) project links only, opening in a new tab
+  notes: >-
+    Includes project links (GET .../links, http(s) only) and "delete expired tokens".
+    Inherited global project values are listed by name, not merged field by field. Create and
+    update send the ProjectCreateRequest/ProjectUpdateRequest envelopes ({project[, upsert]}).
+
+API-106:
+  status: implemented
+  impl: [ui/src/pages/settings/accounts/AccountsPage.tsx, ui/src/pages/settings/accounts/AccountDetailsPage.tsx]
+  tests:
+    - ui/src/pages/settings/accounts/Accounts.test.tsx:generates a token shown once and lists it
+    - ui/src/pages/settings/accounts/Accounts.test.tsx:deletes a token after confirmation
+    - ui/src/pages/settings/accounts/Accounts.test.tsx:explains accounts without the apiKey capability and links the own password change
+
+API-107:
+  status: implemented
+  impl: [ui/src/pages/settings/appearance/AppearancePage.tsx, ui/src/design/theme.ts]
+  tests:
+    - ui/src/pages/settings/SettingsPages.test.tsx:switches the theme and keeps it for this browser
+    - ui/src/design/theme.test.ts
+
+TEN-064:
+  status: implemented
+  impl: [ui/src/pages/settings/projects/ProjectDetailsPage.tsx, ui/src/pages/settings/projects/ProjectsPage.tsx]
+  tests:
+    - ui/src/pages/settings/projects/ProjectDetails.test.tsx:lists allow and deny lists and edits one with kind suggestions
+    - ui/src/pages/settings/projects/ProjectDetails.test.tsx:creates a role, validating policies against the project and role
+    - ui/src/pages/settings/projects/ProjectDetails.test.tsx:adds a source integrity policy
+    - ui/src/pages/settings/projects/ProjectDetails.test.tsx:turns orphaned resource monitoring off
+  notes: >-
+    Adds editors upstream lacks (source integrity policies). permitOnlyProjectScopedClusters has
+    no control, as upstream.
+
+TEN-112:
+  status: implemented
+  impl: [ui/src/pages/auth/LoginPage.tsx, ui/src/pages/auth/UserInfoPage.tsx, ui/src/pages/settings/accounts/AccountDetailsPage.tsx]
+  tests:
+    - ui/src/pages/auth/login.test.tsx
+    - ui/src/pages/settings/accounts/Accounts.test.tsx:generates a token shown once and lists it
+  notes: Login and user info come from the UI foundation; accounts from the Settings workstream.

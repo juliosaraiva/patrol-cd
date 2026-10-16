@@ -1556,6 +1556,382 @@ Permalink base used below: `https://github.com/argoproj/argo-cd/blob/a5038b0e2bb
 - **Tests required**:
   - Status codes for each failure; valid cookie passes claims.
 
+## I. IdP integration recipes and CI workload identity
+
+The features in this section cover the documented identity-provider recipes (`docs/operator-manual/user-management/*.md`)
+and the CI workload-identity login flow. Each recipe combines mechanisms already specified above (TEN-114..TEN-133);
+the sections below pin down the exact configuration shape each recipe uses, the Argo CD-side behaviour it relies on,
+and the per-IdP group-claim mapping that Patrol must reproduce. Behaviour that is implemented inside the bundled Dex
+binary (`ghcr.io/dexidp/dex:v2.45.1`, not a Go dependency of Argo CD) is described as the recipe documents it and
+listed under Unconfirmed where it could not be verified from the checkout.
+
+### TEN-134 CI workload-identity login via Dex token exchange (end-to-end)
+- **Upstream**: https://github.com/argoproj/argo-cd/blob/a5038b0e2bbac1715754380ae0084df8e3d5b48c/util/dex/config.go#L94-L109, https://github.com/argoproj/argo-cd/blob/a5038b0e2bbac1715754380ae0084df8e3d5b48c/server/server.go#L1366-L1376, https://github.com/argoproj/argo-cd/blob/a5038b0e2bbac1715754380ae0084df8e3d5b48c/util/dex/dex.go#L54-L99, https://github.com/argoproj/argo-cd/blob/a5038b0e2bbac1715754380ae0084df8e3d5b48c/util/settings/settings.go#L2074-L2082, https://github.com/argoproj/argo-cd/blob/a5038b0e2bbac1715754380ae0084df8e3d5b48c/util/settings/settings.go#L2142-L2157, https://github.com/argoproj/argo-cd/blob/a5038b0e2bbac1715754380ae0084df8e3d5b48c/util/session/sessionmanager.go#L585-L654, https://github.com/argoproj/argo-cd/blob/a5038b0e2bbac1715754380ae0084df8e3d5b48c/server/server.go#L1579-L1637, https://github.com/argoproj/argo-cd/blob/a5038b0e2bbac1715754380ae0084df8e3d5b48c/util/jwt/jwt.go#L142-L166, https://github.com/argoproj/argo-cd/blob/a5038b0e2bbac1715754380ae0084df8e3d5b48c/pkg/apiclient/apiclient.go#L229-L233, https://github.com/argoproj/argo-cd/blob/a5038b0e2bbac1715754380ae0084df8e3d5b48c/pkg/apiclient/apiclient.go#L308-L313, https://github.com/argoproj/argo-cd/blob/a5038b0e2bbac1715754380ae0084df8e3d5b48c/pkg/apiclient/apiclient.go#L394-L436, https://github.com/argoproj/argo-cd/blob/a5038b0e2bbac1715754380ae0084df8e3d5b48c/cmd/argocd/commands/root.go#L81, https://github.com/argoproj/argo-cd/blob/a5038b0e2bbac1715754380ae0084df8e3d5b48c/manifests/base/dex/argocd-dex-server-deployment.yaml#L38-L42, https://github.com/argoproj/argo-cd/blob/a5038b0e2bbac1715754380ae0084df8e3d5b48c/docs/operator-manual/user-management/github-actions.md#L8-L30, https://github.com/argoproj/argo-cd/blob/a5038b0e2bbac1715754380ae0084df8e3d5b48c/docs/operator-manual/user-management/github-actions.md#L76-L118, https://github.com/argoproj/argo-cd/blob/a5038b0e2bbac1715754380ae0084df8e3d5b48c/docs/operator-manual/user-management/gitlab-ci.md#L44-L65
+- **Maturity**: GA
+- **Semantics**: Argo CD contains no token-exchange code of its own; the flow is assembled from the bundled Dex and existing Argo CD pieces:
+  1. The Dex config Argo CD generates always contains the public static client `argo-cd-cli` (no secret, redirect URIs `http://localhost`, `http://localhost:8085/auth/callback`), prepended before any user `staticClients` (TEN-114).
+  2. The CI job obtains an OIDC ID token from its platform, then sends `POST <url>/api/dex/token` (`application/x-www-form-urlencoded`) with HTTP Basic `argo-cd-cli:` (empty password) and form fields `grant_type=urn:ietf:params:oauth:grant-type:token-exchange`, `connector_id=<dex connector id>`, `scope=openid email profile federated:id`, `requested_token_type=urn:ietf:params:oauth:token-type:access_token`, `subject_token=<CI token>`, `subject_token_type=urn:ietf:params:oauth:token-type:id_token`.
+  3. The API server forwards everything under `/api/dex/` to Dex unchanged (path, method, body, headers; `Host` rewritten to the Dex address). This route exists whenever SSO is configured (TEN-113).
+  4. Dex validates the subject token against the named connector's issuer and returns JSON whose `access_token` is a Dex-signed JWT (`iss = <url>/api/dex`, `aud = argo-cd-cli`).
+  5. The caller passes that token as `ARGOCD_AUTH_TOKEN` (or `--auth-token`, whitespace-trimmed). The CLI sends it in the gRPC `token` metadata; REST clients use `Authorization: Bearer` (TEN-105).
+  6. Because `iss` is not `argocd`, the API server verifies the token against the issuer's JWKS (`IssuerURL()` = `<url>/api/dex` in Dex mode) with allowed audiences fixed to `[argo-cd, argo-cd-cli]` (TEN-119, TEN-128).
+  7. The RBAC subject is `federated_claims.user_id` (Dex sets it to the upstream CI token's `sub` when `federated:id` is requested), falling back to `sub` (TEN-129). Groups exist only if the connector supplies them and the `groups` scope was requested. The display username is the `email` claim if present, else the subject.
+
+  No refresh token is involved, so CI jobs exchange a new token for every run.
+- **Edge cases**:
+  - If `oidc.config` is also set, `IssuerURL()` returns the external OIDC issuer, so Dex-issued tokens fail verification. The result is Unauthenticated `invalid session: failed to verify the token`.
+  - Exchanging through a user-defined Dex static client (e.g. `id: ci`) gives `aud=ci`. That audience is rejected because, in Dex mode, the allowed audiences are hard-coded to `argo-cd`/`argo-cd-cli`. `allowedAudiences` only applies to `oidc.config`.
+  - Omitting `federated:id` from `scope` produces no `federated_claims`, so the subject becomes Dex's opaque `sub` (an encoding of the user ID and connector ID). Policies written against the CI `sub` then silently fail to match.
+  - A Dex HTTP 500 on `/api/dex/token` is rewritten by the proxy into `303 See Other` with an empty body and `Location: <basehref>/login?has_sso_error=true` (TEN-115). `curl -f` treats 303 as success, so scripts must check the JSON body. Dex 4xx errors (unknown connector, invalid subject token) pass through unchanged.
+  - An expired exchanged token yields Unauthenticated `invalid session: failed to verify the token`. Server-side refresh only runs when `oidc.config` is set and a refresh token was cached at web login, so exchanged tokens are never refreshed.
+  - Revocation lookup uses `jti`, then `uti`, then the token's `at_hash`. Dex tokens carry no `jti` (see Unconfirmed for `at_hash` on exchanged access tokens).
+  - CLI precedence: the env/flag token replaces the config-file token. However, if a local config exists and its current context holds a refresh token while the stored token is expired, `NewClient` redeems that refresh token and overwrites the env-supplied token. CI must run without a stale config file.
+  - If no SSO is configured, `/api/dex/` is not registered and the exchange cannot reach Dex.
+- **Configuration surface**: `argocd-cm` `url`, `dex.config.connectors[]` (`type: oidc`, `id`, `name`, `config.issuer`, `config.scopes`, `config.userNameKey`, `config.insecureSkipEmailVerified`); `argocd-rbac-cm` `policy.csv`, `policy.default`, `scopes`; CLI env `ARGOCD_AUTH_TOKEN`, `ARGOCD_SERVER`, `ARGOCD_OPTS` (e.g. `--grpc-web`); flag `--auth-token`.
+- **Exposure**: HTTP `POST /api/dex/token` (reverse-proxied to Dex); API (every RPC with the bearer token, e.g. `GET /api/v1/session/userinfo`, `GET /api/v1/applications`); CLI (`argocd account get-user-info`, `argocd app list`, `argocd proj list` with `ARGOCD_AUTH_TOKEN`).
+- **Tests required**:
+  - Positive (E2E): a mock CI OIDC issuer, a Dex `oidc` connector for it, the exchange at `/api/dex/token` with `argo-cd-cli:`, then `argocd account get-user-info` reports the CI `sub` as username and `argocd app list` returns only the apps the policy grants that subject.
+  - Positive: the token is accepted over gRPC, gRPC-web (`--grpc-web`) and REST (`Authorization: Bearer`).
+  - Negative: a wrong `connector_id`, a subject token from another issuer, or an expired subject token returns a Dex 4xx through the proxy unchanged.
+  - Negative: a token minted for a custom static client is rejected by the API (audience).
+  - Negative: with `oidc.config` and `dex.config` both set, the Dex-exchanged token is rejected.
+  - Negative: an exchange without `federated:id` yields an opaque subject, and the CI-sub policy is not applied (deny / `policy.default` only).
+  - Authorization: policy lines keyed on the exact CI subject grant only the listed actions; another repository's or branch's subject is denied.
+  - Recovery: a Dex 500 becomes a 303 to `/login?has_sso_error=true`; an expired exchanged token becomes Unauthenticated, and a fresh exchange works without a server restart.
+  - Regression: with a stale CLI config containing a refresh token, the env token is overridden (parity).
+
+### TEN-135 GitHub Actions OIDC login recipe
+- **Upstream**: https://github.com/argoproj/argo-cd/blob/a5038b0e2bbac1715754380ae0084df8e3d5b48c/docs/operator-manual/user-management/github-actions.md#L11-L30, https://github.com/argoproj/argo-cd/blob/a5038b0e2bbac1715754380ae0084df8e3d5b48c/docs/operator-manual/user-management/github-actions.md#L34-L119, https://github.com/argoproj/argo-cd/blob/a5038b0e2bbac1715754380ae0084df8e3d5b48c/docs/operator-manual/user-management/github-actions.md#L122-L140, https://github.com/argoproj/argo-cd/blob/a5038b0e2bbac1715754380ae0084df8e3d5b48c/util/jwt/jwt.go#L142-L166, https://github.com/argoproj/argo-cd/blob/a5038b0e2bbac1715754380ae0084df8e3d5b48c/assets/model.conf#L13-L14
+- **Maturity**: GA
+- **Semantics**: Dex connector `type: oidc`, `id: github-actions`, `config.issuer: https://token.actions.githubusercontent.com/` (GitHub Enterprise Server: `https://<host>/_services/token`), `scopes: [openid]`, `userNameKey: sub`, `insecureSkipEmailVerified: true`.
+  - The workflow needs `permissions: id-token: write`. It requests the token from `ACTIONS_ID_TOKEN_REQUEST_URL` with `Authorization: bearer $ACTIONS_RUNTIME_TOKEN` and reads `.value`.
+  - It then runs the TEN-134 exchange with `connector_id=github-actions` and uses `.access_token` as `ARGOCD_AUTH_TOKEN` with `ARGOCD_SERVER` and `ARGOCD_OPTS=--grpc-web`.
+  - The RBAC subject is the GitHub token `sub`, e.g. `repo:my-org/my-repo:pull_request`. Example policy: `p, repo:my-org/my-repo:pull_request, applications, get, my-project/*, allow`.
+  - The recipe relies on the v3 subject mapping (`federated_claims.user_id`); the guide notes it is unsupported on v2.
+- **Edge cases**:
+  - Subjects are matched exactly (Casbin `g(r.sub, p.sub)`, TEN-065). Each trigger produces a different `sub` (pull_request, branch ref, environment), so each needs its own policy line or a `g` mapping to a role.
+  - GitHub tokens carry no `email` or `groups`, so the display username falls back to the subject and only user-level policies apply.
+- **Configuration surface**: `argocd-cm` `dex.config` (connector above); `argocd-rbac-cm` `policy.csv`; GitHub workflow `permissions.id-token: write`.
+- **Exposure**: HTTP (`/api/dex/token`); API; CLI.
+- **Tests required**:
+  - Positive: a token with `sub=repo:o/r:pull_request` (signed by a mock `token.actions.githubusercontent.com` issuer) can `get` apps in `my-project`.
+  - Negative: a token with `sub=repo:o/r:ref:refs/heads/main` is denied by the same policy.
+  - Negative: a GHES issuer token is rejected by a connector configured for github.com.
+  - Authorization: the subject cannot `sync` unless the policy grants it.
+
+### TEN-136 GitLab CI OIDC login recipe
+- **Upstream**: https://github.com/argoproj/argo-cd/blob/a5038b0e2bbac1715754380ae0084df8e3d5b48c/docs/operator-manual/user-management/gitlab-ci.md#L11-L29, https://github.com/argoproj/argo-cd/blob/a5038b0e2bbac1715754380ae0084df8e3d5b48c/docs/operator-manual/user-management/gitlab-ci.md#L33-L66, https://github.com/argoproj/argo-cd/blob/a5038b0e2bbac1715754380ae0084df8e3d5b48c/docs/operator-manual/user-management/gitlab-ci.md#L69-L83, https://github.com/argoproj/argo-cd/blob/a5038b0e2bbac1715754380ae0084df8e3d5b48c/assets/model.conf#L13-L14, https://github.com/argoproj/argo-cd/blob/a5038b0e2bbac1715754380ae0084df8e3d5b48c/util/rbac/rbac.go#L400-L426
+- **Maturity**: GA
+- **Semantics**: Dex connector `type: oidc`, `config.issuer: https://gitlab.com` (or the self-managed GitLab URL), `scopes: [openid]`, `userNameKey: sub`, `insecureSkipEmailVerified: true`.
+  - The job declares `id_tokens: GITLAB_OIDC_TOKEN: aud: <Argo CD URL>` and runs the TEN-134 exchange with `connector_id` equal to the connector `id`, using `.access_token` as `ARGOCD_AUTH_TOKEN`.
+  - The RBAC subject is the GitLab `sub` claim, `project_path:<group>/<project>:ref_type:<branch|tag>:ref:<ref>`. Example: `p, project_path:my-repo/my-project:ref_type:branch:ref:main, applications, sync, production/*, allow`.
+- **Edge cases**:
+  - The guide's connector `id` (`github-ci`) differs from its `connector_id` (`gitlab-ci`). Copied verbatim, the exchange fails in Dex (see Doc differences).
+  - The guide's wildcard subject `project_path:my-repo/my-project:*` only matches a subject literally equal to that string: subjects are not glob-matched, and no Casbin role-matching function is registered.
+- **Configuration surface**: `argocd-cm` `dex.config`; `argocd-rbac-cm` `policy.csv`; GitLab job `id_tokens.<VAR>.aud`.
+- **Exposure**: HTTP (`/api/dex/token`); API; CLI.
+- **Tests required**:
+  - Positive: the `...:ref_type:branch:ref:main` subject may `sync` `production/*`.
+  - Negative: the `...:ref:feature-x` subject is denied `sync`.
+  - Negative (parity): a policy subject containing `*` does not match concrete GitLab subjects.
+  - Negative: a mismatched `connector_id` produces a Dex error passed through the proxy.
+
+### TEN-137 Dex connector environment-variable references and `$` escaping
+- **Upstream**: https://github.com/argoproj/argo-cd/blob/a5038b0e2bbac1715754380ae0084df8e3d5b48c/util/dex/config.go#L137-L151, https://github.com/argoproj/argo-cd/blob/a5038b0e2bbac1715754380ae0084df8e3d5b48c/util/settings/settings.go#L2526-L2540, https://github.com/argoproj/argo-cd/blob/a5038b0e2bbac1715754380ae0084df8e3d5b48c/util/settings/settings.go#L2543-L2588, https://github.com/argoproj/argo-cd/blob/a5038b0e2bbac1715754380ae0084df8e3d5b48c/util/dex/dex_test.go#L584-L703, https://github.com/argoproj/argo-cd/blob/a5038b0e2bbac1715754380ae0084df8e3d5b48c/cmd/argocd-dex/commands/argocd_dex.go#L104-L119, https://github.com/argoproj/argo-cd/blob/a5038b0e2bbac1715754380ae0084df8e3d5b48c/docs/operator-manual/user-management/microsoft.md#L280-L300
+- **Maturity**: GA
+- **Semantics**: After `$`-secret resolution of the whole Dex config (TEN-131), each connector's `config` map is walked recursively, including lists and nested maps. In every string value, `$` is replaced by `$$` so that Dex's environment expansion yields the literal character. This applies both to resolved secret values and to literal strings that contain `$` (e.g. `test$test` → `test$$test`, `pass${WORD}end` → `pass$${WORD}end`, `a$b$c$d` → `a$$b$$c$$d`). The one exception is a value that starts with `$` and whose remainder is not a key in the resolved secret map, i.e. an unresolved reference such as `$AUTHENTIK_CLIENT_ID` or `$MICROSOFT_APPLICATION_ID`. Such a value is left unescaped, so Dex can expand it from the environment of the `dex` container. Dex runs as a child process of `argocd-dex rundex` and inherits that environment. Top-level keys (`issuer`, `staticClients`, `logger`) and connector keys outside `config` are not escaped.
+- **Edge cases**:
+  - Unresolved references log the warning `secret key does not exist in secret`.
+  - A bare `$` is escaped to `$$`.
+  - A resolved secret whose value itself starts with `$` (e.g. secret value `$abc`) is re-examined after resolution. Because `abc` is not a secret key, it is treated as an unresolved env reference and left unescaped, which exposes it to Dex env expansion (code-derived; parity).
+  - Strings with a `$` that is not at the start are never treated as references.
+- **Configuration surface**: `argocd-cm` `dex.config` connectors; `argocd-secret` / labelled Secrets; env vars on the `argocd-dex-server` `dex` container.
+- **Exposure**: Dex config generation (`argocd-dex rundex`, `argocd-dex gendexcfg`).
+- **Tests required**:
+  - Literal and secret-resolved `$` are escaped in connector config; `issuer` is not.
+  - `$UNSET_KEY` is passed through verbatim, and the Dex process resolves it from its env.
+  - Golden output for nested lists/maps inside `config`.
+  - Parity case: a secret value beginning with `$` is not escaped.
+
+### TEN-138 Dex connector redirectURI override and connector validation
+- **Upstream**: https://github.com/argoproj/argo-cd/blob/a5038b0e2bbac1715754380ae0084df8e3d5b48c/util/dex/config.go#L111-L136, https://github.com/argoproj/argo-cd/blob/a5038b0e2bbac1715754380ae0084df8e3d5b48c/util/dex/config.go#L158-L164, https://github.com/argoproj/argo-cd/blob/a5038b0e2bbac1715754380ae0084df8e3d5b48c/util/settings/settings.go#L2288-L2295, https://github.com/argoproj/argo-cd/blob/a5038b0e2bbac1715754380ae0084df8e3d5b48c/util/settings/settings.go#L2337-L2339, https://github.com/argoproj/argo-cd/blob/a5038b0e2bbac1715754380ae0084df8e3d5b48c/server/server.go#L802-L830, https://github.com/argoproj/argo-cd/blob/a5038b0e2bbac1715754380ae0084df8e3d5b48c/cmd/argocd-dex/commands/argocd_dex.go#L104-L127, https://github.com/argoproj/argo-cd/blob/a5038b0e2bbac1715754380ae0084df8e3d5b48c/docs/operator-manual/user-management/index.md#L215-L219
+- **Maturity**: GA
+- **Semantics**: For connectors of type `oidc`, `saml`, `microsoft`, `linkedin`, `gitlab`, `github`, `bitbucket-cloud`, `openshift`, `gitea`, `google` and `oauth`, `config.redirectURI` is unconditionally set to `<url>/api/dex/callback`. The URL is built with `path.Join`, so a path prefix in `url` is kept. Any user-supplied value is overwritten, including the external or localhost values shown in several IdP guides. Other connector types (e.g. `ldap`, `authproxy`, `keystone`, `atlassian-crowd`) are left untouched. `additionalUrls` do not produce extra connector callbacks, because Dex has a single issuer.
+- **Edge cases**:
+  - `connectors` missing or not a list, a connector entry that is not a map, or a redirect-type connector whose `config` is not a map → `malformed Dex configuration found`.
+  - A connector without a string `type` triggers an unchecked type assertion (panic).
+  - Both failures are fatal: `argocd-server` calls `CheckError` on Dex config generation at start-up and on each settings change, and `argocd-dex rundex` does the same. A bad `dex.config` applied at runtime therefore makes both processes exit (crash-loop) until it is fixed.
+  - Config generation is skipped entirely (no Dex) when `url` is empty.
+- **Configuration surface**: `argocd-cm` `url`, `dex.config.connectors[].type`, `connectors[].config.redirectURI` (ignored for listed types).
+- **Exposure**: Dex config generation; `argocd-server` and `argocd-dex-server` lifecycle.
+- **Tests required**:
+  - A user `redirectURI` on `saml`/`oidc`/`google`/`microsoft` is replaced with `<url>/api/dex/callback`; on `ldap` the config has no injected key.
+  - A `url` with a sub-path keeps the prefix.
+  - A malformed connector list, or a connector without `type`, causes the documented error/exit (parity) and recovers after the ConfigMap is fixed and pods restart.
+
+### TEN-139 Dex SAML connector integration (shared by SAML recipes)
+- **Upstream**: https://github.com/argoproj/argo-cd/blob/a5038b0e2bbac1715754380ae0084df8e3d5b48c/util/dex/config.go#L111-L136, https://github.com/argoproj/argo-cd/blob/a5038b0e2bbac1715754380ae0084df8e3d5b48c/util/oidc/oidc.go#L196-L201, https://github.com/argoproj/argo-cd/blob/a5038b0e2bbac1715754380ae0084df8e3d5b48c/docs/operator-manual/user-management/okta.md#L13-L64, https://github.com/argoproj/argo-cd/blob/a5038b0e2bbac1715754380ae0084df8e3d5b48c/docs/operator-manual/user-management/microsoft.md#L214-L278, https://github.com/argoproj/argo-cd/blob/a5038b0e2bbac1715754380ae0084df8e3d5b48c/docs/operator-manual/user-management/google.md#L73-L139, https://github.com/argoproj/argo-cd/blob/a5038b0e2bbac1715754380ae0084df8e3d5b48c/docs/operator-manual/user-management/identity-center.md#L12-L71, https://github.com/argoproj/argo-cd/blob/a5038b0e2bbac1715754380ae0084df8e3d5b48c/manifests/base/dex/argocd-dex-server-deployment.yaml#L88-L110
+- **Maturity**: GA
+- **Semantics**: SAML IdPs are supported only through a Dex `type: saml` connector. The recipes use these `config` keys:
+  - `ssoURL`: IdP SSO endpoint.
+  - `caData` (base64 of the PEM certificate including the BEGIN/END lines) or `ca` (path to a file mounted into the `dex` container).
+  - `entityIssuer`: SP entity ID, normally `<url>/api/dex/callback`.
+  - `ssoIssuer`: optional IdP entity ID.
+  - `usernameAttr`, `emailAttr`, `groupsAttr`: SAML attribute names.
+
+  The IdP must use `<url>/api/dex/callback` as ACS URL, and Argo CD forces that value into `redirectURI` (TEN-138). Login is SP-initiated via `/auth/login`. The Argo CD web flow requests Dex scopes `openid profile email groups federated:id` (TEN-117), so the SAML groups attribute becomes the `groups` claim of the Dex ID token, and RBAC uses `scopes` (default `[groups]`, TEN-074). Recipes commonly set `scopes: '[groups, email]'` (or `[email,groups]`) so that `g` lines can bind either group values or the user's email.
+- **Edge cases**:
+  - IdP-initiated login (tile/badge opening the ACS directly) is not supported by Dex. The Okta guide disables app visibility for this reason.
+  - Without `groupsAttr`, users have no groups and only user/email bindings and `policy.default` apply.
+  - Group values are passed through verbatim: names, IDs or DNs. Values containing commas must be quoted in `policy.csv` (TEN-066).
+- **Configuration surface**: `argocd-cm` `url`, `dex.config.connectors[type=saml].config.*`; `argocd-rbac-cm` `scopes`, `policy.csv`; optional volume mount on `argocd-dex-server` for `ca`.
+- **Exposure**: UI (SSO button → `/auth/login` → IdP → `/api/dex/callback` → `/auth/callback`); API.
+- **Tests required**:
+  - Mock SAML IdP: the groups attribute appears in `GET /api/v1/session/userinfo` `groups` and grants `role:admin` via `g, <group>, role:admin`.
+  - `scopes: '[groups, email]'` lets an email-keyed `g` line apply.
+  - A user without groups gets `policy.default` only.
+  - The `ca` file variant works when mounted into the `dex` container.
+
+### TEN-140 Auth0 OIDC recipe (namespaced groups claim)
+- **Upstream**: https://github.com/argoproj/argo-cd/blob/a5038b0e2bbac1715754380ae0084df8e3d5b48c/docs/operator-manual/user-management/auth0.md#L8-L23, https://github.com/argoproj/argo-cd/blob/a5038b0e2bbac1715754380ae0084df8e3d5b48c/docs/operator-manual/user-management/auth0.md#L28-L68, https://github.com/argoproj/argo-cd/blob/a5038b0e2bbac1715754380ae0084df8e3d5b48c/util/settings/settings.go#L228-L249, https://github.com/argoproj/argo-cd/blob/a5038b0e2bbac1715754380ae0084df8e3d5b48c/util/settings/settings.go#L1949-L1974
+- **Maturity**: GA
+- **Semantics**: Direct OIDC (no Dex) with `oidc.config` keys `name: Auth0`, `issuer: https://<tenant>.<eu|us>.auth0.com/`, `clientID`, `clientSecret`. `requestedScopes` lists `openid, profile, email` plus the custom claim name (e.g. `http://your.domain/groups`), which is sent as an extra scope value. The IdP application registers callback `<url>/auth/callback` and login URL `<url>/login`. Auth0 emits group membership under a namespaced (URL) claim, so `argocd-rbac-cm` sets `scopes: '[http://your.domain/groups, email]'`. The RBAC claim names are arbitrary strings, URLs included. Example policy: `p, someProjectGroup, applications, *, someProject/*, allow`, `g, argocd-global-admins, role:admin`, `policy.default: role:readonly`.
+- **Edge cases**:
+  - The guide's `domain_hint` key is not an `oidc.config` field: unknown keys are silently ignored, and only `domainHint` is honoured (TEN-124).
+  - If `scopes` still contains only `groups`, users get no groups and fall back to `policy.default`.
+- **Configuration surface**: `argocd-cm` `url`, `oidc.config`; `argocd-secret` (via `$` reference, TEN-131); `argocd-rbac-cm` `scopes`, `policy.csv`, `policy.default`.
+- **Exposure**: UI; API; CLI (`argocd login --sso`, requires a localhost callback on the IdP client).
+- **Tests required**:
+  - A token with claim `"http://your.domain/groups": ["argocd-global-admins"]` plus `scopes` set to that URL grants admin.
+  - Without the `scopes` change → readonly only.
+  - `domain_hint` in config does not add `domain_hint` to the authorization URL; `domainHint` does.
+
+### TEN-141 Okta SAML via Dex recipe
+- **Upstream**: https://github.com/argoproj/argo-cd/blob/a5038b0e2bbac1715754380ae0084df8e3d5b48c/docs/operator-manual/user-management/okta.md#L13-L64, https://github.com/argoproj/argo-cd/blob/a5038b0e2bbac1715754380ae0084df8e3d5b48c/docs/operator-manual/user-management/okta.md#L68-L104, https://github.com/argoproj/argo-cd/blob/a5038b0e2bbac1715754380ae0084df8e3d5b48c/docs/operator-manual/user-management/okta.md#L106-L121, https://github.com/argoproj/argo-cd/blob/a5038b0e2bbac1715754380ae0084df8e3d5b48c/util/dex/config.go#L111-L136
+- **Maturity**: GA
+- **Semantics**: This is the TEN-139 SAML connector with `id: okta` and `usernameAttr: email`, `emailAttr: email`, `groupsAttr: group`. Okta's Group Attribute Statement regex (e.g. `argocd-*`) controls which Okta groups are sent. RBAC: `g, argocd-admins, role:admin` with `scopes: '[email,groups]'`. Optional Dex `logger: {level: debug, format: json}` is preserved (TEN-114). For the "private deployment" variant, the guide exposes only the callback publicly and sets the connector `redirectURI` to the external host.
+- **Edge cases**:
+  - Argo CD overwrites `redirectURI` with `<url>/api/dex/callback` (TEN-138). The private-deployment variant can only work when `url` itself is the externally reachable callback host (see Doc differences).
+  - The guide's example lists both `caData` and `ca` while stating only one may be set (Dex behaviour when both are present: Unconfirmed).
+- **Configuration surface**: `argocd-cm` `url`, `dex.config`; `argocd-rbac-cm` `scopes`, `policy.csv`.
+- **Exposure**: UI; API.
+- **Tests required**:
+  - SAML assertion with `group=argocd-admins` → admin; a user whose groups are not sent → readonly / denied.
+  - Configured `redirectURI` ignored in the generated Dex config.
+
+### TEN-142 Okta OIDC recipe (custom authorization server, CLI client)
+- **Upstream**: https://github.com/argoproj/argo-cd/blob/a5038b0e2bbac1715754380ae0084df8e3d5b48c/docs/operator-manual/user-management/okta.md#L123-L177, https://github.com/argoproj/argo-cd/blob/a5038b0e2bbac1715754380ae0084df8e3d5b48c/docs/operator-manual/user-management/okta.md#L179-L224, https://github.com/argoproj/argo-cd/blob/a5038b0e2bbac1715754380ae0084df8e3d5b48c/util/oidc/oidc.go#L901-L923, https://github.com/argoproj/argo-cd/blob/a5038b0e2bbac1715754380ae0084df8e3d5b48c/util/settings/settings.go#L2142-L2157, https://github.com/argoproj/argo-cd/blob/a5038b0e2bbac1715754380ae0084df8e3d5b48c/pkg/apiclient/apiclient.go#L321-L358
+- **Maturity**: GA
+- **Semantics**: Direct OIDC with `issuer` set to an Okta custom authorization server (`https://<org>.okta.com/oauth2/<id>`), `clientID`, `clientSecret` (web app with redirect `<url>/auth/callback`), and `cliClientID` (a separate SPA app with redirect `http://localhost:8085/auth/callback`). It requests `requestedScopes: ["openid","profile","email","groups"]` and `requestedIDTokenClaims: {"groups": {"essential": true}}`, which is sent as the OIDC `claims` parameter (TEN-118). The authorization server defines a `groups` scope and a `groups` ID-token claim filtered by regex. Tokens minted for `cliClientID` are accepted because `cliClientID` is an implicit allowed audience (TEN-119/TEN-121). The CLI flow uses PKCE without a secret (TEN-130).
+- **Edge cases**:
+  - Without API Access Management (the custom authorization server), Okta's org server does not return `groups`. RBAC then sees no groups (guide warning).
+  - A missing `cliClientID` makes the CLI use the web `clientID`, which needs the localhost redirect and public-client settings.
+- **Configuration surface**: `argocd-cm` `oidc.config` (`issuer`, `clientID`, `clientSecret`, `cliClientID`, `requestedScopes`, `requestedIDTokenClaims`); `argocd-rbac-cm`.
+- **Exposure**: UI; API; CLI (`argocd login --sso`).
+- **Tests required**:
+  - The authorization URL contains `claims={"id_token":{"groups":{"essential":true}}}` and the `groups` scope.
+  - A CLI token with `aud=<cliClientID>` is accepted; one with a foreign `aud` is rejected.
+  - The `groups` claim maps to roles.
+
+### TEN-143 OneLogin OIDC recipe (roles as groups, client_secret_basic)
+- **Upstream**: https://github.com/argoproj/argo-cd/blob/a5038b0e2bbac1715754380ae0084df8e3d5b48c/docs/operator-manual/user-management/onelogin.md#L35-L72, https://github.com/argoproj/argo-cd/blob/a5038b0e2bbac1715754380ae0084df8e3d5b48c/docs/operator-manual/user-management/onelogin.md#L78-L85, https://github.com/argoproj/argo-cd/blob/a5038b0e2bbac1715754380ae0084df8e3d5b48c/docs/operator-manual/user-management/onelogin.md#L104-L168, https://github.com/argoproj/argo-cd/blob/a5038b0e2bbac1715754380ae0084df8e3d5b48c/util/oidc/oidc.go#L290-L303, https://github.com/argoproj/argo-cd/blob/a5038b0e2bbac1715754380ae0084df8e3d5b48c/util/oidc/provider.go#L207-L214
+- **Maturity**: GA
+- **Semantics**: Direct OIDC with `issuer: https://<subdomain>.onelogin.com/oidc/2`, `clientID`, `clientSecret` (a plain value; older base64 encoding is no longer required) and `requestedScopes` equal to the default `[openid, profile, email, groups]`. The OneLogin app's Groups parameter is set to "User Roles" with "Semicolon Delimited Input", so the token's `groups` claim lists role names (e.g. `["Manager","ProductTeam","TestEngineering"]`). RBAC: `g, TestEngineering, role:org-admin` with a custom role and `policy.default: role:readonly`. The OneLogin SSO tab sets Token Endpoint auth to "Basic". Argo CD builds its `oauth2.Config` without an `AuthStyle`, so `golang.org/x/oauth2` (v0.36.0) first sends HTTP Basic credentials (client ID and secret form-URL-encoded) and retries with form-body credentials on failure, caching the style that worked.
+- **Edge cases**: A wrong secret → IdP `invalid_client`, and `/auth/callback` returns HTTP 500 `failed to get token: ...` (wrapping the IdP error), on both auth styles. Role names with commas must be quoted.
+- **Configuration surface**: `argocd-cm` `oidc.config`; `argocd-rbac-cm` `policy.csv`, `policy.default`.
+- **Exposure**: UI; API.
+- **Tests required**:
+  - Mock IdP accepting only `client_secret_basic` → login succeeds.
+  - Mock IdP accepting only `client_secret_post` → login succeeds after fallback.
+  - The `TestEngineering` role grants the custom role's permissions; others get readonly.
+
+### TEN-144 Keycloak OIDC recipe with client authentication
+- **Upstream**: https://github.com/argoproj/argo-cd/blob/a5038b0e2bbac1715754380ae0084df8e3d5b48c/docs/operator-manual/user-management/keycloak.md#L9-L81, https://github.com/argoproj/argo-cd/blob/a5038b0e2bbac1715754380ae0084df8e3d5b48c/docs/operator-manual/user-management/keycloak.md#L157-L206, https://github.com/argoproj/argo-cd/blob/a5038b0e2bbac1715754380ae0084df8e3d5b48c/docs/operator-manual/user-management/keycloak.md#L225-L229, https://github.com/argoproj/argo-cd/blob/a5038b0e2bbac1715754380ae0084df8e3d5b48c/util/oidc/oidc.go#L718-L748
+- **Maturity**: GA
+- **Semantics**: This recipe uses a confidential Keycloak client with redirect `<url>/auth/callback`. The secret is stored in `argocd-secret` key `oidc.keycloak.clientSecret` and referenced as `clientSecret: $oidc.keycloak.clientSecret` (TEN-131). `oidc.config` has `issuer: https://<keycloak>/realms/<realm>` (Keycloak < 17 uses `/auth/realms/<realm>`), `clientID`, `refreshTokenThreshold: 2m` and `requestedScopes: ["openid","profile","email","groups","offline_access"]`. `offline_access` makes Keycloak return a refresh token, so server-side refresh works (TEN-125). Groups come from a `groups` client scope with a Group Membership mapper (claim `groups`, full path disabled). RBAC: `g, ArgoCDAdmins, role:admin`.
+- **Edge cases**:
+  - If `refreshTokenThreshold` is ≥ the token lifetime (Keycloak default 5 min), every request triggers a refresh.
+  - With "full group path" enabled, group values are `/ArgoCDAdmins`, so the `g` line must match that exactly.
+  - The guide advises restarting `argocd-server` on 401/login loops.
+  - The CLI cannot use this confidential client, because the CLI never sends a secret (TEN-130).
+- **Configuration surface**: `argocd-cm` `oidc.config`; `argocd-secret` `oidc.keycloak.clientSecret`; `argocd-rbac-cm`.
+- **Exposure**: UI; API.
+- **Tests required**:
+  - Login with secret reference resolved.
+  - Token refreshed when within 2m of expiry.
+  - `groups=["ArgoCDAdmins"]` → admin; `"/ArgoCDAdmins"` does not match `ArgoCDAdmins`.
+
+### TEN-145 Keycloak OIDC recipe with PKCE (public client, CLI login)
+- **Upstream**: https://github.com/argoproj/argo-cd/blob/a5038b0e2bbac1715754380ae0084df8e3d5b48c/docs/operator-manual/user-management/keycloak.md#L83-L155, https://github.com/argoproj/argo-cd/blob/a5038b0e2bbac1715754380ae0084df8e3d5b48c/docs/operator-manual/user-management/keycloak.md#L208-L233, https://github.com/argoproj/argo-cd/blob/a5038b0e2bbac1715754380ae0084df8e3d5b48c/util/oidc/oidc.go#L456-L459, https://github.com/argoproj/argo-cd/blob/a5038b0e2bbac1715754380ae0084df8e3d5b48c/util/oidc/oidc.go#L575-L577, https://github.com/argoproj/argo-cd/blob/a5038b0e2bbac1715754380ae0084df8e3d5b48c/cmd/argocd/commands/login.go#L205-L361
+- **Maturity**: GA
+- **Semantics**: This recipe uses a public Keycloak client (no client authentication) with PKCE method S256 and redirect URIs `http://localhost:8085/auth/callback` (CLI; depends on `--sso-port`) and `<url>/auth/callback`. `oidc.config` has `issuer`, `clientID`, `enablePKCEAuthentication: true` (no `clientSecret`), `refreshTokenThreshold: 2m` and the same scopes as TEN-144. The server web flow then sends `code_challenge`/`code_challenge_method=S256` and supplies the verifier at code exchange (TEN-120). The CLI (`argocd login <host> --sso --grpc-web`) always uses PKCE with the same `clientID` (TEN-130).
+- **Edge cases**:
+  - Switching an existing install from client auth to PKCE can surface `invalid_request: Missing parameter: code_challenge_method` from stale browser state (the guide suggests clearing cookies).
+  - The guide's extra redirect `<url>/pkce/verify` does not correspond to any route at this commit (see Doc differences).
+- **Configuration surface**: `argocd-cm` `oidc.config.enablePKCEAuthentication`; CLI `--sso`, `--sso-port`.
+- **Exposure**: UI; API; CLI.
+- **Tests required**:
+  - Web login against a PKCE-required public client succeeds only with `enablePKCEAuthentication: true`.
+  - CLI login succeeds and its token is accepted (aud = clientID).
+  - With PKCE disabled → IdP error surfaced as a callback failure.
+
+### TEN-146 OpenUnison OIDC recipe (public client, DN groups)
+- **Upstream**: https://github.com/argoproj/argo-cd/blob/a5038b0e2bbac1715754380ae0084df8e3d5b48c/docs/operator-manual/user-management/openunison.md#L9-L32, https://github.com/argoproj/argo-cd/blob/a5038b0e2bbac1715754380ae0084df8e3d5b48c/docs/operator-manual/user-management/openunison.md#L38-L71, https://github.com/argoproj/argo-cd/blob/a5038b0e2bbac1715754380ae0084df8e3d5b48c/util/rbac/rbac.go#L603-L633
+- **Maturity**: GA
+- **Semantics**: An OpenUnison `Trust` with `clientId: argocd`, `publicEndpoint: true` (no client secret, because the CLI cannot use one) and redirect URIs `<url>/auth/callback` plus `http://localhost:8085/auth/callback`. `oidc.config` has `name: OpenUnison`, `issuer: https://<ou-host>/auth/idp/k8sIdp`, `clientID: argocd` and `requestedScopes: ["openid","profile","email","groups"]`, with no `clientSecret`. Both web and CLI logins use the same client. Groups arrive in the `groups` claim. For LDAP/AD sources they are full Distinguished Names, which contain commas and must be double-quoted: `g, "CN=k8s_login_cluster_admins,CN=Users,DC=...", role:admin`. An OpenUnison portal "badge" opens Argo CD, which then completes the SP-initiated login silently against the existing OpenUnison session.
+- **Edge cases**:
+  - The server web flow exchanges the code without a secret: Basic auth with an empty password first, then form fallback (TEN-143 mechanism).
+  - An unquoted DN is split by the CSV parser into extra fields, and the `g` line is rejected (`invalid RBAC policy`).
+- **Configuration surface**: `argocd-cm` `oidc.config`; `argocd-rbac-cm` `policy.csv`.
+- **Exposure**: UI; API; CLI.
+- **Tests required**:
+  - A DN group (quoted) grants admin.
+  - The unquoted DN line fails validation.
+  - Web and CLI logins both work with a public client and no secret.
+
+### TEN-147 Zitadel OIDC recipe (project roles as groups, logout, SSO-only)
+- **Upstream**: https://github.com/argoproj/argo-cd/blob/a5038b0e2bbac1715754380ae0084df8e3d5b48c/docs/operator-manual/user-management/zitadel.md#L25-L93, https://github.com/argoproj/argo-cd/blob/a5038b0e2bbac1715754380ae0084df8e3d5b48c/docs/operator-manual/user-management/zitadel.md#L95-L141, https://github.com/argoproj/argo-cd/blob/a5038b0e2bbac1715754380ae0084df8e3d5b48c/docs/operator-manual/user-management/zitadel.md#L144-L210, https://github.com/argoproj/argo-cd/blob/a5038b0e2bbac1715754380ae0084df8e3d5b48c/server/logout/logout.go#L133-L139, https://github.com/argoproj/argo-cd/blob/a5038b0e2bbac1715754380ae0084df8e3d5b48c/ui/src/app/login/components/login.tsx#L71-L92
+- **Maturity**: GA
+- **Semantics**: Zitadel web app (CODE flow) with redirect `<url>/auth/callback` and post-logout URI `<url>`. Project roles `argocd_administrators`/`argocd_users` are copied into a `groups` claim by a Zitadel Action (`groupsClaim`) on the "Pre Userinfo creation" and "Pre access token creation" triggers.
+  - `argocd-cm`: `admin.enabled: "false"` (with no other `login`-capable local accounts, `userLoginsDisabled` is true and the UI hides the form) and `oidc.config` with `name: Zitadel`, `issuer`, `clientID` of the form `<number>@<project>`, `clientSecret`, `requestedScopes` = defaults, and a static `logoutURL: https://<zitadel>/oidc/v1/end_session` (no placeholders, TEN-123).
+  - `argocd-rbac-cm`: `scopes: '[groups]'`, `g, argocd_administrators, role:admin`, `g, argocd_users, role:readonly`, `policy.default: ''` (no default role).
+  - The UI shows only the SSO button, labelled `Log in via Zitadel` (TEN-155).
+- **Edge cases**:
+  - Users with no Zitadel role get no groups and, with an empty default, are denied everything.
+  - The client ID contains `@`, which is form-URL-encoded (`%40`) inside the HTTP Basic credentials at the token endpoint.
+  - If the Zitadel action is not marked "Allowed To Fail", users without roles cannot log in at the IdP.
+- **Configuration surface**: `argocd-cm` `admin.enabled`, `url`, `oidc.config` (`logoutURL`); `argocd-rbac-cm` `scopes`, `policy.csv`, `policy.default`.
+- **Exposure**: UI (login page, User Info groups, logout redirect); API.
+- **Tests required**:
+  - The `argocd_users` group gives readonly; no group → all requests denied.
+  - Logout redirects to the static end-session URL.
+  - With `admin.enabled: "false"` the login page has no username/password form.
+  - A client ID with `@` authenticates.
+
+### TEN-148 Microsoft Entra ID OIDC recipe (app registration)
+- **Upstream**: https://github.com/argoproj/argo-cd/blob/a5038b0e2bbac1715754380ae0084df8e3d5b48c/docs/operator-manual/user-management/microsoft.md#L10-L125, https://github.com/argoproj/argo-cd/blob/a5038b0e2bbac1715754380ae0084df8e3d5b48c/docs/operator-manual/user-management/microsoft.md#L127-L212, https://github.com/argoproj/argo-cd/blob/a5038b0e2bbac1715754380ae0084df8e3d5b48c/docs/operator-manual/user-management/microsoft.md#L302-L360, https://github.com/argoproj/argo-cd/blob/a5038b0e2bbac1715754380ae0084df8e3d5b48c/util/oidc/oidc.go#L486-L522, https://github.com/argoproj/argo-cd/blob/a5038b0e2bbac1715754380ae0084df8e3d5b48c/util/session/sessionmanager.go#L656-L666
+- **Maturity**: GA
+- **Semantics**:
+  - **App registration**: web redirect `<url>/auth/callback` plus a "Mobile and desktop" redirect `http://localhost:8085/auth/callback` for the CLI. Permission `User.Read` and a groups claim (token configuration).
+  - **`oidc.config`**: `name: Azure`, `issuer: https://login.microsoftonline.com/<tenant>/v2.0`, `clientID`, and either `clientSecret: $oidc.azure.clientSecret` or `azure.useWorkloadIdentity: true`. Workload identity relies on pod label `azure.workload.identity/use: "true"` and service-account annotation `azure.workload.identity/client-id` on `argocd-server`, plus a federated credential; the token is read from `AZURE_FEDERATED_TOKEN_FILE` (TEN-126). Also `requestedIDTokenClaims: {groups: {essential: true, value: "ApplicationGroup"}}` and `requestedScopes: [openid, profile, email]`.
+  - **Groups**: the `groups` claim carries group object IDs (GUIDs), bound with `g, "<object-id>", role:org-admin`. `scopes: '[groups, email]'` additionally allows email bindings. Users in 200+ groups need `azure.enableUserGroupOverageClaim` (TEN-126).
+  - **Optional settings**: `domainHint` adds `domain_hint` to the web authorization URL (TEN-124).
+  - **CLI**: `argocd login <host> --grpc-web-root-path / --sso` runs the PKCE code flow with `access_type=offline`, the `claims` parameter and `offline_access` (TEN-130).
+- **Edge cases**:
+  - Entra tokens carry `uti` instead of `jti`. Revocation verification uses `uti`, but logout does not record it (existing Doc difference).
+  - Graph overage failures return 401 (TEN-126).
+  - Copying the guide's inline `// ...` comments into YAML makes `useWorkloadIdentity` a string, so the whole `oidc.config` is discarded (see Doc differences).
+- **Configuration surface**: `argocd-cm` `oidc.config` (`azure.*`, `requestedIDTokenClaims`, `domainHint`); `argocd-secret` `oidc.azure.clientSecret`; `argocd-server` pod label / SA annotation; env `AZURE_FEDERATED_TOKEN_FILE`; `argocd-rbac-cm`.
+- **Exposure**: UI; API; CLI.
+- **Tests required**:
+  - GUID group binding grants the custom role.
+  - Secret vs workload-identity code exchange: the latter sends a `client_assertion`.
+  - CLI login token accepted (aud = clientID).
+  - The guide's YAML with inline `//` comments disables SSO (parity).
+
+### TEN-149 Microsoft Entra ID SAML via Dex recipe
+- **Upstream**: https://github.com/argoproj/argo-cd/blob/a5038b0e2bbac1715754380ae0084df8e3d5b48c/docs/operator-manual/user-management/microsoft.md#L214-L278, https://github.com/argoproj/argo-cd/blob/a5038b0e2bbac1715754380ae0084df8e3d5b48c/util/dex/config.go#L111-L136
+- **Maturity**: GA
+- **Semantics**: This is a TEN-139 SAML connector (`id: saml`). The Entra enterprise app sets Identifier (Entity ID) and Reply URL to `<url>/api/dex/callback` and Sign-on URL to `<url>/auth/login`, adds an `email` claim from `user.mail`, and adds a group claim named `Group` (all groups, source Group ID, not emitted as role claims). The connector config has `entityIssuer: <url>/api/dex/callback`, `ssoURL: https://login.microsoftonline.com/<tenant>/saml2`, `caData` (base64 signing cert), `usernameAttr: email`, `emailAttr: email` and `groupsAttr: Group`. RBAC binds group object IDs: `g, "<object-id>", role:org-admin`, with `policy.default: role:readonly`.
+- **Edge cases**:
+  - The attribute name is case-sensitive (`Group` vs `groups`). A mismatch yields no groups (Dex behaviour; see Unconfirmed).
+  - The `redirectURI` in the example is overwritten (TEN-138).
+- **Configuration surface**: `argocd-cm` `dex.config`; `argocd-rbac-cm`.
+- **Exposure**: UI; API.
+- **Tests required**:
+  - SAML assertion with a `Group` attribute value equal to the GUID → custom role.
+  - Without the attribute → readonly.
+
+### TEN-150 Microsoft Entra ID via Dex `microsoft` connector recipe
+- **Upstream**: https://github.com/argoproj/argo-cd/blob/a5038b0e2bbac1715754380ae0084df8e3d5b48c/docs/operator-manual/user-management/microsoft.md#L280-L300, https://github.com/argoproj/argo-cd/blob/a5038b0e2bbac1715754380ae0084df8e3d5b48c/util/dex/config.go#L158-L164, https://github.com/argoproj/argo-cd/blob/a5038b0e2bbac1715754380ae0084df8e3d5b48c/util/settings/settings.go#L2578-L2588
+- **Maturity**: GA
+- **Semantics**: Dex connector `type: microsoft` with `config.clientID: $MICROSOFT_APPLICATION_ID`, `config.clientSecret: $MICROSOFT_CLIENT_SECRET`, `config.tenant: <tenant id>` and `config.groups: [DevOps]` (Dex group filter). Argo CD first tries to resolve the `$` values from `argocd-secret`. If they are not secret keys, they pass unescaped and Dex expands them from the `dex` container environment (TEN-137). `redirectURI` is forced to `<url>/api/dex/callback` (TEN-138). Groups returned by Dex become the `groups` claim used by RBAC.
+- **Edge cases**:
+  - The example's `redirectURI: http://localhost:8080/api/dex/callback` is ignored.
+  - If neither a secret key nor an env var exists, Dex receives an empty or literal value and the IdP rejects the client (Dex behaviour; Unconfirmed).
+- **Configuration surface**: `argocd-cm` `dex.config`; `argocd-secret` keys or `dex` container env.
+- **Exposure**: UI; API.
+- **Tests required**:
+  - `$KEY` present in `argocd-secret` is resolved and escaped.
+  - `$ENV` absent from the secret is left for Dex env expansion.
+  - The group filter restricts the groups seen in userinfo (Dex conformance).
+
+### TEN-151 Google OIDC via Dex recipe (no groups)
+- **Upstream**: https://github.com/argoproj/argo-cd/blob/a5038b0e2bbac1715754380ae0084df8e3d5b48c/docs/operator-manual/user-management/google.md#L3-L22, https://github.com/argoproj/argo-cd/blob/a5038b0e2bbac1715754380ae0084df8e3d5b48c/docs/operator-manual/user-management/google.md#L24-L71, https://github.com/argoproj/argo-cd/blob/a5038b0e2bbac1715754380ae0084df8e3d5b48c/util/jwt/jwt.go#L142-L166, https://github.com/argoproj/argo-cd/blob/a5038b0e2bbac1715754380ae0084df8e3d5b48c/util/session/sessionmanager.go#L691-L707
+- **Maturity**: GA
+- **Semantics**: Dex connector `type: oidc`, `id: google`, `name: Google`, `config.issuer: https://accounts.google.com`, `clientID`, `clientSecret`. The Google OAuth client registers JS origin `<url>` and redirect `<url>/api/dex/callback`. Google does not expose `groups` via OIDC, so RBAC relies on `policy.default` (guide: `role:readonly`) and per-user bindings. The RBAC subject is `federated_claims.user_id`, the upstream Google `sub` (an opaque numeric ID), not the email. To bind by email, add `email` to `argocd-rbac-cm` `scopes` and use `g, user@example.com, role:admin`. The UI and CLI display the email.
+- **Edge cases**:
+  - A `p`/`g` line keyed on the email does nothing unless `email` is listed in `scopes`.
+  - "Authorized domains" on the consent screen limits who can log in, not Argo CD RBAC.
+- **Configuration surface**: `argocd-cm` `dex.config`; `argocd-rbac-cm` `policy.default`, `scopes`, `policy.csv`.
+- **Exposure**: UI; API; CLI (`argocd login --sso` via `argo-cd-cli`).
+- **Tests required**:
+  - The subject equals the Google `sub`; the email shown in userinfo.
+  - An email binding is effective only with `scopes` including `email`.
+  - Readonly default applies.
+
+### TEN-152 Google SAML via Dex recipe
+- **Upstream**: https://github.com/argoproj/argo-cd/blob/a5038b0e2bbac1715754380ae0084df8e3d5b48c/docs/operator-manual/user-management/google.md#L73-L144
+- **Maturity**: GA
+- **Semantics**: This is a TEN-139 SAML connector (`id: saml`). The Google custom SAML app sets ACS URL and Entity ID to `<url>/api/dex/callback` and maps Primary email to the attributes `name` and `email`. The connector config has `ssoURL: https://accounts.google.com/o/saml2/idp?idpid=<id>`, `entityIssuer: <url>/api/dex/callback`, `caData` (base64 PEM), `usernameAttr: name`, `emailAttr: email` and optional `ssoIssuer`. No group information is available, so RBAC uses `policy.default` and email bindings (via `scopes`).
+- **Edge cases**: The certificate must be PEM before base64 encoding. Dex documents SAML as deprecated/unsafe (guide warning).
+- **Configuration surface**: `argocd-cm` `dex.config`; `argocd-rbac-cm`.
+- **Exposure**: UI; API.
+- **Tests required**:
+  - Mock Google SAML IdP login → `policy.default` permissions.
+  - Email binding with `scopes: '[groups, email]'`.
+
+### TEN-153 Google Groups via Dex `google` connector recipe
+- **Upstream**: https://github.com/argoproj/argo-cd/blob/a5038b0e2bbac1715754380ae0084df8e3d5b48c/docs/operator-manual/user-management/google.md#L146-L268, https://github.com/argoproj/argo-cd/blob/a5038b0e2bbac1715754380ae0084df8e3d5b48c/manifests/base/dex/argocd-dex-server-deployment.yaml#L19-L110, https://github.com/argoproj/argo-cd/blob/a5038b0e2bbac1715754380ae0084df8e3d5b48c/util/dex/config.go#L158-L164, https://github.com/argoproj/argo-cd/blob/a5038b0e2bbac1715754380ae0084df8e3d5b48c/cmd/argocd-dex/commands/argocd_dex.go#L82-L127
+- **Maturity**: GA
+- **Semantics**: Dex connector `type: google`, `id: google`, with `config.clientID`, `config.clientSecret`, `config.adminEmail` (the admin identity to impersonate), optional `fetchTransitiveGroupMembership: true`, and either `serviceAccountFilePath` (option 1) or no file (option 2, GKE Workload Identity on the `argocd-dex-server` service account).
+  - **Option 1 credentials**: Secret `argocd-google-groups-json` (key `googleAuth.json`) is mounted read-only at `/tmp/oidc`, so `serviceAccountFilePath: /tmp/oidc/googleAuth.json`. The mount goes on the `dex` container (not the `copyutil` init container), alongside the existing `static-files` (`/shared`) and `dexconfig` (`/tmp`) mounts (and the stock `argocd-dex-server-tls` mount at `/tls`).
+  - **Google-side setup**: a service account with domain-wide delegation and scope `https://www.googleapis.com/auth/admin.directory.group.readonly`, plus the Admin SDK enabled.
+  - **RBAC**: the `groups` claim contains Google group email addresses (e.g. `g, sysadmins@yourcompany.com, role:admin`).
+  - **Restart**: the guide restarts `argocd-dex-server` after changes. Note that `rundex` already restarts the Dex child process when the generated config changes, but not when a mounted file changes.
+- **Edge cases**:
+  - The `redirectURI` the guide asks to edit is overwritten anyway (`google` is a redirect-injected type).
+  - Granting only the broader `admin.directory.group` scope prevents group retrieval (guide).
+  - Replacing the `volumes`/`volumeMounts` lists verbatim with the guide's snippet drops the stock `argocd-dex-server-tls` mount. Dex then serves the self-signed certificate that `rundex` generates. This matters for `--dex-server-strict-tls`.
+- **Configuration surface**: `argocd-cm` `dex.config`; Secret with the service-account JSON; `argocd-dex-server` Deployment `volumes`/`volumeMounts`; Dex SA Workload Identity annotation.
+- **Exposure**: UI (User Info shows groups); API.
+- **Tests required**:
+  - Mock Google directory: the group email in the `groups` claim grants admin.
+  - Transitive membership flag honoured (Dex conformance).
+  - A missing credentials file → Dex connector failure surfaced as an SSO error (TEN-115 redirect).
+
+### TEN-154 AWS IAM Identity Center SAML via Dex recipe
+- **Upstream**: https://github.com/argoproj/argo-cd/blob/a5038b0e2bbac1715754380ae0084df8e3d5b48c/docs/operator-manual/user-management/identity-center.md#L8-L92
+- **Maturity**: GA
+- **Semantics**: This is a TEN-139 SAML connector (`id: aws`, `name: AWS IAM Identity Center`). Config: `ssoURL: https://portal.sso.<region>.amazonaws.com/saml/assertion/<id>`, `caData` (base64 Identity Center certificate) or `ca` (a mounted file), `entityIssuer: <url>/api/dex/callback`, `usernameAttr: email`, `emailAttr: email`, `groupsAttr: groups`. Users/groups are assigned to the Identity Center application, and the group attribute mapping (described as an unofficial workaround) emits group IDs. RBAC: `g, <Identity Center Group ID>, role:admin` with `scopes: '[groups, email]'`.
+- **Edge cases**:
+  - Group values are Identity Center group IDs, not display names.
+  - `redirectURI` in the example points at an external host and is overwritten (TEN-138).
+- **Configuration surface**: `argocd-cm` `dex.config`; `argocd-rbac-cm` `scopes`, `policy.csv`.
+- **Exposure**: UI; API.
+- **Tests required**:
+  - An assertion with `groups=<group-id>` → admin.
+  - Email binding effective through `scopes`.
+
+### TEN-155 UI SSO login button label
+- **Upstream**: https://github.com/argoproj/argo-cd/blob/a5038b0e2bbac1715754380ae0084df8e3d5b48c/ui/src/app/login/components/login.tsx#L71-L92, https://github.com/argoproj/argo-cd/blob/a5038b0e2bbac1715754380ae0084df8e3d5b48c/ui/src/app/login/components/login.tsx#L94-L101, https://github.com/argoproj/argo-cd/blob/a5038b0e2bbac1715754380ae0084df8e3d5b48c/ui/src/app/login/components/login.tsx#L139-L141, https://github.com/argoproj/argo-cd/blob/a5038b0e2bbac1715754380ae0084df8e3d5b48c/server/settings/settings.go#L41-L160
+- **Maturity**: GA
+- **Semantics**: The login page treats SSO as configured when the public settings have `dexConfig.connectors` non-empty or an `oidcConfig` object. The SSO button links to `auth/login?return_url=<encoded>`. Its label is:
+  - `Log in via <oidcConfig.name>` when `oidcConfig` is present;
+  - else `Log in via <connector name>` when exactly one Dex connector exists;
+  - else `SSO Login`.
+
+  An "or" separator and the username/password form appear only when `userLoginsDisabled` is false. When logins are disabled and no SSO is configured, the page shows `Login is disabled. Please contact your system administrator.`
+- **Edge cases**:
+  - `oidc.config` without `name` yields the label `Log in via ` with an empty name.
+  - With two or more Dex connectors the generic label is shown, and Dex presents its own connector chooser.
+- **Configuration surface**: `argocd-cm` `oidc.config.name`, `dex.config.connectors[].name`, `admin.enabled`, `accounts.*`.
+- **Exposure**: UI (login page); API (`GET /api/v1/settings`).
+- **Tests required**:
+  - Label for each of the three cases.
+  - SSO-only install hides the form.
+  - Disabled logins with no SSO show the disabled message.
+
 ## Unconfirmed
 
 - Regex match mode details (TEN-075): whether Casbin's regex matcher in v2.135.0 anchors patterns and how built-in policy objects such as `*/*` and `*` (invalid Go regexes) behave in `policy.matchMode: regex` (error-as-deny vs panic recovery). The Casbin module source is not vendored in the checkout; checked `util/rbac/rbac.go#L180-L183`, `util/rbac/rbac_test.go#L496-L509`, `go.mod#L30`.
@@ -1566,6 +1942,10 @@ Permalink base used below: `https://github.com/argoproj/argo-cd/blob/a5038b0e2bb
 - Server-side handling of `users.session.duration` for the bundled Dex flow vs the documented "no refresh for Dex embedded login" note (TEN-125): server code calls `CheckAndRefreshToken` whenever Dex is configured; whether Dex returns refresh tokens to the `argo-cd` static client by default was not verified (checked `server/server.go#L1621-L1637`, `util/dex/config.go`).
 - Behaviour of the UI when `GetUserInfo.loggedIn` is false but anonymous access is enabled (rendering of read-only views) — not traced in `ui/src/app/app.tsx`.
 - Runtime effect of an invalid `policy.csv` update (TEN-078, fail-closed with Internal errors) is derived from code reading only (`util/rbac/rbac.go#L158-L205`, `#L436-L442`, `#L590-L599`, `server/server.go#L971-L984`, `util/grpc/grpc.go#L27-L32`); no upstream test exercises it, and the exact behaviour of non-gRPC HTTP handlers (terminal, extensions) on the resulting panic was not traced.
+- Dex-internal behaviour of the token-exchange flow (TEN-134..TEN-136): whether Dex v2.45.1 enables the `urn:ietf:params:oauth:grant-type:token-exchange` grant by default; whether it accepts the grant from the public `argo-cd-cli` client with an empty secret; that it requires a connector supporting token identity (the `oidc` connector); how it validates the subject token's `aud` when the connector has no `clientID` (as in the recipes); and whether the issued access token carries `aud=argo-cd-cli`, `federated_claims` and `at_hash` (which decides whether `/auth/logout` can revoke it). Dex is not a Go dependency (no `dexidp` module in `go.mod`); only the image tag is pinned (`manifests/base/dex/argocd-dex-server-deployment.yaml#L40`). No upstream test exercises token exchange: a repository-wide search for `token-exchange` finds only `docs/operator-manual/user-management/github-actions.md` and `gitlab-ci.md`.
+- How Dex expands unresolved `$VAR` values in connector config (TEN-137, TEN-150), including the result when the variable is unset in the `dex` container. Argo CD only guarantees that such values are passed unescaped (`util/dex/dex_test.go#L672-L683`); the expansion itself happens inside the Dex binary.
+- Connector attribute semantics that are delegated to Dex (TEN-139, TEN-141, TEN-149..TEN-154): case-sensitivity of SAML `groupsAttr`; mapping of SAML NameID to `federated_claims.user_id`; behaviour when both `caData` and `ca` are set; the `microsoft` connector `groups` filter and group-name format; and the `google` connector's `fetchTransitiveGroupMembership` and Workload Identity support. Checked `util/dex/config.go`, `util/dex/dex_test.go` and the IdP guides; no Argo CD code interprets these keys.
+- Whether the SSO button text is shown upper-cased (the guides show `LOGIN VIA AZURE` / `LOG IN WITH ZITADEL`): `ui/src/app/login/components/login.tsx#L87-L90` renders `Log in via <name>`, and the `argo-button` styles come from `argo-ui`, which is not present in the checkout (`ui/node_modules` absent; `ui/src/app/login/components/login.scss` upper-cases only `__more-row` links).
 
 ## Doc/implementation differences
 
@@ -1584,3 +1964,10 @@ Permalink base used below: `https://github.com/argoproj/argo-cd/blob/a5038b0e2bb
 - `docs/operator-manual/user-management/index.md#L450-L454` says logout revokes the token; revocation keys on `jti` or `at_hash` (`server/logout/logout.go#L113-L117`) whereas verification also uses `uti` (`util/session/sessionmanager.go#L661-L666`), so Entra ID tokens carrying `uti` without `jti` are not effectively revoked.
 - `cmd/argocd/commands/admin/project.go#L100` error text refers to flag `--group`, but the flag is `--scope`.
 - `cmd/argocd/commands/login.go#L320-L333`: the CLI's `domain_hint` handling reads an uninitialised struct, so `oidc.config.domainHint` is never sent by `argocd login --sso` although the server web flow sends it.
+- `docs/operator-manual/user-management/gitlab-ci.md#L19` defines the Dex connector as `id: github-ci`, but the exchange example at `#L50` sends `connector_id=gitlab-ci`. Followed verbatim, the exchange fails in Dex.
+- `docs/operator-manual/user-management/gitlab-ci.md#L78` uses the policy subject `project_path:my-repo/my-project:*` as if it were a wildcard. Subjects are matched exactly via `g(r.sub, p.sub)` (`assets/model.conf#L14`), and no Casbin role-matching function is registered (`util/rbac/rbac.go#L180-L200`), so the line only matches that literal subject.
+- `docs/operator-manual/user-management/auth0.md#L42` sets `domain_hint` in `oidc.config`; the implemented key is `domainHint` (`util/settings/settings.go#L243`). Unknown keys are ignored silently, so no domain hint is sent.
+- Several guides set connector `redirectURI` to a specific value: `okta.md#L99` (private deployment, external host), `identity-center.md#L67`, `microsoft.md#L260`, `microsoft.md#L296` (`http://localhost:8080/...`), and `google.md#L134`, `#L221-L231`. Argo CD always overwrites `redirectURI` with `<url>/api/dex/callback` for these connector types (`util/dex/config.go#L111-L136`). As a result, the Okta private-deployment variant cannot point the SAML ACS at a host other than `url`.
+- `docs/operator-manual/user-management/keycloak.md#L113` lists redirect URI `https://{hostname}/pkce/verify` as needed for the UI. No `pkce/verify` route exists in `ui/src`, `server` or `util/oidc` at this commit; server-side PKCE completes at `/auth/callback` (`util/oidc/oidc.go#L456-L459`, `#L575-L577`).
+- `docs/operator-manual/user-management/microsoft.md#L77-L79` puts `// ...` comments inline in the `oidc.config` YAML. `useWorkloadIdentity: true // ...` then parses as a string, unmarshalling into the boolean fails, and the whole `oidc.config` is discarded with warning `invalid oidc config` (`util/settings/settings.go#L1949-L1974`). Likewise, `clientSecret` would include the comment text.
+- `docs/operator-manual/user-management/google.md#L190-L215` shows `volumeMounts`/`volumes` lists for `argocd-dex-server` that omit the stock `argocd-dex-server-tls` volume (`manifests/base/dex/argocd-dex-server-deployment.yaml#L93-L110`). Applied as replacements, they drop the configured Dex TLS certificate, and `rundex` falls back to a generated self-signed one (`cmd/argocd-dex/commands/argocd_dex.go#L82-L96`).

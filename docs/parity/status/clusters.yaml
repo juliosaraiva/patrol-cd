@@ -1,0 +1,261 @@
+# internal/clusters (destination cluster access) and internal/clusters/k8sauth. See
+# docs/architecture/components/clusters.md. Library-level evidence: the controller, API server,
+# CLI and UI do not use the package yet, so features with surfaces or loops outside it are
+# in-progress. envtest tests run against a real kube-apiserver 1.36 with the generated Cluster
+# CRD and RBAC (no controllers; the token controller is emulated by the tests). Cloud endpoints
+# (STS, Google OAuth, Entra ID) and remote API servers are local fakes.
+# Commands and results: docs/architecture/components/clusters.md#verification.
+
+REPO-077:
+  status: implemented
+  impl: [internal/clusters/registry.go]
+  tests:
+    - internal/clusters/registry_test.go:TestRegistryLookups
+    - internal/clusters/registry_test.go:TestRegistryEnvtest
+    - internal/clusters/registry_test.go:TestRegistryEventsMatchModel
+  notes: >-
+    Storage is the Cluster CRD plus a credentials Secret (ADR-0003). Informer-backed registry
+    indexed by server (trailing "/" trimmed), name, project and credentials Secret; objects
+    that do not convert are skipped with a warning; the API listing is REPO-098.
+
+REPO-078:
+  status: in-progress
+  impl: [internal/clusters/registry.go]
+  tests:
+    - internal/clusters/registry_test.go:TestRegistryLookups
+    - internal/clusters/registry_test.go:TestRegistryInClusterEvents
+  notes: >-
+    Server normalization, name lookups returning every server, in-cluster resolving without an
+    object. The CRD requires spec.name, so API name=server defaulting is not applicable here.
+
+REPO-079:
+  status: in-progress
+  impl: [internal/clusters/registry.go, internal/clusters/helpers.go]
+  tests:
+    - internal/clusters/helpers_test.go:TestNormalizeNamespaces
+    - internal/clusters/helpers_test.go:TestDiffCacheSettings
+    - internal/clusters/registry_test.go:TestRegistryChangeEvents
+  notes: Namespaces are normalized and changes are reported (DiffCacheSettings); cache scoping and re-sync are internal/cache and controller wiring.
+
+REPO-080:
+  status: in-progress
+  impl: [internal/clusters/helpers.go]
+  tests: [internal/clusters/helpers_test.go:TestDiffCacheSettings]
+  notes: Typed boolean in the CRD (the "True" casing quirk does not apply); only change detection lives here.
+
+REPO-081:
+  status: in-progress
+  impl: [internal/clusters/registry.go]
+  tests:
+    - internal/clusters/registry_test.go:TestRegistryLookups
+    - internal/clusters/registry_project_test.go:TestRegistryAsProjectLookup
+  notes: Project-scoped cluster listing (GetProjectClusters for internal/project); destination rules are internal/project.
+
+REPO-084:
+  status: implemented
+  impl: [internal/clusters/restconfig.go]
+  tests:
+    - internal/clusters/restconfig_test.go:TestRawRestConfigPrecedence
+    - internal/clusters/restconfig_test.go:TestAuthHeaders
+  notes: Credentials live in the referenced Secret, never in the Cluster object.
+
+REPO-085:
+  status: implemented
+  impl: [internal/clusters/restconfig.go]
+  tests:
+    - internal/clusters/restconfig_test.go:TestRawRestConfigPrecedence
+    - internal/clusters/restconfig_test.go:TestAuthHeaders
+  notes: The "cert-based kubeconfig stores no token" rule belongs to the CLI (REPO-106).
+
+REPO-086:
+  status: implemented
+  impl: [internal/clusters/restconfig.go]
+  tests:
+    - internal/clusters/restconfig_test.go:TestTLSSettingsAgainstServer
+    - internal/clusters/restconfig_test.go:TestRawRestConfigPrecedence
+  notes: Custom CA, mTLS, serverName and insecure tested against TLS servers; CA/cert/key come from the Secret.
+
+REPO-087:
+  status: implemented
+  impl: [internal/clusters/restconfig.go, internal/clusters/aws.go]
+  tests:
+    - internal/clusters/restconfig_test.go:TestRawRestConfigPrecedence
+    - internal/clusters/restconfig_test.go:TestAWSExecModePlugin
+    - internal/clusters/aws_test.go:TestAWSNativeTransport
+    - internal/clusters/restconfig_test.go:TestAWSExecArgsEmptyClusterName
+    - internal/clusters/cloudauth_test.go:TestCloudAuthWithClientCertUsesMutualTLS
+  notes: >-
+    Default is in-process EKS tokens (no helper binary); Options.AWSAuthExec produces the
+    upstream exec form with command patrolcd and args "k8s-auth aws --cluster-name ...".
+    With a client certificate and key the exec form is kept and client-go ignores it.
+
+REPO-088:
+  status: in-progress
+  impl: [internal/clusters/restconfig.go]
+  tests:
+    - internal/clusters/restconfig_test.go:TestExecProviderPlugin
+    - internal/clusters/restconfig_test.go:TestNativeK8sAuthRecognition
+  notes: >-
+    Plugin receives args, env and spec.cluster.config (provideClusterInfo). Env is sorted.
+    Omitting execProviderConfig from API responses is the API server's job (not done).
+
+REPO-089:
+  status: implemented
+  impl: [internal/clusters/restconfig.go, internal/clusters/tuning.go]
+  tests: [internal/clusters/restconfig_test.go:TestDisableCompression]
+  notes: The CLI no-op flag parity is REPO-106.
+
+REPO-090:
+  status: implemented
+  impl: [internal/clusters/restconfig.go]
+  tests:
+    - internal/clusters/restconfig_test.go:TestProxyURL
+    - internal/clusters/restconfig_test.go:TestRawRestConfigErrors
+  notes: Error text follows upstream code ("can`t parse proxy url"); the inventory writes "can't".
+
+REPO-091:
+  status: implemented
+  impl: [internal/clusters/restconfig.go, internal/clusters/credentials.go]
+  tests:
+    - internal/clusters/restconfig_test.go:TestRawRestConfigPrecedence
+    - internal/clusters/restconfig_test.go:TestFakeInClusterUsesLocalKubeconfig
+    - internal/clusters/restconfig_test.go:TestRestConfigDoesNotMutateInClusterConfig
+    - internal/clusters/cloudauth_test.go:TestCloudAuthWithClientCertUsesMutualTLS
+  notes: >-
+    PATROL_FAKE_IN_CLUSTER replaces ARGOCD_FAKE_IN_CLUSTER. With certData and keyData in the
+    Secret, awsAuthConfig and k8s-auth helper exec configs get no in-process token (client-go
+    skips exec plugins under cert auth), so such clusters use mutual TLS only, as upstream.
+
+REPO-092:
+  status: in-progress
+  impl: [internal/clusters/registry.go]
+  tests:
+    - internal/clusters/registry_test.go:TestRegistryInClusterEvents
+    - internal/clusters/registry_test.go:TestRegistryEnvtest
+    - internal/clusters/registry_test.go:TestRegistryLocalProbeFailure
+  notes: Synthetic cluster, override by an object and restore on delete (as Modified events), one probe per process. API delete NotFound is REPO-102.
+
+REPO-093:
+  status: in-progress
+  impl: [internal/clusters/registry.go, internal/clusters/constants.go, internal/clusters/helpers.go]
+  tests:
+    - internal/clusters/registry_test.go:TestRegistryInClusterEvents
+    - internal/clusters/registry_project_test.go:TestRegistryAsProjectLookup
+    - internal/clusters/helpers_test.go:TestInClusterEnabledSetting
+    - internal/clusters/helpers_test.go:TestValidateRegistration
+  notes: List/get/name filtering and messages; registration rejection helper. Settings watching and API wiring are elsewhere.
+
+REPO-094:
+  status: in-progress
+  impl: [internal/clusters/status.go, internal/clusters/registry.go]
+  tests:
+    - internal/clusters/status_test.go:TestComputeClusterInfo
+    - internal/clusters/status_test.go:TestStatusWriterEnvtest
+    - internal/clusters/registry_test.go:TestRegistryLookups
+  notes: >-
+    Status mapping, application count and status writes. The periodic updater
+    (UPDATE_CLUSTER_INFO_TIMEOUT) and the API attaching info are not implemented here.
+
+REPO-095:
+  status: implemented
+  impl: [internal/clusters/helpers.go, internal/clusters/status.go]
+  tests:
+    - internal/clusters/helpers_test.go:TestAutoLabelKubernetesVersion
+    - internal/clusters/status_test.go:TestStatusWriterEnvtest
+  notes: The controller must call RecordVersionLabel on its cluster-info interval.
+
+REPO-096:
+  status: in-progress
+  impl: [internal/clusters/helpers.go, internal/clusters/registry.go]
+  tests: [internal/clusters/helpers_test.go:TestRefreshRequestedAt, internal/clusters/helpers_test.go:TestDiffCacheSettings]
+  notes: Annotation parsing (malformed ignored) and change detection; the invalidate-cache API and cache resync are elsewhere.
+
+REPO-097:
+  status: in-progress
+  impl: [internal/clusters/helpers.go]
+  tests: [internal/clusters/helpers_test.go:TestIsSkipReconcile, internal/clusters/registry_test.go:TestRegistryEnvtest]
+  notes: Annotation evaluation and change events; shard filtering is the controller's.
+
+REPO-103:
+  status: in-progress
+  impl: [internal/clusters/bootstrap.go]
+  tests:
+    - internal/clusters/bootstrap_test.go:TestBootstrapEnvtest
+    - internal/clusters/bootstrap_test.go:TestRotateManagerTokenRejectsNonLegacyTokens
+  notes: >-
+    Token rotation library (new token Secret, persist callback, SA secrets list update, old
+    Secret deletion) against envtest with an emulated token controller; the API handler and
+    RBAC checks are not implemented.
+
+REPO-104:
+  status: in-progress
+  impl: [internal/clusters/helpers.go]
+  tests: [internal/clusters/helpers_test.go:TestObjectNameForServer, internal/clusters/helpers_test.go:TestObjectNameForServerProperties]
+  notes: Naming with upstream known answers; API write semantics are not applicable to the CRD and belong to the API server.
+
+REPO-105:
+  status: implemented
+  impl: [internal/clusters/tuning.go]
+  tests:
+    - internal/clusters/tuning_test.go:TestTuningFromLookup
+    - internal/clusters/tuning_test.go:TestTuningFromLookupBounds
+    - internal/clusters/tuning_test.go:TestApplyTuningTransport
+    - internal/clusters/tuning_test.go:TestRetries
+    - internal/clusters/tuning_test.go:TestRetryTransportProperties
+  notes: Variables use the PATROL_ prefix (PATROL_K8S_*, PATROL_K8SCLIENT_RETRY_*).
+
+REPO-106:
+  status: in-progress
+  impl: [internal/clusters/bootstrap.go]
+  tests: [internal/clusters/bootstrap_test.go:TestBootstrapEnvtest]
+  notes: Bootstrap step only; the patrol cluster add command is not implemented.
+
+REPO-107:
+  status: implemented
+  impl: [internal/clusters/bootstrap.go]
+  tests:
+    - internal/clusters/bootstrap_test.go:TestBootstrapEnvtest
+    - internal/clusters/bootstrap_test.go:TestBootstrapTokenTimeout
+  notes: >-
+    Names patrol-manager, patrol-manager-role(-binding), patrol-manager-long-lived-token.
+    Difference: UninstallManager uses the install namespace and removes per-namespace Roles
+    (upstream always uses kube-system and leaves Roles).
+
+REPO-111:
+  status: implemented
+  impl: [internal/clusters/aws.go, internal/clusters/k8sauth/k8sauth.go]
+  tests:
+    - internal/clusters/aws_test.go:TestAWSTokenFormat
+    - internal/clusters/aws_test.go:TestAWSTokenAssumeRole
+    - internal/clusters/aws_test.go:TestAWSTokenRetry
+    - internal/clusters/k8sauth/k8sauth_test.go:TestAWSCommand
+    - internal/clusters/k8sauth/k8sauth_test.go:TestAWSCommandTimeout
+  notes: patrolcd k8s-auth aws (command to be wired into patrolcd); also used in-process.
+
+REPO-112:
+  status: implemented
+  impl: [internal/clusters/gcp.go, internal/clusters/k8sauth/k8sauth.go]
+  tests:
+    - internal/clusters/cloudauth_test.go:TestGCPTokenSource
+    - internal/clusters/cloudauth_test.go:TestGCPNativeExec
+    - internal/clusters/k8sauth/k8sauth_test.go:TestGCPCommand
+
+REPO-113:
+  status: implemented
+  impl: [internal/clusters/azure.go, internal/clusters/k8sauth/k8sauth.go]
+  tests:
+    - internal/clusters/cloudauth_test.go:TestAzureServicePrincipal
+    - internal/clusters/cloudauth_test.go:TestAzureDefaultsToWorkloadIdentity
+    - internal/clusters/cloudauth_test.go:TestAzureNativeExec
+    - internal/clusters/k8sauth/k8sauth_test.go:TestAzureCommand
+  notes: >-
+    azidentity instead of kubelogin; login methods workloadidentity (default), spn, msi,
+    azurecli, ropc. devicecode/interactive are rejected (no terminal); no CGO restriction.
+
+SYNC-093:
+  status: in-progress
+  impl: [internal/clusters/impersonation.go]
+  tests:
+    - internal/clusters/impersonation_test.go:TestImpersonationHeader
+    - internal/clusters/impersonation_test.go:TestImpersonationEnvtest
+  notes: Applying the selected service account to the REST config (verified against real RBAC in envtest); selection is internal/project, sync wiring is the controller's.

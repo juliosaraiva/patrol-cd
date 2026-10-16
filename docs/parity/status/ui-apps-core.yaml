@@ -1,0 +1,284 @@
+# Web UI, applications core (ui/src/pages/applications, except resources/): list, details shell,
+# sync, operations, history and rollback, delete, details/parameters. See
+# docs/architecture/components/ui.md. Evidence is vitest + Testing Library against MSW mocks of
+# the /api/v1 contract (pnpm -C ui test): implemented, not verified end to end. Playwright
+# journeys for a real server live in ui/e2e/apps-core.spec.ts and have not been run.
+# Annotation keys use Patrol's prefixes (notice.cd.patrol.example/*, link.cd.patrol.example/*,
+# cd.patrol.example/managed-by-url, cd.patrol.example/deletion-approved).
+
+API-088:
+  status: in-progress
+  impl:
+    - ui/src/pages/applications/ApplicationsListPage.tsx
+    - ui/src/pages/applications/list/ApplicationTiles.tsx
+    - ui/src/pages/applications/list/ApplicationsTable.tsx
+    - ui/src/pages/applications/list/ApplicationsSummary.tsx
+    - ui/src/pages/applications/list/HealthBar.tsx
+    - ui/src/pages/applications/list/filters.ts
+  tests:
+    - ui/src/pages/applications/ApplicationsListPage.test.tsx:renders tiles with the distinct status families and details links
+    - ui/src/pages/applications/ApplicationsListPage.test.tsx:toggles the health bar and remembers the choice
+    - ui/src/pages/applications/ApplicationsListPage.test.tsx:switches to the summary view and filters from a count
+    - ui/src/pages/applications/ApplicationsListPage.test.tsx:merges watch events into the list
+    - ui/src/pages/applications/ApplicationsListPage.test.tsx:paginates and virtualizes thousands of applications
+    - ui/src/pages/applications/ApplicationsListPage.test.tsx:guides first-time users from the empty state
+    - ui/src/pages/applications/list/filters.test.ts:sorts by name, creation and last sync
+  notes: >-
+    Tiles, list (virtualized above 200 rows) and summary (counts by sync, health, project,
+    cluster) views; `view`/`page` URL params, page sizes 10/25/50/100/500, sort by name, created
+    or last synced; health bar toggle; live list from the watch stream; per-application Sync,
+    Refresh, Delete, favorite, notice icon and links. Not done: app-of-apps parent marker,
+    `fields=` projection of the list request, pausing updates while the page is hidden.
+
+API-089:
+  status: implemented
+  impl: [ui/src/pages/applications/list/filters.ts, ui/src/pages/applications/list/FiltersPanel.tsx, ui/src/pages/applications/shared/favorites.ts]
+  tests:
+    - ui/src/pages/applications/list/filters.test.ts:round-trips every filter through URL search params with upstream names
+    - ui/src/pages/applications/list/filters.test.ts:filters by every dimension, glob dimensions included
+    - ui/src/pages/applications/list/filters.test.ts:counts options against the other active filters
+    - ui/src/pages/applications/list/filters.test.ts:matches label selector expressions
+    - ui/src/pages/applications/ApplicationsListPage.test.tsx:filters with counts, shows chips and clears them
+    - ui/src/pages/applications/ApplicationsListPage.test.tsx:restores filters and the view from the URL
+    - ui/src/pages/applications/ApplicationsListPage.test.tsx:marks favorites and filters by them
+  notes: >-
+    URL params search, proj, sync, health, operation, labels, annotations, namespace, cluster,
+    repo, targetRevision, autoSync, showFavorites (comma-separated, URI-encoded values). Globs on
+    namespace, cluster, repository and target revision. Filters persist in the URL only (not in
+    browser preferences); favorites persist per browser.
+
+API-090:
+  status: implemented
+  impl: [ui/src/pages/applications/list/BulkActions.tsx, ui/src/pages/applications/ApplicationsListPage.tsx]
+  tests:
+    - ui/src/pages/applications/ApplicationsListPage.test.tsx:hard-refreshes the selected applications and reports each result
+    - ui/src/pages/applications/ApplicationsListPage.test.tsx:syncs every selected application with the chosen flags
+    - ui/src/pages/applications/ApplicationsListPage.test.tsx:requires typing delete before deleting several applications
+    - ui/src/pages/applications/details/Integrations.test.tsx:opens the application creation wizard from the list
+  notes: >-
+    Applications are chosen by selecting them in the list (checkboxes, "Select all N") instead of a
+    picker inside the panel. Bulk sync (prune, dry run, apply only, force with confirmation, sync
+    options, retry), bulk refresh (normal/hard) and bulk delete (type-to-confirm), four at a time,
+    with a per-application result table. "New application" opens the creation wizard (?new=1)
+    from src/pages/create.
+
+API-093:
+  status: implemented
+  impl:
+    - ui/src/pages/applications/details/ActionBar.tsx
+    - ui/src/pages/applications/details/AutoSyncDialog.tsx
+    - ui/src/pages/applications/operations/ApproveDeletionDialog.tsx
+    - ui/src/pages/applications/operations/TerminateDialog.tsx
+    - ui/src/pages/applications/ApplicationDetailsPage.tsx
+  tests:
+    - ui/src/pages/applications/ApplicationDetailsPage.test.tsx:refreshes normally and hard
+    - ui/src/pages/applications/ApplicationDetailsPage.test.tsx:disables Diff when there is nothing to compare
+    - ui/src/pages/applications/ApplicationDetailsPage.test.tsx:opens the diff drawer for an out-of-sync application
+    - ui/src/pages/applications/ApplicationDetailsPage.test.tsx:toggles auto-sync after confirmation, keeping prune and self-heal
+    - ui/src/pages/applications/ApplicationDetailsPage.test.tsx:replaces Delete with Confirm deletion while a deletion waits for approval
+    - ui/src/pages/applications/ApplicationDetailsPage.test.tsx:terminates a running operation after confirmation
+    - ui/src/pages/applications/history/HistoryPanel.test.tsx:disables auto-sync first when asked, then rolls back
+  notes: >-
+    Toggle auto-sync updates spec.syncPolicy.automated.enabled (PUT, validate=false) instead of
+    running a toggle-auto-sync resource action. Confirm pruning lives in the operation panel;
+    Confirm deletion replaces Delete while a deletion waits. Top-bar extensions are API-125.
+
+API-094:
+  status: in-progress
+  impl:
+    - ui/src/pages/applications/parameters/AppDetailsPanel.tsx
+    - ui/src/pages/applications/parameters/SourceEditor.tsx
+    - ui/src/pages/applications/parameters/Fields.tsx
+    - ui/src/pages/applications/parameters/specEdit.ts
+    - ui/src/pages/applications/parameters/rebase.ts
+    - ui/src/api/hooks/apps-core.ts
+  tests:
+    - ui/src/pages/applications/parameters/AppDetailsPanel.test.tsx:edits labels and the sync policy, then saves with the loaded resourceVersion
+    - ui/src/pages/applications/parameters/AppDetailsPanel.test.tsx:merges the draft onto the latest version after a conflict, keeping concurrent changes
+    - ui/src/pages/applications/parameters/AppDetailsPanel.test.tsx:saves onto a status-only update without a conflict or a stale warning
+    - ui/src/pages/applications/parameters/AppDetailsPanel.test.tsx:holds the save until server-side edits are merged and reviewed
+    - ui/src/pages/applications/parameters/AppDetailsPanel.test.tsx:edits Helm parameters with override markers on a multi-source application
+    - ui/src/pages/applications/parameters/AppDetailsPanel.test.tsx:edits Kustomize images and validates patches YAML
+    - ui/src/pages/applications/parameters/AppDetailsPanel.test.tsx:adds Kustomize common labels and annotations, keeping a row while its key is retyped
+    - ui/src/pages/applications/parameters/AppDetailsPanel.test.tsx:adds entries to a map parameter announced by the plugin
+    - ui/src/pages/applications/parameters/AppDetailsPanel.test.tsx:renders plugin parameters from the announcement
+    - ui/src/pages/applications/parameters/AppDetailsPanel.test.tsx:validates the YAML and saves the edited spec
+    - ui/src/pages/applications/details/Integrations.test.tsx:adds Application resource-tab extensions and the notification subscriptions editor to the details panel
+    - ui/src/pages/applications/parameters/specEdit.test.ts:applies drafts with parsed YAML and switches between single and multi source
+    - ui/src/pages/applications/parameters/specEdit.test.ts:keeps rows without a key in the draft and writes only complete rows
+    - ui/src/pages/applications/parameters/specEdit.test.ts:round-trips plugin map parameters in place and drops emptied ones
+    - ui/src/pages/applications/parameters/rebase.test.ts:applies the user's edits onto the latest version and keeps concurrent changes
+    - ui/src/pages/applications/parameters/rebase.test.ts:keeps the user's value when both sides changed a field and reports the conflict
+    - ui/src/pages/applications/parameters/rebase.test.ts:merges lists of named items per name and removes what either side deleted
+    - ui/src/pages/applications/parameters/rebase.test.ts:ignores status and resourceVersion updates from the controller
+  notes: >-
+    Summary (project, labels, annotations, destination, sync policy, sync options, retry, info,
+    revision history limit, links, status badge), Parameters/Sources (Helm, Kustomize, Directory,
+    Plugin editors, add/remove sources with refs) and Manifest (YAML of metadata and spec,
+    validated) tabs, plus Application resource-tab extensions. Saves PUT the whole object: the
+    user's changes (draft vs. the version it is based on) are applied onto the latest watched
+    version, so status-only updates do not conflict; when labels, annotations, finalizers or the
+    spec changed on the server, saving is held and the changed paths are listed until the user
+    rebases (3-way merge: untouched fields take server values, both-changed fields keep the
+    user's value and are listed as conflicts), and a 409 offers the same rebase. The summary mounts the notification subscriptions
+    editor (NOTIF-109, src/pages/notifications). The manifest is saved with PUT, not UpdateSpec.
+    Missing: the app EVENTS tab; the diff is a separate drawer.
+
+API-098:
+  status: implemented
+  impl: [ui/src/pages/applications/sync/SyncPanel.tsx, ui/src/pages/applications/sync/SyncOptionsFields.tsx, ui/src/pages/applications/sync/syncOptions.ts]
+  tests:
+    - ui/src/pages/applications/sync/SyncPanel.test.tsx:starts a full sync and links to the created operation
+    - ui/src/pages/applications/sync/SyncPanel.test.tsx:sends a revision override, apply-only strategy, retry and a selective resource list
+    - ui/src/pages/applications/sync/SyncPanel.test.tsx:lists every source revision of a multi-source app, excludes hooks and confirms pruning
+    - ui/src/pages/applications/sync/SyncPanel.test.tsx:requires confirming Force, and explains deletion approval for Prune=confirm
+    - ui/src/pages/applications/sync/SyncPanel.test.tsx:offers Replace only when the server allows it, with a typed confirmation
+    - ui/src/pages/applications/sync/SyncPanel.test.tsx:preselects one resource from the upstream deploy deep link
+    - ui/src/pages/applications/sync/SyncPanel.test.tsx:explains a sync refused by a sync window
+    - ui/src/pages/applications/sync/syncOptions.test.ts:sends every revision of a multi-source application when one changes
+    - ui/src/pages/applications/sync/syncOptions.test.ts:sends empty sync options when the user clears the options the application declares
+  notes: >-
+    Revisions are sent only when they differ from the spec. Typed confirmation ('prune') whenever
+    pruning deletes resources (upstream asks for both prune-all and prune-some), 'replace' for
+    Replace, a checkbox for Force. FailOnSharedResource is offered as an option too. The body is
+    the published ApplicationSyncRequest (strategy, syncOptions {items}); the response
+    ({application, operation}) names the created Operation.
+
+API-099:
+  status: in-progress
+  impl: [ui/src/pages/applications/history/HistoryPanel.tsx]
+  tests:
+    - ui/src/pages/applications/history/HistoryPanel.test.tsx:lists deployments newest first with revisions, compare links and commit details
+    - ui/src/pages/applications/history/HistoryPanel.test.tsx:disables auto-sync first when asked, then rolls back
+    - ui/src/pages/applications/history/HistoryPanel.test.tsx:explains multi-source rollbacks and server refusals
+    - ui/src/pages/applications/history/HistoryPanel.test.tsx:shows guidance when nothing was deployed yet
+  notes: >-
+    History with revisions (commit links, revision metadata on demand), initiator, duration,
+    sources, compare-with-current links, Rollback/Redeploy with prune and dry run. Opened with
+    ?panel=history (upstream: rollback=<index>). Missing: per-entry source parameters from
+    GetAppDetails with versionId.
+
+API-100:
+  status: in-progress
+  impl:
+    - ui/src/pages/applications/details/StatusPanel.tsx
+    - ui/src/pages/applications/details/ConditionsPanel.tsx
+    - ui/src/pages/applications/operations/OperationPanel.tsx
+  tests:
+    - ui/src/pages/applications/ApplicationDetailsPage.test.tsx:shows health, sync with revision link and commit, auto-sync, last operation and source
+    - ui/src/pages/applications/ApplicationDetailsPage.test.tsx:lists conditions with recovery guidance and a dismissible notice
+    - ui/src/pages/applications/operations/OperationPanel.test.tsx:shows the running operation with progress and per-resource results, and terminates it
+    - ui/src/pages/applications/operations/OperationPanel.test.tsx:lists operation history and shows another operation through the URL
+    - ui/src/pages/applications/operations/OperationPanel.test.tsx:approves deletions waiting for confirmation
+    - ui/src/pages/applications/operations/OperationPanel.test.tsx:pages through older operations with the continue token
+  notes: >-
+    Status panel (health, sync with revision and commit summary, auto-sync, sync window state,
+    last operation, sources), conditions with recovery guidance, operation panel over Operation
+    objects (phase, wave/task progress, plan revisions and warnings, hooks, per-resource results,
+    terminate, operation history paged with limit/continue; polled every 2 s while running). Missing: hydrator status and
+    hydration operation panel (APP-139); status-panel extensions are API-124.
+
+API-114:
+  status: implemented
+  impl: [ui/src/pages/applications/details/StatusBadge.tsx]
+  tests:
+    - ui/src/pages/applications/parameters/AppDetailsPanel.test.tsx:shows settings, links and the status badge snippet
+  notes: Application badge in the details summary (URL, Markdown, Textile, Rdoc, AsciiDoc). The project badge belongs to the projects page.
+
+API-115:
+  status: in-progress
+  impl: [ui/src/pages/applications/shared/links.ts, ui/src/pages/applications/parameters/AppDetailsPanel.tsx]
+  tests:
+    - ui/src/pages/applications/shared/shared.test.ts:validates the managed-by URL
+  notes: >-
+    The details summary links to the managing instance or shows "managed-by-url: invalid url
+    provided". Child-application links in app-of-apps trees belong to the resource views.
+
+API-116:
+  status: implemented
+  impl: [ui/src/pages/applications/shared/links.ts, ui/src/pages/applications/details/ActionBar.tsx, ui/src/pages/applications/list/AppRow.tsx]
+  tests:
+    - ui/src/pages/applications/shared/shared.test.ts:parses titled links and rejects unsafe schemes
+    - ui/src/pages/applications/shared/shared.test.ts:merges summary URLs and link annotations
+    - ui/src/pages/applications/ApplicationDetailsPage.test.tsx:opens deep links and external URLs from the Links menu
+  notes: Application-level links (status.summary.externalURLs and link.cd.patrol.example/* on the Application); resource-node links are the resource views' part.
+
+API-117:
+  status: implemented
+  impl: [ui/src/pages/applications/shared/notice.ts, ui/src/pages/applications/details/NoticeBanner.tsx, ui/src/pages/applications/list/AppRow.tsx]
+  tests:
+    - ui/src/pages/applications/shared/shared.test.ts:requires content, strips bidi controls and truncates
+    - ui/src/pages/applications/shared/shared.test.ts:parses severity, url, permanent, icon and scope with safe defaults
+    - ui/src/pages/applications/shared/shared.test.ts:remembers dismissals per content and keeps at most 200
+    - ui/src/pages/applications/ApplicationDetailsPage.test.tsx:lists conditions with recovery guidance and a dismissible notice
+  notes: >-
+    Icon names info|warning|error, plus upstream's fa-info-circle, fa-exclamation-triangle and
+    fa-exclamation-circle; other upstream icons (bell, wrench…) fall back to the severity icon
+    because Patrol ships no such glyphs.
+
+API-119:
+  status: in-progress
+  impl: [ui/src/pages/applications/ApplicationsListPage.tsx, ui/src/pages/applications/shared/favorites.ts, ui/src/pages/applications/shared/notice.ts]
+  tests:
+    - ui/src/pages/applications/ApplicationsListPage.test.tsx:toggles the health bar and remembers the choice
+    - ui/src/pages/applications/ApplicationsListPage.test.tsx:marks favorites and filters by them
+  notes: >-
+    Per-browser keys (patrol.apps.view, .pageSize, .filtersOpen, .healthBar, .favorites,
+    .dismissedNotices) instead of one view_preferences object; filters persist in the URL.
+
+API-133:
+  status: implemented
+  impl: [ui/src/pages/applications/ApplicationsListPage.tsx, ui/src/pages/applications/list/keyboard.ts]
+  tests:
+    - ui/src/pages/applications/ApplicationsListPage.test.tsx:focuses the list search with "/" and keeps the search in the URL
+  notes: >-
+    "/" focuses and selects the list search (before the shell's global search) except while the
+    New application panel is open. Esc clears a non-empty search first, then blurs.
+
+API-134:
+  status: implemented
+  impl: [ui/src/pages/applications/ApplicationsListPage.tsx, ui/src/pages/applications/list/keyboard.ts]
+  tests:
+    - ui/src/pages/applications/ApplicationsListPage.test.tsx:moves a cursor over tiles with arrows and digits, opens with Enter and clears with Esc
+    - ui/src/pages/applications/list/filters.test.ts:moves within bounds without wrapping
+    - ui/src/pages/applications/list/filters.test.ts:reads digits from the top row and the numpad
+  notes: The cursor moves DOM focus to the tile's link and marks the tile aria-current.
+
+API-135:
+  status: implemented
+  impl: [ui/src/pages/applications/ApplicationsListPage.tsx, ui/src/pages/applications/list/ApplicationsTable.tsx]
+  tests:
+    - ui/src/pages/applications/ApplicationsListPage.test.tsx:enters the table with ArrowDown, moves by row, returns to search with Esc and opens with Enter
+  notes: Rows use the design-system table's focus model (Up/Down, Enter); Esc returns focus to the search field instead of only clearing the highlight.
+
+API-092:
+  status: implemented
+  impl:
+    - ui/src/pages/applications/details/ResourceViewsSlot.tsx
+    - ui/src/pages/applications/ApplicationDetailsPage.tsx
+  tests:
+    - ui/src/pages/applications/details/ResourceViewsSlot.test.tsx:starts a selective sync from the resource drawer's Sync button
+    - ui/src/pages/applications/details/ResourceViewsSlot.test.tsx:opens the application details panel from the tree root node
+    - ui/src/pages/applications/ApplicationDetailsPage.test.tsx:lists resources, selects one through the URL and starts a selective sync
+  notes: >-
+    Shell side only: the details page mounts the resource views (owned by apps-resources) through
+    ResourceViewsSlot, forwarding app, onSyncResources (selective sync from the resource drawer),
+    onOpenApplication (tree root) and fullscreenLogs; tree data is the shared useResourceTree
+    cache entry and selection the `node` URL parameter. A built-in resource table is the fallback
+    when the module is absent.
+
+API-096:
+  status: implemented
+  impl:
+    - ui/src/pages/applications/ApplicationLogsPage.tsx
+    - ui/src/pages/applications/details/ResourceViewsSlot.tsx
+  tests:
+    - ui/src/pages/applications/ApplicationLogsPage.test.tsx:streams a pod's logs in the chosen container with a link back to the resource
+    - ui/src/pages/applications/ApplicationLogsPage.test.tsx:aggregates a workload's pods on the namespaced route
+    - ui/src/pages/applications/ApplicationLogsPage.test.tsx:explains how to pick a pod when the query string names none
+    - ui/src/pages/applications/details/ResourceViewsSlot.test.tsx:links the resource drawer's Logs tab to the full-screen logs page
+  notes: >-
+    Full-screen route only (/applications/[:appNamespace/]:name/:namespace/:container/logs with
+    ?podName= or ?kind=&group=&resourceName=): mounts the resource views' ResourceLogsViewer in
+    full-screen mode, with loading, missing-target and error states and a link back to the
+    resource's Logs tab. The viewer itself is reported by apps-resources.

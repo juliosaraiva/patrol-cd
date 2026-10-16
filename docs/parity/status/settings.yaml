@@ -1,0 +1,1743 @@
+# internal/settings (settings model, watcher, parameters). See docs/architecture/components/settings.md.
+# Library-level evidence: no component has adopted the package yet. Entries whose behavior also
+# needs a component that does not exist yet (controller, API server, repo-server, CLI, command
+# wiring) are in-progress; entries completed by existing libraries (internal/rbac, internal/auth,
+# internal/diff, internal/lua, internal/cache) together with this package are implemented.
+
+APP-031:
+  status: in-progress
+  impl: [internal/settings/params.go, internal/settings/params_table.go]
+  tests:
+    - internal/settings/params_test.go:TestParamKeysMatchUpstream
+    - internal/settings/params_test.go:TestParamWiringMatchesManifests
+    - internal/settings/params_test.go:TestParamDefaultsAreValidAndDocumented
+    - internal/settings/params_test.go:TestResolveParamsPrecedence
+    - internal/settings/params_test.go:TestResolveParamsInvalidValues
+  notes: >-
+    Settings part only: patrol-cmd-params-cm key(s) controller.resource.health.persist with
+    upstream env var (ARGOCD_ renamed PATROL_), flag name, default, bounds and fallback warnings;
+    the consuming component applies the semantics.
+
+APP-040:
+  status: in-progress
+  impl: [internal/settings/resources.go]
+  tests:
+    - internal/settings/resources_test.go:TestResourcesFilterTruthTable
+    - internal/settings/resources_test.go:TestCoreExclusionsCannotBeIncluded
+  notes: >-
+    Settings part only: Settings.IsExcludedResource/ResourceFilter decide exclusion per group,
+    kind and cluster; the controller raises ExcludedResourceWarning.
+
+APP-067:
+  status: in-progress
+  impl: [internal/settings/params.go, internal/settings/params_table.go]
+  tests:
+    - internal/settings/params_test.go:TestParamKeysMatchUpstream
+    - internal/settings/params_test.go:TestParamWiringMatchesManifests
+    - internal/settings/params_test.go:TestParamDefaultsAreValidAndDocumented
+    - internal/settings/params_test.go:TestResolveParamsPrecedence
+    - internal/settings/params_test.go:TestResolveParamsInvalidValues
+  notes: >-
+    Settings part only: patrol-cmd-params-cm key(s) application.namespaces with upstream env var
+    (ARGOCD_ renamed PATROL_), flag name, default, bounds and fallback warnings; the consuming
+    component applies the semantics. Glob semantics are owned by the controller/server.
+
+APP-070:
+  status: in-progress
+  impl: [internal/settings/parse_cm.go, internal/settings/settings.go]
+  tests:
+    - internal/settings/parse_cm_test.go:TestParseEveryConfigMapKeyFamily
+    - internal/settings/parse_cm_test.go:TestParseInvalidValuesAreReportedWithKeyNames
+    - internal/settings/parse_cm_test.go:TestParseDefaults
+  notes: >-
+    Settings part only: parsing and validation of application.resourceTrackingMethod (default
+    annotation; invalid values are errors). Tracking behavior lives in internal/tracking.
+
+APP-071:
+  status: in-progress
+  impl: [internal/settings/parse_cm.go, internal/settings/settings.go]
+  tests:
+    - internal/settings/parse_cm_test.go:TestParseEveryConfigMapKeyFamily
+    - internal/settings/parse_cm_test.go:TestParseInvalidValuesAreReportedWithKeyNames
+    - internal/settings/parse_cm_test.go:TestParseDefaults
+  notes: >-
+    Settings part only: parsing and validation of application.resourceTrackingMethod=label.
+
+APP-072:
+  status: in-progress
+  impl: [internal/settings/parse_cm.go, internal/settings/settings.go]
+  tests:
+    - internal/settings/parse_cm_test.go:TestParseEveryConfigMapKeyFamily
+    - internal/settings/parse_cm_test.go:TestParseInvalidValuesAreReportedWithKeyNames
+    - internal/settings/parse_cm_test.go:TestParseDefaults
+  notes: >-
+    Settings part only: parsing and validation of
+    application.resourceTrackingMethod=annotation+label.
+
+APP-073:
+  status: in-progress
+  impl: [internal/settings/parse_cm.go, internal/settings/settings.go]
+  tests:
+    - internal/settings/parse_cm_test.go:TestParseEveryConfigMapKeyFamily
+    - internal/settings/parse_cm_test.go:TestParseInvalidValuesAreReportedWithKeyNames
+    - internal/settings/parse_cm_test.go:TestParseDefaults
+  notes: >-
+    Settings part only: parsing and validation of application.instanceLabelKey (default
+    app.kubernetes.io/instance, validated as a qualified label key).
+
+APP-074:
+  status: in-progress
+  impl: [internal/settings/parse_cm.go, internal/settings/settings.go]
+  tests:
+    - internal/settings/parse_cm_test.go:TestParseEveryConfigMapKeyFamily
+    - internal/settings/parse_cm_test.go:TestParseInvalidValuesAreReportedWithKeyNames
+    - internal/settings/parse_cm_test.go:TestParseDefaults
+  notes: >-
+    Settings part only: parsing and validation of installationID.
+
+APP-081:
+  status: in-progress
+  impl: [internal/settings/parse_cm.go, internal/settings/settings.go]
+  tests:
+    - internal/settings/parse_cm_test.go:TestParseEveryConfigMapKeyFamily
+    - internal/settings/parse_cm_test.go:TestParseInvalidValuesAreReportedWithKeyNames
+    - internal/settings/parse_cm_test.go:TestParseDefaults
+  notes: >-
+    Settings part only: parsing and validation of timeout.reconciliation (default 120s,
+    Reconciliation.TimeoutSet for the repo-server default). Periodic refresh is the controller's.
+
+APP-082:
+  status: in-progress
+  impl: [internal/settings/parse_cm.go, internal/settings/settings.go]
+  tests:
+    - internal/settings/parse_cm_test.go:TestParseEveryConfigMapKeyFamily
+    - internal/settings/parse_cm_test.go:TestParseInvalidValuesAreReportedWithKeyNames
+    - internal/settings/parse_cm_test.go:TestParseDefaults
+  notes: >-
+    Settings part only: parsing and validation of timeout.reconciliation.jitter (default 60s).
+
+APP-083:
+  status: in-progress
+  impl: [internal/settings/parse_cm.go, internal/settings/settings.go]
+  tests:
+    - internal/settings/parse_cm_test.go:TestParseEveryConfigMapKeyFamily
+    - internal/settings/parse_cm_test.go:TestParseInvalidValuesAreReportedWithKeyNames
+    - internal/settings/parse_cm_test.go:TestParseDefaults
+  notes: >-
+    Settings part only: parsing and validation of timeout.hard.reconciliation (default 0).
+
+APP-092:
+  status: in-progress
+  impl: [internal/settings/parse_cm.go]
+  tests:
+    - internal/settings/parse_cm_test.go:TestParseEveryConfigMapKeyFamily
+  notes: >-
+    Settings part only: resource.customizations.health.<group_kind> keys are parsed through
+    lua.ParseResourceOverrides with per-key isolation.
+
+APP-113:
+  status: in-progress
+  impl: [internal/settings/params.go, internal/settings/params_table.go]
+  tests:
+    - internal/settings/params_test.go:TestParamKeysMatchUpstream
+    - internal/settings/params_test.go:TestParamWiringMatchesManifests
+    - internal/settings/params_test.go:TestParamDefaultsAreValidAndDocumented
+    - internal/settings/params_test.go:TestResolveParamsPrecedence
+    - internal/settings/params_test.go:TestResolveParamsInvalidValues
+  notes: >-
+    Settings part only: patrol-cmd-params-cm key(s) hydrator.enabled, commit.server with upstream
+    env var (ARGOCD_ renamed PATROL_), flag name, default, bounds and fallback warnings; the
+    consuming component applies the semantics.
+
+APP-126:
+  status: in-progress
+  impl: [internal/settings/parse_cm.go, internal/settings/settings.go]
+  tests:
+    - internal/settings/parse_cm_test.go:TestParseEveryConfigMapKeyFamily
+    - internal/settings/parse_cm_test.go:TestParseInvalidValuesAreReportedWithKeyNames
+    - internal/settings/parse_cm_test.go:TestParseDefaults
+  notes: >-
+    Settings part only: parsing and validation of sourceHydrator.commitMessageTemplate (upstream
+    default template; templates must parse).
+
+APP-127:
+  status: in-progress
+  impl: [internal/settings/parse_cm.go, internal/settings/settings.go]
+  tests:
+    - internal/settings/parse_cm_test.go:TestParseEveryConfigMapKeyFamily
+    - internal/settings/parse_cm_test.go:TestParseInvalidValuesAreReportedWithKeyNames
+    - internal/settings/parse_cm_test.go:TestParseDefaults
+  notes: >-
+    Settings part only: parsing and validation of sourceHydrator.readmeMessageTemplate (upstream
+    default template).
+
+APP-128:
+  status: in-progress
+  impl: [internal/settings/parse_cm.go, internal/settings/settings.go]
+  tests:
+    - internal/settings/parse_cm_test.go:TestParseEveryConfigMapKeyFamily
+    - internal/settings/parse_cm_test.go:TestParseInvalidValuesAreReportedWithKeyNames
+    - internal/settings/parse_cm_test.go:TestParseDefaults
+  notes: >-
+    Settings part only: parsing and validation of commit.author.name, commit.author.email.
+    Defaults are applied by the commit server.
+
+SRC-002:
+  status: in-progress
+  impl: [internal/settings/parse_cm.go, internal/settings/settings.go]
+  tests:
+    - internal/settings/parse_cm_test.go:TestParseEveryConfigMapKeyFamily
+    - internal/settings/parse_cm_test.go:TestParseInvalidValuesAreReportedWithKeyNames
+    - internal/settings/parse_cm_test.go:TestParseDefaults
+  notes: >-
+    Settings part only: parsing and validation of kustomize.enable, helm.enable. Detection is the
+    repo-server's.
+
+SRC-003:
+  status: in-progress
+  impl: [internal/settings/parse_cm.go, internal/settings/settings.go]
+  tests:
+    - internal/settings/parse_cm_test.go:TestParseEveryConfigMapKeyFamily
+    - internal/settings/parse_cm_test.go:TestParseInvalidValuesAreReportedWithKeyNames
+    - internal/settings/parse_cm_test.go:TestParseDefaults
+  notes: >-
+    Settings part only: parsing and validation of kustomize.enable, helm.enable, jsonnet.enable
+    (only "true" keeps a set key enabled; Plugin always enabled) via
+    SourceTypeEnabled/EnabledSourceTypes.
+
+SRC-013:
+  status: in-progress
+  impl: [internal/settings/params.go, internal/settings/params_table.go]
+  tests:
+    - internal/settings/params_test.go:TestParamKeysMatchUpstream
+    - internal/settings/params_test.go:TestParamWiringMatchesManifests
+    - internal/settings/params_test.go:TestParamDefaultsAreValidAndDocumented
+    - internal/settings/params_test.go:TestResolveParamsPrecedence
+    - internal/settings/params_test.go:TestResolveParamsInvalidValues
+  notes: >-
+    Settings part only: patrol-cmd-params-cm key(s)
+    reposerver.max.combined.directory.manifests.size (Kubernetes quantity; invalid is an error, as
+    upstream exits) with upstream env var (ARGOCD_ renamed PATROL_), flag name, default, bounds
+    and fallback warnings; the consuming component applies the semantics.
+
+SRC-025:
+  status: in-progress
+  impl: [internal/settings/parse_cm.go, internal/settings/settings.go]
+  tests:
+    - internal/settings/parse_cm_test.go:TestParseEveryConfigMapKeyFamily
+    - internal/settings/parse_cm_test.go:TestParseInvalidValuesAreReportedWithKeyNames
+    - internal/settings/parse_cm_test.go:TestParseDefaults
+    - internal/settings/parse_cm_test.go:TestParseHelmValuesFileSchemesEmptyDisablesRemote
+  notes: >-
+    Settings part only: parsing and validation of helm.valuesFileSchemes (absent: https, http;
+    empty: none).
+
+SRC-064:
+  status: in-progress
+  impl: [internal/settings/parse_cm.go, internal/settings/settings.go]
+  tests:
+    - internal/settings/parse_cm_test.go:TestParseEveryConfigMapKeyFamily
+    - internal/settings/parse_cm_test.go:TestParseInvalidValuesAreReportedWithKeyNames
+    - internal/settings/parse_cm_test.go:TestParseDefaults
+    - internal/settings/parse_cm_test.go:TestParseKustomizeDuplicateVersion
+  notes: >-
+    Settings part only: parsing and validation of kustomize.path.<v> and deprecated
+    kustomize.version.<v>, KustomizeBinaryPath with upstream errors (not registered, duplicate).
+
+SRC-065:
+  status: in-progress
+  impl: [internal/settings/parse_cm.go, internal/settings/settings.go]
+  tests:
+    - internal/settings/parse_cm_test.go:TestParseEveryConfigMapKeyFamily
+    - internal/settings/parse_cm_test.go:TestParseInvalidValuesAreReportedWithKeyNames
+    - internal/settings/parse_cm_test.go:TestParseDefaults
+  notes: >-
+    Settings part only: parsing and validation of kustomize.buildOptions and
+    kustomize.buildOptions.<v>.
+
+SRC-086:
+  status: in-progress
+  impl: [internal/settings/params.go, internal/settings/params_table.go]
+  tests:
+    - internal/settings/params_test.go:TestParamKeysMatchUpstream
+    - internal/settings/params_test.go:TestParamWiringMatchesManifests
+    - internal/settings/params_test.go:TestParamDefaultsAreValidAndDocumented
+    - internal/settings/params_test.go:TestResolveParamsPrecedence
+    - internal/settings/params_test.go:TestResolveParamsInvalidValues
+  notes: >-
+    Settings part only: patrol-cmd-params-cm key(s) reposerver.plugin.tar.exclusions (semicolon
+    list) with upstream env var (ARGOCD_ renamed PATROL_), flag name, default, bounds and fallback
+    warnings; the consuming component applies the semantics.
+
+SRC-088:
+  status: in-progress
+  impl: [internal/settings/params.go, internal/settings/params_table.go]
+  tests:
+    - internal/settings/params_test.go:TestParamKeysMatchUpstream
+    - internal/settings/params_test.go:TestParamWiringMatchesManifests
+    - internal/settings/params_test.go:TestParamDefaultsAreValidAndDocumented
+    - internal/settings/params_test.go:TestResolveParamsPrecedence
+    - internal/settings/params_test.go:TestResolveParamsInvalidValues
+  notes: >-
+    Settings part only: patrol-cmd-params-cm key(s) controller.repo.server.timeout.seconds,
+    server.repo.server.timeout.seconds with upstream env var (ARGOCD_ renamed PATROL_), flag name,
+    default, bounds and fallback warnings; the consuming component applies the semantics.
+
+SRC-100:
+  status: in-progress
+  impl: [internal/settings/params.go, internal/settings/params_table.go]
+  tests:
+    - internal/settings/params_test.go:TestParamKeysMatchUpstream
+    - internal/settings/params_test.go:TestParamWiringMatchesManifests
+    - internal/settings/params_test.go:TestParamDefaultsAreValidAndDocumented
+    - internal/settings/params_test.go:TestResolveParamsPrecedence
+    - internal/settings/params_test.go:TestResolveParamsInvalidValues
+  notes: >-
+    Settings part only: patrol-cmd-params-cm key(s) reposerver.oci.manifest.max.extracted.size,
+    reposerver.disable.oci.manifest.max.extracted.size with upstream env var (ARGOCD_ renamed
+    PATROL_), flag name, default, bounds and fallback warnings; the consuming component applies
+    the semantics.
+
+SRC-109:
+  status: in-progress
+  impl: [internal/settings/params.go, internal/settings/params_table.go]
+  tests:
+    - internal/settings/params_test.go:TestParamKeysMatchUpstream
+    - internal/settings/params_test.go:TestParamWiringMatchesManifests
+    - internal/settings/params_test.go:TestParamDefaultsAreValidAndDocumented
+    - internal/settings/params_test.go:TestResolveParamsPrecedence
+    - internal/settings/params_test.go:TestResolveParamsInvalidValues
+  notes: >-
+    Settings part only: patrol-cmd-params-cm key(s) reposerver.enable.git.submodule with upstream
+    env var (ARGOCD_ renamed PATROL_), flag name, default, bounds and fallback warnings; the
+    consuming component applies the semantics.
+
+SRC-110:
+  status: in-progress
+  impl: [internal/settings/params.go, internal/settings/params_table.go]
+  tests:
+    - internal/settings/params_test.go:TestParamKeysMatchUpstream
+    - internal/settings/params_test.go:TestParamWiringMatchesManifests
+    - internal/settings/params_test.go:TestParamDefaultsAreValidAndDocumented
+    - internal/settings/params_test.go:TestResolveParamsPrecedence
+    - internal/settings/params_test.go:TestResolveParamsInvalidValues
+  notes: >-
+    Settings part only: patrol-cmd-params-cm key(s) reposerver.repo.cache.expiration with upstream
+    env var (ARGOCD_ renamed PATROL_), flag name, default, bounds and fallback warnings; the
+    consuming component applies the semantics.
+
+SRC-117:
+  status: in-progress
+  impl: [internal/settings/params.go, internal/settings/params_table.go]
+  tests:
+    - internal/settings/params_test.go:TestParamKeysMatchUpstream
+    - internal/settings/params_test.go:TestParamWiringMatchesManifests
+    - internal/settings/params_test.go:TestParamDefaultsAreValidAndDocumented
+    - internal/settings/params_test.go:TestResolveParamsPrecedence
+    - internal/settings/params_test.go:TestResolveParamsInvalidValues
+  notes: >-
+    Settings part only: patrol-cmd-params-cm key(s) reposerver.allow.oob.symlinks with upstream
+    env var (ARGOCD_ renamed PATROL_), flag name, default, bounds and fallback warnings; the
+    consuming component applies the semantics.
+
+SRC-133:
+  status: in-progress
+  impl: [internal/settings/params.go, internal/settings/params_table.go]
+  tests:
+    - internal/settings/params_test.go:TestParamKeysMatchUpstream
+    - internal/settings/params_test.go:TestParamWiringMatchesManifests
+    - internal/settings/params_test.go:TestParamDefaultsAreValidAndDocumented
+    - internal/settings/params_test.go:TestResolveParamsPrecedence
+    - internal/settings/params_test.go:TestResolveParamsInvalidValues
+  notes: >-
+    Settings part only: patrol-cmd-params-cm key(s) reposerver.include.hidden.directories with
+    upstream env var (ARGOCD_ renamed PATROL_), flag name, default, bounds and fallback warnings;
+    the consuming component applies the semantics.
+
+REPO-052:
+  status: in-progress
+  impl: [internal/settings/params.go, internal/settings/params_table.go]
+  tests:
+    - internal/settings/params_test.go:TestParamKeysMatchUpstream
+    - internal/settings/params_test.go:TestParamWiringMatchesManifests
+    - internal/settings/params_test.go:TestParamDefaultsAreValidAndDocumented
+    - internal/settings/params_test.go:TestResolveParamsPrecedence
+    - internal/settings/params_test.go:TestResolveParamsInvalidValues
+  notes: >-
+    Settings part only: patrol-cmd-params-cm key(s) reposerver.enable.builtin.git.config with
+    upstream env var (ARGOCD_ renamed PATROL_), flag name, default, bounds and fallback warnings;
+    the consuming component applies the semantics.
+
+REPO-057:
+  status: in-progress
+  impl: [internal/settings/certs.go]
+  tests:
+    - internal/settings/certs_test.go:TestSSHKnownHostsConfigMap
+    - internal/settings/certs_test.go:TestSSHKnownHostsLimit
+  notes: >-
+    Settings part only: ssh_known_hosts parsing and validation (comments, [host]:port, markers,
+    ssh.ParseKnownHosts, 256-entry limit, hashed-host warning) and SSHKnownHostsData for the
+    mounted file; git usage is internal/git's.
+
+REPO-058:
+  status: in-progress
+  impl: [internal/settings/certs.go]
+  tests:
+    - internal/settings/certs_test.go:TestTLSCertificatesConfigMap
+    - internal/settings/certs_test.go:TestParseTLSCertificatesLimits
+  notes: >-
+    Settings part only: hostname validation, upstream PEM splitting limits, X.509 validation per
+    certificate, lookup with the port stripped; transport use is internal/git/helm/oci's.
+
+REPO-064:
+  status: in-progress
+  impl: [internal/settings/gpg.go]
+  tests:
+    - internal/settings/certs_test.go:TestGPGKeysConfigMap
+    - internal/settings/certs_test.go:TestGPGKeyID
+  notes: >-
+    Settings part only: key ID validation and one-key-per-entry parsing with upstream messages
+    (in-process OpenPGP instead of gpg). Invalid entries are dropped individually (upstream fails
+    the whole list). Keyring sync is the repo-server's.
+
+REPO-093:
+  status: in-progress
+  impl: [internal/settings/parse_cm.go, internal/settings/settings.go]
+  tests:
+    - internal/settings/parse_cm_test.go:TestParseEveryConfigMapKeyFamily
+    - internal/settings/parse_cm_test.go:TestParseInvalidValuesAreReportedWithKeyNames
+    - internal/settings/parse_cm_test.go:TestParseDefaults
+  notes: >-
+    Settings part only: parsing and validation of cluster.inClusterEnabled (enabled unless exactly
+    "false").
+
+REPO-114:
+  status: in-progress
+  impl: [internal/settings/params.go, internal/settings/params_table.go]
+  tests:
+    - internal/settings/params_test.go:TestParamKeysMatchUpstream
+    - internal/settings/params_test.go:TestParamWiringMatchesManifests
+    - internal/settings/params_test.go:TestParamDefaultsAreValidAndDocumented
+    - internal/settings/params_test.go:TestResolveParamsPrecedence
+    - internal/settings/params_test.go:TestResolveParamsInvalidValues
+  notes: >-
+    Settings part only: patrol-cmd-params-cm key(s) server.webhook.parallelism.limit (1-1000) with
+    upstream env var (ARGOCD_ renamed PATROL_), flag name, default, bounds and fallback warnings;
+    the consuming component applies the semantics.
+
+REPO-115:
+  status: in-progress
+  impl: [internal/settings/parse_cm.go, internal/settings/settings.go]
+  tests:
+    - internal/settings/parse_cm_test.go:TestParseEveryConfigMapKeyFamily
+    - internal/settings/parse_cm_test.go:TestParseInvalidValuesAreReportedWithKeyNames
+    - internal/settings/parse_cm_test.go:TestParseDefaults
+  notes: >-
+    Settings part only: parsing and validation of webhook.maxPayloadSizeMB (default 50;
+    Webhook.MaxPayloadSize in bytes).
+
+REPO-116:
+  status: in-progress
+  impl: [internal/settings/secrets.go]
+  tests:
+    - internal/settings/secrets_test.go:TestWebhookSecretReferences
+    - internal/settings/secrets_test.go:TestSecretValuesNeverLeak
+    - internal/settings/retain_test.go:TestMissingSecretKeepsLastLoadedSecrets
+    - internal/settings/manager_test.go:TestManagerKeepsLastLoadedSettingsWhenObjectsDisappear
+  notes: >-
+    Settings part only: the five webhook secrets with $<key>/$<secret>:<key> resolution as
+    Sensitive values; Manager subscribers see changes. A patrol-secret deleted after loading
+    keeps its last secrets (upstream keeps its cached settings); Webhook.SecretsLoaded is false
+    while it was never loaded, so handlers must reject payloads then. Verification of payloads
+    is internal/webhook's.
+
+REPO-122:
+  status: in-progress
+  impl: [internal/settings/secrets.go]
+  tests:
+    - internal/settings/secrets_test.go:TestWebhookSecretReferences
+  notes: >-
+    Settings part only: webhook.azuredevops.username/password.
+
+REPO-129:
+  status: in-progress
+  impl: [internal/settings/params.go, internal/settings/params_table.go, internal/settings/parse_cm.go, internal/settings/settings.go]
+  tests:
+    - internal/settings/parse_cm_test.go:TestParseEveryConfigMapKeyFamily
+    - internal/settings/parse_cm_test.go:TestParseInvalidValuesAreReportedWithKeyNames
+    - internal/settings/parse_cm_test.go:TestParseDefaults
+  notes: >-
+    Settings part only: parsing and validation of webhook.refresh.jitter,
+    webhook.refresh.jitter.threshold (default 10, negative rejected) and parameter
+    server.webhook.refresh.workers.
+
+REPO-130:
+  status: in-progress
+  impl: [internal/settings/params.go, internal/settings/params_table.go]
+  tests:
+    - internal/settings/params_test.go:TestParamKeysMatchUpstream
+    - internal/settings/params_test.go:TestParamWiringMatchesManifests
+    - internal/settings/params_test.go:TestParamDefaultsAreValidAndDocumented
+    - internal/settings/params_test.go:TestResolveParamsPrecedence
+    - internal/settings/params_test.go:TestResolveParamsInvalidValues
+  notes: >-
+    Settings part only: patrol-cmd-params-cm key(s) application.namespaces with upstream env var
+    (ARGOCD_ renamed PATROL_), flag name, default, bounds and fallback warnings; the consuming
+    component applies the semantics.
+
+DIFF-009:
+  status: in-progress
+  impl: [internal/settings/params.go, internal/settings/params_table.go]
+  tests:
+    - internal/settings/params_test.go:TestParamKeysMatchUpstream
+    - internal/settings/params_test.go:TestParamWiringMatchesManifests
+    - internal/settings/params_test.go:TestParamDefaultsAreValidAndDocumented
+    - internal/settings/params_test.go:TestResolveParamsPrecedence
+    - internal/settings/params_test.go:TestResolveParamsInvalidValues
+  notes: >-
+    Settings part only: patrol-cmd-params-cm key(s) controller.diff.server.side with upstream env
+    var (ARGOCD_ renamed PATROL_), flag name, default, bounds and fallback warnings; the consuming
+    component applies the semantics.
+
+DIFF-014:
+  status: implemented
+  impl: [internal/settings/parse_cm.go, internal/settings/settings.go]
+  tests:
+    - internal/settings/parse_cm_test.go:TestParseEveryConfigMapKeyFamily
+    - internal/settings/parse_cm_test.go:TestParseInvalidValuesAreReportedWithKeyNames
+    - internal/settings/parse_cm_test.go:TestParseDefaults
+  notes: >-
+    Settings part only: parsing and validation of resource.compareoptions ignoreAggregatedRoles.
+
+DIFF-016:
+  status: implemented
+  impl: [internal/settings/parse_cm.go, internal/settings/settings.go]
+  tests:
+    - internal/settings/parse_cm_test.go:TestParseEveryConfigMapKeyFamily
+    - internal/settings/parse_cm_test.go:TestSystemIgnoreAndResourceUpdateRules
+  notes: >-
+    Settings part only: parsing and validation of
+    resource.customizations.knownTypeFields.<group_kind> (unsupported types warned) and
+    Settings.KnownTypeFields.
+
+DIFF-022:
+  status: implemented
+  impl: [internal/settings/parse_cm.go, internal/settings/settings.go]
+  tests:
+    - internal/settings/parse_cm_test.go:TestSystemIgnoreAndResourceUpdateRules
+  notes: >-
+    Settings part only: parsing and validation of
+    resource.customizations.ignoreDifferences.<group_kind> and Settings.SystemIgnoreRules.
+
+DIFF-023:
+  status: implemented
+  impl: [internal/settings/parse_cm.go, internal/settings/settings.go]
+  tests:
+    - internal/settings/parse_cm_test.go:TestParseEveryConfigMapKeyFamily
+    - internal/settings/parse_cm_test.go:TestSystemIgnoreAndResourceUpdateRules
+  notes: >-
+    Settings part only: parsing and validation of resource.customizations.ignoreDifferences.all.
+
+DIFF-024:
+  status: implemented
+  impl: [internal/settings/parse_cm.go, internal/settings/settings.go]
+  tests:
+    - internal/settings/parse_cm_test.go:TestParseEveryConfigMapKeyFamily
+    - internal/settings/parse_cm_test.go:TestParseInvalidValuesAreReportedWithKeyNames
+    - internal/settings/parse_cm_test.go:TestParseDefaults
+  notes: >-
+    Settings part only: parsing and validation of the legacy resource.customizations block
+    (delegated to lua.ParseResourceOverrides).
+
+DIFF-025:
+  status: implemented
+  impl: [internal/settings/parse_cm.go, internal/settings/settings.go]
+  tests:
+    - internal/settings/parse_cm_test.go:TestParseEveryConfigMapKeyFamily
+    - internal/settings/parse_cm_test.go:TestParseInvalidValuesAreReportedWithKeyNames
+    - internal/settings/parse_cm_test.go:TestParseDefaults
+    - internal/settings/parse_cm_test.go:TestParseCompareOptionsYAMLOff
+  notes: >-
+    Settings part only: parsing and validation of resource.compareoptions
+    ignoreResourceStatusField (all/crd/none/off/false; unknown warned with the upstream message).
+
+DIFF-064:
+  status: in-progress
+  impl: [internal/settings/params.go, internal/settings/params_table.go]
+  tests:
+    - internal/settings/params_test.go:TestParamKeysMatchUpstream
+    - internal/settings/params_test.go:TestParamWiringMatchesManifests
+    - internal/settings/params_test.go:TestParamDefaultsAreValidAndDocumented
+    - internal/settings/params_test.go:TestResolveParamsPrecedence
+    - internal/settings/params_test.go:TestResolveParamsInvalidValues
+  notes: >-
+    Settings part only: patrol-cmd-params-cm key(s) controller.resource.health.persist with
+    upstream env var (ARGOCD_ renamed PATROL_), flag name, default, bounds and fallback warnings;
+    the consuming component applies the semantics.
+
+DIFF-067:
+  status: in-progress
+  impl: [internal/settings/parse_cm.go, internal/settings/resources.go]
+  tests:
+    - internal/settings/resources_test.go:TestFilteredResourceMatch
+    - internal/settings/resources_test.go:TestResourcesFilterUpstreamCases
+    - internal/settings/resources_test.go:TestDefaultResourceExclusionsMatchUpstream
+  notes: >-
+    Settings part only: resource.exclusions parsing and matching (group/cluster globs, exact
+    kinds, invalid globs never match); the cache applies it at discovery.
+
+DIFF-068:
+  status: in-progress
+  impl: [internal/settings/resources.go]
+  tests:
+    - internal/settings/resources_test.go:TestResourcesFilterTruthTable
+  notes: >-
+    Settings part only: resource.inclusions and the upstream nine-row precedence table.
+
+DIFF-069:
+  status: in-progress
+  impl: [internal/settings/resources.go]
+  tests:
+    - internal/settings/resources_test.go:TestCoreExclusionsCannotBeIncluded
+  notes: >-
+    Settings part only: CoreExcludedResources cannot be re-included.
+
+DIFF-071:
+  status: implemented
+  impl: [internal/settings/parse_cm.go, internal/settings/settings.go]
+  tests:
+    - internal/settings/parse_cm_test.go:TestParseEveryConfigMapKeyFamily
+    - internal/settings/parse_cm_test.go:TestParseInvalidValuesAreReportedWithKeyNames
+    - internal/settings/parse_cm_test.go:TestParseDefaults
+  notes: >-
+    Settings part only: parsing and validation of resource.respectRBAC (invalid: upstream error
+    text) and CacheRespectRBAC for internal/cache. Difference: an invalid value is reported and
+    the last valid value (or none) is used, while upstream fails to build the cluster cache.
+
+DIFF-097:
+  status: in-progress
+  impl: [internal/settings/parse_cm.go, internal/settings/settings.go]
+  tests:
+    - internal/settings/parse_cm_test.go:TestParseEveryConfigMapKeyFamily
+    - internal/settings/parse_cm_test.go:TestParseInvalidValuesAreReportedWithKeyNames
+    - internal/settings/parse_cm_test.go:TestParseDefaults
+  notes: >-
+    Settings part only: parsing and validation of resource.customLabels (split without trimming,
+    whitespace warned).
+
+DIFF-098:
+  status: in-progress
+  impl: [internal/settings/parse_cm.go, internal/settings/settings.go]
+  tests:
+    - internal/settings/parse_cm_test.go:TestParseEveryConfigMapKeyFamily
+    - internal/settings/parse_cm_test.go:TestParseInvalidValuesAreReportedWithKeyNames
+    - internal/settings/parse_cm_test.go:TestParseDefaults
+  notes: >-
+    Settings part only: parsing and validation of application.allowedNodeLabels (invalid keys
+    skipped with the upstream warning).
+
+DIFF-101:
+  status: in-progress
+  impl: [internal/settings/params.go, internal/settings/params_table.go]
+  tests:
+    - internal/settings/params_test.go:TestParamKeysMatchUpstream
+    - internal/settings/params_test.go:TestParamWiringMatchesManifests
+    - internal/settings/params_test.go:TestParamDefaultsAreValidAndDocumented
+    - internal/settings/params_test.go:TestResolveParamsPrecedence
+    - internal/settings/params_test.go:TestResolveParamsInvalidValues
+  notes: >-
+    Settings part only: patrol-cmd-params-cm key(s) controller.cluster.cache.* parameters with
+    upstream env var (ARGOCD_ renamed PATROL_), flag name, default, bounds and fallback warnings;
+    the consuming component applies the semantics.
+
+SYNC-005:
+  status: in-progress
+  impl: [internal/settings/parse_cm.go, internal/settings/settings.go]
+  tests:
+    - internal/settings/parse_cm_test.go:TestParseEveryConfigMapKeyFamily
+    - internal/settings/parse_cm_test.go:TestParseInvalidValuesAreReportedWithKeyNames
+    - internal/settings/parse_cm_test.go:TestParseDefaults
+  notes: >-
+    Settings part only: parsing and validation of
+    application.sync.requireOverridePrivilegeForRevisionSync (upstream parse error text).
+
+SYNC-023:
+  status: in-progress
+  impl: [internal/settings/params.go, internal/settings/params_table.go]
+  tests:
+    - internal/settings/params_test.go:TestParamKeysMatchUpstream
+    - internal/settings/params_test.go:TestParamWiringMatchesManifests
+    - internal/settings/params_test.go:TestParamDefaultsAreValidAndDocumented
+    - internal/settings/params_test.go:TestResolveParamsPrecedence
+    - internal/settings/params_test.go:TestResolveParamsInvalidValues
+  notes: >-
+    Settings part only: patrol-cmd-params-cm key(s) controller.self.heal.* parameters with
+    upstream env var (ARGOCD_ renamed PATROL_), flag name, default, bounds and fallback warnings;
+    the consuming component applies the semantics. The deprecated cooldown key is accepted and
+    reported.
+
+SYNC-047:
+  status: in-progress
+  impl: [internal/settings/params.go, internal/settings/params_table.go]
+  tests:
+    - internal/settings/params_test.go:TestParamKeysMatchUpstream
+    - internal/settings/params_test.go:TestParamWiringMatchesManifests
+    - internal/settings/params_test.go:TestParamDefaultsAreValidAndDocumented
+    - internal/settings/params_test.go:TestResolveParamsPrecedence
+    - internal/settings/params_test.go:TestResolveParamsInvalidValues
+  notes: >-
+    Settings part only: patrol-cmd-params-cm key(s) server.sync.replace.allowed with upstream env
+    var (ARGOCD_ renamed PATROL_), flag name, default, bounds and fallback warnings; the consuming
+    component applies the semantics.
+
+SYNC-064:
+  status: in-progress
+  impl: [internal/settings/params.go, internal/settings/params_table.go]
+  tests:
+    - internal/settings/params_test.go:TestParamKeysMatchUpstream
+    - internal/settings/params_test.go:TestParamWiringMatchesManifests
+    - internal/settings/params_test.go:TestParamDefaultsAreValidAndDocumented
+    - internal/settings/params_test.go:TestResolveParamsPrecedence
+    - internal/settings/params_test.go:TestResolveParamsInvalidValues
+  notes: >-
+    Settings part only: patrol-cmd-params-cm key(s) controller.sync.wave.delay.seconds
+    (PATROL_SYNC_WAVE_DELAY) with upstream env var (ARGOCD_ renamed PATROL_), flag name, default,
+    bounds and fallback warnings; the consuming component applies the semantics.
+
+SYNC-079:
+  status: in-progress
+  impl: [internal/settings/params.go, internal/settings/params_table.go]
+  tests:
+    - internal/settings/params_test.go:TestParamKeysMatchUpstream
+    - internal/settings/params_test.go:TestParamWiringMatchesManifests
+    - internal/settings/params_test.go:TestParamDefaultsAreValidAndDocumented
+    - internal/settings/params_test.go:TestResolveParamsPrecedence
+    - internal/settings/params_test.go:TestResolveParamsInvalidValues
+  notes: >-
+    Settings part only: patrol-cmd-params-cm key(s) controller.sync.timeout.seconds with upstream
+    env var (ARGOCD_ renamed PATROL_), flag name, default, bounds and fallback warnings; the
+    consuming component applies the semantics.
+
+SYNC-093:
+  status: in-progress
+  impl: [internal/settings/parse_cm.go, internal/settings/settings.go]
+  tests:
+    - internal/settings/parse_cm_test.go:TestParseEveryConfigMapKeyFamily
+    - internal/settings/parse_cm_test.go:TestParseInvalidValuesAreReportedWithKeyNames
+    - internal/settings/parse_cm_test.go:TestParseDefaults
+  notes: >-
+    Settings part only: parsing and validation of application.sync.impersonation.enabled.
+
+SYNC-094:
+  status: in-progress
+  impl: [internal/settings/parse_cm.go, internal/settings/settings.go]
+  tests:
+    - internal/settings/parse_cm_test.go:TestParseEveryConfigMapKeyFamily
+    - internal/settings/parse_cm_test.go:TestParseInvalidValuesAreReportedWithKeyNames
+    - internal/settings/parse_cm_test.go:TestParseDefaults
+  notes: >-
+    Settings part only: parsing and validation of application.sync.impersonation.enforced (true
+    unless exactly "false").
+
+SYNC-104:
+  status: implemented
+  impl: [internal/settings/parse_cm.go, internal/settings/settings.go]
+  tests:
+    - internal/settings/parse_cm_test.go:TestParseEveryConfigMapKeyFamily
+    - internal/settings/parse_cm_test.go:TestParseInvalidValuesAreReportedWithKeyNames
+    - internal/settings/parse_cm_test.go:TestParseDefaults
+  notes: >-
+    Settings part only: parsing and validation of resource.customizations.actions.<group_kind>
+    (parsed through lua.ParseResourceOverrides).
+
+ASET-009:
+  status: in-progress
+  impl: [internal/settings/params.go, internal/settings/params_table.go]
+  tests:
+    - internal/settings/params_test.go:TestParamKeysMatchUpstream
+    - internal/settings/params_test.go:TestParamWiringMatchesManifests
+    - internal/settings/params_test.go:TestParamDefaultsAreValidAndDocumented
+    - internal/settings/params_test.go:TestResolveParamsPrecedence
+    - internal/settings/params_test.go:TestResolveParamsInvalidValues
+  notes: >-
+    Settings part only: patrol-cmd-params-cm key(s) applicationsetcontroller.requeue.after
+    (1s-8760h) with upstream env var (ARGOCD_ renamed PATROL_), flag name, default, bounds and
+    fallback warnings; the consuming component applies the semantics.
+
+ASET-086:
+  status: in-progress
+  impl: [internal/settings/params.go, internal/settings/params_table.go]
+  tests:
+    - internal/settings/params_test.go:TestParamKeysMatchUpstream
+    - internal/settings/params_test.go:TestParamWiringMatchesManifests
+    - internal/settings/params_test.go:TestParamDefaultsAreValidAndDocumented
+    - internal/settings/params_test.go:TestResolveParamsPrecedence
+    - internal/settings/params_test.go:TestResolveParamsInvalidValues
+  notes: >-
+    Settings part only: patrol-cmd-params-cm key(s)
+    applicationsetcontroller.concurrent.reconciliations.max with upstream env var (ARGOCD_ renamed
+    PATROL_), flag name, default, bounds and fallback warnings; the consuming component applies
+    the semantics.
+
+ASET-123:
+  status: in-progress
+  impl: [internal/settings/params.go, internal/settings/params_table.go]
+  tests:
+    - internal/settings/params_test.go:TestParamKeysMatchUpstream
+    - internal/settings/params_test.go:TestParamWiringMatchesManifests
+    - internal/settings/params_test.go:TestParamDefaultsAreValidAndDocumented
+    - internal/settings/params_test.go:TestResolveParamsPrecedence
+    - internal/settings/params_test.go:TestResolveParamsInvalidValues
+  notes: >-
+    Settings part only: patrol-cmd-params-cm key(s) applicationsetcontroller.namespaces with
+    upstream env var (ARGOCD_ renamed PATROL_), flag name, default, bounds and fallback warnings;
+    the consuming component applies the semantics.
+
+ASET-131:
+  status: in-progress
+  impl: [internal/settings/params.go, internal/settings/params_table.go]
+  tests:
+    - internal/settings/params_test.go:TestParamKeysMatchUpstream
+    - internal/settings/params_test.go:TestParamWiringMatchesManifests
+    - internal/settings/params_test.go:TestParamDefaultsAreValidAndDocumented
+    - internal/settings/params_test.go:TestResolveParamsPrecedence
+    - internal/settings/params_test.go:TestResolveParamsInvalidValues
+  notes: >-
+    Settings part only: patrol-cmd-params-cm key(s) applicationsetcontroller.repo.server.*
+    parameters with upstream env var (ARGOCD_ renamed PATROL_), flag name, default, bounds and
+    fallback warnings; the consuming component applies the semantics.
+
+TEN-030:
+  status: in-progress
+  impl: [internal/settings/parse_cm.go, internal/settings/settings.go]
+  tests:
+    - internal/settings/parse_cm_test.go:TestParseEveryConfigMapKeyFamily
+    - internal/settings/parse_cm_test.go:TestParseInvalidValuesAreReportedWithKeyNames
+    - internal/settings/parse_cm_test.go:TestParseDefaults
+  notes: >-
+    Settings part only: parsing and validation of application.sync.impersonation.enabled/enforced.
+
+TEN-037:
+  status: in-progress
+  impl: [internal/settings/projects.go]
+  tests:
+    - internal/settings/parse_cm_test.go:TestParseEveryConfigMapKeyFamily
+    - internal/settings/parse_cm_test.go:TestParseGlobalProjectsStopAtInvalidSelector
+  notes: >-
+    Settings part only: globalProjects parsing with compiled selectors; processing stops at the
+    first invalid selector as upstream. Virtual project merging is internal/project's.
+
+TEN-050:
+  status: in-progress
+  impl: [internal/settings/parse_cm.go, internal/settings/settings.go]
+  tests:
+    - internal/settings/parse_cm_test.go:TestParseEveryConfigMapKeyFamily
+    - internal/settings/parse_cm_test.go:TestParseInvalidValuesAreReportedWithKeyNames
+    - internal/settings/parse_cm_test.go:TestParseDefaults
+  notes: >-
+    Settings part only: parsing and validation of project.links.
+
+TEN-071:
+  status: in-progress
+  impl: [internal/settings/parse_cm.go, internal/settings/settings.go]
+  tests:
+    - internal/settings/parse_cm_test.go:TestParseEveryConfigMapKeyFamily
+    - internal/settings/parse_cm_test.go:TestParseInvalidValuesAreReportedWithKeyNames
+    - internal/settings/parse_cm_test.go:TestParseDefaults
+  notes: >-
+    Settings part only: parsing and validation of
+    server.rbac.disableApplicationFineGrainedRBACInheritance (default true, ParseBool).
+
+TEN-073:
+  status: implemented
+  impl: [internal/settings/rbac.go]
+  tests:
+    - internal/settings/rbac_test.go:TestRBACConfigMap
+    - internal/settings/rbac_test.go:TestRBACDefaultsWhenAbsent
+  notes: >-
+    Settings part only: policy.default for the enforcer.
+
+TEN-074:
+  status: implemented
+  impl: [internal/settings/rbac.go]
+  tests:
+    - internal/settings/rbac_test.go:TestRBACConfigMap
+    - internal/settings/rbac_test.go:TestRBACScopesIsolationAndWarnings
+  notes: >-
+    Settings part only: scopes via rbac.ParseScopes; an invalid value keeps the last valid scopes.
+
+TEN-075:
+  status: implemented
+  impl: [internal/settings/rbac.go]
+  tests:
+    - internal/settings/rbac_test.go:TestRBACScopesIsolationAndWarnings
+  notes: >-
+    Settings part only: policy.matchMode (unknown values warned, treated as glob).
+
+TEN-077:
+  status: implemented
+  impl: [internal/settings/rbac.go]
+  tests:
+    - internal/settings/rbac_test.go:TestRBACConfigMap
+  notes: >-
+    Settings part only: policy.csv plus policy.<name>.csv overlays in key order
+    (rbac.PolicyCSV/PolicySources).
+
+TEN-078:
+  status: in-progress
+  impl: [internal/settings/manager.go, internal/settings/rbac.go]
+  tests:
+    - internal/settings/rbac_test.go:TestRBACInvalidPolicyFailsClosed
+    - internal/settings/retain_test.go:TestMissingRBACConfigMapKeepsLastPolicy
+    - internal/settings/manager_test.go:TestManagerLoadsAndReloads
+    - internal/settings/envtest_test.go:TestEnvtestManagerReload
+  notes: >-
+    Settings part only: the Manager watches patrol-rbac-cm by name and publishes changes; an
+    invalid policy is passed through so the enforcer fails closed; a deleted patrol-rbac-cm
+    keeps the last loaded policy in force (upstream's informer has no delete handler) and is
+    reported as an error. Applying snapshots to the enforcer is the API server's.
+
+TEN-086:
+  status: in-progress
+  impl: [internal/settings/params.go, internal/settings/params_table.go]
+  tests:
+    - internal/settings/params_test.go:TestParamKeysMatchUpstream
+    - internal/settings/params_test.go:TestParamWiringMatchesManifests
+    - internal/settings/params_test.go:TestParamDefaultsAreValidAndDocumented
+    - internal/settings/params_test.go:TestResolveParamsPrecedence
+    - internal/settings/params_test.go:TestResolveParamsInvalidValues
+  notes: >-
+    Settings part only: patrol-cmd-params-cm key(s) server.glob.cache.size with upstream env var
+    (ARGOCD_ renamed PATROL_), flag name, default, bounds and fallback warnings; the consuming
+    component applies the semantics. Accepted without effect: internal/rbac compiles patterns with
+    the policy.
+
+TEN-090:
+  status: implemented
+  impl: [internal/settings/secrets.go]
+  tests:
+    - internal/settings/secrets_test.go:TestAccountsFromSettings
+    - internal/settings/parse_cm_test.go:TestParseEveryConfigMapKeyFamily
+    - internal/settings/retain_test.go:TestMissingConfigMapKeepsLastLoadedSettings
+    - internal/settings/retain_test.go:TestMissingConfigMapWithoutHistoryFailsClosed
+    - internal/settings/retain_test.go:TestMissingSecretKeepsLastLoadedSecrets
+  notes: >-
+    Settings part only: accounts.* of patrol-cm and patrol-secret through auth.AccountsFromMaps
+    (fail closed per account), issues name the keys. While patrol-cm or patrol-secret is
+    missing or unlabelled every local account is disabled (upstream GetAccounts fails).
+
+TEN-091:
+  status: implemented
+  impl: [internal/settings/secrets.go]
+  tests:
+    - internal/settings/secrets_test.go:TestAccountsFromSettings
+    - internal/settings/parse_cm_test.go:TestParseDefaults
+    - internal/settings/retain_test.go:TestMissingConfigMapKeepsLastLoadedSettings
+    - internal/settings/manager_test.go:TestManagerKeepsLastLoadedSettingsWhenObjectsDisappear
+  notes: >-
+    Settings part only: admin.enabled and admin.* secret keys through auth. Deleting or
+    unlabelling patrol-cm never re-enables a disabled admin: the last loaded settings are
+    retained and local accounts are disabled until it is restored.
+
+TEN-093:
+  status: implemented
+  impl: [internal/settings/bootstrap.go, internal/settings/secrets.go]
+  tests:
+    - internal/settings/secrets_test.go:TestServerSecretKey
+    - internal/settings/bootstrap_test.go:TestEnsureServerSecretKeyCreatesSecret
+    - internal/settings/bootstrap_test.go:TestEnsureServerSecretKeyConflictKeepsOtherReplicasKey
+    - internal/settings/envtest_test.go:TestEnvtestEnsureServerSecretKeyConcurrent
+  notes: >-
+    Settings part only: server.secretkey (and server.secretkey.previous) as auth.KeySet; 32-byte
+    bootstrap with optimistic concurrency. Token signing is internal/auth's.
+
+TEN-095:
+  status: implemented
+  impl: [internal/settings/parse_cm.go, internal/settings/settings.go]
+  tests:
+    - internal/settings/parse_cm_test.go:TestParseEveryConfigMapKeyFamily
+    - internal/settings/parse_cm_test.go:TestParseInvalidValuesAreReportedWithKeyNames
+    - internal/settings/parse_cm_test.go:TestParseDefaults
+  notes: >-
+    Settings part only: parsing and validation of passwordPattern (default ^.{8,32}$; an invalid
+    regex keeps the last valid one).
+
+TEN-100:
+  status: implemented
+  impl: [internal/settings/parse_cm.go, internal/settings/settings.go]
+  tests:
+    - internal/settings/parse_cm_test.go:TestParseEveryConfigMapKeyFamily
+    - internal/settings/parse_cm_test.go:TestParseInvalidValuesAreReportedWithKeyNames
+    - internal/settings/parse_cm_test.go:TestParseDefaults
+  notes: >-
+    Settings part only: parsing and validation of users.session.duration
+    (auth.ParseSessionDuration, default 24h).
+
+TEN-104:
+  status: in-progress
+  impl: [internal/settings/parse_cm.go, internal/settings/settings.go]
+  tests:
+    - internal/settings/parse_cm_test.go:TestParseEveryConfigMapKeyFamily
+    - internal/settings/parse_cm_test.go:TestParseInvalidValuesAreReportedWithKeyNames
+    - internal/settings/parse_cm_test.go:TestParseDefaults
+  notes: >-
+    Settings part only: parsing and validation of users.anonymous.enabled.
+
+TEN-113:
+  status: in-progress
+  impl: [internal/settings/oidc.go]
+  tests:
+    - internal/settings/oidc_test.go:TestDexProviderConfig
+    - internal/settings/oidc_test.go:TestOIDCPrecedenceOverDex
+    - internal/settings/parse_cm_test.go:TestParseInvalidValuesAreReportedWithKeyNames
+  notes: >-
+    Settings part only: IsDexConfigured (url and non-empty dex.config), IsSSOConfigured,
+    OIDCProviderConfig (oidc.config wins over Dex). Route registration and restarts are the API
+    server's.
+
+TEN-116:
+  status: implemented
+  impl: [internal/settings/oidc.go]
+  tests:
+    - internal/settings/oidc_test.go:TestOIDCConfigEveryKey
+    - internal/settings/oidc_test.go:TestOIDCConfigWarnings
+    - internal/settings/oidc_test.go:TestAzureGraphDefaultEndpoint
+  notes: >-
+    Settings part only: every oidc.config key with secret resolution and upstream warnings, mapped
+    to internal/auth/oidc.Config.
+
+TEN-131:
+  status: in-progress
+  impl: [internal/settings/oidc.go, internal/settings/secrets.go]
+  tests:
+    - internal/settings/secrets_test.go:TestResolveSecretRef
+    - internal/settings/secrets_test.go:TestResolveSecretRefUnlabelledMessage
+    - internal/settings/envtest_test.go:TestEnvtestReferencedSecretLabel
+  notes: >-
+    Both reference forms, label requirement, trimming, unresolved values kept literal. Escaping of
+    '$' for Dex's environment expansion is not implemented here (Dex launcher).
+
+API-002:
+  status: in-progress
+  impl: [internal/settings/params.go, internal/settings/params_table.go]
+  tests:
+    - internal/settings/params_test.go:TestParamKeysMatchUpstream
+    - internal/settings/params_test.go:TestParamWiringMatchesManifests
+    - internal/settings/params_test.go:TestParamDefaultsAreValidAndDocumented
+    - internal/settings/params_test.go:TestResolveParamsPrecedence
+    - internal/settings/params_test.go:TestResolveParamsInvalidValues
+  notes: >-
+    Settings part only: patrol-cmd-params-cm key(s) server.insecure, server.listen.address,
+    server.tls.minversion/maxversion/ciphers with upstream env var (ARGOCD_ renamed PATROL_), flag
+    name, default, bounds and fallback warnings; the consuming component applies the semantics.
+
+API-005:
+  status: in-progress
+  impl: [internal/settings/parse_cm.go, internal/settings/settings.go]
+  tests:
+    - internal/settings/parse_cm_test.go:TestParseEveryConfigMapKeyFamily
+    - internal/settings/parse_cm_test.go:TestParseInvalidValuesAreReportedWithKeyNames
+    - internal/settings/parse_cm_test.go:TestParseDefaults
+  notes: >-
+    Settings part only: parsing and validation of users.anonymous.enabled.
+
+API-016:
+  status: in-progress
+  impl: [internal/settings/secrets.go]
+  tests:
+    - internal/settings/secrets_test.go:TestAccountsFromSettings
+  notes: >-
+    Settings part only: account definitions and passwordPattern for the AccountService.
+
+API-019:
+  status: in-progress
+  impl: [internal/settings/params.go, internal/settings/params_table.go, internal/settings/parse_cm.go, internal/settings/settings.go]
+  tests:
+    - internal/settings/parse_cm_test.go:TestParseEveryConfigMapKeyFamily
+    - internal/settings/parse_cm_test.go:TestParseInvalidValuesAreReportedWithKeyNames
+    - internal/settings/parse_cm_test.go:TestParseDefaults
+  notes: >-
+    Settings part only: parsing and validation of
+    application.sync.requireOverridePrivilegeForRevisionSync and parameter
+    server.sync.replace.allowed.
+
+API-022:
+  status: in-progress
+  impl: [internal/settings/parse_cm.go, internal/settings/settings.go]
+  tests:
+    - internal/settings/parse_cm_test.go:TestParseEveryConfigMapKeyFamily
+    - internal/settings/parse_cm_test.go:TestParseInvalidValuesAreReportedWithKeyNames
+    - internal/settings/parse_cm_test.go:TestParseDefaults
+  notes: >-
+    Settings part only: parsing and validation of
+    server.rbac.disableApplicationFineGrainedRBACInheritance, resource.sensitive.mask.annotations.
+
+API-023:
+  status: in-progress
+  impl: [internal/settings/parse_cm.go, internal/settings/settings.go]
+  tests:
+    - internal/settings/parse_cm_test.go:TestParseEveryConfigMapKeyFamily
+    - internal/settings/parse_cm_test.go:TestParseInvalidValuesAreReportedWithKeyNames
+    - internal/settings/parse_cm_test.go:TestParseDefaults
+  notes: >-
+    Settings part only: parsing and validation of resource.customizations.actions.<group_kind>.
+
+API-024:
+  status: in-progress
+  impl: [internal/settings/parse_cm.go, internal/settings/settings.go]
+  tests:
+    - internal/settings/parse_cm_test.go:TestParseEveryConfigMapKeyFamily
+    - internal/settings/parse_cm_test.go:TestParseInvalidValuesAreReportedWithKeyNames
+    - internal/settings/parse_cm_test.go:TestParseDefaults
+  notes: >-
+    Settings part only: parsing and validation of server.maxPodLogsToRender (default 10).
+
+API-027:
+  status: in-progress
+  impl: [internal/settings/parse_cm.go, internal/settings/settings.go]
+  tests:
+    - internal/settings/parse_cm_test.go:TestParseEveryConfigMapKeyFamily
+    - internal/settings/parse_cm_test.go:TestParseInvalidValuesAreReportedWithKeyNames
+    - internal/settings/parse_cm_test.go:TestParseDefaults
+  notes: >-
+    Settings part only: parsing and validation of application.links, resource.links.
+
+API-029:
+  status: in-progress
+  impl: [internal/settings/certs.go]
+  tests:
+    - internal/settings/certs_test.go:TestTLSCertificatesConfigMap
+    - internal/settings/certs_test.go:TestSSHKnownHostsConfigMap
+  notes: >-
+    Settings part only: reading and validating the certificate ConfigMaps; the CertificateService
+    is the API server's.
+
+API-031:
+  status: in-progress
+  impl: [internal/settings/gpg.go]
+  tests:
+    - internal/settings/certs_test.go:TestGPGKeysConfigMap
+  notes: >-
+    Settings part only: reading and validating patrol-gpg-keys-cm (key ID, fingerprint, owner,
+    subtype).
+
+API-033:
+  status: in-progress
+  impl: [internal/settings/projects.go]
+  tests:
+    - internal/settings/parse_cm_test.go:TestParseGlobalProjectsStopAtInvalidSelector
+  notes: >-
+    Settings part only: globalProjects.
+
+API-035:
+  status: in-progress
+  impl: [internal/settings/parse_cm.go, internal/settings/settings.go]
+  tests:
+    - internal/settings/parse_cm_test.go:TestParseEveryConfigMapKeyFamily
+    - internal/settings/parse_cm_test.go:TestParseInvalidValuesAreReportedWithKeyNames
+    - internal/settings/parse_cm_test.go:TestParseDefaults
+  notes: >-
+    Settings part only: parsing and validation of project.links.
+
+API-041:
+  status: in-progress
+  impl: [internal/settings/oidc.go, internal/settings/parse_cm.go, internal/settings/settings.go]
+  tests:
+    - internal/settings/parse_cm_test.go:TestParseEveryConfigMapKeyFamily
+    - internal/settings/parse_cm_test.go:TestParseInvalidValuesAreReportedWithKeyNames
+    - internal/settings/parse_cm_test.go:TestParseDefaults
+    - internal/settings/oidc_test.go:TestOIDCConfigEveryKey
+  notes: >-
+    Settings part only: every field of GET /api/v1/settings is available from the snapshot (URLs,
+    badge, kustomize, GA, help, userLoginsDisabled, UI, tracking, installationID, exec,
+    impersonation, Dex connectors, OIDC, resource overrides, passwordPattern).
+
+API-043:
+  status: in-progress
+  impl: [internal/settings/parse_cm.go, internal/settings/settings.go]
+  tests:
+    - internal/settings/parse_cm_test.go:TestParseEveryConfigMapKeyFamily
+    - internal/settings/parse_cm_test.go:TestParseInvalidValuesAreReportedWithKeyNames
+    - internal/settings/parse_cm_test.go:TestParseDefaults
+  notes: >-
+    Settings part only: parsing and validation of statusbadge.enabled, statusbadge.url.
+
+API-044:
+  status: in-progress
+  impl: [internal/settings/parse_cm.go, internal/settings/settings.go]
+  tests:
+    - internal/settings/parse_cm_test.go:TestParseEveryConfigMapKeyFamily
+    - internal/settings/parse_cm_test.go:TestParseInvalidValuesAreReportedWithKeyNames
+    - internal/settings/parse_cm_test.go:TestParseDefaults
+  notes: >-
+    Settings part only: parsing and validation of exec.enabled, exec.shells (default
+    bash,sh,powershell,cmd).
+
+API-045:
+  status: in-progress
+  impl: [internal/settings/links.go]
+  tests:
+    - internal/settings/parse_cm_test.go:TestParseEveryConfigMapKeyFamily
+    - internal/settings/parse_cm_test.go:TestParseInvalidValuesAreReportedWithKeyNames
+  notes: >-
+    Settings part only: application.links/resource.links/project.links YAML with url templates and
+    conditions checked at load; evaluation is the API server's.
+
+API-047:
+  status: in-progress
+  impl: [internal/settings/extensions.go]
+  tests:
+    - internal/settings/parse_cm_test.go:TestParseEveryConfigMapKeyFamily
+    - internal/settings/parse_cm_test.go:TestParseInvalidValuesAreReportedWithKeyNames
+    - internal/settings/parse_cm_test.go:TestParseExtensionsDuplicateAcrossKeys
+  notes: >-
+    Settings part only: extension.config and extension.config.<name> with $ references, upstream
+    defaults and validation messages. A duplicate or invalid key drops only that key (upstream
+    rejects the whole configuration).
+
+API-085:
+  status: in-progress
+  impl: [internal/settings/keys.go, internal/settings/validate.go]
+  tests:
+    - internal/settings/validate_test.go:TestValidateGroups
+    - internal/settings/keys_test.go:TestAcceptedKeysSortedAndDescribed
+  notes: >-
+    Settings part only: the validate engine (groups and upstream summaries, accepted key
+    register); the CLI and rbac/resource-overrides subcommands are other components.
+
+API-109:
+  status: in-progress
+  impl: [internal/settings/parse_cm.go, internal/settings/settings.go]
+  tests:
+    - internal/settings/parse_cm_test.go:TestParseEveryConfigMapKeyFamily
+    - internal/settings/parse_cm_test.go:TestParseInvalidValuesAreReportedWithKeyNames
+    - internal/settings/parse_cm_test.go:TestParseDefaults
+  notes: >-
+    Settings part only: parsing and validation of help.download.<os>-<arch> (unknown platforms
+    ignored).
+
+API-110:
+  status: in-progress
+  impl: [internal/settings/parse_cm.go, internal/settings/settings.go]
+  tests:
+    - internal/settings/parse_cm_test.go:TestParseEveryConfigMapKeyFamily
+    - internal/settings/parse_cm_test.go:TestParseInvalidValuesAreReportedWithKeyNames
+    - internal/settings/parse_cm_test.go:TestParseDefaults
+  notes: >-
+    Settings part only: parsing and validation of ui.bannercontent, ui.bannerurl,
+    ui.bannerpermanent, ui.bannerposition.
+
+API-111:
+  status: in-progress
+  impl: [internal/settings/parse_cm.go, internal/settings/settings.go]
+  tests:
+    - internal/settings/parse_cm_test.go:TestParseEveryConfigMapKeyFamily
+    - internal/settings/parse_cm_test.go:TestParseInvalidValuesAreReportedWithKeyNames
+    - internal/settings/parse_cm_test.go:TestParseDefaults
+    - internal/settings/parse_cm_test.go:TestParseHelpChatDefaults
+  notes: >-
+    Settings part only: parsing and validation of help.chatUrl, help.chatText (default Chat now!,
+    empty without a URL).
+
+API-112:
+  status: in-progress
+  impl: [internal/settings/parse_cm.go, internal/settings/settings.go]
+  tests:
+    - internal/settings/parse_cm_test.go:TestParseEveryConfigMapKeyFamily
+    - internal/settings/parse_cm_test.go:TestParseInvalidValuesAreReportedWithKeyNames
+    - internal/settings/parse_cm_test.go:TestParseDefaults
+  notes: >-
+    Settings part only: parsing and validation of ui.cssurl.
+
+API-113:
+  status: in-progress
+  impl: [internal/settings/parse_cm.go, internal/settings/settings.go]
+  tests:
+    - internal/settings/parse_cm_test.go:TestParseEveryConfigMapKeyFamily
+    - internal/settings/parse_cm_test.go:TestParseInvalidValuesAreReportedWithKeyNames
+    - internal/settings/parse_cm_test.go:TestParseDefaults
+  notes: >-
+    Settings part only: parsing and validation of ga.trackingid, ga.anonymizeusers (true unless
+    "false").
+
+API-115:
+  status: in-progress
+  impl: [internal/settings/parse_cm.go, internal/settings/settings.go]
+  tests:
+    - internal/settings/parse_cm_test.go:TestParseEveryConfigMapKeyFamily
+    - internal/settings/parse_cm_test.go:TestParseInvalidValuesAreReportedWithKeyNames
+    - internal/settings/parse_cm_test.go:TestParseDefaults
+  notes: >-
+    Settings part only: parsing and validation of url.
+
+NOTIF-002:
+  status: in-progress
+  impl: [internal/settings/params.go, internal/settings/params_table.go]
+  tests:
+    - internal/settings/params_test.go:TestParamKeysMatchUpstream
+    - internal/settings/params_test.go:TestParamWiringMatchesManifests
+    - internal/settings/params_test.go:TestParamDefaultsAreValidAndDocumented
+    - internal/settings/params_test.go:TestResolveParamsPrecedence
+    - internal/settings/params_test.go:TestResolveParamsInvalidValues
+  notes: >-
+    Settings part only: patrol-cmd-params-cm key(s) application.namespaces with upstream env var
+    (ARGOCD_ renamed PATROL_), flag name, default, bounds and fallback warnings; the consuming
+    component applies the semantics.
+
+NOTIF-004:
+  status: in-progress
+  impl: [internal/settings/params.go, internal/settings/params_table.go]
+  tests:
+    - internal/settings/params_test.go:TestParamKeysMatchUpstream
+    - internal/settings/params_test.go:TestParamWiringMatchesManifests
+    - internal/settings/params_test.go:TestParamDefaultsAreValidAndDocumented
+    - internal/settings/params_test.go:TestResolveParamsPrecedence
+    - internal/settings/params_test.go:TestResolveParamsInvalidValues
+  notes: >-
+    Settings part only: patrol-cmd-params-cm key(s) notificationscontroller.processors.count (min
+    1) with upstream env var (ARGOCD_ renamed PATROL_), flag name, default, bounds and fallback
+    warnings; the consuming component applies the semantics.
+
+NOTIF-005:
+  status: in-progress
+  impl: [internal/settings/params.go, internal/settings/params_table.go]
+  tests:
+    - internal/settings/params_test.go:TestParamKeysMatchUpstream
+    - internal/settings/params_test.go:TestParamWiringMatchesManifests
+    - internal/settings/params_test.go:TestParamDefaultsAreValidAndDocumented
+    - internal/settings/params_test.go:TestResolveParamsPrecedence
+    - internal/settings/params_test.go:TestResolveParamsInvalidValues
+    - internal/settings/params_log_test.go:TestResolveParamsLogSettingsAcceptUpstreamSpellings
+  notes: >-
+    Settings part only: patrol-cmd-params-cm key(s) notificationscontroller.log.level,
+    notificationscontroller.log.format (invalid format or level is an error; any letter case and
+    every logrus level name accepted) with upstream env var (ARGOCD_ renamed PATROL_), flag name,
+    default, bounds and fallback warnings; the consuming component applies the semantics.
+
+NOTIF-007:
+  status: in-progress
+  impl: [internal/settings/params.go, internal/settings/params_table.go]
+  tests:
+    - internal/settings/params_test.go:TestParamKeysMatchUpstream
+    - internal/settings/params_test.go:TestParamWiringMatchesManifests
+    - internal/settings/params_test.go:TestParamDefaultsAreValidAndDocumented
+    - internal/settings/params_test.go:TestResolveParamsPrecedence
+    - internal/settings/params_test.go:TestResolveParamsInvalidValues
+  notes: >-
+    Settings part only: patrol-cmd-params-cm key(s) notificationscontroller.repo.server.*
+    parameters with upstream env var (ARGOCD_ renamed PATROL_), flag name, default, bounds and
+    fallback warnings; the consuming component applies the semantics.
+
+NOTIF-011:
+  status: in-progress
+  impl: [internal/settings/certs.go]
+  tests:
+    - internal/settings/certs_test.go:TestTLSCertificatesConfigMap
+  notes: >-
+    Settings part only: per-host certificates for notification services.
+
+NOTIF-054:
+  status: in-progress
+  impl: [internal/settings/params.go, internal/settings/params_table.go]
+  tests:
+    - internal/settings/params_test.go:TestParamKeysMatchUpstream
+    - internal/settings/params_test.go:TestParamWiringMatchesManifests
+    - internal/settings/params_test.go:TestParamDefaultsAreValidAndDocumented
+    - internal/settings/params_test.go:TestResolveParamsPrecedence
+    - internal/settings/params_test.go:TestResolveParamsInvalidValues
+  notes: >-
+    Settings part only: patrol-cmd-params-cm key(s) notificationscontroller.selfservice.enabled
+    with upstream env var (ARGOCD_ renamed PATROL_), flag name, default, bounds and fallback
+    warnings; the consuming component applies the semantics.
+
+OPS-005:
+  status: in-progress
+  impl: [internal/settings/params.go, internal/settings/params_table.go]
+  tests:
+    - internal/settings/params_test.go:TestParamKeysMatchUpstream
+    - internal/settings/params_test.go:TestParamWiringMatchesManifests
+    - internal/settings/params_test.go:TestParamDefaultsAreValidAndDocumented
+    - internal/settings/params_test.go:TestResolveParamsPrecedence
+    - internal/settings/params_test.go:TestResolveParamsInvalidValues
+  notes: >-
+    Settings part only: patrol-cmd-params-cm key(s) hydrator.enabled, commit.server with upstream
+    env var (ARGOCD_ renamed PATROL_), flag name, default, bounds and fallback warnings; the
+    consuming component applies the semantics.
+
+OPS-012:
+  status: in-progress
+  impl: [internal/settings/manager.go, internal/settings/names.go, internal/settings/parse.go]
+  tests:
+    - internal/settings/parse_cm_test.go:TestParseMissingConfigMapAndLabel
+    - internal/settings/retain_test.go:TestMissingConfigMapKeepsLastLoadedSettings
+    - internal/settings/manager_test.go:TestManagerFiltersNamespaceAndNames
+    - internal/settings/manager_test.go:TestManagerKeepsLastLoadedSettingsWhenObjectsDisappear
+    - internal/settings/envtest_test.go:TestEnvtestManagerReload
+    - internal/settings/envtest_test.go:TestEnvtestReferencedSecretLabel
+  notes: >-
+    Namespace-scoped informers per object name; patrol-cm and the TLS/SSH/GPG ConfigMaps need
+    app.kubernetes.io/part-of=patrol-cd (reported as an issue instead of a silent NotFound);
+    referenced Secrets need it too. An unlabelled or deleted patrol-cm is an error and the last
+    loaded settings stay in force with local accounts disabled (upstream: settings reads fail,
+    cached settings remain); re-adding the label reloads without restart. Components still have
+    to adopt the Manager.
+
+OPS-017:
+  status: in-progress
+  impl: [internal/settings/params.go, internal/settings/params_table.go]
+  tests:
+    - internal/settings/params_test.go:TestParamKeysMatchUpstream
+    - internal/settings/params_test.go:TestParamWiringMatchesManifests
+    - internal/settings/params_test.go:TestParamDefaultsAreValidAndDocumented
+    - internal/settings/params_test.go:TestResolveParamsPrecedence
+    - internal/settings/params_test.go:TestResolveParamsInvalidValues
+    - internal/settings/params_test.go:TestResolveParamsEmptyValues
+    - internal/settings/params_test.go:TestParamsFlagDefaultAndSettings
+  notes: >-
+    ParamsForComponent/ResolveParams: env > ConfigMap > default, empty selects the default,
+    invalid values warn and use the default (upstream wording), unknown keys warned. Command
+    wiring and restart semantics are each component's.
+
+OPS-018:
+  status: in-progress
+  impl: [internal/settings/params.go, internal/settings/params_table.go]
+  tests:
+    - internal/settings/params_test.go:TestParamKeysMatchUpstream
+    - internal/settings/params_test.go:TestParamWiringMatchesManifests
+    - internal/settings/params_test.go:TestParamDefaultsAreValidAndDocumented
+    - internal/settings/params_test.go:TestResolveParamsPrecedence
+    - internal/settings/params_test.go:TestResolveParamsInvalidValues
+  notes: >-
+    Settings part only: shared keys with env var, flag, default and bounds; manifest wiring
+    matches upstream (golden test). Redis keys and gRPC TXT keys are accepted and reported as
+    having no effect (ADR-0004/0006).
+
+OPS-019:
+  status: in-progress
+  impl: [internal/settings/params.go, internal/settings/params_table.go]
+  tests:
+    - internal/settings/params_test.go:TestParamKeysMatchUpstream
+    - internal/settings/params_test.go:TestParamWiringMatchesManifests
+    - internal/settings/params_test.go:TestParamDefaultsAreValidAndDocumented
+    - internal/settings/params_test.go:TestResolveParamsPrecedence
+    - internal/settings/params_test.go:TestResolveParamsInvalidValues
+  notes: >-
+    Settings part only: application-controller processing keys with env var, flag, default and
+    bounds; manifest wiring matches upstream (golden test). Redis keys and gRPC TXT keys are
+    accepted and reported as having no effect (ADR-0004/0006).
+
+OPS-020:
+  status: in-progress
+  impl: [internal/settings/params.go, internal/settings/params_table.go]
+  tests:
+    - internal/settings/params_test.go:TestParamKeysMatchUpstream
+    - internal/settings/params_test.go:TestParamWiringMatchesManifests
+    - internal/settings/params_test.go:TestParamDefaultsAreValidAndDocumented
+    - internal/settings/params_test.go:TestResolveParamsPrecedence
+    - internal/settings/params_test.go:TestResolveParamsInvalidValues
+  notes: >-
+    Settings part only: application-controller repo-server and cache keys with env var, flag,
+    default and bounds; manifest wiring matches upstream (golden test). Redis keys and gRPC TXT
+    keys are accepted and reported as having no effect (ADR-0004/0006).
+
+OPS-021:
+  status: in-progress
+  impl: [internal/settings/params.go, internal/settings/params_table.go]
+  tests:
+    - internal/settings/params_test.go:TestParamKeysMatchUpstream
+    - internal/settings/params_test.go:TestParamWiringMatchesManifests
+    - internal/settings/params_test.go:TestParamDefaultsAreValidAndDocumented
+    - internal/settings/params_test.go:TestResolveParamsPrecedence
+    - internal/settings/params_test.go:TestResolveParamsInvalidValues
+  notes: >-
+    Settings part only: Kubernetes client and gRPC TXT keys with env var, flag, default and
+    bounds; manifest wiring matches upstream (golden test). Redis keys and gRPC TXT keys are
+    accepted and reported as having no effect (ADR-0004/0006).
+
+OPS-022:
+  status: in-progress
+  impl: [internal/settings/params.go, internal/settings/params_table.go]
+  tests:
+    - internal/settings/params_test.go:TestParamKeysMatchUpstream
+    - internal/settings/params_test.go:TestParamWiringMatchesManifests
+    - internal/settings/params_test.go:TestParamDefaultsAreValidAndDocumented
+    - internal/settings/params_test.go:TestResolveParamsPrecedence
+    - internal/settings/params_test.go:TestResolveParamsInvalidValues
+  notes: >-
+    Settings part only: API server keys with env var, flag, default and bounds; manifest wiring
+    matches upstream (golden test). Redis keys and gRPC TXT keys are accepted and reported as
+    having no effect (ADR-0004/0006).
+
+OPS-023:
+  status: in-progress
+  impl: [internal/settings/params.go, internal/settings/params_table.go]
+  tests:
+    - internal/settings/params_test.go:TestParamKeysMatchUpstream
+    - internal/settings/params_test.go:TestParamWiringMatchesManifests
+    - internal/settings/params_test.go:TestParamDefaultsAreValidAndDocumented
+    - internal/settings/params_test.go:TestResolveParamsPrecedence
+    - internal/settings/params_test.go:TestResolveParamsInvalidValues
+  notes: >-
+    Settings part only: repo-server keys with env var, flag, default and bounds; manifest wiring
+    matches upstream (golden test). Redis keys and gRPC TXT keys are accepted and reported as
+    having no effect (ADR-0004/0006).
+
+OPS-024:
+  status: in-progress
+  impl: [internal/settings/params.go, internal/settings/params_table.go]
+  tests:
+    - internal/settings/params_test.go:TestParamKeysMatchUpstream
+    - internal/settings/params_test.go:TestParamWiringMatchesManifests
+    - internal/settings/params_test.go:TestParamDefaultsAreValidAndDocumented
+    - internal/settings/params_test.go:TestResolveParamsPrecedence
+    - internal/settings/params_test.go:TestResolveParamsInvalidValues
+  notes: >-
+    Settings part only: commit-server keys with env var, flag, default and bounds; manifest wiring
+    matches upstream (golden test). Redis keys and gRPC TXT keys are accepted and reported as
+    having no effect (ADR-0004/0006).
+
+OPS-025:
+  status: in-progress
+  impl: [internal/settings/params.go, internal/settings/params_table.go]
+  tests:
+    - internal/settings/params_test.go:TestParamKeysMatchUpstream
+    - internal/settings/params_test.go:TestParamWiringMatchesManifests
+    - internal/settings/params_test.go:TestParamDefaultsAreValidAndDocumented
+    - internal/settings/params_test.go:TestResolveParamsPrecedence
+    - internal/settings/params_test.go:TestResolveParamsInvalidValues
+  notes: >-
+    Settings part only: Dex keys with env var, flag, default and bounds; manifest wiring matches
+    upstream (golden test). Redis keys and gRPC TXT keys are accepted and reported as having no
+    effect (ADR-0004/0006).
+
+OPS-026:
+  status: in-progress
+  impl: [internal/settings/params.go, internal/settings/params_table.go]
+  tests:
+    - internal/settings/params_test.go:TestParamKeysMatchUpstream
+    - internal/settings/params_test.go:TestParamWiringMatchesManifests
+    - internal/settings/params_test.go:TestParamDefaultsAreValidAndDocumented
+    - internal/settings/params_test.go:TestResolveParamsPrecedence
+    - internal/settings/params_test.go:TestResolveParamsInvalidValues
+  notes: >-
+    Settings part only: ApplicationSet controller keys with env var, flag, default and bounds;
+    manifest wiring matches upstream (golden test). Redis keys and gRPC TXT keys are accepted and
+    reported as having no effect (ADR-0004/0006).
+
+OPS-027:
+  status: in-progress
+  impl: [internal/settings/params.go, internal/settings/params_table.go]
+  tests:
+    - internal/settings/params_test.go:TestParamKeysMatchUpstream
+    - internal/settings/params_test.go:TestParamWiringMatchesManifests
+    - internal/settings/params_test.go:TestParamDefaultsAreValidAndDocumented
+    - internal/settings/params_test.go:TestResolveParamsPrecedence
+    - internal/settings/params_test.go:TestResolveParamsInvalidValues
+  notes: >-
+    Settings part only: notifications controller keys with env var, flag, default and bounds;
+    manifest wiring matches upstream (golden test). Redis keys and gRPC TXT keys are accepted and
+    reported as having no effect (ADR-0004/0006).
+
+OPS-028:
+  status: in-progress
+  impl: [internal/settings/params.go, internal/settings/params_table.go]
+  tests:
+    - internal/settings/params_test.go:TestParamKeysMatchUpstream
+    - internal/settings/params_test.go:TestParamWiringMatchesManifests
+    - internal/settings/params_test.go:TestParamDefaultsAreValidAndDocumented
+    - internal/settings/params_test.go:TestResolveParamsPrecedence
+    - internal/settings/params_test.go:TestResolveParamsInvalidValues
+  notes: >-
+    Settings part only: manifest-wired keys missing from the reference document with env var,
+    flag, default and bounds; manifest wiring matches upstream (golden test). Redis keys and gRPC
+    TXT keys are accepted and reported as having no effect (ADR-0004/0006).
+
+OPS-029:
+  status: verified
+  impl: [internal/settings/keys.go, internal/settings/parse_cm.go]
+  tests:
+    - internal/settings/keys_test.go:TestConfigMapKeyRegister
+  notes: >-
+    Every upstream argocd-cm key is accepted and interpreted by the settings package (register
+    test with real input, library-level rule); deprecated/removed keys are reported.
+
+OPS-030:
+  status: in-progress
+  impl: [internal/settings/bootstrap.go, internal/settings/secrets.go]
+  tests:
+    - internal/settings/secrets_test.go:TestServerSecretKey
+    - internal/settings/secrets_test.go:TestServerCertificate
+    - internal/settings/secrets_test.go:TestWebhookSecretReferences
+    - internal/settings/bootstrap_test.go:TestEnsureServerSecretKeyCreatesSecret
+    - internal/settings/bootstrap_test.go:TestEnsureServerSecretKeyAddsMissingKey
+    - internal/settings/bootstrap_test.go:TestEnsureServerSecretKeyConflictKeepsOtherReplicasKey
+    - internal/settings/bootstrap_test.go:TestEnsureServerSecretKeyCreateRace
+    - internal/settings/envtest_test.go:TestEnvtestEnsureServerSecretKeyConcurrent
+  notes: >-
+    All patrol-secret keys are read; server.secretkey bootstrap with conflict tolerance is
+    implemented. Initial admin password generation and the self-signed certificate are not
+    implemented yet.
+
+OPS-037:
+  status: in-progress
+  impl: [internal/settings/params.go, internal/settings/params_table.go]
+  tests:
+    - internal/settings/params_test.go:TestParamKeysMatchUpstream
+    - internal/settings/params_test.go:TestParamWiringMatchesManifests
+    - internal/settings/params_test.go:TestParamDefaultsAreValidAndDocumented
+    - internal/settings/params_test.go:TestResolveParamsPrecedence
+    - internal/settings/params_test.go:TestResolveParamsInvalidValues
+  notes: >-
+    Settings part only: patrol-cmd-params-cm key(s) reposerver.git.request.timeout,
+    reposerver.git.lsremote.parallelism.limit with upstream env var (ARGOCD_ renamed PATROL_),
+    flag name, default, bounds and fallback warnings; the consuming component applies the
+    semantics.
+
+OPS-047:
+  status: in-progress
+  impl: [internal/settings/params.go, internal/settings/params_table.go]
+  tests:
+    - internal/settings/params_test.go:TestParamKeysMatchUpstream
+    - internal/settings/params_test.go:TestParamWiringMatchesManifests
+    - internal/settings/params_test.go:TestParamDefaultsAreValidAndDocumented
+    - internal/settings/params_test.go:TestResolveParamsPrecedence
+    - internal/settings/params_test.go:TestResolveParamsInvalidValues
+  notes: >-
+    Settings part only: patrol-cmd-params-cm key(s) *.k8s.client.qps/burst/max.idle.connections
+    and *.k8s.tcp/tls timeouts with upstream env var (ARGOCD_ renamed PATROL_), flag name,
+    default, bounds and fallback warnings; the consuming component applies the semantics.
+
+OPS-048:
+  status: in-progress
+  impl: [internal/settings/params.go, internal/settings/params_table.go]
+  tests:
+    - internal/settings/params_test.go:TestParamKeysMatchUpstream
+    - internal/settings/params_test.go:TestParamWiringMatchesManifests
+    - internal/settings/params_test.go:TestParamDefaultsAreValidAndDocumented
+    - internal/settings/params_test.go:TestResolveParamsPrecedence
+    - internal/settings/params_test.go:TestResolveParamsInvalidValues
+  notes: >-
+    Settings part only: patrol-cmd-params-cm key(s) controller.k8sclient.retry.*,
+    server.k8sclient.retry.* with upstream env var (ARGOCD_ renamed PATROL_), flag name, default,
+    bounds and fallback warnings; the consuming component applies the semantics.
+
+OPS-049:
+  status: in-progress
+  impl: [internal/settings/params.go, internal/settings/params_table.go]
+  tests:
+    - internal/settings/params_test.go:TestParamKeysMatchUpstream
+    - internal/settings/params_test.go:TestParamWiringMatchesManifests
+    - internal/settings/params_test.go:TestParamDefaultsAreValidAndDocumented
+    - internal/settings/params_test.go:TestResolveParamsPrecedence
+    - internal/settings/params_test.go:TestResolveParamsInvalidValues
+  notes: >-
+    Settings part only: patrol-cmd-params-cm key(s) controller.cluster.cache.* parameters with
+    upstream env var (ARGOCD_ renamed PATROL_), flag name, default, bounds and fallback warnings;
+    the consuming component applies the semantics.
+
+OPS-058:
+  status: in-progress
+  impl: [internal/settings/parse_cm.go, internal/settings/settings.go]
+  tests:
+    - internal/settings/parse_cm_test.go:TestParseEveryConfigMapKeyFamily
+    - internal/settings/parse_cm_test.go:TestParseInvalidValuesAreReportedWithKeyNames
+    - internal/settings/parse_cm_test.go:TestParseDefaults
+  notes: >-
+    Settings part only: parsing and validation of timeout.reconciliation (Go duration or
+    <n><unit>; negative rejected).
+
+OPS-059:
+  status: in-progress
+  impl: [internal/settings/parse_cm.go, internal/settings/settings.go]
+  tests:
+    - internal/settings/parse_cm_test.go:TestParseEveryConfigMapKeyFamily
+    - internal/settings/parse_cm_test.go:TestParseInvalidValuesAreReportedWithKeyNames
+    - internal/settings/parse_cm_test.go:TestParseDefaults
+  notes: >-
+    Settings part only: parsing and validation of timeout.reconciliation.jitter.
+
+OPS-060:
+  status: in-progress
+  impl: [internal/settings/parse_cm.go, internal/settings/settings.go]
+  tests:
+    - internal/settings/parse_cm_test.go:TestParseEveryConfigMapKeyFamily
+    - internal/settings/parse_cm_test.go:TestParseInvalidValuesAreReportedWithKeyNames
+    - internal/settings/parse_cm_test.go:TestParseDefaults
+  notes: >-
+    Settings part only: parsing and validation of timeout.hard.reconciliation.
+
+OPS-062:
+  status: in-progress
+  impl: [internal/settings/parse_cm.go, internal/settings/settings.go]
+  tests:
+    - internal/settings/parse_cm_test.go:TestParseEveryConfigMapKeyFamily
+    - internal/settings/parse_cm_test.go:TestParseInvalidValuesAreReportedWithKeyNames
+    - internal/settings/parse_cm_test.go:TestParseDefaults
+  notes: >-
+    Settings part only: parsing and validation of resource.ignoreResourceUpdatesEnabled (default
+    true, ParseBool).
+
+OPS-063:
+  status: in-progress
+  impl: [internal/settings/parse_cm.go, internal/settings/resources.go]
+  tests:
+    - internal/settings/parse_cm_test.go:TestSystemIgnoreAndResourceUpdateRules
+    - internal/settings/resources_test.go:TestDefaultIgnoreResourceUpdatesParse
+  notes: >-
+    Settings part only: ignoreResourceUpdates keys, merge with ignoreDifferences when
+    ignoreDifferencesOnResourceUpdates, the metadata noise rule
+    (Settings.ResourceUpdateIgnoreRules via internal/diff) and the shipped defaults. Event
+    skipping is the cache's.
+
+OPS-081:
+  status: in-progress
+  impl: [internal/settings/params.go, internal/settings/params_table.go]
+  tests:
+    - internal/settings/params_test.go:TestParamKeysMatchUpstream
+    - internal/settings/params_test.go:TestParamWiringMatchesManifests
+    - internal/settings/params_test.go:TestParamDefaultsAreValidAndDocumented
+    - internal/settings/params_test.go:TestResolveParamsPrecedence
+    - internal/settings/params_test.go:TestResolveParamsInvalidValues
+  notes: >-
+    Settings part only: patrol-cmd-params-cm key(s)
+    applicationsetcontroller.enable.github.api.metrics with upstream env var (ARGOCD_ renamed
+    PATROL_), flag name, default, bounds and fallback warnings; the consuming component applies
+    the semantics.
+
+OPS-086:
+  status: in-progress
+  impl: [internal/settings/params.go, internal/settings/params_table.go]
+  tests:
+    - internal/settings/params_test.go:TestParamWiringMatchesManifests
+    - internal/settings/params_test.go:TestParamDefaultsAreValidAndDocumented
+    - internal/settings/params_test.go:TestResolveParamsInvalidValues
+    - internal/settings/params_log_test.go:TestResolveParamsLogSettingsAcceptUpstreamSpellings
+  notes: >-
+    Settings part only: <component>.log.format (json|text in any letter case, default json;
+    other values are errors) and <component>.log.level (every logrus level name in any letter
+    case, default info, used as the closest slog level: warning→warn, trace→debug and
+    fatal/panic→error with a warning; other values are errors with logrus wording) for all seven
+    components with upstream env vars (ARGOCD_ renamed PATROL_) and flags. Configuring loggers,
+    the appset --debug override and the process env export are the components'.
+
+OPS-092:
+  status: in-progress
+  impl: [internal/settings/parse_cm.go, internal/settings/settings.go]
+  tests:
+    - internal/settings/parse_cm_test.go:TestParseEveryConfigMapKeyFamily
+    - internal/settings/parse_cm_test.go:TestParseInvalidValuesAreReportedWithKeyNames
+    - internal/settings/parse_cm_test.go:TestParseDefaults
+  notes: >-
+    Settings part only: parsing and validation of resource.includeEventLabelKeys,
+    resource.excludeEventLabelKeys (spaces removed, globs checked).
+
+OPS-095:
+  status: in-progress
+  impl: [internal/settings/manager.go]
+  tests:
+    - internal/settings/manager_test.go:TestManagerLoadsAndReloads
+    - internal/settings/manager_test.go:TestManagerDebouncesBursts
+    - internal/settings/envtest_test.go:TestEnvtestManagerReload
+  notes: >-
+    Settings part only: change notifications with old and new snapshots (the server compares url,
+    additionalUrls, Dex/OIDC and webhook secrets and restarts itself).

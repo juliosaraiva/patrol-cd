@@ -1,0 +1,357 @@
+# CLI core (cmd/patrol, internal/cli and its cmdutil, config, transport, sso, output and
+# clitest packages). See docs/architecture/components/cli.md.
+# Evidence: end-to-end tests run the real cobra root command in-process (internal/cli/clitest)
+# against the real patrol API server (internal/apiserver with the core routes and the
+# projects, clusters and repositories services), the real token service, login
+# authenticator, RBAC enforcer and settings manager, and an envtest kube-apiserver 1.36 with
+# the generated CRDs. Fakes, where a feature depends on them, are named in the notes and the
+# status is then verified-simulated: repo-server (connection tests), OIDC provider (SSO),
+# destination cluster authentication (envtest behind a token-checking front end) and the
+# Kubernetes port-forward subresource (no kubelet in envtest).
+
+API-051:
+  status: verified
+  impl: [internal/cli/cmdutil/flags.go, internal/cli/cmdutil/opts.go, internal/cli/cmdutil/client.go, internal/cli/root.go]
+  tests:
+    - internal/cli/session_test.go:TestServerAndTokenSources
+    - internal/cli/root_test.go:TestInvalidInvocations
+    - internal/cli/root_test.go:TestHelpGolden
+    - internal/cli/cmdutil/cmdutil_test.go:TestParseOpts
+  notes: >-
+    PATROL_OPTS (shell-quoted, --flag=value form, "PATROL_OPTS invalid at '<x>'"), PATROL_SERVER,
+    PATROL_AUTH_TOKEN, PATROL_SERVER_NAME, PATROL_APPLICATION_CONTROLLER_NAME,
+    PATROL_REPO_SERVER_NAME; precedence flag > PATROL_OPTS > environment > configuration.
+    ARGOCD_OPTS/ARGOCD_SERVER/ARGOCD_AUTH_TOKEN are warned migration aliases (ARGOCD_OPTS
+    --auth-token dropped; ARGOCD_AUTH_TOKEN only sent to ARGOCD_SERVER). --argocd-context is a
+    hidden alias of --patrol-context; --redis-* accepted and deprecated (ADR-0004).
+
+API-052:
+  status: verified
+  impl: [internal/cli/config/config.go, internal/cli/config/perm_unix.go, internal/cli/cmdutil/client.go]
+  tests:
+    - internal/cli/session_test.go:TestLoginContextsLogout
+    - internal/cli/session_test.go:TestServerAndTokenSources
+    - internal/cli/session_test.go:TestSSOLoginAndRefresh
+    - internal/cli/config/config_test.go:TestWriteReadRoundTrip
+    - internal/cli/config/config_test.go:TestReadErrors
+    - internal/cli/config/config_test.go:TestContextOperations
+    - internal/cli/config/config_test.go:TestDefaultPath
+    - internal/cli/cmdutil/target_test.go:TestResolveTargetScopesContextCredentials
+  notes: >-
+    ~/.config/patrol/config (PATROL_CONFIG, PATROL_CONFIG_DIR, XDG_CONFIG_HOME), upstream YAML
+    keys, atomic 0600 writes, 0600/0400 enforced on read. Context credentials and TLS data
+    apply only to the context's own server (hardening): a requested --port-forward /
+    --port-forward-namespace or --core is its own effective server and reuses only a
+    port-forward / core context (no token, refresh token, SSO refresh or renewed-token
+    storage for a remote context). The expired-SSO refresh path is
+    exercised against a fake OIDC provider. ARGOCD_CONFIG_DIR and ~/.argocd are not read.
+
+API-053:
+  status: verified
+  impl: [internal/cli/cmdutil/client.go, internal/cli/cmdutil/debuglog.go, internal/cli/transport/transport.go]
+  tests:
+    - internal/cli/transport_test.go:TestRootPath
+    - internal/cli/transport_test.go:TestHTTPRetriesAndHeaders
+    - internal/cli/session_test.go:TestLoginTLS
+    - internal/cli/root_test.go:TestInvalidInvocations
+    - internal/cli/cmdutil/cmdutil_test.go:TestDebugTransportRedacts
+  notes: >-
+    Transport is JSON over HTTP (ADR-0005): no gRPC probe or gRPC-Web fallback; --grpc-web is
+    accepted and ignored, --grpc-web-root-path is the server root path. TLS by default,
+    --plaintext, --insecure, --server-crt, client certificates, -H headers, User-Agent
+    patrol-cli/<version>, --http-retry-max (502/503/504 and transport errors on GET).
+
+API-054:
+  status: verified-simulated
+  impl: [internal/cli/transport/portforward.go]
+  tests:
+    - internal/cli/portforward_test.go:TestPortForward
+    - internal/cli/portforward_test.go:TestPortForwardDoesNotReuseRemoteContext
+    - internal/cli/transport/transport_test.go:TestSelectReadyPod
+  notes: >-
+    Pod selection and the v4.channel.k8s.io WebSocket protocol run against a fake Kubernetes
+    API (envtest has no kubelet) bridging to the real patrol API server over TLS (insecure
+    forced). WebSocket instead of SPDY (client-go port-forward packages are not in the module
+    graph).
+
+API-055:
+  status: implemented
+  impl: [internal/cli/transport/transport.go, internal/cli/cmdutil/client.go, internal/cli/cmdutil/kube.go]
+  tests:
+    - internal/cli/root_test.go:TestInvalidInvocations
+  notes: >-
+    --core, login --core and the kubectl client flags are plumbed through transport.Provider;
+    the provider (internal/cli/core, registered by cmd/patrol) and its evidence are recorded
+    in docs/parity/status/cli-core-mode.yaml. Builds without the registrar still fail with
+    "core mode not available in this build" (tested here).
+
+API-056:
+  status: verified
+  impl: [internal/cli/plugin.go, internal/cli/root.go]
+  tests:
+    - internal/cli/root_test.go:TestPluginDispatch
+    - internal/cli/root_test.go:TestPluginRelativePathRefused
+  notes: >-
+    patrol-<name> on PATH with PATROL_BINARY, PATROL_CONFIG and PATROL_PLUGIN_NAME added to the
+    environment; exit code propagated; relative PATH entries refused; plugin names completed.
+
+API-058:
+  status: verified
+  impl: [internal/cli/login.go, internal/cli/session.go, internal/cli/sso/sso.go]
+  tests:
+    - internal/cli/session_test.go:TestLoginContextsLogout
+    - internal/cli/session_test.go:TestLoginFailures
+    - internal/cli/session_test.go:TestLoginTLS
+    - internal/cli/session_test.go:TestSSOLoginAndRefresh
+    - internal/cli/portforward_test.go:TestPortForward
+  notes: >-
+    Password login, prompts, TLS probe prompts, logout with server-side revocation
+    (DELETE /api/v1/session) and relogin against the real server. The SSO variants use a fake
+    OIDC provider (see TEN-130). login --core stores a core context; core mode itself is
+    API-055.
+
+API-059:
+  status: verified
+  impl: [internal/cli/session.go]
+  tests: [internal/cli/session_test.go:TestLoginContextsLogout]
+
+API-060:
+  status: verified
+  impl: [internal/cli/session.go]
+  tests:
+    - internal/cli/session_test.go:TestLoginContextsLogout
+    - internal/cli/root_test.go:TestInvalidInvocations
+
+API-061:
+  status: verified
+  impl: [internal/cli/version.go, internal/cli/cmdutil/version.go]
+  tests:
+    - internal/cli/transport_test.go:TestVersionServer
+    - internal/cli/root_test.go:TestVersionClient
+
+API-062:
+  status: verified
+  impl: [internal/cli/completion.go]
+  tests:
+    - internal/cli/root_test.go:TestCompletionScripts
+    - internal/cli/completion_test.go:TestDynamicCompletion
+    - internal/cli/root_test.go:TestInvalidInvocations
+  notes: The invalid-shell message also lists powershell (supported, as upstream).
+
+API-066:
+  status: verified
+  impl: [internal/cli/proj.go]
+  tests:
+    - internal/cli/proj_test.go:TestProjectCreateGetListDelete
+    - internal/cli/proj_test.go:TestProjectModifiers
+    - internal/cli/proj_test.go:TestProjectEdit
+    - internal/cli/proj_test.go:TestProjectAuthorization
+
+API-067:
+  status: verified
+  impl: [internal/cli/proj_role.go]
+  tests: [internal/cli/proj_role_test.go:TestProjectRoles]
+  notes: delete-token also accepts --id (token ID) besides ISSUED-AT (Patrol addition).
+
+API-068:
+  status: verified
+  impl: [internal/cli/proj_syncwindows.go]
+  tests: [internal/cli/proj_syncwindows_test.go:TestProjectSyncWindows]
+
+API-069:
+  status: verified
+  impl: [internal/cli/proj_source_integrity.go]
+  tests: [internal/cli/proj_syncwindows_test.go:TestProjectSourceIntegrity]
+  notes: >-
+    update/delete without -y always confirm; "n" prints "Aborted by user." (exit 0), no answer
+    (no input) fails with exit 20 like upstream AskToProceedS.
+
+API-070:
+  status: verified-simulated
+  impl: [internal/cli/repo.go]
+  tests:
+    - internal/cli/repo_test.go:TestRepoCommands
+    - internal/cli/repo_test.go:TestRepoAuthorization
+  notes: >-
+    The repo-server that tests connections to Git/Helm/OCI hosts is an in-process fake; the
+    API, Repository objects, credential Secrets and RBAC are real.
+
+API-071:
+  status: verified
+  impl: [internal/cli/repo.go]
+  tests: [internal/cli/repo_test.go:TestRepoCredsCommands]
+
+API-072:
+  status: verified-simulated
+  impl: [internal/cli/cluster.go]
+  tests: [internal/cli/cluster_test.go:TestClusterLifecycle]
+  notes: >-
+    The destination cluster is envtest behind an HTTPS front end that authenticates the
+    kubeconfig token and service-account token Secrets (envtest cannot validate legacy
+    service-account tokens); a token-controller emulation fills the Secrets.
+
+API-073:
+  status: verified
+  impl: [internal/cli/account.go]
+  tests:
+    - internal/cli/account_test.go:TestAccountCommands
+    - internal/cli/account_test.go:TestAccountAuthorization
+    - internal/cli/account_test.go:TestAccountUpdatePassword
+    - internal/cli/account_test.go:TestAccountBcrypt
+    - internal/cli/account_test.go:TestAccountSessionTokenWithoutLogin
+
+API-074:
+  status: verified
+  impl: [internal/cli/cert.go]
+  tests: [internal/cli/cert_gpg_test.go:TestCertCommands]
+
+API-075:
+  status: verified
+  impl: [internal/cli/gpg.go]
+  tests: [internal/cli/cert_gpg_test.go:TestGPGCommands]
+
+REPO-047:
+  status: verified-simulated
+  impl: [internal/cli/repo.go]
+  tests:
+    - internal/cli/repo_test.go:TestRepoCommands
+    - internal/cli/repo_test.go:TestRepoAuthorization
+  notes: Same command as API-070; connection tests go to a fake repo-server.
+
+REPO-048:
+  status: verified
+  impl: [internal/cli/repo.go]
+  tests: [internal/cli/repo_test.go:TestRepoCredsCommands]
+
+REPO-062:
+  status: verified
+  impl: [internal/cli/cert.go]
+  tests: [internal/cli/cert_gpg_test.go:TestCertCommands]
+
+REPO-066:
+  status: verified
+  impl: [internal/cli/gpg.go]
+  tests: [internal/cli/cert_gpg_test.go:TestGPGCommands]
+
+REPO-074:
+  status: verified
+  impl: [internal/cli/proj_source_integrity.go]
+  tests: [internal/cli/proj_syncwindows_test.go:TestProjectSourceIntegrity]
+
+REPO-075:
+  status: verified
+  impl: [internal/cli/proj.go]
+  tests: [internal/cli/proj_test.go:TestProjectModifiers]
+
+REPO-106:
+  status: verified-simulated
+  impl: [internal/cli/cluster.go]
+  tests: [internal/cli/cluster_test.go:TestClusterLifecycle]
+  notes: >-
+    patrol cluster add with the kubeconfig flags, labels/annotations, --upsert and
+    --service-account; the kubeconfig's client certificate/key are never sent. Destination
+    cluster authentication is emulated (see API-072).
+
+REPO-108:
+  status: verified-simulated
+  impl: [internal/cli/cluster.go]
+  tests: [internal/cli/cluster_test.go:TestClusterLifecycle]
+  notes: get/list/set/rm (with manager uninstall)/rotate-auth; destination authentication emulated (API-072).
+
+TEN-053:
+  status: verified
+  impl: [internal/cli/proj.go]
+  tests:
+    - internal/cli/proj_test.go:TestProjectCreateGetListDelete
+    - internal/cli/proj_test.go:TestProjectEdit
+
+TEN-054:
+  status: verified
+  impl: [internal/cli/proj.go]
+  tests: [internal/cli/proj_test.go:TestProjectModifiers]
+
+TEN-055:
+  status: verified
+  impl: [internal/cli/proj.go]
+  tests: [internal/cli/proj_test.go:TestProjectModifiers]
+
+TEN-056:
+  status: verified
+  impl: [internal/cli/proj.go]
+  tests: [internal/cli/proj_test.go:TestProjectModifiers]
+
+TEN-057:
+  status: verified
+  impl: [internal/cli/proj.go]
+  tests: [internal/cli/proj_test.go:TestProjectModifiers]
+
+TEN-058:
+  status: verified
+  impl: [internal/cli/proj.go]
+  tests: [internal/cli/proj_test.go:TestProjectModifiers]
+
+TEN-059:
+  status: verified
+  impl: [internal/cli/proj.go]
+  tests: [internal/cli/proj_test.go:TestProjectModifiers]
+
+TEN-060:
+  status: verified
+  impl: [internal/cli/proj_role.go]
+  tests: [internal/cli/proj_role_test.go:TestProjectRoles]
+
+TEN-061:
+  status: verified
+  impl: [internal/cli/proj_syncwindows.go]
+  tests: [internal/cli/proj_syncwindows_test.go:TestProjectSyncWindows]
+
+TEN-062:
+  status: verified
+  impl: [internal/cli/proj_source_integrity.go]
+  tests: [internal/cli/proj_syncwindows_test.go:TestProjectSourceIntegrity]
+
+TEN-089:
+  status: verified
+  impl: [internal/cli/account.go]
+  tests:
+    - internal/cli/account_test.go:TestAccountCommands
+    - internal/cli/account_test.go:TestAccountAuthorization
+    - internal/cli/proj_role_test.go:TestProjectRoles
+  notes: CLI part (account can-i) against the real CanI route and enforcer.
+
+TEN-094:
+  status: verified
+  impl: [internal/cli/account.go]
+  tests: [internal/cli/account_test.go:TestAccountBcrypt]
+  notes: CLI part (account bcrypt).
+
+TEN-110:
+  status: verified
+  impl: [internal/cli/login.go, internal/cli/session.go]
+  tests:
+    - internal/cli/session_test.go:TestLoginContextsLogout
+    - internal/cli/session_test.go:TestLoginFailures
+    - internal/cli/session_test.go:TestLoginTLS
+
+TEN-111:
+  status: verified
+  impl: [internal/cli/account.go]
+  tests:
+    - internal/cli/account_test.go:TestAccountCommands
+    - internal/cli/account_test.go:TestAccountAuthorization
+    - internal/cli/account_test.go:TestAccountUpdatePassword
+
+TEN-130:
+  status: verified-simulated
+  impl: [internal/cli/sso/sso.go, internal/cli/login.go, internal/cli/cmdutil/client.go]
+  tests:
+    - internal/cli/session_test.go:TestSSOLoginAndRefresh
+    - internal/cli/sso/sso_test.go:TestLoginAndRefresh
+    - internal/cli/sso/sso_test.go:TestLoginWithoutBrowser
+    - internal/cli/sso/sso_test.go:TestLoginCallbackErrors
+    - internal/cli/sso/sso_test.go:TestLoginTimeoutAndCancel
+    - internal/cli/sso/sso_test.go:TestProviderFromSettings
+  notes: >-
+    Authorization code + PKCE (S256), state and nonce checks, loopback callback, refresh
+    grant and exchange through the real server's /session/oidc-exchange; the identity provider
+    is a fake (clitest.FakeIdP). The implicit flow is refused.

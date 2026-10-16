@@ -1,0 +1,548 @@
+# internal/controller (Application and Operation reconcilers, retention, Run wiring). See
+# docs/architecture/components/controller.md (commands and results under "Verification").
+# Evidence: envtest integration tests run both reconcilers in a controller-runtime manager
+# against a real kube-apiserver 1.36 (control plane and destination) with the real cache,
+# compare, diff, sync, tracking, project and settings packages and a fake repo-server.
+# Surfaces of these features outside the controller (API server, CLI, UI) are other
+# workstreams', so entries are "implemented" (in-progress where the controller part is
+# incomplete or untested).
+
+APP-002:
+  status: implemented
+  impl: [internal/controller/app/status.go]
+  tests:
+    - internal/controller/integration/reconcile_test.go:TestSpecErrors
+  notes: >-
+    Missing project: InvalidSpecError "Application referencing project <p> which does not
+    exist", sync and health Unknown, no comparison; creating the project refreshes the
+    Application (AppProject watch) and resolves it. Spec normalization (writing "default"
+    into spec.project) is not done by the controller.
+
+APP-032:
+  status: implemented
+  impl: [internal/controller/app/status.go, internal/controller/app/deletion.go]
+  tests:
+    - internal/controller/integration/reconcile_test.go:TestSpecErrors
+    - internal/controller/integration/reconcile_test.go:TestRepositoryErrors
+    - internal/controller/integration/autosync_test.go:TestFailedSyncRetryBackoff
+  notes: >-
+    metav1.Condition list with observedGeneration; each producer replaces only its types
+    (compare.MergeConditions), unchanged True conditions keep lastTransitionTime. Plus
+    aggregate Reconciled, Synced and Healthy. An operation refuses to run with InvalidSpecError
+    or ComparisonError (Error with "<Type>: <message>").
+
+APP-033:
+  status: implemented
+  impl: [internal/controller/app/status.go]
+  tests:
+    - internal/controller/integration/reconcile_test.go:TestSpecErrors
+    - internal/controller/integration/deletion_test.go:TestDeleteWithUnresolvableDestination
+
+APP-034:
+  status: implemented
+  impl: [internal/controller/app/status.go]
+  tests:
+    - internal/controller/integration/reconcile_test.go:TestRepositoryErrors
+
+APP-035:
+  status: implemented
+  impl: [internal/controller/app/autosync.go, internal/controller/app/status.go]
+  tests:
+    - internal/controller/app/autosync_test.go:TestDecideAutoSync
+    - internal/controller/integration/autosync_test.go:TestFailedSyncRetryBackoff
+  notes: >-
+    "Failed last sync attempt to [revs]: <message>" and the allowEmpty wipe-out message;
+    evaluated only when sync windows allow; cleared by the next evaluation without error.
+
+APP-036:
+  status: implemented
+  impl: [internal/controller/app/status.go]
+  tests:
+    - internal/controller/integration/reconcile_test.go:TestApplicationsInAnyNamespace
+
+APP-037:
+  status: implemented
+  impl: [internal/controller/app/deletion.go]
+  tests:
+    - internal/controller/integration/deletion_test.go:TestPreDeleteHookFailure
+  notes: >-
+    Set on any deletion pass error, cleared when a deletion stage completes (upstream never
+    reliably persists the clearing).
+
+APP-042:
+  status: implemented
+  impl: [internal/controller/app/refresh.go, internal/controller/app/status.go]
+  tests:
+    - internal/controller/integration/reconcile_test.go:TestRefreshAnnotationAndRecentRefresh
+    - internal/controller/app/refresh_test.go:TestNeedRefresh
+  notes: reconciledAt only for latest/force-resolve comparisons or when unset; observedAt never written.
+
+APP-044:
+  status: implemented
+  impl: [internal/controller/app/status.go]
+  tests:
+    - internal/controller/integration/lifecycle_test.go:TestManualSyncLifecycle
+
+APP-045:
+  status: different-by-design
+  impl: [internal/controller/operation/reconciler.go, internal/controller/app/autosync.go]
+  tests:
+    - internal/controller/integration/lifecycle_test.go:TestManualSyncLifecycle
+    - internal/controller/integration/operations_test.go:TestTerminateAndOperationSlot
+  notes: >-
+    Sync and rollback requests are Operation objects (ADR-0003, ADR-0011), not the
+    Application.operation field; "another operation is already in progress" is an Operation
+    Rejected/OperationInProgress. See docs/architecture/components/controller.md.
+
+APP-046:
+  status: implemented
+  impl: [internal/controller/operation/finish.go]
+  tests:
+    - internal/controller/integration/lifecycle_test.go:TestManualSyncLifecycle
+    - internal/controller/operation/summary_test.go:TestShouldSummarize
+  notes: >-
+    Application.status.operationState is a summary (no per-resource results, which live in
+    the Operation's status); OperationCompleted Events; post-operation refresh.
+
+APP-057:
+  status: implemented
+  impl: [internal/controller/app/deletion.go]
+  tests:
+    - internal/controller/integration/deletion_test.go:TestCascadeDeleteForeground
+
+APP-058:
+  status: implemented
+  impl: [internal/controller/app/deletion.go]
+  tests:
+    - internal/controller/app/refresh_test.go:TestDeletionHelpers
+
+APP-059:
+  status: implemented
+  impl: [internal/controller/app/deletion.go]
+  tests:
+    - internal/controller/integration/deletion_test.go:TestCascadeDeleteReverseWaves
+
+APP-060:
+  status: implemented
+  impl: [internal/controller/app/deletion.go]
+  tests:
+    - internal/controller/integration/deletion_test.go:TestCascadeDeleteForeground
+  notes: Cached comparison state is dropped when the Application disappears.
+
+APP-063:
+  status: implemented
+  impl: [internal/controller/app/deletion.go]
+  tests:
+    - internal/controller/integration/deletion_test.go:TestDeleteWithUnresolvableDestination
+
+APP-066:
+  status: implemented
+  impl: [internal/controller/app/deletion.go]
+  tests:
+    - internal/controller/integration/deletion_test.go:TestPostDeleteHook
+    - internal/controller/app/refresh_test.go:TestDeletionHelpers
+
+APP-067:
+  status: implemented
+  impl: [internal/controller/core/namespaces.go, internal/controller/run.go]
+  tests:
+    - internal/controller/integration/reconcile_test.go:TestApplicationsInAnyNamespace
+    - internal/controller/core/core_test.go:TestNamespaceMatcher
+  notes: Controller side only (the API server's filtering belongs to its workstream).
+
+APP-078:
+  status: implemented
+  impl: [internal/controller/app/refresh.go, internal/controller/app/status.go]
+  tests:
+    - internal/controller/integration/autosync_test.go:TestAutomatedSyncOnNewRevisionAndPrune
+    - internal/controller/app/refresh_test.go:TestNeedRefresh
+
+APP-079:
+  status: implemented
+  impl: [internal/controller/app/refresh.go]
+  tests:
+    - internal/controller/integration/reconcile_test.go:TestRefreshAnnotationAndRecentRefresh
+    - internal/controller/app/refresh_test.go:TestNeedRefresh
+  notes: Hard refresh passes NoCache to the comparison; the manifest-cache bypass itself is the repo-server's.
+
+APP-081:
+  status: implemented
+  impl: [internal/controller/app/refresh.go]
+  tests:
+    - internal/controller/app/refresh_test.go:TestNeedRefresh
+    - internal/controller/app/refresh_test.go:TestNextExpiry
+  notes: Requeue at reconciledAt + timeout.reconciliation; 0 disables expiry.
+
+APP-082:
+  status: implemented
+  impl: [internal/controller/app/refresh.go]
+  tests:
+    - internal/controller/app/refresh_test.go:TestNextExpiry
+  notes: >-
+    The jitter is added to the periodic requeue delay (upstream delays informer resync
+    events); object changes are processed immediately in both.
+
+APP-083:
+  status: implemented
+  impl: [internal/controller/app/refresh.go]
+  tests:
+    - internal/controller/app/refresh_test.go:TestNeedRefresh
+    - internal/controller/app/refresh_test.go:TestNextExpiry
+
+APP-084:
+  status: implemented
+  impl: [internal/controller/app/refresh.go, internal/controller/app/status.go, internal/controller/app/state.go]
+  tests:
+    - internal/controller/app/refresh_test.go:TestNeedRefresh
+    - internal/controller/integration/reconcile_test.go:TestRefreshAnnotationAndRecentRefresh
+  notes: >-
+    Levels recent/latest/force-resolve plus tree-only refreshes; a spec generation not yet
+    observed requests latest (upstream reacts to the specific spec differences listed).
+
+APP-085:
+  status: in-progress
+  impl: [internal/controller/app/liveevents.go]
+  tests:
+    - internal/controller/integration/autosync_test.go:TestSelfHeal
+    - internal/controller/integration/reconcile_test.go:TestRefreshAnnotationAndRecentRefresh
+  notes: >-
+    Managed resources → recent comparison; descendants → tree-only refresh; ignoreResourceUpdates
+    and self-managed Applications respected. Refreshing Applications that monitor orphaned
+    resources on unmanaged changes is not implemented.
+
+APP-086:
+  status: in-progress
+  impl: [internal/controller/app/status.go]
+  tests:
+    - internal/controller/integration/reconcile_test.go:TestRepositoryErrors
+  notes: >-
+    ErrRepoErrorDeferred keeps the previous status and retries in 30s (grace logic in
+    internal/compare); the deferral path is not exercised by controller tests.
+
+APP-087:
+  status: in-progress
+  impl: [internal/controller/app/status.go, internal/controller/core/status.go]
+  tests:
+    - internal/controller/integration/lifecycle_test.go:TestManualSyncLifecycle
+  notes: >-
+    Status subresource merge patches with a resourceVersion precondition, skipped when
+    unchanged; transition Events. The too-large fallback with the upstream UnknownError message
+    is implemented but untested.
+
+APP-088:
+  status: implemented
+  impl: [internal/controller/app/reconciler.go, internal/controller/core/deps.go]
+  tests:
+    - internal/controller/integration/reconcile_test.go:TestSkipReconcile
+    - internal/controller/core/core_test.go:TestSkipReconcile
+
+REPO-097:
+  status: in-progress
+  impl: [internal/controller/app/reconciler.go]
+  tests:
+    - internal/controller/core/core_test.go:TestSkipReconcile
+  notes: The controller skips Applications whose destination Cluster has skip-reconcile=true; no integration test.
+
+APP-141:
+  status: in-progress
+  impl: [internal/controller/app/status.go, internal/controller/app/autosync.go, internal/controller/operation/finish.go, internal/controller/app/deletion.go]
+  tests:
+    - internal/controller/integration/lifecycle_test.go:TestManualSyncLifecycle
+    - internal/controller/integration/autosync_test.go:TestAutomatedSyncOnNewRevisionAndPrune
+  notes: >-
+    Controller Events: ResourceUpdated (sync/health transitions), OperationStarted,
+    OperationCompleted, StatusRefreshed (deletion errors), OperationRejected. Create/update/delete
+    Events are the API server's.
+
+TEN-010:
+  status: implemented
+  impl: [internal/controller/app/status.go]
+  tests:
+    - internal/controller/integration/reconcile_test.go:TestApplicationsInAnyNamespace
+  notes: Controller enforcement (UnknownError, no comparison) through internal/project.
+
+SYNC-001:
+  status: implemented
+  impl: [internal/controller/operation/reconciler.go, internal/controller/operation/admission.go]
+  tests:
+    - internal/controller/integration/lifecycle_test.go:TestManualSyncLifecycle
+  notes: The declarative trigger is an Operation object (ADR-0011) rather than Application.operation.
+
+SYNC-003:
+  status: implemented
+  impl: [internal/controller/operation/execute.go]
+  tests:
+    - internal/controller/integration/lifecycle_test.go:TestManualSyncLifecycle
+    - internal/controller/integration/operations_test.go:TestRollback
+  notes: The revision is resolved once and persisted in status.plan.resolvedRevisions before any mutation.
+
+SYNC-006:
+  status: implemented
+  impl: [internal/controller/operation/execute.go, internal/controller/app/autosync.go]
+  tests:
+    - internal/controller/integration/autosync_test.go:TestAutomatedSyncOnNewRevisionAndPrune
+
+SYNC-011:
+  status: implemented
+  impl: [internal/controller/operation/execute.go]
+  tests:
+    - internal/controller/integration/extra_test.go:TestOperationSourceOverrideNotPermitted
+  notes: >-
+    Controller part: spec.sync.source(s) is rendered and recorded in syncResult.source(s);
+    overridden and rollback sources are validated against the effective project like the
+    Application's own (source fields, spec.sourceRepos, destination), because Operations can
+    be created without the API server. The override RBAC action for kubectl-created
+    Operations needs an admission rule (requested from the CRD/deploy owner).
+
+SYNC-013:
+  status: implemented
+  impl: [internal/controller/operation/execute.go]
+  tests:
+    - internal/controller/operation/summary_test.go:TestMergeSyncOptions
+  notes: Operation options are merged over the Application's (operation keys win).
+
+SYNC-014:
+  status: implemented
+  impl: [internal/controller/operation/retry.go]
+  tests:
+    - internal/controller/integration/extra_test.go:TestRetryRefreshPicksUpNewRevision
+    - internal/controller/operation/retry_test.go:TestEffectiveRetry
+
+SYNC-015:
+  status: implemented
+  impl: [internal/controller/app/autosync.go]
+  tests:
+    - internal/controller/integration/autosync_test.go:TestSelfHeal
+
+SYNC-016:
+  status: implemented
+  impl: [internal/controller/operation/finish.go]
+  tests:
+    - internal/controller/integration/lifecycle_test.go:TestManualSyncLifecycle
+  notes: initiatedBy is copied to the summary and the history entry.
+
+SYNC-017:
+  status: implemented
+  impl: [internal/controller/app/autosync.go]
+  tests:
+    - internal/controller/app/autosync_test.go:TestDecideAutoSync
+    - internal/controller/integration/operations_test.go:TestRollback
+  notes: Enabling automated sync changes the spec generation, which requests a latest refresh.
+
+SYNC-018:
+  status: implemented
+  impl: [internal/controller/app/autosync.go, internal/controller/app/status.go]
+  tests:
+    - internal/controller/app/autosync_test.go:TestDecideAutoSync
+    - internal/controller/integration/operations_test.go:TestSyncWindowBlocksManualOperation
+
+SYNC-019:
+  status: implemented
+  impl: [internal/controller/app/autosync.go]
+  tests:
+    - internal/controller/integration/autosync_test.go:TestAutomatedSyncOnNewRevisionAndPrune
+    - internal/controller/integration/autosync_test.go:TestAutomatedSyncWithoutPruneSkipsPruneOnly
+
+SYNC-020:
+  status: implemented
+  impl: [internal/controller/app/autosync.go]
+  tests:
+    - internal/controller/app/autosync_test.go:TestDecideAutoSync
+
+SYNC-021:
+  status: implemented
+  impl: [internal/controller/app/autosync.go]
+  tests:
+    - internal/controller/app/autosync_test.go:TestAlreadyAttemptedSync
+    - internal/controller/app/autosync_test.go:TestAutomatedOperationName
+    - internal/controller/app/autosync_test.go:TestCreateAutomatedOperation
+    - internal/controller/integration/autosync_test.go:TestFailedSyncRetryBackoff
+    - internal/controller/integration/autosync_test.go:TestAutoSyncBackAfterManualSync
+  notes: >-
+    Deterministic automated Operation names (<app>-auto-<hash of UID, revisions, attempt,
+    sources and the Operation summarized in status.operationState>) dedupe concurrent
+    evaluations of one state only: after any other Operation ran (a manual sync to another
+    revision, an earlier heal) the next decision gets a new name, as upstream issues a new
+    operation. Names taken by Operations that never ran fall back to suffixes, then a
+    generated name.
+
+SYNC-022:
+  status: implemented
+  impl: [internal/controller/app/autosync.go]
+  tests:
+    - internal/controller/integration/autosync_test.go:TestSelfHeal
+    - internal/controller/integration/autosync_test.go:TestSelfHealAfterManualSync
+    - internal/controller/app/autosync_test.go:TestDecideAutoSync
+
+SYNC-023:
+  status: implemented
+  impl: [internal/controller/app/autosync.go, internal/controller/core/params.go]
+  tests:
+    - internal/controller/app/autosync_test.go:TestSelfHealRemainingBackoff
+    - internal/controller/integration/autosync_test.go:TestSelfHeal
+    - internal/controller/integration/autosync_test.go:TestSelfHealAfterManualSync
+  notes: >-
+    The attempt counter comes from the last Operation (a manual sync resets it, as upstream);
+    a reset counter never collides with an earlier heal's Operation.
+
+SYNC-024:
+  status: implemented
+  impl: [internal/controller/app/autosync.go]
+  tests:
+    - internal/controller/integration/autosync_test.go:TestAutomatedSyncOnNewRevisionAndPrune
+    - internal/controller/app/autosync_test.go:TestDecideAutoSync
+
+SYNC-025:
+  status: implemented
+  impl: [internal/controller/app/status.go]
+  tests:
+    - internal/controller/integration/autosync_test.go:TestFailedSyncRetryBackoff
+
+SYNC-026:
+  status: implemented
+  impl: [internal/controller/operation/finish.go, internal/controller/operation/retry.go]
+  tests:
+    - internal/controller/integration/autosync_test.go:TestFailedSyncRetryBackoff
+    - internal/controller/operation/retry_test.go:TestRetryAllowed
+
+SYNC-027:
+  status: implemented
+  impl: [internal/controller/operation/retry.go, internal/controller/operation/execute.go]
+  tests:
+    - internal/controller/operation/retry_test.go:TestNextRetryAt
+    - internal/controller/integration/autosync_test.go:TestFailedSyncRetryBackoff
+  notes: >-
+    The message names the time the retry actually runs (duration × factor^n for attempt n),
+    which is upstream's effective wait; upstream's message shows the factor^(n-1) time.
+
+SYNC-028:
+  status: implemented
+  impl: [internal/controller/operation/execute.go]
+  tests:
+    - internal/controller/integration/extra_test.go:TestRetryRefreshPicksUpNewRevision
+
+SYNC-031:
+  status: in-progress
+  impl: [internal/controller/app/deletion.go]
+  tests:
+    - internal/controller/integration/extra_test.go:TestDeletionConfirmation
+  notes: >-
+    Controller part: cascade deletion waits for deletion-approved at or after the deletion
+    timestamp for Delete=confirm/Prune=confirm resources. Prune confirmation during syncs is
+    the engine's (internal/sync).
+
+SYNC-051:
+  status: implemented
+  impl: [internal/controller/app/deletion.go]
+  tests:
+    - internal/controller/integration/deletion_test.go:TestPreDeleteHook
+    - internal/controller/integration/deletion_test.go:TestPreDeleteHookFailure
+    - internal/controller/integration/deletion_test.go:TestPreDeleteHookNameTaken
+    - internal/controller/integration/deletion_test.go:TestPreDeleteHookExcludedKind
+  notes: >-
+    A hook name taken by an object the Application does not track is skipped (upstream
+    executeHooks) with a DeleteHookSkipped Warning Event; a hook the live-state cache does not
+    show (not yet observed, or an excluded kind) is assessed from the object read on
+    AlreadyExists.
+
+SYNC-052:
+  status: implemented
+  impl: [internal/controller/app/deletion.go]
+  tests:
+    - internal/controller/integration/deletion_test.go:TestPostDeleteHook
+
+SYNC-070:
+  status: implemented
+  impl: [internal/controller/app/deletion.go]
+  tests:
+    - internal/controller/integration/deletion_test.go:TestCascadeDeleteReverseWaves
+    - internal/controller/app/refresh_test.go:TestDeletionHelpers
+
+SYNC-076:
+  status: implemented
+  impl: [internal/controller/operation/execute.go, internal/controller/operation/finish.go]
+  tests:
+    - internal/controller/integration/reconcile_test.go:TestRepositoryErrors
+    - internal/controller/operation/summary_test.go:TestFormatErrorConditionsAndDigest
+  notes: >-
+    Controller-level messages ("Failed to load application project", "<Type>: <message>"
+    conditions, retry suffixes).
+
+SYNC-077:
+  status: implemented
+  impl: [internal/controller/operation/reconciler.go, internal/controller/operation/execute.go, internal/controller/operation/finish.go]
+  tests:
+    - internal/controller/integration/restart_test.go:TestRestartMidOperation
+    - internal/controller/integration/lifecycle_test.go:TestManualSyncLifecycle
+    - internal/controller/operation/stale_test.go:TestStaleStepIsAbandoned
+    - internal/controller/core/write_test.go:TestPatchStatusStrict
+  notes: >-
+    Every step is persisted on the Operation with optimistic concurrency before returning;
+    a step whose write conflicts is abandoned and recomputed (never re-applied over the newer
+    status, terminal phases never replaced); killing the controller twice during a
+    multi-wave sync resumes without duplicate hooks or re-created resources.
+
+SYNC-078:
+  status: implemented
+  impl: [internal/controller/operation/execute.go]
+  tests:
+    - internal/controller/integration/operations_test.go:TestTerminateAndOperationSlot
+  notes: Ends Cancelled "Operation terminated" (state machine) where upstream ends Failed.
+
+SYNC-079:
+  status: implemented
+  impl: [internal/controller/operation/execute.go]
+  tests:
+    - internal/controller/integration/operations_test.go:TestSyncTimeoutTerminates
+
+SYNC-087:
+  status: implemented
+  impl: [internal/controller/operation/admission.go, internal/controller/operation/execute.go, internal/controller/app/status.go]
+  tests:
+    - internal/controller/integration/operations_test.go:TestSyncWindowBlocksManualOperation
+  notes: >-
+    Automated-sync initiation and every Operation step evaluate windows (overrun from
+    startedAt). Different by design at admission: a blocked manual Operation waits Pending
+    (Admitted=False/SyncWindowClosed); blocked automated Operations are deleted.
+
+SYNC-089:
+  status: implemented
+  impl: [internal/controller/operation/finish.go, internal/controller/core/history.go]
+  tests:
+    - internal/controller/integration/lifecycle_test.go:TestManualSyncLifecycle
+    - internal/controller/integration/operations_test.go:TestRollback
+    - internal/controller/core/core_test.go:TestAppendHistory
+
+SYNC-090:
+  status: implemented
+  impl: [internal/controller/core/history.go, internal/controller/retention/retention.go]
+  tests:
+    - internal/controller/integration/operations_test.go:TestHistoryLimitAndRetention
+    - internal/controller/retention/retention_test.go:TestSelectProperties
+    - internal/controller/retention/collect_test.go:TestCollectIfNeeded
+
+SYNC-091:
+  status: implemented
+  impl: [internal/controller/operation/admission.go, internal/controller/operation/execute.go]
+  tests:
+    - internal/controller/integration/operations_test.go:TestRollback
+  notes: >-
+    Controller side: admission refusals, apply strategy, history entry sources/revisions,
+    new history entry. The API/CLI surfaces are other workstreams'.
+
+SYNC-093:
+  status: implemented
+  impl: [internal/controller/operation/execute.go, internal/controller/operation/engines.go, internal/controller/app/deletion.go]
+  tests:
+    - internal/controller/integration/extra_test.go:TestImpersonation
+    - internal/controller/integration/extra_test.go:TestTerminateWithoutMatchingServiceAccount
+
+SYNC-094:
+  status: implemented
+  impl: [internal/controller/operation/execute.go]
+  tests:
+    - internal/controller/integration/extra_test.go:TestImpersonation
+    - internal/controller/integration/extra_test.go:TestTerminateWithoutMatchingServiceAccount
+  notes: >-
+    Enforced and unmatched also fails termination ("Operation termination had errors: failed
+    to find a matching service account to impersonate: ...") without cleaning up hooks.

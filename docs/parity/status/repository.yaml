@@ -1,0 +1,248 @@
+# internal/repository — repository access resolution (lookup precedence, credential templates,
+# credential method selection, short-lived token minting, Helm dependency lists, connection
+# testing and status). Library-level evidence: `go test -race ./internal/repository/` with
+# KUBEBUILDER_ASSETS set (envtest API server for the lister and the status subresource; fake
+# GitHub, Google, Entra ID and ACR endpoints over httptest). Nothing here is wired into the
+# controller, the API server or the hydrator yet, so no feature is "verified". Features whose
+# end-to-end behavior also needs the repo-server transports or the API are "in-progress".
+
+REPO-001:
+  status: in-progress
+  impl: [internal/repository/lister.go]
+  tests:
+    - internal/repository/envtest_test.go:TestEnvtestResolveAndValidate
+    - internal/repository/resolve_test.go:TestResolveErrors
+    - internal/repository/security_test.go:TestSecretReferencesAreChecked
+  notes: Declarative Repository objects and labeled Secrets are picked up by informers without a restart; unlabeled Secrets and other secret types are invisible; late labeling, rotation and deletion are observed (envtest). A referenced Secret must carry the secret-type of the referencing kind and purpose (repository/repository-write, repo-creds/repo-write-creds, scm-creds). Listing through the API is not in this package.
+REPO-002:
+  status: in-progress
+  impl: [internal/repository/resolve.go]
+  tests:
+    - internal/repository/resolve_test.go:TestTypesAndSettings
+    - internal/repository/resolve_test.go:TestReposForProject
+    - internal/repository/envtest_test.go:TestEnvtestResolveAndValidate
+  notes: Type selection (CRD default git, query hint, oci:// inference), per-type settings and credentials, Helm lists require a name. API normalization and validate-access errors for unknown types are the API server's (the CRD enum rejects unknown types).
+REPO-003:
+  status: in-progress
+  impl: [internal/repository/resolve.go]
+  tests: [internal/repository/resolve_test.go:TestReposForProject]
+  notes: Unnamed Helm repositories are excluded from dependency lists; the name is forwarded. CLI/API checks are elsewhere.
+REPO-004:
+  status: in-progress
+  impl: [internal/repository/resolve.go, internal/repository/lister.go]
+  tests:
+    - internal/repository/resolve_test.go:TestResolvePrecedence
+    - internal/repository/resolve_test.go:TestPickRepositoryModel
+    - internal/repository/resolve_test.go:TestListerLookups
+    - internal/repository/security_test.go:TestSecretReferencesAreChecked
+    - internal/repository/envtest_test.go:TestEnvtestResolveAndValidate
+  notes: Lookup for (url, project) with fallback to the unscoped Repository, never another project's; GetProjectRepositoryURLs feeds project membership. Secrets of project-scoped Repositories must be bound to the project by an ownerReference (upstream keeps the credentials in the repository Secret itself, so no borrowing is possible there; see docs/architecture/components/repository.md). RBAC and create/delete semantics are the API server's.
+REPO-005:
+  status: in-progress
+  impl: [internal/repository/resolve.go, internal/repository/material.go]
+  tests: [internal/repository/resolve_test.go:TestGitMethods]
+  notes: Username/password selection and forwarding (TLS client certificate included). The git transport and askpass are internal/git.
+REPO-006:
+  status: in-progress
+  impl: [internal/repository/resolve.go]
+  tests: [internal/repository/resolve_test.go:TestGitMethods]
+  notes: Bearer token selection and forwarding; header injection is internal/git.
+REPO-007:
+  status: in-progress
+  impl: [internal/repository/resolve.go, internal/repository/material.go]
+  tests:
+    - internal/repository/resolve_test.go:TestGitMethods
+    - internal/repository/resolve_test.go:TestInheritanceRules
+  notes: Forwarded; always taken from an inherited template. Boolean parsing is replaced by the typed CRD field.
+REPO-008:
+  status: in-progress
+  impl: [internal/repository/resolve.go]
+  tests: [internal/repository/resolve_test.go:TestGitMethods]
+  notes: SSH key selection and forwarding only.
+REPO-009:
+  status: in-progress
+  impl: [internal/repository/resolve.go, internal/repository/httpclient.go]
+  tests:
+    - internal/repository/resolve_test.go:TestGitMethods
+    - internal/repository/resolve_test.go:TestTypesAndSettings
+  notes: Client certificate forwarded with HTTPS, GitHub App and service principal credentials (git) and always for Helm/OCI; applied to token endpoint requests.
+REPO-010:
+  status: in-progress
+  impl: [internal/repository/resolve.go]
+  tests:
+    - internal/repository/resolve_test.go:TestTypesAndSettings
+    - internal/repository/security_test.go:TestSCMProviderCannotRedirectCredentials
+  notes: Forwarded per type (git uses upstream IsInsecure); also disables TLS verification of GitHub API token requests for the object's own App key. Not allowed with SCMProvider credentials unless the provider sets insecure (by design).
+REPO-011:
+  status: in-progress
+  impl: [internal/repository/resolve.go]
+  tests: [internal/repository/resolve_test.go:TestTypesAndSettings]
+REPO-012:
+  status: in-progress
+  impl: [internal/repository/resolve.go]
+  tests: [internal/repository/resolve_test.go:TestTypesAndSettings]
+  notes: Forwarded for git only.
+REPO-013:
+  status: in-progress
+  impl: [internal/repository/resolve.go, internal/repository/url.go]
+  tests:
+    - internal/repository/resolve_test.go:TestTypesAndSettings
+    - internal/repository/azure_test.go:TestChallengeAndRegistryParsing
+  notes: enableOCI forwarded (always overwritten by templates); scheme-less Helm URLs are OCI registries (upstream IsHelmOciRepo, including its host:port quirk).
+REPO-014:
+  status: in-progress
+  impl: [internal/repository/resolve.go]
+  tests: [internal/repository/resolve_test.go:TestTypesAndSettings]
+REPO-015:
+  status: implemented
+  impl: [internal/repository/github.go, internal/repository/material.go, internal/repository/tokens.go]
+  tests:
+    - internal/repository/github_test.go:TestGitHubAppTokenCaching
+    - internal/repository/github_test.go:TestGitHubAppConcurrentMint
+    - internal/repository/github_test.go:TestGitHubAppFromSCMProvider
+    - internal/repository/github_test.go:TestGitHubAppFailures
+    - internal/repository/provider_test.go:TestGitHubAppProxy
+    - internal/repository/security_test.go:TestSCMProviderCannotRedirectCredentials
+    - internal/repository/security_test.go:TestTokenEndpointPolicy
+  notes: Installation tokens minted through the pkg/scm/github CredentialSource (fake GitHub API over TLS), x-access-token user, cached until five minutes before expiry and refreshed, CredentialsExpireAt set; the private key never leaves the resolver. An App ID without a key is a configuration error (see docs/architecture/components/repository.md). The App may also come from an SCMProvider, whose API URL, CA and TLS setting are then always used; an inherited template key keeps the template's endpoint. Error messages keep only the HTTP status (no response body).
+REPO-016:
+  status: implemented
+  impl: [internal/repository/github.go, internal/repository/url.go]
+  tests:
+    - internal/repository/github_test.go:TestGitHubAppInstallationDiscovery
+    - internal/repository/github_test.go:TestOwnerFromURL
+  notes: Discovery per organization (case-insensitive, https/scp/ssh forms) with upstream's messages; the discovered installation is cached with its token rather than separately for 60 minutes.
+REPO-017:
+  status: implemented
+  impl: [internal/repository/github.go, internal/repository/egress.go]
+  tests:
+    - internal/repository/github_test.go:TestGitHubAppTokenCaching
+    - internal/repository/security_test.go:TestTokenEndpointPolicy
+  notes: Enterprise base URL with trailing slash tolerated; token request at <base>/app/installations/<id>/access_tokens. Unlike upstream the URL must be https and the connection is refused for loopback, link-local and operator-denied addresses (by design; token requests run in the controller/API server).
+REPO-018:
+  status: implemented
+  impl: [internal/repository/gcp.go, internal/repository/egress.go]
+  tests:
+    - internal/repository/gcp_test.go:TestGCPServiceAccountToken
+    - internal/repository/gcp_test.go:TestGCPServiceAccountErrors
+    - internal/repository/resolve_test.go:TestInheritanceRules
+    - internal/repository/security_test.go:TestTokenEndpointPolicy
+  notes: cloud-platform scope, client_email user name, token cached until shortly before expiry (fake token endpoint). external_account credentials are rejected, and token_uri / impersonation URLs must be https on Google's hosts or Options.GoogleTokenHosts, by design (see docs/architecture/components/repository.md); token endpoint error bodies are not reflected.
+REPO-019:
+  status: implemented
+  impl: [internal/repository/azure.go]
+  tests:
+    - internal/repository/azure_test.go:TestAzureWorkloadIdentityGit
+    - internal/repository/azure_test.go:TestAzureWorkloadIdentityACR
+    - internal/repository/azure_test.go:TestAzureWorkloadIdentityACRChallengeErrors
+    - internal/repository/security_test.go:TestAzureWorkloadIdentityHostPolicy
+  notes: Git (Azure DevOps scope, empty GUID user, token as password and bearer token) and Helm ACR challenge/exchange with AZURE_ARM_TOKEN_RESOURCE, against a fake token provider and a fake registry. By design (the token is the controller/API server identity) the ACR exchange runs only for Options.AzureContainerRegistryHosts (default *.azurecr.io/.cn/.us) with verified TLS and a realm on the registry host, and the Azure DevOps token goes only to https Options.AzureDevOpsHosts (default dev.azure.com, *.visualstudio.com). The bearer header itself is sent by internal/git.
+REPO-020:
+  status: implemented
+  impl: [internal/repository/azure.go]
+  tests:
+    - internal/repository/azure_test.go:TestAzureServicePrincipal
+    - internal/repository/azure_test.go:TestAzureServicePrincipalCacheCap
+    - internal/repository/resolve_test.go:TestResolveErrors
+    - internal/repository/security_test.go:TestTokenEndpointPolicy
+  notes: Client secret credential against a fake Entra ID with a custom endpoint (instance discovery disabled; the endpoint must be https on a Microsoft cloud authority or Options.AzureAuthorityHosts, by design; error bodies are not reflected), cache duration capped at 59 minutes (Options field; process flag/env wiring pending). IDs without a client secret are a configuration error rather than anonymous access (by design); the repo-creds key casing difference does not apply to typed CRD fields.
+REPO-021:
+  status: in-progress
+  impl: [internal/repository/httpclient.go, internal/repository/resolve.go, internal/repository/material.go]
+  tests:
+    - internal/repository/provider_test.go:TestGitHubAppProxy
+    - internal/repository/resolve_test.go:TestTypesAndSettings
+    - internal/repository/security_test.go:TestSCMProviderCannotRedirectCredentials
+  notes: Forwarded to the repo-server; applied to GitHub App (of the object that supplied the key) and service principal token requests, unsafe proxies dropped with a security log. With SCMProvider credentials a proxy is allowed only over verified https. Git transport use is internal/git.
+REPO-022:
+  status: in-progress
+  impl: [internal/repository/httpclient.go]
+  tests: [internal/repository/provider_test.go:TestGitHubAppProxy]
+REPO-024:
+  status: in-progress
+  impl: [internal/repository/resolve.go]
+  tests: [internal/repository/resolve_test.go:TestTypesAndSettings]
+  notes: Forwarded for git only.
+REPO-026:
+  status: implemented
+  impl: [internal/repository/resolve.go, internal/repository/material.go]
+  tests:
+    - internal/repository/methods_test.go:TestGitMethodTable
+    - internal/repository/resolve_test.go:TestGitMethods
+    - internal/repository/resolve_test.go:TestInheritanceRules
+  notes: Exhaustive table against a model of GetGitCreds and HasCredentials, including the GCP-key inheritance quirk. Two partial configurations are errors instead of NopCreds (see REPO-015/REPO-020).
+REPO-029:
+  status: implemented
+  impl: [internal/repository/url.go]
+  tests:
+    - internal/repository/methods_test.go:TestURLKey
+    - internal/repository/resolve_test.go:TestResolvePrecedence
+  notes: Lookup equality (SameURL with raw fallback) over internal/project NormalizeGitURL. Deleting objects with invalid URLs is an API concern.
+REPO-031:
+  status: implemented
+  impl: [internal/repository/resolve.go, internal/repository/url.go]
+  tests:
+    - internal/repository/resolve_test.go:TestResolvePrecedence
+    - internal/repository/resolve_test.go:TestTemplateMatching
+    - internal/repository/resolve_test.go:TestInheritanceRules
+    - internal/repository/envtest_test.go:TestEnvtestResolveAndValidate
+  notes: Longest normalized prefix, not path-segment aware, case and .git insensitive, stubs inherit; ties are resolved by name. Resolution.Inherited is the inheritedCreds flag (API output elsewhere).
+REPO-032:
+  status: implemented
+  impl: [internal/repository/material.go]
+  tests:
+    - internal/repository/resolve_test.go:TestCopyCredentialsFrom
+    - internal/repository/security_test.go:TestSCMProviderCannotRedirectCredentials
+  notes: Upstream rules, except that an inherited GitHub App private key brings its template's API URL, proxy and TLS settings (the receiver's enterpriseBaseURL is not used with another object's key), by design.
+REPO-033:
+  status: implemented
+  impl: [internal/repository/resolve.go, internal/repository/facade.go]
+  tests:
+    - internal/repository/resolve_test.go:TestResolvePrecedence
+    - internal/repository/validate_test.go:TestFacade
+  notes: Purpose write objects only, with project scoping and fallback; GetWriteRepository for the hydrator returns a stub when nothing matches. The hydrator push itself is not exercised here.
+REPO-034:
+  status: implemented
+  impl: [internal/repository/resolve.go]
+  tests: [internal/repository/resolve_test.go:TestResolvePrecedence]
+  notes: Write templates only for write lookups; Helm/OCI template lists always read the read templates.
+REPO-040:
+  status: in-progress
+  impl: [internal/repository/validate.go]
+  tests: [internal/repository/validate_test.go:TestValidate]
+  notes: ValidateWithSecretData (unsaved input, templates applied for read and not for write) and the repo-server call; the API endpoint and RBAC are the API server's.
+REPO-043:
+  status: in-progress
+  impl: [internal/repository/validate.go]
+  tests:
+    - internal/repository/validate_test.go:TestValidate
+    - internal/repository/validate_test.go:TestApplyConnectionStatus
+    - internal/repository/validate_test.go:TestStatusWriterRetriesConflicts
+    - internal/repository/security_test.go:TestStatusWriterRejectsStaleResults
+    - internal/repository/envtest_test.go:TestEnvtestResolveAndValidate
+  notes: Upstream connection messages and status persisted in Repository.status (connectionState, Ready/ConnectionFailed) instead of a server cache; a result for another generation/UID or older than the recorded attemptedAt is not written (ErrStaleConnectionState). The periodic re-check and forceRefresh handling belong to the reconciler/API.
+REPO-044:
+  status: in-progress
+  impl: [internal/repository/validate.go]
+  tests: [internal/repository/validate_test.go:TestValidate]
+  notes: Client side only (call, verifiedRepository=false as failure, redaction of echoed secrets); the per-type tests run in the repo-server.
+REPO-055:
+  status: implemented
+  impl: [internal/repository/tokens.go]
+  tests:
+    - internal/repository/tokens_test.go:TestTokenCacheGet
+    - internal/repository/tokens_test.go:TestTokenCacheValidUntil
+    - internal/repository/tokens_test.go:TestTokenCacheValidUntilProperty
+    - internal/repository/tokens_test.go:TestTokenCacheCancellation
+    - internal/repository/github_test.go:TestGitHubAppTokenCaching
+    - internal/repository/gcp_test.go:TestGCPServiceAccountToken
+    - internal/repository/azure_test.go:TestAzureServicePrincipal
+    - internal/repository/azure_test.go:TestAzureServicePrincipalCacheCap
+  notes: One bounded in-memory cache for every short-lived token, reused until shortly before the issuer's expiry (service principal tokens additionally capped at 59 minutes); mints coalesced. GitHub App and GCP lifetimes follow the token expiry instead of ARGOCD_GITHUB_APP_CREDS_EXPIRATION_DURATION / no expiry. Durations are Options fields; process flag/env wiring is pending.
+REPO-056:
+  status: in-progress
+  impl: [internal/repository/resolve.go, internal/repository/facade.go]
+  tests:
+    - internal/repository/resolve_test.go:TestReposForProject
+    - internal/repository/validate_test.go:TestFacade
+  notes: Named Helm repositories (plus OCI ones for OCI sources) and Helm/OCI templates permitted by the project, resolved with Helm credentials (ACR flow with workload identity). Repositories scoped to other projects are excluded (by design). CA paths and dependency resolution are the repo-server's.

@@ -2185,6 +2185,264 @@ Counts at this commit (directory `resource_customizations/`): 111 API-group dire
 - **Exposure**: CRD (Application `status.resources[].health`, resource tree node health) / API (ResourceTree, Get) / CLI (`argocd app get`, `argocd app resources --output tree=detailed`) / UI (resource tree health icons).
 - **Tests required**: port and pass all upstream health_test.yaml fixtures (ZookeeperCluster: 2 cases); negative: an argocd-cm health override for the same group/kind replaces the built-in script; recovery: a script runtime error yields Unknown with the error text as message.
 
+## Typed schema resolution (structured-merge parsing)
+
+These features cover which schema Argo CD uses when it converts objects into structured-merge-diff typed values. They refine the schema statements in DIFF-008 (structured-merge diff), DIFF-010 (webhook mutation removal) and DIFF-021 (`managedFieldsManagers`). Where those sections say "cluster OpenAPI GVK parser", DIFF-214 gives the exact precedence.
+
+### DIFF-214 Typed schema resolution order (static built-in schema before cluster GVK parser)
+- **Upstream**: https://github.com/argoproj/argo-cd/blob/a5038b0e2bbac1715754380ae0084df8e3d5b48c/gitops-engine/pkg/utils/kube/scheme/typed.go#L17, https://github.com/argoproj/argo-cd/blob/a5038b0e2bbac1715754380ae0084df8e3d5b48c/gitops-engine/pkg/utils/kube/scheme/typed.go#L28, https://github.com/argoproj/argo-cd/blob/a5038b0e2bbac1715754380ae0084df8e3d5b48c/gitops-engine/pkg/utils/kube/scheme/typed.go#L51, https://github.com/argoproj/argo-cd/blob/a5038b0e2bbac1715754380ae0084df8e3d5b48c/gitops-engine/pkg/utils/kube/scheme/typed.go#L58, https://github.com/argoproj/argo-cd/blob/a5038b0e2bbac1715754380ae0084df8e3d5b48c/gitops-engine/pkg/diff/diff.go#L423, https://github.com/argoproj/argo-cd/blob/a5038b0e2bbac1715754380ae0084df8e3d5b48c/util/argo/diff/diff.go#L436, https://github.com/argoproj/argo-cd/blob/a5038b0e2bbac1715754380ae0084df8e3d5b48c/controller/state.go#L889, https://github.com/argoproj/argo-cd/blob/a5038b0e2bbac1715754380ae0084df8e3d5b48c/controller/appcontroller.go#L899, https://github.com/argoproj/argo-cd/blob/a5038b0e2bbac1715754380ae0084df8e3d5b48c/server/application/application.go#L3024, https://github.com/argoproj/argo-cd/blob/a5038b0e2bbac1715754380ae0084df8e3d5b48c/docs/faq.md#L422
+- **Maturity**: GA
+- **Semantics**: `ResolveParseableType(gvk, parser)` picks the typed schema in this order:
+  1. If `parser` (the destination cluster's GVK parser) is nil, it returns the deduced type (DIFF-218).
+  2. It looks up the GVK's OpenAPI definition name in a process-wide GVK-to-definition-name map. That map is extracted once per process (`sync.Once`) from the private `gvks` map of the *first* non-nil parser passed in. If a name is found and the compiled-in static schema (DIFF-215) has a valid type with that name, the static type is returned. The cluster's own schema for that GVK is then ignored, even when the cluster is newer or older than the compiled-in Kubernetes version.
+  3. Otherwise it returns `parser.Type(gvk)` from the current call's cluster parser. This is nil when the GVK is not published in the cluster's OpenAPI document.
+
+  In practice, built-in kinds whose definitions come from `k8s.io/api` resolve statically. CRDs, `apiextensions.k8s.io/CustomResourceDefinition`, `apiregistration.k8s.io/APIService` and aggregated APIs resolve from the cluster parser, because the static schema has none of their definition names.
+
+  Callers of this resolution:
+  - the structured-merge diff (DIFF-008), for both config and live
+  - `managedFieldsManagers` pre-diff normalization (DIFF-021), on these paths:
+    - controller `CompareAppState`
+    - the controller's Secret re-diff in `hideSecretData`
+    - the ServerSideDiff API's pre-diff normalization
+    - CLI client-side diff, which has no parser (DIFF-218)
+
+  Paths that do *not* use it:
+  - server-side diff webhook-mutation removal (DIFF-220): cluster parser only
+  - managed-fields version conversion inside structured-merge diff (DIFF-221): cluster parser only
+  - legacy 3-way/2-way diff (DIFF-002/003): no typed parsing
+- **Edge cases**:
+  - **The name map is frozen from the first parser.** In a multi-cluster controller, or an API server answering ServerSideDiff for several clusters, the map comes from whichever cluster's parser reached this code first. Later CRD or APIService reloads (DIFF-073) never refresh it. A built-in GVK that the first cluster did not serve has no entry, so it resolves from the current cluster's parser instead of the static schema. Examples are an alpha/beta API or an API version enabled only on a later cluster. The same applies when the first cluster published the definition under an aggregator-suffixed name (`..._v2`).
+  - A definition name that is present in the map but missing from the static schema (any CRD) falls through to the cluster parser.
+  - The static type wins even when the cluster serves a different shape for the same built-in GVK. Fields added after the compiled-in version, or removed before it, then produce `field not declared in schema` (DIFF-216, DIFF-217).
+  - If the cluster parser has no type for the GVK, structured-merge diff errors with `unable to resolve parseableType for GroupVersionKind: <gvk>`. `managedFieldsManagers` normalization falls back to the deduced type instead.
+- **Configuration surface**: none. No flag, env var or ConfigMap key selects the schema source. The static schema version is fixed at build time (DIFF-215).
+- **Exposure**: internal. It is observable through Application `status.conditions` (ComparisonError), resource sync status, ManagedResources/ServerSideDiff API results, `argocd app diff` and UI diff panels.
+- **Tests required**:
+  - **Positive, static schema wins:**
+    - `apps/v1` Deployment where the cluster parser's Deployment schema lacks a field that the static schema declares: typed parsing succeeds.
+    - Same kind where the cluster schema has an extra field that the static schema lacks, and the manifest uses it: structured-merge diff fails.
+  - **Positive, CRD:** the cluster parser's schema is used. A field declared in the CRD schema parses. An undeclared field outside `x-kubernetes-preserve-unknown-fields` fails.
+  - **Negative:**
+    - Non-built-in GVK missing from the cluster OpenAPI under structured-merge diff: `unable to resolve parseableType for GroupVersionKind: ...`.
+    - Nil parser: the deduced type is used and nothing errors.
+  - **Parity quirk, multi-cluster:** cluster A (seen first) does not serve built-in GVK X and cluster B does. Diffs of X on B use B's published schema, not the static one.
+
+### DIFF-215 Compiled-in static Kubernetes schema (version and coverage)
+- **Upstream**: https://github.com/argoproj/argo-cd/blob/a5038b0e2bbac1715754380ae0084df8e3d5b48c/gitops-engine/pkg/utils/kube/scheme/parser.go#L1, https://github.com/argoproj/argo-cd/blob/a5038b0e2bbac1715754380ae0084df8e3d5b48c/gitops-engine/pkg/utils/kube/scheme/parser.go#L31, https://github.com/argoproj/argo-cd/blob/a5038b0e2bbac1715754380ae0084df8e3d5b48c/gitops-engine/pkg/utils/kube/scheme/parser.go#L44, https://github.com/argoproj/argo-cd/blob/a5038b0e2bbac1715754380ae0084df8e3d5b48c/gitops-engine/pkg/utils/kube/scheme/parser.go#L1781, https://github.com/argoproj/argo-cd/blob/a5038b0e2bbac1715754380ae0084df8e3d5b48c/gitops-engine/hack/update_static_schema.sh#L6, https://github.com/argoproj/argo-cd/blob/a5038b0e2bbac1715754380ae0084df8e3d5b48c/gitops-engine/hack/update_static_schema.sh#L9, https://github.com/argoproj/argo-cd/blob/a5038b0e2bbac1715754380ae0084df8e3d5b48c/gitops-engine/go.mod#L19, https://github.com/argoproj/argo-cd/blob/a5038b0e2bbac1715754380ae0084df8e3d5b48c/go.mod#L121, https://github.com/argoproj/argo-cd/blob/a5038b0e2bbac1715754380ae0084df8e3d5b48c/docs/faq.md#L424, https://github.com/argoproj/argo-cd/blob/a5038b0e2bbac1715754380ae0084df8e3d5b48c/docs/faq.md#L429, https://github.com/argoproj/argo-cd/blob/a5038b0e2bbac1715754380ae0084df8e3d5b48c/docs/faq.md#L443
+- **Maturity**: GA
+- **Semantics**:
+  - **Source.** `StaticParser()` is a structured-merge-diff `typed.Parser` built from a YAML schema embedded in the binary. The file is a verbatim copy of client-go `applyconfigurations/internal/internal.go` at the client-go version pinned in `gitops-engine/go.mod`: `k8s.io/client-go v0.36.1`, i.e. Kubernetes 1.36 API shapes. It is byte-identical, after the script's header/package/function renames, to client-go v0.36.1's file.
+  - **Coverage.** 861 named types:
+    - all `k8s.io/api` groups, including core, apps, batch, autoscaling, networking, policy, rbac, storage, admissionregistration, flowcontrol, resource, scheduling and extensions
+    - `io.k8s.apimachinery` meta types (ObjectMeta, ManagedFieldsEntry and others)
+    - `__untyped_atomic_` and `__untyped_deduced_`
+
+    It has no `apiextensions.k8s.io` or `apiregistration.k8s.io` types and no CRD types.
+  - **List/map semantics.** Each type carries Kubernetes SMD semantics: associative list keys such as `containers` keyed by `name`, atomic and granular relationships, unions, and field defaults. Validation is strict: a map field that is not declared, and has no element type, is rejected.
+  - **Loading.** The parser is built lazily on first use and cached for the process. A parse failure panics (`Failed to parse schema: ...`), which cannot happen with the shipped content.
+- **Edge cases**:
+  - When a cluster is newer than Kubernetes 1.36 and adds fields to a built-in kind, any manifest *or live object* that carries those fields fails typed parsing on the structured-merge paths. This includes server-populated status fields.
+  - Fields that exist only in older API shapes and were dropped by 1.36 fail in the same way.
+  - The FAQ's only fix is to upgrade to an Argo CD build whose static schema contains the field. There is no runtime override.
+- **Configuration surface**: build-time only. `gitops-engine/hack/update_static_schema.sh` reads the client-go version from `go.mod` and downloads that version's `internal.go`. No Makefile target invokes it at this commit.
+- **Exposure**: internal (no CRD/API/CLI/UI surface).
+- **Tests required**:
+  - **Positive:**
+    - Patrol ships an equivalent schema for Kubernetes 1.36.
+    - Every built-in kind in `k8s.io/api` v0.36.1 resolves, for example `io.k8s.api.apps.v1.Deployment`.
+    - A field present in 1.36, such as Deployment `spec.template.spec.containers[].image`, is accepted.
+    - Associative-list keys match upstream, for example `containers` keyed by `name` and `ports` keyed by `containerPort`+`protocol`.
+  - **Negative:**
+    - A synthetic field not in 1.36 on a built-in kind is rejected with `field not declared in schema`.
+    - `CustomResourceDefinition`, `APIService` and CRD kinds are not resolved statically.
+
+### DIFF-216 `field not declared in schema` and other typed-validation failures in structured-merge diff
+- **Upstream**: https://github.com/argoproj/argo-cd/blob/a5038b0e2bbac1715754380ae0084df8e3d5b48c/gitops-engine/pkg/diff/diff.go#L113, https://github.com/argoproj/argo-cd/blob/a5038b0e2bbac1715754380ae0084df8e3d5b48c/gitops-engine/pkg/diff/diff.go#L118, https://github.com/argoproj/argo-cd/blob/a5038b0e2bbac1715754380ae0084df8e3d5b48c/gitops-engine/pkg/diff/diff.go#L429, https://github.com/argoproj/argo-cd/blob/a5038b0e2bbac1715754380ae0084df8e3d5b48c/gitops-engine/pkg/diff/diff.go#L433, https://github.com/argoproj/argo-cd/blob/a5038b0e2bbac1715754380ae0084df8e3d5b48c/gitops-engine/pkg/diff/diff.go#L1257, https://github.com/argoproj/argo-cd/blob/a5038b0e2bbac1715754380ae0084df8e3d5b48c/util/argo/diff/diff.go#L336, https://github.com/argoproj/argo-cd/blob/a5038b0e2bbac1715754380ae0084df8e3d5b48c/controller/state.go#L909, https://github.com/argoproj/argo-cd/blob/a5038b0e2bbac1715754380ae0084df8e3d5b48c/controller/state.go#L922, https://github.com/argoproj/argo-cd/blob/a5038b0e2bbac1715754380ae0084df8e3d5b48c/docs/faq.md#L422, https://github.com/argoproj/argo-cd/blob/a5038b0e2bbac1715754380ae0084df8e3d5b48c/docs/faq.md#L448
+- **Maturity**: GA
+- **Semantics**:
+  - **When it runs.** Structured-merge diff applies when the app has sync option `ServerSideApply=true`, or the resource carries `argocd.argoproj.io/sync-options: ServerSideApply=true`, and server-side diff is off. Live and config are each converted with the type resolved by DIFF-214, using strict validation: `FromUnstructured` without `AllowDuplicates`.
+  - **Unknown fields reach the parser.** `remarshal` decodes with `DisallowUnknownFields`, and on failure it returns the original object. Unknown fields therefore survive to the typed parser.
+  - **Failure.** Any validation error aborts the comparison of the *whole application*, not just that resource:
+    - The error chain is `failed to calculate diff: error calculating structured merge diff: error building typed value from config resource: <path>: field not declared in schema`, or `... from live resource: ...`.
+    - The controller records a `ComparisonError` condition `Failed to compare desired state to live state: <chain>`.
+    - Sync status becomes `Unknown` for every resource (DIFF-001).
+  - **Error format.**
+    - Paths are `.`-prefixed field segments with list keys, for example `.spec.template.spec.containers[name="app"].foo`.
+    - Inside one map, iteration stops at the first undeclared key.
+    - Several errors are joined as `errors:\n  <e1>\n  <e2>`.
+  - **Other validation failures on the same path:**
+    - scalar mismatches: `expected string, got ...`, `expected numeric (int or float), got ...`, `expected boolean, got ...`
+    - duplicate associative-list keys: `duplicate entries for key [name="X"]`, for example two env vars with the same name in one container
+  - **Workarounds (FAQ):**
+    - remove the `ServerSideApply=true` sync option or annotation (legacy diff is used)
+    - enable server-side diff (DIFF-009), which bypasses structured-merge diff
+    - upgrade Argo CD
+- **Edge cases**:
+  - **Live-side failures:** a live object from a newer cluster with new server-populated fields, such as status, fails even if Git never mentions them.
+  - **CRDs:** a Git field that is not in the CRD's structural schema, and not under `x-kubernetes-preserve-unknown-fields`, also fails, although the API server would silently prune it on apply.
+  - **Create/delete pairs:** pairs where one side is nil never reach typed parsing.
+  - **Server-side diff:** when it is on, structured-merge diff is not used.
+  - **CLI client-side diff:** `argocd app diff` without server-side diff has no GVK parser, so it uses the deduced type (DIFF-218) and never reports this error. It can disagree with the controller's ComparisonError.
+- **Configuration surface**:
+  - `spec.syncPolicy.syncOptions: [ServerSideApply=true]`
+  - resource annotation `argocd.argoproj.io/sync-options: ServerSideApply=true`
+  - bypass: `argocd.argoproj.io/compare-options: ServerSideDiff=true`, or controller `--server-side-diff-enabled` / `controller.diff.server.side`
+- **Exposure**:
+  - CRD: `status.conditions[type=ComparisonError]`, `status.sync.status=Unknown`
+  - API: Application Get/Watch, ManagedResources
+  - CLI: `argocd app get` shows the condition
+  - UI: application conditions panel and sync status
+- **Tests required**:
+  - **Positive:**
+    - SSA app whose Deployment manifest has an undeclared `spec.foo`: ComparisonError containing `error building typed value from config resource: .spec.foo: field not declared in schema`, and all resources Unknown.
+    - Live object with an undeclared status field: same error, but `from live resource`.
+    - Duplicate env var names: `duplicate entries for key`.
+    - Only one resource annotated with SSA while the app is not: that resource triggers the failure for the whole app.
+  - **Negative:**
+    - The same manifest without SSA compares normally (legacy diff).
+    - With `ServerSideDiff=true`, no such error.
+    - A CRD field under `x-kubernetes-preserve-unknown-fields` gives no error.
+  - **Recovery:** after fixing the manifest, the next refresh clears the condition.
+
+### DIFF-217 Typed-validation failure in `managedFieldsManagers` normalization (silent skip)
+- **Upstream**: https://github.com/argoproj/argo-cd/blob/a5038b0e2bbac1715754380ae0084df8e3d5b48c/util/argo/diff/diff.go#L431, https://github.com/argoproj/argo-cd/blob/a5038b0e2bbac1715754380ae0084df8e3d5b48c/util/argo/diff/diff.go#L436, https://github.com/argoproj/argo-cd/blob/a5038b0e2bbac1715754380ae0084df8e3d5b48c/util/argo/managedfields/managed_fields.go#L35, https://github.com/argoproj/argo-cd/blob/a5038b0e2bbac1715754380ae0084df8e3d5b48c/util/argo/managedfields/managed_fields.go#L98, https://github.com/argoproj/argo-cd/blob/a5038b0e2bbac1715754380ae0084df8e3d5b48c/util/argo/managedfields/managed_fields_test.go#L153, https://github.com/argoproj/argo-cd/blob/a5038b0e2bbac1715754380ae0084df8e3d5b48c/docs/faq.md#L426, https://github.com/argoproj/argo-cd/blob/a5038b0e2bbac1715754380ae0084df8e3d5b48c/docs/faq.md#L450
+- **Maturity**: GA
+- **Semantics**:
+  - **When it runs.** Pre-diff `managedFieldsManagers` normalization (DIFF-021) runs only when both sides exist and a matching ignore rule lists managers. It resolves the type through DIFF-214, so built-in kinds use the static 1.36 schema.
+  - **Silent failure.** If converting live or target to a typed value fails, or the typed comparison fails, the error is only logged at debug level (`error building typed results: <err>`). Unmodified deep copies are returned. Normalization is skipped for that resource alone, no condition is raised, and the comparison continues. Causes include an undeclared field, a type mismatch or duplicate associative keys.
+  - **Visible effect.** Fields that trusted managers own and Git changes are *not* ignored, so the resource can unexpectedly show `OutOfSync`. No `field not declared in schema` message appears anywhere.
+  - **Error that still surfaces.** Only a managed-fields JSON decode failure still errors: `error normalizing manager <m>: ...`.
+  - **Scope.** The step runs before diff-mode selection. It therefore applies under legacy diff, structured-merge diff and server-side diff, and in the ServerSideDiff API and the controller's Secret re-diff.
+  - **Other normalizers unaffected.** `jsonPointers`/`jqPathExpressions` rules for the same resource are applied later by the normalizer and are unaffected.
+- **Edge cases**:
+  - Under SSA (structured-merge diff), the later structured-merge step fails anyway, with DIFF-216's error, for the same undeclared field.
+  - Under server-side diff or legacy diff, the skip is the only symptom.
+  - An empty manager list returns early before any typed conversion. That is what upstream's "does not fail if object fails validation schema" test exercises.
+- **Configuration surface**: `managedFieldsManagers` in Application `spec.ignoreDifferences[]`, `resource.customizations.ignoreDifferences.<group_kind>` and `resource.customizations.ignoreDifferences.all`.
+- **Exposure**:
+  - CRD: `spec.ignoreDifferences`, resource `status`
+  - API: ManagedResources, ServerSideDiff
+  - UI: diff shows the non-ignored field
+- **Tests required**:
+  - **Positive:** Deployment with `managedFieldsManagers: [kube-controller-manager]` whose `spec.replicas` is changed in Git, under legacy diff: Synced.
+  - **Negative:** the same, plus an undeclared field elsewhere in the manifest: no ComparisonError, but the resource is OutOfSync on `spec.replicas`. A `jsonPointers` rule on the same resource is still honored.
+  - **Error case:** corrupt `managedFields[].fieldsV1` produces a ComparisonError.
+  - **Recovery:** after the undeclared field is removed, the next refresh shows Synced.
+
+### DIFF-218 Deduced parseable-type fallback (no schema available)
+- **Upstream**: https://github.com/argoproj/argo-cd/blob/a5038b0e2bbac1715754380ae0084df8e3d5b48c/gitops-engine/pkg/utils/kube/scheme/typed.go#L18, https://github.com/argoproj/argo-cd/blob/a5038b0e2bbac1715754380ae0084df8e3d5b48c/util/argo/managedfields/managed_fields.go#L99, https://github.com/argoproj/argo-cd/blob/a5038b0e2bbac1715754380ae0084df8e3d5b48c/util/argo/managedfields/managed_fields_test.go#L164, https://github.com/argoproj/argo-cd/blob/a5038b0e2bbac1715754380ae0084df8e3d5b48c/cmd/argocd/commands/app_diff.go#L333, https://github.com/argoproj/argo-cd/blob/a5038b0e2bbac1715754380ae0084df8e3d5b48c/cmd/argocd/commands/app_diff.go#L768, https://github.com/argoproj/argo-cd/blob/a5038b0e2bbac1715754380ae0084df8e3d5b48c/controller/state.go#L889, https://github.com/argoproj/argo-cd/blob/a5038b0e2bbac1715754380ae0084df8e3d5b48c/go.mod#L131
+- **Maturity**: GA
+- **Semantics**:
+  - **What the deduced type is.** It is structured-merge-diff's `DeducedParseableType` (`sigs.k8s.io/structured-merge-diff/v6` v6.4.0, `typed/parser.go`, type `__untyped_deduced_`):
+    - every map is *separable*: per-key granular and recursive
+    - every list is *atomic*, and maps nested inside lists are atomic too
+    - scalars are untyped
+    - any field is accepted, so it never yields `field not declared in schema`
+
+    Note that the upstream code comment ("lists and maps are manipulated atomically") is imprecise about maps.
+  - **When it is used:**
+    - when the GVK parser is nil, `ResolveParseableType` returns it. This covers CLI client-side `argocd app diff`, the default when server-side diff is not requested, whose diff config never sets a parser. It also covers the controller when the cluster-cache lookup for the parser fails: an `UnknownError` condition carrying the error is added and the comparison continues with a nil parser.
+    - in `managedFieldsManagers` normalization, when the resolved type is nil, for example a CRD GVK not published in the cluster OpenAPI.
+  - **When it is not used.** Structured-merge diff with a non-nil parser and an unresolvable GVK errors instead (DIFF-214). Server-side diff's webhook removal never uses it.
+  - **Effect on `managedFieldsManagers`.** A field inside a map owned by a trusted manager, such as `spec.replicas`, is still matched and removed. List content is compared as a whole value, so results for list items can differ from the schema-aware controller result.
+  - **Effect on CLI client-side diff.** A resource annotated `argocd.argoproj.io/sync-options: ServerSideApply=true` gets structured-merge diff with the deduced type and an empty manager name, because the CLI never sets `WithManager`. Lists are then merged atomically.
+- **Edge cases**:
+  - The deduced type cannot detect undeclared fields, so CLI diffs can succeed where the controller raises a ComparisonError (DIFF-216). CLI output can also differ from the controller's sync status for list fields.
+  - The upstream comment on `ResolveParseableType` says the deduced type is "not suitable for calculating diffs", but structured-merge diff still uses it whenever the parser is nil.
+- **Configuration surface**: none. It is triggered by a missing parser or type.
+- **Exposure**: CLI (`argocd app diff` client-side mode), plus the controller fallback (UnknownError condition).
+- **Tests required**:
+  - **Positive:**
+    - `managedfields.Normalize` with a nil type does not panic and returns non-nil objects (port the upstream "does not panic when pt is nil" test).
+    - CRD absent from the cluster OpenAPI with `managedFieldsManagers` owning `spec.replicas`, where Git changes replicas: ignored.
+    - CLI client-side diff of an SSA-annotated Deployment containing an undeclared field: no error.
+  - **Negative:** structured-merge diff with a non-nil parser lacking the GVK errors rather than falling back.
+  - **Recovery:** once the cluster cache becomes available, the next comparison uses schema-aware types and the UnknownError condition clears.
+
+### DIFF-219 Cluster OpenAPI GVK parser construction and duplicate-GVK de-duplication
+- **Upstream**: https://github.com/argoproj/argo-cd/blob/a5038b0e2bbac1715754380ae0084df8e3d5b48c/gitops-engine/pkg/utils/kube/ctl.go#L129, https://github.com/argoproj/argo-cd/blob/a5038b0e2bbac1715754380ae0084df8e3d5b48c/gitops-engine/pkg/utils/kube/ctl.go#L147, https://github.com/argoproj/argo-cd/blob/a5038b0e2bbac1715754380ae0084df8e3d5b48c/gitops-engine/pkg/utils/kube/ctl.go#L157, https://github.com/argoproj/argo-cd/blob/a5038b0e2bbac1715754380ae0084df8e3d5b48c/gitops-engine/pkg/utils/kube/ctl.go#L161, https://github.com/argoproj/argo-cd/blob/a5038b0e2bbac1715754380ae0084df8e3d5b48c/gitops-engine/pkg/utils/kube/uniqueprotomodels.go#L11, https://github.com/argoproj/argo-cd/blob/a5038b0e2bbac1715754380ae0084df8e3d5b48c/gitops-engine/pkg/utils/kube/uniqueprotomodels.go#L91, https://github.com/argoproj/argo-cd/blob/a5038b0e2bbac1715754380ae0084df8e3d5b48c/gitops-engine/pkg/utils/kube/uniqueprotomodels.go#L121, https://github.com/argoproj/argo-cd/blob/a5038b0e2bbac1715754380ae0084df8e3d5b48c/gitops-engine/pkg/cache/cluster.go#L937, https://github.com/argoproj/argo-cd/blob/a5038b0e2bbac1715754380ae0084df8e3d5b48c/gitops-engine/pkg/cache/cluster.go#L1123, https://github.com/argoproj/argo-cd/blob/a5038b0e2bbac1715754380ae0084df8e3d5b48c/controller/sync.go#L47, https://github.com/argoproj/argo-cd/blob/a5038b0e2bbac1715754380ae0084df8e3d5b48c/server/application/application.go#L3024
+- **Maturity**: GA
+- **Semantics**:
+  - **Construction.** `LoadOpenAPISchema` fetches the cluster's OpenAPI v2 document through discovery, converts it to proto models, de-duplicates GVKs, and calls `NewGVKParser(models, preserveUnknownFields=false)`.
+  - **De-duplication.** Model names are walked in sorted (lexicographic) order. The first model that declares a GVK wins. A later model that declares any GVK already seen is dropped *entirely*, and its GVK is recorded as tainted. Tainted GVKs are logged at info level: `Duplicate GVKs detected in OpenAPI schema. This could cause inaccurate diffs.` with key `gvks`. The parser is still built; upstream prefers an imprecise parser to none.
+  - **Unknown fields.** With `preserveUnknownFields=false`, unknown fields are tolerated only where the published schema has `x-kubernetes-preserve-unknown-fields`.
+  - **Controller lifecycle.**
+    - The parser is built during cluster-cache sync and stored per cluster.
+    - It is reloaded on CRD and APIService events (DIFF-073).
+    - It is replaced only when the reload returns a non-nil parser. On a reload error the previous parser stays.
+    - Comparisons read it through `getGVKParser`.
+  - **API server.** The ServerSideDiff RPC loads a fresh parser from the destination cluster on every request.
+- **Edge cases**:
+  - **Aggregated APIs** built against older Kubernetes libraries, such as metrics-server, cause the API aggregator to emit `_vN`-suffixed duplicate definitions. The lexicographically first one is kept, and it may be the stale shape.
+  - **Initial-sync failure** fails the cluster sync: `failed to load open api schema while syncing cluster cache: ...`. Possible causes:
+    - discovery client creation: `failed to create discovery client`
+    - OpenAPI parse: `error getting openapi resources`
+    - parser creation: `error getting gvk parser: failed to create GVK parser: ...` or `error getting openapi schema` / `error getting openapi data`
+  - **ServerSideDiff API failure** returns `failed to get OpenAPI schema: ...` to the caller.
+  - **Static schema precedence.** Built-in kinds still prefer the static schema (DIFF-214), whatever the cluster publishes.
+- **Configuration surface**: none.
+- **Exposure**: internal for the controller. Errors surface on the API side through ServerSideDiff and as cluster connection errors.
+- **Tests required**:
+  - **Positive:**
+    - OpenAPI document with two definitions for one GVK: the parser is built, a warning is logged listing the GVK, and the lexicographically first definition is used.
+    - Document without duplicates: no warning.
+    - After a CRD is added and the schema reloaded, the new CRD GVK resolves.
+  - **Negative:** OpenAPI endpoint failure during initial sync gives a cluster-sync error and app ComparisonErrors.
+  - **Recovery:** a reload failure keeps the previous parser and diffs keep working.
+  - **API:** ServerSideDiff against a cluster whose OpenAPI fails returns `failed to get OpenAPI schema`.
+
+### DIFF-220 Schema source for server-side diff (cluster schema only; static schema not used)
+- **Upstream**: https://github.com/argoproj/argo-cd/blob/a5038b0e2bbac1715754380ae0084df8e3d5b48c/gitops-engine/pkg/diff/diff.go#L93, https://github.com/argoproj/argo-cd/blob/a5038b0e2bbac1715754380ae0084df8e3d5b48c/gitops-engine/pkg/diff/diff.go#L179, https://github.com/argoproj/argo-cd/blob/a5038b0e2bbac1715754380ae0084df8e3d5b48c/gitops-engine/pkg/diff/diff.go#L223, https://github.com/argoproj/argo-cd/blob/a5038b0e2bbac1715754380ae0084df8e3d5b48c/gitops-engine/pkg/diff/diff.go#L228, https://github.com/argoproj/argo-cd/blob/a5038b0e2bbac1715754380ae0084df8e3d5b48c/controller/state.go#L885, https://github.com/argoproj/argo-cd/blob/a5038b0e2bbac1715754380ae0084df8e3d5b48c/server/application/application.go#L3051, https://github.com/argoproj/argo-cd/blob/a5038b0e2bbac1715754380ae0084df8e3d5b48c/docs/faq.md#L450, https://github.com/argoproj/argo-cd/blob/a5038b0e2bbac1715754380ae0084df8e3d5b48c/docs/user-guide/diff-strategies.md#L111
+- **Maturity**: GA
+- **Semantics**:
+  - **No static schema.** The server-side diff path (DIFF-009) never calls `ResolveParseableType` and never consults the static schema.
+  - **Webhook-mutation removal.** With the default `IncludeMutationWebhook` unset (DIFF-010), this is the only typed step. It calls `gvkParser.Type(gvk)` on the destination cluster's parser *directly*. Built-in kinds are therefore typed with the schema the cluster itself publishes, which matches what the API server accepted in the dry run. An outdated compiled-in schema cannot cause `field not declared in schema` here.
+  - **`IncludeMutationWebhook=true`.** No typed parsing occurs at all; raw dry-run output is compared.
+  - **Config is never typed.** Only the dry-run result and live are typed.
+  - **Pre-diff normalization still uses static.** The `managedFieldsManagers` pre-diff normalization still uses DIFF-214 resolution under server-side diff, with the silent skip of DIFF-217.
+- **Edge cases**: each of these fails the app comparison as a ComparisonError.
+  - The GVK is missing from the cluster parser: `unable to resolve parseableType for GroupVersionKind: <gvk>`.
+  - A predicted-live or live typed conversion fails: `error converting predicted live state from unstructured to <gvk>: ...` or `error converting live state from unstructured to <gvk>: ...`.
+
+  All of these are wrapped as `error calculating server side diff: serverSideDiff error: error removing non config mutations for resource <Kind>/<name>: ...`.
+- **Configuration surface**:
+  - enable: `argocd.argoproj.io/compare-options: ServerSideDiff=true`, or controller `--server-side-diff-enabled` / `controller.diff.server.side`
+  - skip typed parsing: `argocd.argoproj.io/compare-options: IncludeMutationWebhook=true`
+- **Exposure**:
+  - CRD: annotations
+  - API: ServerSideDiff RPC `GET /api/v1/applications/{appName}/server-side-diff` uses the per-request parser with the same rules
+  - CLI: `argocd app diff --server-side-diff`
+  - UI: indirect, through cached diffs
+- **Tests required**:
+  - **Positive:**
+    - Server-side diff on a cluster whose Deployment schema has a field absent from the static schema, with a manifest using that field: no error, and the diff is computed.
+    - The same app switched from server-side diff to SSA-only structured-merge diff: DIFF-216 error, which proves the schema-source difference.
+    - With `IncludeMutationWebhook=true`, no typed conversion: a GVK absent from the cluster parser still diffs.
+  - **Negative:** default server-side diff for a GVK missing from the cluster OpenAPI gives `unable to resolve parseableType` as a ComparisonError.
+
+### DIFF-221 Managed-fields version conversion during structured-merge diff
+- **Upstream**: https://github.com/argoproj/argo-cd/blob/a5038b0e2bbac1715754380ae0084df8e3d5b48c/gitops-engine/pkg/diff/diff.go#L474, https://github.com/argoproj/argo-cd/blob/a5038b0e2bbac1715754380ae0084df8e3d5b48c/gitops-engine/pkg/diff/diff.go#L498, https://github.com/argoproj/argo-cd/blob/a5038b0e2bbac1715754380ae0084df8e3d5b48c/gitops-engine/pkg/diff/internal/fieldmanager/wrapper.go#L19, https://github.com/argoproj/argo-cd/blob/a5038b0e2bbac1715754380ae0084df8e3d5b48c/gitops-engine/pkg/diff/internal/fieldmanager/borrowed_versionconverter.go#L63, https://github.com/argoproj/argo-cd/blob/a5038b0e2bbac1715754380ae0084df8e3d5b48c/gitops-engine/pkg/diff/internal/fieldmanager/borrowed_versionconverter.go#L99, https://github.com/argoproj/argo-cd/blob/a5038b0e2bbac1715754380ae0084df8e3d5b48c/gitops-engine/pkg/diff/internal/fieldmanager/borrowed_typeconverter.go#L84, https://github.com/argoproj/argo-cd/blob/a5038b0e2bbac1715754380ae0084df8e3d5b48c/gitops-engine/pkg/diff/internal/fieldmanager/borrowed_typeconverter.go#L112, https://github.com/argoproj/argo-cd/blob/a5038b0e2bbac1715754380ae0084df8e3d5b48c/gitops-engine/pkg/diff/diff_test.go#L2409, https://github.com/argoproj/argo-cd/blob/a5038b0e2bbac1715754380ae0084df8e3d5b48c/gitops-engine/pkg/diff/diff_test.go#L2483
+- **Maturity**: GA
+- **Semantics**:
+  - **When conversion happens.** Structured-merge diff runs `merge.Updater.Apply` with a version converter. Converting an object to the API version a manager recorded is skipped when that version equals the object's own version.
+  - **How it converts.** Otherwise the object goes through client-go's `kubernetes/scheme.Scheme` with hub version `<group>/__internal`. The converted object is then typed with the destination cluster's parser, `parser.Type(gvk)`, *not* the static schema.
+  - **Missing versions are dropped.** Two errors count as a missing version: a type not registered in the Go scheme (every CRD), or `no corresponding type for <gvk>` (absent from the cluster OpenAPI). The manager entries recorded at that version are then dropped from the managed set, so their ownership is ignored. This rule comes from structured-merge-diff v6.4.0 `merge/update.go`.
+  - **Other errors fail.** Any other conversion error aborts the structured-merge diff, wrapped as `error calculating structured merge diff: error calculating diff: error while running updater.Apply: ...`.
+  - **Regression test.** Upstream tests cover an HPA with config at `autoscaling/v2` and a manager entry recorded at `autoscaling/v1`:
+    - identical objects: `Modified=false`
+    - changed replicas: `Modified=true`
+- **Edge cases**:
+  - CRD manager entries at another served version are silently disregarded, which can change conflict and ownership outcomes compared with a real server-side apply.
+  - Live `managedFields` that cannot be decoded fail with `error decoding managed fields: ...`.
+  - The CLI client-side diff has no parser, see DIFF-218 and Unconfirmed.
+- **Configuration surface**: same triggers as DIFF-008: the `ServerSideApply=true` sync option or annotation, with server-side diff off.
+- **Exposure**: CRD (sync options) and the resulting sync status and diff. No dedicated API, CLI or UI surface.
+- **Tests required**:
+  - **Positive:** port `TestStructuredMergeDiff_HPAv2ToV1Conversion` and `TestStructuredMergeDiff_HPAv2ToV1Conversion_Modified`.
+  - **CRD:** live `managedFields` recorded at `v1beta1` while config is `v1` diffs without error, and the v1beta1 entries are ignored.
+  - **Negative:** malformed `managedFields` fails with `error decoding managed fields` as a ComparisonError.
+
 ## Unconfirmed
 
 - **System-level `managedFieldsManagers` for core-group kinds.** `HasIgnoreDifference` looks up overrides with key `fmt.Sprintf("%s/%s", group, kind)`, which is `/Service` for the core group, while `convertToOverrideKey` stores `resource.customizations.ignoreDifferences.Service` under key `Service`. From reading the code, managers configured for a core kind by group/kind (not via `.all`) seem never to be applied, although jsonPointers/jqPathExpressions for the same key do work through the glob normalizer. No upstream test covers a core kind. Paths checked: `util/argo/diff/ignore.go#L46`, `util/settings/settings.go#L1210`, `util/argo/diff/ignore_test.go`, `util/argo/normalizers/util.go#L8`.
@@ -2193,6 +2451,17 @@ Counts at this commit (directory `resource_customizations/`): 111 API-group dire
 - **Inventory status hints and test counts.** The "statuses referenced" list for each built-in script is a regex scan for quoted status literals. Scripts that copy a status from the object (for example, child health) can return codes that are not listed. Test-case counts are the number of `inputPath:` entries in each `health_test.yaml`. Paths checked: `resource_customizations/**/health.lua`, `resource_customizations/**/health_test.yaml`.
 - **UI rendering.** Health and sync icon rendering, the pods view grouped by host, and the network view were only located, not inventoried in detail. Paths checked: `ui/src/app/applications/components/application-details/application-details.tsx`, `ui/src/app/applications/components/application-resource-tree/application-resource-tree.tsx`, `ui/src/app/applications/components/utils.tsx`.
 - **Health aggregation error message.** The "see application-controller logs for N other errors" branch in `setApplicationHealth` looks unreachable, because `errCount` only increments while `savedErr` is nil. This was established by reading the code. No test asserts it. Path checked: `controller/health.go#L56-L102`.
+- **Version-conversion hub in structured-merge diff.** `apply` passes client-go's `kubernetes/scheme.Scheme` as the object convertor (import at `gitops-engine/pkg/diff/diff.go#L24`, use at `#L477`), with hub `<group>/__internal`. That scheme registers only external versions. gitops-engine's own `scheme.Scheme` (`legacyscheme`, which has internal types, `gitops-engine/pkg/utils/kube/scheme/scheme.go#L29`) is not used here. Code was not run, so it is unknown which of two things happens for a built-in kind with managed fields at another version:
+  - conversion succeeds
+  - conversion returns a not-registered error, so the manager entry is dropped (DIFF-221)
+
+  The HPA regression tests only assert the `Modified` flag. Paths checked: `gitops-engine/pkg/diff/internal/fieldmanager/borrowed_versionconverter.go#L63-L101`, `gitops-engine/pkg/diff/diff_test.go#L2409-L2530`.
+- **Nil GVK parser in typed paths that bypass `ResolveParseableType`.** `GvkParser.Type` dereferences its receiver (`k8s.io/apimachinery` v0.36.1 `pkg/util/managedfields/gvkparser.go#L42-L43`). Two callers do not check for nil first: `removeWebhookMutation` (`gitops-engine/pkg/diff/diff.go#L223`) and the version converter's `typeConverter.ObjectToTyped` (`gitops-engine/pkg/diff/internal/fieldmanager/borrowed_typeconverter.go#L86`). The controller and the ServerSideDiff API normally pass a non-nil parser. The CLI client-side diff passes nil (`cmd/argocd/commands/app_diff.go#L333-L338`). A panic looks possible there, but only if all of these hold, and this was not run:
+  - the resource has the `ServerSideApply=true` sync-options annotation
+  - live managed fields are recorded at another API version
+  - Go-scheme conversion succeeds
+- **Deduced type and list-item ownership.** With the deduced type (DIFF-218), lists are atomic, so the typed comparison reports a whole list path as modified. Server-recorded managedFields entries hold item-level paths (`k:{...}`). It was not run whether `fieldpath.Set.Intersection` then removes anything, i.e. whether changes inside list items owned by a trusted manager are ignored when no schema is available. DIFF-021's test bullet "whole list ignored if any item modified by manager" is unverified on this point. Paths checked: `util/argo/managedfields/managed_fields.go#L74-L87`, `sigs.k8s.io/structured-merge-diff/v6@v6.4.0/typed/parser.go#L128-L150`.
+- **Frozen GVK-to-definition-name map across clusters.** The map is built once per process from the first parser it sees (`gitops-engine/pkg/utils/kube/scheme/typed.go#L46-L56`). This can change the schema source for built-in GVKs that the first cluster did not serve (DIFF-214). That consequence comes from reading the code only. No upstream test covers more than one cluster, and `ResolveParseableType` has no direct unit test.
 
 ## Doc/implementation differences
 
@@ -2220,3 +2489,9 @@ Counts at this commit (directory `resource_customizations/`): 111 API-group dire
   - flag-validation failures exit with the generic code 20; only a wrong argument count exits 2
   - Secrets are excluded only in deprecated local client-side mode; otherwise they are diffed with masked values
 - **Aggregated roles in CLI and API diffs.** `docs/user-guide/diffing.md#L135-L148` presents `ignoreAggregatedRoles` as a global compare option. The CLI client-side diff (`cmd/argocd/commands/app_diff.go#L332`) and the ServerSideDiff API (`server/application/application.go#L3043`) always use `false`, so their output can disagree with the controller's sync status.
+- **Features that use the static schema (FAQ).** `docs/faq.md#L450-L453` lists three features that rely on the static schema: `managedFieldsManagers`, server-side apply without server-side diff, and server-side diff "_with_ mutation webhooks". Server-side diff never uses the static schema:
+  - webhook-mutation removal types objects with the destination cluster's parser only (`gitops-engine/pkg/diff/diff.go#L223`)
+  - with `IncludeMutationWebhook=true` there is no typed parsing at all
+
+  Only structured-merge diff (`gitops-engine/pkg/diff/diff.go#L423`) and `managedFieldsManagers` normalization (`util/argo/diff/diff.go#L436`) resolve the static schema. The FAQ's workarounds still avoid the error. See DIFF-220.
+- **Symptom of the `field not declared in schema` error.** `docs/faq.md#L426-L427` says the user "may get an error like `field not declared in schema`". That is true only on the structured-merge diff path, where the message appears in a ComparisonError. In `managedFieldsManagers` normalization the conversion error is only logged at debug level and the normalization is skipped (`util/argo/managedfields/managed_fields.go#L35-L40`). The visible symptom there is an unexpectedly OutOfSync resource with no error message (DIFF-217).
