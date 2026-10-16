@@ -41,7 +41,10 @@ func NormalizeManagedFields(live, config *unstructured.Unstructured, trustedMana
 	if live == nil || config == nil {
 		return live, config, nil
 	}
-	liveCopy, configCopy := live.DeepCopy(), config.DeepCopy()
+	liveCopy, configCopy, err := jsonCopies(live, config)
+	if err != nil {
+		return nil, nil, err
+	}
 	if len(trustedManagers) == 0 {
 		return liveCopy, configCopy, nil
 	}

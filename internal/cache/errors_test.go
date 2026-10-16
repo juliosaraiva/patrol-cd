@@ -8,6 +8,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"net/url"
+	"sync"
 	"sync/atomic"
 	"syscall"
 	"testing"
@@ -116,7 +117,7 @@ func TestEnsureSyncedRetryTimeout(t *testing.T) {
 	assert.Equal(t, n, requests.Load())
 }
 
-func TestEnsureSyncedCallerCancellationIsNotRecorded(t *testing.T) {
+func TestEnsureSyncedDoneContextStartsNoSync(t *testing.T) {
 	t.Parallel()
 	c, err := New(closedPortConfig(t), Settings{})
 	require.NoError(t, err)
@@ -124,7 +125,115 @@ func TestEnsureSyncedCallerCancellationIsNotRecorded(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	cancel()
 	assert.ErrorIs(t, c.EnsureSynced(ctx), context.Canceled)
+	c.statusMu.Lock()
+	assert.Nil(t, c.status.flight, "no sync was started for a caller that was already done")
+	c.statusMu.Unlock()
 	assert.Nil(t, c.GetClusterInfo().LastCacheSyncTime)
+}
+
+// Callers whose deadline is shorter than a sync stop waiting, but the sync is not cancelled:
+// it completes once, under the cache's own context, and serves later callers.
+func TestEnsureSyncedOutlivesCallerContext(t *testing.T) {
+	t.Parallel()
+	fc := newFakeCluster(t, cmResource)
+	release := fc.holdVersion()
+	c, err := New(fc.config(), Settings{EventProcessingInterval: -1}, fc.options()...)
+	require.NoError(t, err)
+	t.Cleanup(c.Close)
+	t.Cleanup(release) // runs before Close
+
+	var wg sync.WaitGroup
+	for range 4 {
+		wg.Go(func() {
+			ctx, cancel := context.WithTimeout(context.Background(), 50*time.Millisecond)
+			defer cancel()
+			assert.ErrorIs(t, c.EnsureSynced(ctx), context.DeadlineExceeded)
+		})
+	}
+	wg.Wait()
+	assert.Nil(t, c.GetClusterInfo().LastCacheSyncTime, "the sync is still running")
+	// The shared sync runs on its own goroutine; under load its version request may reach
+	// the fake server only after every caller has timed out, so wait for it to arrive.
+	require.Eventually(t, func() bool { return fc.versionRequests() >= 1 }, 20*time.Second, 10*time.Millisecond,
+		"the shared sync never requested the server version")
+	assert.Equal(t, 1, fc.versionRequests(), "callers share one sync")
+
+	waiters := make(chan error, 3)
+	for range 3 {
+		go func() { waiters <- c.EnsureSynced(context.Background()) }()
+	}
+	release()
+	for range 3 {
+		select {
+		case err := <-waiters:
+			require.NoError(t, err)
+		case <-time.After(20 * time.Second):
+			t.Fatal("waiters did not receive the sync result")
+		}
+	}
+	require.NoError(t, c.EnsureSynced(context.Background()))
+	info := c.GetClusterInfo()
+	assert.True(t, info.Synced)
+	assert.Equal(t, 1, fc.versionRequests(), "the sync that callers gave up on was not restarted")
+}
+
+// A caller that joined a sync must not get its result when that sync completed for an epoch
+// older than the call (Invalidate ran between the sync's swap and its completion).
+func TestEnsureSyncedIgnoresResultOfOlderEpoch(t *testing.T) {
+	t.Parallel()
+	fc := newFakeCluster(t, cmResource)
+	c := fc.start(t, Settings{})
+	c.Invalidate()
+	stale := &syncFlight{done: make(chan struct{})}
+	c.statusMu.Lock()
+	c.status.flight = stale
+	c.statusMu.Unlock()
+
+	result := make(chan error, 1)
+	go func() { result <- c.EnsureSynced(context.Background()) }()
+	time.Sleep(50 * time.Millisecond) // let the caller join the stale flight
+	c.statusMu.Lock()
+	stale.err, stale.epoch = nil, 0 // completed for the epoch before Invalidate
+	c.status.flight = nil
+	c.statusMu.Unlock()
+	close(stale.done)
+
+	select {
+	case err := <-result:
+		require.NoError(t, err)
+	case <-time.After(20 * time.Second):
+		t.Fatal("EnsureSynced did not return")
+	}
+	assert.True(t, c.GetClusterInfo().Synced, "the caller waited for a sync of the current epoch")
+	assert.Equal(t, 2, fc.versionRequests())
+}
+
+func TestEnsureSyncedCloseWhileWaiting(t *testing.T) {
+	t.Parallel()
+	fc := newFakeCluster(t, cmResource)
+	release := fc.holdVersion()
+	t.Cleanup(release)
+	c, err := New(fc.config(), Settings{EventProcessingInterval: -1}, fc.options()...)
+	require.NoError(t, err)
+
+	result := make(chan error, 1)
+	go func() { result <- c.EnsureSynced(context.Background()) }()
+	eventually(t, 10*time.Second, func() bool { return fc.versionRequests() == 1 }, "sync started")
+	closed := make(chan struct{})
+	go func() {
+		c.Close()
+		close(closed)
+	}()
+	eventually(t, 10*time.Second, func() bool { return c.rootCtx.Err() != nil }, "close cancelled the cache")
+	release() // let the in-flight discovery request return
+	select {
+	case err := <-result:
+		assert.ErrorIs(t, err, ErrClosed)
+	case <-time.After(20 * time.Second):
+		t.Fatal("waiter not released by Close")
+	}
+	<-closed
+	assert.ErrorIs(t, c.EnsureSynced(context.Background()), ErrClosed)
 }
 
 func TestClosedCache(t *testing.T) {

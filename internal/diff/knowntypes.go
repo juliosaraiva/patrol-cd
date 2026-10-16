@@ -156,7 +156,8 @@ func reencode(v any, newType func() any) (any, error) {
 }
 
 // Chain returns a Normalizer applying normalizers in order; nil entries are skipped. The
-// first error stops the chain. If any element provides trusted managers, so does the chain.
+// first error stops the chain, and so does a done context (the chain then returns an error
+// wrapping ctx.Err()). If any element provides trusted managers, so does the chain.
 func Chain(normalizers ...Normalizer) Normalizer {
 	var ns []Normalizer
 	for _, n := range normalizers {
@@ -171,6 +172,9 @@ type chain []Normalizer
 
 func (c chain) Normalize(ctx context.Context, un *unstructured.Unstructured) error {
 	for _, n := range c {
+		if err := ctx.Err(); err != nil {
+			return fmt.Errorf("diff: normalization of %s interrupted: %w", describe(un), err)
+		}
 		if err := n.Normalize(ctx, un); err != nil {
 			return err
 		}

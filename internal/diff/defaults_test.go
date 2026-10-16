@@ -7,6 +7,7 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
+	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/client-go/kubernetes/scheme"
 )
 
@@ -119,5 +120,93 @@ func TestImageTag(t *testing.T) {
 		"registry.example/a/b/c:2026.10.12-1": "2026.10.12-1",
 	} {
 		assert.Equal(t, want, imageTag(image), image)
+	}
+}
+
+func TestApplyDefaultsVerifiedAgainstAPIServer(t *testing.T) {
+	t.Parallel()
+	// Values below were confirmed against kube-apiserver 1.36 (TestEnvtestDefaultsConformance).
+	d := defaulted(t, `{"apiVersion":"apps/v1","kind":"Deployment","metadata":{"name":"d"},"spec":{"template":{"spec":{
+		"containers":[{"name":"c","image":"a:1","startupProbe":{"grpc":{"port":81}}}],
+		"volumes":[{"name":"i","iscsi":{"targetPortal":"t","iqn":"q","lun":0}},{"name":"r","rbd":{"monitors":["m"],"image":"x"}},
+		{"name":"az","azureDisk":{"diskName":"d","diskURI":"u"}},{"name":"s","scaleIO":{"gateway":"g","system":"s","volumeName":"v","secretRef":{"name":"x"}}}]}}}}`)
+	c := field(t, d, "spec", "template", "spec", "containers").([]any)[0].(map[string]any)
+	assert.Equal(t, "", c["startupProbe"].(map[string]any)["grpc"].(map[string]any)["service"])
+	vols := field(t, d, "spec", "template", "spec", "volumes").([]any)
+	assert.Equal(t, "default", vols[0].(map[string]any)["iscsi"].(map[string]any)["iscsiInterface"])
+	assert.Equal(t, map[string]any{"monitors": []any{"m"}, "image": "x", "pool": "rbd", "user": "admin", "keyring": "/etc/ceph/keyring"}, vols[1].(map[string]any)["rbd"])
+	assert.Equal(t, map[string]any{"diskName": "d", "diskURI": "u", "cachingMode": "ReadWrite", "fsType": "ext4", "kind": "Shared", "readOnly": false}, vols[2].(map[string]any)["azureDisk"])
+	assert.Equal(t, "ThinProvisioned", vols[3].(map[string]any)["scaleIO"].(map[string]any)["storageMode"])
+
+	svc := defaulted(t, `{"apiVersion":"v1","kind":"Service","metadata":{"name":"s"},"spec":{"externalIPs":["192.0.2.1"],"ports":[{"port":80}]}}`)
+	assert.Equal(t, "Cluster", field(t, svc, "spec", "externalTrafficPolicy"), "ClusterIP with external IPs is externally accessible")
+
+	lr := defaulted(t, `{"apiVersion":"v1","kind":"LimitRange","metadata":{"name":"l"},"spec":{"limits":[{"type":"Container","max":{"cpu":"2"},"min":{"cpu":"0.1","memory":"0.5Mi"}}]}}`)
+	item := field(t, lr, "spec", "limits").([]any)[0].(map[string]any)
+	assert.Equal(t, map[string]any{"cpu": "2"}, item["default"])
+	assert.Equal(t, map[string]any{"cpu": "2", "memory": "512Ki"}, item["defaultRequest"], "default request falls back to default limit, then min")
+
+	pod := defaulted(t, `{"apiVersion":"v1","kind":"Pod","metadata":{"name":"p"},"spec":{"resources":{"limits":{"cpu":"2","memory":"256Mi","hugepages-2Mi":"4Mi"}},
+		"initContainers":[{"name":"side","image":"s:1","restartPolicy":"Always","resources":{"requests":{"cpu":"100m"}}},{"name":"init","image":"i:1","resources":{"requests":{"cpu":"1500m","memory":"10Mi"}}}],
+		"containers":[{"name":"c","image":"n:1","resources":{"requests":{"cpu":"250m","memory":"64Mi","hugepages-2Mi":"2Mi"},"limits":{"hugepages-2Mi":"2Mi"}}},{"name":"d","image":"n:1","resources":{"limits":{"cpu":"300m"}}}]}}`)
+	assert.Equal(t, map[string]any{"cpu": "1600m", "memory": "64Mi", "hugepages-2Mi": "4Mi"}, field(t, pod, "spec", "resources", "requests"),
+		"pod-level CPU/memory requests default to effective container requests, hugepages to the pod limit")
+
+	pv := defaulted(t, `{"apiVersion":"v1","kind":"PersistentVolume","metadata":{"name":"pv"},"spec":{"capacity":{"storage":"1Gi"},"hostPath":{"path":"/d"}}}`)
+	assert.Equal(t, "Retain", field(t, pv, "spec", "persistentVolumeReclaimPolicy"))
+	assert.Equal(t, "Filesystem", field(t, pv, "spec", "volumeMode"))
+	assert.Equal(t, "", field(t, pv, "spec", "hostPath", "type"))
+
+	crb := defaulted(t, `{"apiVersion":"rbac.authorization.k8s.io/v1","kind":"ClusterRoleBinding","metadata":{"name":"b"},"roleRef":{"kind":"ClusterRole","name":"view"},
+		"subjects":[{"kind":"User","name":"u"},{"kind":"ServiceAccount","name":"sa","namespace":"n"}]}`)
+	assert.Equal(t, "rbac.authorization.k8s.io", field(t, crb, "roleRef", "apiGroup"))
+	subjects := field(t, crb, "subjects").([]any)
+	assert.Equal(t, "rbac.authorization.k8s.io", subjects[0].(map[string]any)["apiGroup"])
+	assert.NotContains(t, subjects[1].(map[string]any), "apiGroup", "service account subjects stay in the core group")
+
+	ic := defaulted(t, `{"apiVersion":"networking.k8s.io/v1","kind":"IngressClass","metadata":{"name":"i"},"spec":{"controller":"c","parameters":{"kind":"P","name":"p"}}}`)
+	assert.Equal(t, "Cluster", field(t, ic, "spec", "parameters", "scope"))
+
+	csi := defaulted(t, `{"apiVersion":"storage.k8s.io/v1","kind":"CSIDriver","metadata":{"name":"c"},"spec":{}}`)
+	assert.Equal(t, map[string]any{"attachRequired": true, "fsGroupPolicy": "ReadWriteOnceWithFSType", "podInfoOnMount": false, "requiresRepublish": false,
+		"seLinuxMount": false, "storageCapacity": false, "volumeLifecycleModes": []any{"Persistent"}}, csi["spec"])
+
+	es := defaulted(t, `{"apiVersion":"discovery.k8s.io/v1","kind":"EndpointSlice","metadata":{"name":"e"},"addressType":"IPv4","endpoints":[],"ports":[{"port":80}]}`)
+	assert.Equal(t, []any{map[string]any{"name": "", "port": int64(80), "protocol": "TCP"}}, es["ports"])
+
+	vap := defaulted(t, `{"apiVersion":"admissionregistration.k8s.io/v1","kind":"ValidatingAdmissionPolicy","metadata":{"name":"v"},"spec":{"matchConstraints":{"resourceRules":[{"apiGroups":["apps"],"apiVersions":["v1"],"operations":["CREATE"],"resources":["deployments"]}]}}}`)
+	assert.Equal(t, "Fail", field(t, vap, "spec", "failurePolicy"))
+	assert.Equal(t, "Equivalent", field(t, vap, "spec", "matchConstraints", "matchPolicy"))
+	assert.Equal(t, map[string]any{}, field(t, vap, "spec", "matchConstraints", "objectSelector"))
+	assert.Equal(t, "*", field(t, vap, "spec", "matchConstraints", "resourceRules").([]any)[0].(map[string]any)["scope"])
+}
+
+// TestTypedDefaultsDoNotLeakPatchDirectives: a defaults patch that introduces a whole
+// structure (here the Deployment strategy) must not leave strategic-merge directives behind.
+func TestTypedDefaultsDoNotLeakPatchDirectives(t *testing.T) {
+	t.Parallel()
+	u := obj(t, `{"apiVersion":"apps/v1","kind":"Deployment","metadata":{"name":"d"},"spec":{"selector":{"matchLabels":{"a":"b"}},"template":{"spec":{"containers":[{"name":"c","image":"a:1"}]}}}}`)
+	data := mustJSON(t, u)
+	out, err := withTypedDefaults(data, func() (runtime.Object, error) { return scheme.Scheme.New(u.GroupVersionKind()) })
+	require.NoError(t, err)
+	assert.NotContains(t, string(out), "$retainKeys")
+	strategy, ok := nested(t, out, "spec", "strategy")
+	require.True(t, ok)
+	assert.Equal(t, map[string]any{"type": "RollingUpdate", "rollingUpdate": map[string]any{"maxSurge": "25%", "maxUnavailable": "25%"}}, strategy)
+}
+
+// TestDefaultingIdempotent: applying the defaults pipeline (typed re-encoding and defaults
+// patch) to an already defaulted object changes nothing, for every corpus manifest.
+func TestDefaultingIdempotent(t *testing.T) {
+	t.Parallel()
+	for _, manifest := range defaultsCorpus {
+		u := obj(t, manifest)
+		t.Run(u.GetKind()+"/"+u.GetName(), func(t *testing.T) {
+			t.Parallel()
+			once := locallyDefaulted(t, u)
+			twice := locallyDefaulted(t, &unstructured.Unstructured{Object: once})
+			assert.Equal(t, once, twice)
+			assert.NotContains(t, string(mustJSON(t, &unstructured.Unstructured{Object: once})), `"$`, "no patch directives")
+		})
 	}
 }

@@ -101,22 +101,22 @@ func TestNormalizeSecretVariants(t *testing.T) {
 func TestNormalizeCanonicalizesSecretData(t *testing.T) {
 	t.Parallel()
 	u := obj(t, `{"apiVersion":"v1","kind":"Secret","metadata":{"name":"s"},"data":{"a":"YWJj\n","b":null}}`)
-	Normalize(context.Background(), u, Options{})
+	require.NoError(t, Normalize(context.Background(), u, Options{}))
 	assert.Equal(t, map[string]any{"a": "YWJj", "b": ""}, u.Object["data"])
 }
 
 func TestNormalizeRoles(t *testing.T) {
 	t.Parallel()
 	r := obj(t, aggrRoleLive)
-	Normalize(context.Background(), r, Options{IgnoreAggregatedRoles: true})
+	require.NoError(t, Normalize(context.Background(), r, Options{IgnoreAggregatedRoles: true}))
 	assert.Nil(t, r.Object["rules"])
 
 	r = obj(t, aggrRoleLive)
-	Normalize(context.Background(), r, Options{})
+	require.NoError(t, Normalize(context.Background(), r, Options{}))
 	assert.NotNil(t, r.Object["rules"])
 
 	malformed := obj(t, `{"apiVersion":"rbac.authorization.k8s.io/v1","kind":"Role","metadata":{"name":"r"},"aggregationRule":"oops","rules":[{"verbs":["get"]}]}`)
-	Normalize(context.Background(), malformed, Options{IgnoreAggregatedRoles: true})
+	require.NoError(t, Normalize(context.Background(), malformed, Options{IgnoreAggregatedRoles: true}))
 	assert.NotNil(t, malformed.Object["rules"])
 }
 
@@ -152,8 +152,8 @@ func TestNormalizeEndpointsOrderInsensitive(t *testing.T) {
 			s["ports"] = rapid.Permutation(s["ports"].([]any)).Draw(rt, "portOrder")
 		}
 		other := mk(shuffled)
-		Normalize(context.Background(), original, Options{})
-		Normalize(context.Background(), other, Options{})
+		require.NoError(rt, Normalize(context.Background(), original, Options{}))
+		require.NoError(rt, Normalize(context.Background(), other, Options{}))
 		assert.Equal(rt, original.Object, other.Object)
 	})
 }
@@ -226,9 +226,9 @@ func TestNormalizeIdempotent(t *testing.T) {
 		o := Options{Normalizer: n, IgnoreAggregatedRoles: rapid.Bool().Draw(rt, "aggr")}
 		u, err := remarshal(genObject(rt), Options{}.withDefaults().Log)
 		require.NoError(rt, err)
-		Normalize(context.Background(), u, o)
+		require.NoError(rt, Normalize(context.Background(), u, o))
 		once := u.DeepCopy()
-		Normalize(context.Background(), u, o)
+		require.NoError(rt, Normalize(context.Background(), u, o))
 		assert.Equal(rt, once.Object, u.Object)
 
 		again, err := remarshal(once, Options{}.withDefaults().Log)

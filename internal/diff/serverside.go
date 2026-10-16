@@ -37,7 +37,9 @@ func serverSideDiff(ctx context.Context, config, live *unstructured.Unstructured
 		return nil, err
 	}
 	for _, obj := range []*unstructured.Unstructured{predicted, live} {
-		normalizeObject(ctx, obj, o, false)
+		if err := normalizeObject(ctx, obj, o, false); err != nil {
+			return nil, err
+		}
 		unstructured.RemoveNestedField(obj.Object, "metadata", "managedFields")
 		unstructured.RemoveNestedField(obj.Object, "metadata", "resourceVersion")
 		unstructured.RemoveNestedField(obj.Object, "metadata", "annotations", AnnotationLastAppliedConfig)

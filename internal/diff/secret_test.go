@@ -126,21 +126,23 @@ func TestHideSecretData(t *testing.T) {
 	})
 	t.Run("malformed last-applied fails closed", func(t *testing.T) {
 		t.Parallel()
-		const raw = `{"data":{"password":"U0VDUkVUVkFM"`
-		for _, side := range []string{"target", "live"} {
-			target, live := secret(map[string]string{"k": "v"}), secret(map[string]string{"k": "v"})
-			bad := live
-			if side == "target" {
-				bad = target
+		// Truncated JSON, and valid JSON without kind (rejected by the baseline's decoder).
+		for _, raw := range []string{`{"data":{"password":"U0VDUkVUVkFM"`, `{"data":{"password":"U0VDUkVUVkFM"}}`} {
+			for _, side := range []string{"target", "live"} {
+				target, live := secret(map[string]string{"k": "v"}), secret(map[string]string{"k": "v"})
+				bad := live
+				if side == "target" {
+					bad = target
+				}
+				bad.SetAnnotations(map[string]string{AnnotationLastAppliedConfig: raw})
+				mt, ml, err := HideSecretData(target, live, nil)
+				require.NoError(t, err)
+				got := ml
+				if side == "target" {
+					got = mt
+				}
+				assert.Equal(t, mask1, got.GetAnnotations()[AnnotationLastAppliedConfig], side)
 			}
-			bad.SetAnnotations(map[string]string{AnnotationLastAppliedConfig: raw})
-			mt, ml, err := HideSecretData(target, live, nil)
-			require.NoError(t, err)
-			got := ml
-			if side == "target" {
-				got = mt
-			}
-			assert.Equal(t, mask1, got.GetAnnotations()[AnnotationLastAppliedConfig], side)
 		}
 	})
 	t.Run("input is not modified", func(t *testing.T) {

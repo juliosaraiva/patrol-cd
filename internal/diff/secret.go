@@ -24,19 +24,21 @@ const maskUnit = "++++++++"
 // A last-applied-configuration annotation that is not valid JSON, or that is itself listed in
 // hideAnnotations, is replaced entirely by "++++++++" (fail closed).
 func HideSecretData(target, live *unstructured.Unstructured, hideAnnotations map[string]bool) (*unstructured.Unstructured, *unstructured.Unstructured, error) {
+	target, live, err := jsonCopies(target, live)
+	if err != nil {
+		return nil, nil, err
+	}
 	var targetLA, liveLA *unstructured.Unstructured
 	var targetLAInvalid, liveLAInvalid bool
 	if live != nil {
 		var err error
 		liveLA, err = LastAppliedConfig(live)
 		liveLAInvalid = err != nil
-		live = live.DeepCopy()
 	}
 	if target != nil {
 		var err error
 		targetLA, err = LastAppliedConfig(target)
 		targetLAInvalid = err != nil
-		target = target.DeepCopy()
 	}
 	objs := []*unstructured.Unstructured{target, live, targetLA, liveLA}
 

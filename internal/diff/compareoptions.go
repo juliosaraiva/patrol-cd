@@ -139,13 +139,19 @@ var metadataNoisePointers = []string{"/metadata/resourceVersion", "/metadata/gen
 
 // ResourceUpdateIgnoreRules returns the rules used to decide whether a watch event for a
 // live resource is relevant (ignoreResourceUpdates). updateRules are the system-level
-// ignoreResourceUpdates overrides; diffRules (the system-level ignoreDifferences overrides)
-// are included when IgnoreDifferencesOnResourceUpdates is set. resourceVersion, generation
-// and managedFields changes are always ignored.
+// ignoreResourceUpdates overrides. When IgnoreDifferencesOnResourceUpdates is set, diffRules
+// (the system-level ignoreDifferences overrides) and the /status rule implied by
+// IgnoreResourceStatusField are added, as the baseline merges its status override into the
+// ignoreDifferences overrides before reusing them; passing SystemIgnoreRules output as
+// diffRules is equivalent (a repeated /status removal is a no-op). Application-level
+// ignoreDifferences never take part. resourceVersion, generation and managedFields changes
+// are always ignored. Managed fields managers have no effect on hashing (only pointers and jq
+// expressions are applied), as in the baseline.
 func ResourceUpdateIgnoreRules(updateRules, diffRules []IgnoreRule, opts CompareOptions) []IgnoreRule {
 	out := slices.Clone(updateRules)
 	if opts.IgnoreDifferencesOnResourceUpdates {
 		out = append(out, diffRules...)
+		out = append(out, StatusIgnoreRules(opts.IgnoreResourceStatusField)...)
 	}
 	return append(out, IgnoreRule{Group: "*", Kind: "*", JSONPointers: slices.Clone(metadataNoisePointers)})
 }
@@ -153,14 +159,22 @@ func ResourceUpdateIgnoreRules(updateRules, diffRules []IgnoreRule, opts Compare
 // ResourceUpdateHash returns a hash of un after normalization with n (typically an
 // IgnoreNormalizer built from ResourceUpdateIgnoreRules). Two versions of a live object with
 // the same hash differ only in ignored fields, so the update need not trigger a refresh.
-// un is not modified.
+// un is not modified. If ctx is done once n returns, the error wraps ctx.Err().
 func ResourceUpdateHash(ctx context.Context, un *unstructured.Unstructured, n Normalizer) (string, error) {
 	if un == nil {
 		return "", ErrNilObjects
 	}
-	cp := un.DeepCopy()
+	cp, err := roundTrip(un)
+	if err != nil {
+		return "", err
+	}
 	if n != nil {
-		if err := n.Normalize(ctx, cp); err != nil {
+		err := n.Normalize(ctx, cp)
+		// A normalizer may skip rules because ctx is done while reporting success.
+		if ctxErr := ctx.Err(); ctxErr != nil {
+			return "", fmt.Errorf("normalize %s: %w", describe(un), ctxErr)
+		}
+		if err != nil {
 			return "", fmt.Errorf("normalize %s: %w", describe(un), err)
 		}
 	}

@@ -2,11 +2,14 @@ package diff
 
 import (
 	"context"
+	"slices"
+	"strings"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
+	"pgregory.net/rapid"
 )
 
 func TestAnnotationOptions(t *testing.T) {
@@ -149,9 +152,68 @@ func TestResourceUpdateRulesAndHash(t *testing.T) {
 	require.NoError(t, unstructured.SetNestedField(onlyRV.Object, int64(4), "metadata", "generation"))
 	assert.Equal(t, hash(without, base), hash(without, onlyRV), "metadata noise is always ignored")
 
+	// The /status rule implied by ignoreResourceStatusField is part of the update rules when
+	// ignoreDifferences are reused, whether or not the caller passed it in diffRules.
+	statusOnly := base.DeepCopy()
+	require.NoError(t, unstructured.SetNestedField(statusOnly.Object, int64(7), "status", "readyReplicas"))
+	for _, rules := range [][]IgnoreRule{diffRules, SystemIgnoreRules(diffRules, DefaultCompareOptions())} {
+		r := ResourceUpdateIgnoreRules(nil, rules, DefaultCompareOptions())
+		assert.Equal(t, hash(r, base), hash(r, statusOnly), "status-only change is not relevant by default")
+	}
+	crdOnly := DefaultCompareOptions()
+	crdOnly.IgnoreResourceStatusField = IgnoreStatusCRD
+	assert.NotEqual(t, hash(ResourceUpdateIgnoreRules(nil, diffRules, crdOnly), base),
+		hash(ResourceUpdateIgnoreRules(nil, diffRules, crdOnly), statusOnly), "status of a Deployment is relevant with mode crd")
+	noReuse := DefaultCompareOptions()
+	noReuse.IgnoreDifferencesOnResourceUpdates = false
+	assert.NotEqual(t, hash(ResourceUpdateIgnoreRules(nil, diffRules, noReuse), base),
+		hash(ResourceUpdateIgnoreRules(nil, diffRules, noReuse), statusOnly), "status is relevant when ignoreDifferences are not reused")
+
 	_, err := ResourceUpdateHash(context.Background(), nil, nil)
 	require.ErrorIs(t, err, ErrNilObjects)
 	h1, err := ResourceUpdateHash(context.Background(), base, nil)
 	require.NoError(t, err)
 	assert.NotEmpty(t, h1)
+}
+
+// TestParseCompareAnnotationProperties: parsing is insensitive to surrounding whitespace,
+// empty items, duplicates and item order, and only exact (case-sensitive) items count.
+func TestParseCompareAnnotationProperties(t *testing.T) {
+	t.Parallel()
+	vocabulary := []string{"IgnoreExtraneous", "ServerSideDiff=true", "ServerSideDiff=false", "IncludeMutationWebhook=true",
+		"serverSideDiff=true", "IgnoreExtraneous=true", "Prune=false", ""}
+	rapid.Check(t, func(rt *rapid.T) {
+		items := rapid.SliceOfN(rapid.SampledFrom(vocabulary), 0, 8).Draw(rt, "items")
+		canonical := strings.Join(items, ",")
+		noisy := make([]string, 0, 2*len(items))
+		for _, it := range rapid.Permutation(items).Draw(rt, "order") {
+			pad := strings.Repeat(" ", rapid.IntRange(0, 2).Draw(rt, "pad"))
+			noisy = append(noisy, pad+it+pad)
+			if rapid.Bool().Draw(rt, "dup") {
+				noisy = append(noisy, it)
+			}
+		}
+		const key = DefaultCompareOptionsAnnotation
+		want := ParseCompareAnnotation(map[string]string{key: canonical}, key)
+		got := ParseCompareAnnotation(map[string]string{key: strings.Join(noisy, ",")}, key)
+		assert.Equal(rt, want, got)
+
+		assert.Equal(rt, slices.Contains(items, "IgnoreExtraneous"), got.IgnoreExtraneous)
+		assert.Equal(rt, slices.Contains(items, "IncludeMutationWebhook=true"), got.IncludeMutationWebhook)
+		switch {
+		case slices.Contains(items, "ServerSideDiff=false"):
+			require.NotNil(rt, got.ServerSideDiff)
+			assert.False(rt, *got.ServerSideDiff, "an explicit disable wins")
+		case slices.Contains(items, "ServerSideDiff=true"):
+			require.NotNil(rt, got.ServerSideDiff)
+			assert.True(rt, *got.ServerSideDiff)
+		default:
+			assert.Nil(rt, got.ServerSideDiff)
+		}
+		for _, controllerDefault := range []bool{false, true} {
+			if got.ServerSideDiff == nil {
+				assert.Equal(rt, controllerDefault, got.ServerSideDiffEnabled(controllerDefault))
+			}
+		}
+	})
 }

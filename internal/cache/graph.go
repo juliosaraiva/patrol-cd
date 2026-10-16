@@ -172,17 +172,6 @@ func (g *graph) removeGK(gk schema.GroupKind) []change {
 	return changes
 }
 
-// fillNamespaces sets the namespace snapshot of each change. Call after seal().
-func (g *graph) fillNamespaces(changes []change) {
-	for i := range changes {
-		r := changes[i].newRes
-		if r == nil {
-			r = changes[i].oldRes
-		}
-		changes[i].ns = g.ns[r.Ref.Namespace]
-	}
-}
-
 // children returns the direct children of p sorted by key. Children of a namespaced parent
 // must live in its namespace; a cluster-scoped parent may own objects in any namespace.
 // When several keys share a UID (the same object served by two API groups), the smallest

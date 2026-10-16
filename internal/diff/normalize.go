@@ -27,17 +27,21 @@ const rbacGroup = "rbac.authorization.k8s.io"
 //     rules of aggregated roles are cleared;
 //   - Endpoints: subsets, addresses and ports are sorted and port protocols defaulted.
 //
-// Normalizer errors are logged and do not abort normalization, matching the baseline.
-func Normalize(ctx context.Context, un *unstructured.Unstructured, o Options) {
+// Normalizer errors are logged and do not abort normalization, matching the baseline. The
+// exception is a done context: if ctx is done once o.Normalizer returns (whatever it
+// returned), Normalize returns an error wrapping ctx.Err() and un may be only partially
+// normalized (for example with some ignore rules not applied). Callers must not use un then.
+func Normalize(ctx context.Context, un *unstructured.Unstructured, o Options) error {
 	o = o.withDefaults()
-	normalizeObject(ctx, un, o, false)
+	return normalizeObject(ctx, un, o, false)
 }
 
 // normalizeObject implements Normalize. With skipFull, the user-configured normalizer is not
-// applied (server-side diff applies it after the dry run instead).
-func normalizeObject(ctx context.Context, un *unstructured.Unstructured, o Options, skipFull bool) {
+// applied (server-side diff applies it after the dry run instead). The only error it returns
+// wraps ctx.Err().
+func normalizeObject(ctx context.Context, un *unstructured.Unstructured, o Options, skipFull bool) error {
 	if un == nil || un.Object == nil {
-		return
+		return nil
 	}
 	unstructured.RemoveNestedField(un.Object, "metadata", "creationTimestamp")
 
@@ -52,13 +56,20 @@ func normalizeObject(ctx context.Context, un *unstructured.Unstructured, o Optio
 	}
 
 	if skipFull || o.Normalizer == nil {
-		return
+		return nil
 	}
-	if err := o.Normalizer.Normalize(ctx, un); err != nil {
+	err := o.Normalizer.Normalize(ctx, un)
+	// Checked even when the normalizer reports success: a normalizer may skip work (e.g. an
+	// ignore rule) because ctx is done, and the object must then not be compared.
+	if ctxErr := ctx.Err(); ctxErr != nil {
+		return fmt.Errorf("normalize %s: %w", describe(un), ctxErr)
+	}
+	if err != nil {
 		o.Log.Error("failed to normalize resource",
 			"kind", gvk.Kind, "group", gvk.Group, "namespace", un.GetNamespace(), "name", un.GetName(),
 			"error", sanitizeError(un, err))
 	}
+	return nil
 }
 
 // NormalizeSecret merges stringData into data (base64-encoding string values, copying other

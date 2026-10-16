@@ -194,7 +194,10 @@ type Unsubscribe func()
 type ClusterCache interface {
 	// EnsureSynced performs a full sync if the cache was never synced, was invalidated, or
 	// its last sync failed more than SyncRetryTimeout ago. A due periodic resync is started in
-	// the background. Connectivity failures are reported as ErrClusterUnreachable.
+	// the background. Connectivity failures are reported as ErrClusterUnreachable. The sync
+	// runs under the cache's own context and is shared by concurrent callers: ctx bounds only
+	// the wait, so a caller that gives up does not cancel it, and its outcome is recorded for
+	// later calls.
 	EnsureSynced(ctx context.Context) error
 	// Invalidate stops all watches and marks the cache stale; the next EnsureSynced performs
 	// a full sync. Options may replace settings or the REST config.

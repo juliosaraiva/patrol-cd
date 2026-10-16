@@ -74,6 +74,15 @@ func resolveTyper(gvk schema.GroupVersionKind, parser *managedfields.GvkParser) 
 // managedFields: fields previously applied by manager and no longer in config are removed
 // unless another manager owns them. Without a parser lists and maps are merged atomically.
 func StructuredMergeDiff(config, live *unstructured.Unstructured, parser *managedfields.GvkParser, manager string) (*Result, error) {
+	config, live, err := jsonCopies(config, live)
+	if err != nil {
+		return nil, err
+	}
+	return structuredMergeDiff(config, live, parser, manager)
+}
+
+// structuredMergeDiff implements StructuredMergeDiff for JSON-typed inputs.
+func structuredMergeDiff(config, live *unstructured.Unstructured, parser *managedfields.GvkParser, manager string) (*Result, error) {
 	if config == nil || live == nil {
 		return createOrDeleteResult(config, live)
 	}

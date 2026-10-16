@@ -131,10 +131,21 @@ func (r *compiledRule) matches(gk schema.GroupKind, name, namespace string) bool
 }
 
 // Normalize removes the fields selected by every matching rule. Patches that fail to apply
-// are skipped (and logged unless the selected path simply does not exist).
+// are skipped (and logged unless the selected path simply does not exist), as in the
+// baseline.
+//
+// Unlike a patch failure, a done ctx is an error: when ctx is done on entry, or a patch
+// fails while ctx is done (a jq expression interrupted by cancellation or by the caller's
+// deadline), Normalize returns an error wrapping ctx.Err() and un may be partially
+// normalized. Skipping the rule instead would report ignored fields as drift. The
+// per-expression jq timeout (IgnoreNormalizerOptions.JQTimeout) is not a context error: that
+// patch is skipped.
 func (n *IgnoreNormalizer) Normalize(ctx context.Context, un *unstructured.Unstructured) error {
 	if un == nil || un.Object == nil {
 		return errors.New("diff: cannot normalize a nil object")
+	}
+	if err := ctx.Err(); err != nil {
+		return fmt.Errorf("diff: ignore rules for %s not applied: %w", describe(un), err)
 	}
 	gvk := un.GroupVersionKind()
 	name, namespace := un.GetName(), un.GetNamespace()
@@ -147,6 +158,10 @@ func (n *IgnoreNormalizer) Normalize(ctx context.Context, un *unstructured.Unstr
 		for _, p := range r.patches {
 			patched, err := p.apply(ctx, obj)
 			if err != nil {
+				if ctxErr := ctx.Err(); ctxErr != nil {
+					un.Object = obj
+					return fmt.Errorf("diff: ignore rules for %s interrupted: %w", describe(un), ctxErr)
+				}
 				if !p.expected(err) {
 					n.log.Debug("failed to apply normalization patch",
 						"group", gvk.Group, "kind", gvk.Kind, "namespace", namespace, "name", name,
@@ -325,22 +340,36 @@ func compileJQPatch(expr string, timeout time.Duration) (jqPatch, error) {
 
 func (jqPatch) expected(error) bool { return false }
 
+// apply evaluates the expression against obj. Every failure that happens while the parent ctx
+// is done is reported as an error wrapping the parent's ctx.Err() (never as a jq failure or as
+// the per-expression timeout), so callers can tell an interrupted evaluation from a patch that
+// does not apply. The per-expression timeout error does not wrap context.DeadlineExceeded.
 func (p jqPatch) apply(ctx context.Context, obj map[string]any) (_ map[string]any, err error) {
-	// Expressions are user input evaluated by a third-party interpreter: contain any panic.
 	defer func() {
+		// Expressions are user input evaluated by a third-party interpreter: contain any panic.
 		if r := recover(); r != nil {
 			err = fmt.Errorf("jq patch evaluation failed: %v", r)
 		}
+		if err != nil {
+			if ctxErr := ctx.Err(); ctxErr != nil {
+				err = fmt.Errorf("jq patch interrupted: %w", ctxErr)
+			}
+		}
 	}()
-	ctx, cancel := context.WithTimeout(ctx, p.timeout)
+	if err := ctx.Err(); err != nil {
+		return nil, err // rewritten by the deferred check
+	}
+	runCtx, cancel := context.WithTimeout(ctx, p.timeout)
 	defer cancel()
-	iter := p.code.RunWithContext(ctx, toJQValue(obj))
+	iter := p.code.RunWithContext(runCtx, toJQValue(obj))
 	first, ok := iter.Next()
 	if !ok {
 		return nil, errors.New("jq patch did not return any data")
 	}
 	if err, isErr := first.(error); isErr {
 		if errors.Is(err, context.DeadlineExceeded) {
+			// Only reached when the parent is not done (see the deferred check): this is the
+			// per-expression timeout. Deliberately not wrapped.
 			return nil, fmt.Errorf("jq patch execution timed out (%s)", p.timeout)
 		}
 		return nil, fmt.Errorf("jq patch returned error: %w", err)

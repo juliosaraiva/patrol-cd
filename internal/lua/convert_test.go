@@ -129,21 +129,31 @@ func TestConvertEdgeCases(t *testing.T) {
 	require.ErrorIs(t, err, ErrInvalidKeys)
 }
 
-func TestCheckFormat(t *testing.T) {
+func TestScanFormat(t *testing.T) {
 	t.Parallel()
-	ok := []string{"", "plain", "%d", "%5d", "%-99s", "%.2f", "%99.99f", "%%", "100%%", "%+ #0d", "%s and %q"}
-	bad := []string{"%100d", "%.100f", "%999999999d", "%-+ #0-d"}
-	for _, f := range ok {
-		assert.NoError(t, checkFormat(f), f)
+	ok := map[string]string{
+		"": "", "plain": "", "%d": "d", "%5d": "d", "%-99s": "s", "%.2f": "f", "%99.99f": "f",
+		"%%": "", "100%%": "", "%+ #0d": "d", "%s and %q": "sq", "[%s]": "s", "50%": "\x00",
+	}
+	bad := []string{
+		"%100d", "%.100f", "%999999999d", "%-+ #0-d",
+		// Go argument indexes and '*' widths would bypass the width limit.
+		"%[1]s", "%[1]999999d", "%.[1]999999d", "%5.2[1]d", "%*d", "%.*f", "%-*d",
+	}
+	for f, verbs := range ok {
+		got, err := scanFormat(f)
+		require.NoError(t, err, f)
+		assert.Equal(t, verbs, string(got), f)
 	}
 	for _, f := range bad {
-		assert.Error(t, checkFormat(f), f)
+		_, err := scanFormat(f)
+		assert.Error(t, err, f)
 	}
 }
 
-func TestCheckFormatNeverPanics(t *testing.T) {
+func TestScanFormatNeverPanics(t *testing.T) {
 	t.Parallel()
 	rapid.Check(t, func(t *rapid.T) {
-		_ = checkFormat(rapid.String().Draw(t, "format"))
+		_, _ = scanFormat(rapid.String().Draw(t, "format"))
 	})
 }

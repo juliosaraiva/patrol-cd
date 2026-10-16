@@ -45,6 +45,56 @@ func (d *discoveryResult) served(gk schema.GroupKind) bool {
 	return ok
 }
 
+// failedGroups returns the groups with at least one group version whose discovery failed.
+func (d *discoveryResult) failedGroups() map[string]bool {
+	out := make(map[string]bool, len(d.failures))
+	for _, f := range d.failures {
+		out[f.GroupKind.Group] = true
+	}
+	return out
+}
+
+// inheritFailed copies from prev what d lacks about the group versions whose discovery
+// failed, so that a transient failure does not make served kinds look unknown (IsNamespaced,
+// GetAPIResources, GET resolution). It must be called before d is published; prev may be
+// nil. The watch list is not inherited: callers keep existing registrations of failed
+// groups instead.
+func (d *discoveryResult) inheritFailed(prev *discoveryResult) {
+	if prev == nil || len(d.failures) == 0 {
+		return
+	}
+	failedGV := make(map[schema.GroupVersion]bool, len(d.failures))
+	failedGroup := make(map[string]bool, len(d.failures))
+	for _, f := range d.failures {
+		failedGV[schema.GroupVersion{Group: f.GroupKind.Group, Version: f.Version}] = true
+		failedGroup[f.GroupKind.Group] = true
+	}
+	for gk, ns := range prev.namespaced {
+		if _, ok := d.namespaced[gk]; !ok && failedGroup[gk.Group] {
+			d.namespaced[gk] = ns
+		}
+	}
+	for gvk, info := range prev.byGVK {
+		if _, ok := d.byGVK[gvk]; !ok && failedGV[gvk.GroupVersion()] {
+			d.byGVK[gvk] = info
+		}
+	}
+	have := make(map[schema.GroupVersionResource]bool, len(d.all))
+	for _, a := range d.all {
+		have[a.GroupVersionResource] = true
+	}
+	added := false
+	for _, a := range prev.all {
+		if !have[a.GroupVersionResource] && failedGV[a.GroupVersionResource.GroupVersion()] {
+			d.all = append(d.all, a)
+			added = true
+		}
+	}
+	if added {
+		slices.SortFunc(d.all, compareAPIInfo)
+	}
+}
+
 // alwaysExcluded reports kinds that are never cached regardless of configuration, matching
 // upstream's core exclusions: high-churn objects that no application manages.
 func alwaysExcluded(gk schema.GroupKind) bool {

@@ -71,11 +71,3 @@ func eventually(t *testing.T, timeout time.Duration, cond func() bool, msg strin
 		time.Sleep(20 * time.Millisecond)
 	}
 }
-
-func keysOf(m map[ResourceKey]*Resource) []ResourceKey {
-	out := make([]ResourceKey, 0, len(m))
-	for k := range m {
-		out = append(out, k)
-	}
-	return out
-}

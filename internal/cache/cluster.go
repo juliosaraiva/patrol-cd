@@ -145,7 +145,29 @@ type syncStatus struct {
 	epoch     uint64
 	bgResync  bool
 	closed    bool
+	// flight is the foreground sync in progress, shared by every EnsureSynced caller.
+	flight *syncFlight
 }
+
+// syncFlight is one foreground full sync. It runs under the cache's root context, so a
+// caller that stops waiting does not cancel it.
+type syncFlight struct {
+	done chan struct{}
+	// err and epoch (the Invalidate epoch the result is valid for) are written before done
+	// is closed.
+	err   error
+	epoch uint64
+}
+
+// syncDecision is what the recorded sync status implies for EnsureSynced.
+type syncDecision int
+
+const (
+	syncNeeded    syncDecision = iota // never synced, invalidated, or failed beyond the retry window
+	syncCurrent                       // synced for the current epoch
+	syncFailed                        // failed within the retry window: report the recorded error
+	syncResyncDue                     // synced, and the periodic resync is due
+)
 
 // Cluster is the live-state cache of one cluster. Create it with New; it implements
 // ClusterCache.
@@ -262,52 +284,135 @@ func (c *Cluster) Close() {
 }
 
 // EnsureSynced implements ClusterCache.
+//
+// The sync itself runs on a goroutine owned by the cache, under the cache's own context, and
+// is shared by concurrent callers. ctx only bounds how long this caller waits: when it ends,
+// EnsureSynced returns its error while the sync continues and records its outcome for later
+// calls. A context that is already done when no sync result is available starts nothing.
 func (c *Cluster) EnsureSynced(ctx context.Context) error {
-	if err, done := c.checkSynced(); done {
-		return err
+	for {
+		f, epoch, err := c.syncOrJoin(ctx)
+		if f == nil {
+			return err
+		}
+		select {
+		case <-f.done:
+			if f.err != nil || f.epoch >= epoch {
+				return f.err
+			}
+			// The joined sync completed for an epoch older than this call (Invalidate ran
+			// between its swap and its completion): evaluate again, which starts a new sync.
+		case <-ctx.Done():
+			return fmt.Errorf("wait for cluster cache sync: %w", ctx.Err())
+		}
 	}
-	select {
-	case c.syncSem <- struct{}{}:
-	case <-ctx.Done():
-		return ctx.Err()
-	case <-c.rootCtx.Done():
-		return ErrClosed
-	}
-	defer func() { <-c.syncSem }()
-	if err, done := c.checkSynced(); done {
-		return err
-	}
-	return c.syncLocked(ctx)
 }
 
-// checkSynced reports whether the current state answers EnsureSynced without a sync, and
-// starts a background resync when the periodic resync is due.
-func (c *Cluster) checkSynced() (error, bool) {
+// syncSettings returns the settings that drive syncDecision.
+func (c *Cluster) syncSettings() (retry, period time.Duration) {
 	c.mu.RLock()
-	retry, period := c.settings.SyncRetryTimeout, c.settings.ClusterResyncPeriod
-	c.mu.RUnlock()
+	defer c.mu.RUnlock()
+	return c.settings.SyncRetryTimeout, c.settings.ClusterResyncPeriod
+}
+
+// decideLocked evaluates the recorded status for epoch; call with statusMu held.
+func (c *Cluster) decideLocked(epoch uint64, retry, period time.Duration) syncDecision {
+	st := &c.status
+	switch {
+	case !st.attempted, st.epoch != epoch: // never synced, or invalidated since
+		return syncNeeded
+	case st.syncErr != nil:
+		if retry > 0 && time.Since(st.syncTime) < retry {
+			return syncFailed
+		}
+		return syncNeeded
+	case period > 0 && time.Since(st.syncTime) >= period:
+		return syncResyncDue
+	}
+	return syncCurrent
+}
+
+// syncOrJoin answers EnsureSynced from the recorded status when it can (starting a due
+// periodic resync in the background). Otherwise it returns the running foreground sync,
+// starting one if none runs, and the epoch the caller observed.
+func (c *Cluster) syncOrJoin(ctx context.Context) (*syncFlight, uint64, error) {
+	retry, period := c.syncSettings()
 	epoch := c.epoch.Load()
 
 	c.statusMu.Lock()
 	defer c.statusMu.Unlock()
 	st := &c.status
-	switch {
-	case st.closed:
-		return ErrClosed, true
-	case !st.attempted, st.epoch != epoch: // never synced, or invalidated since
-		return nil, false
-	case st.syncErr != nil:
-		if retry > 0 && time.Since(st.syncTime) < retry {
-			return st.syncErr, true
+	if st.closed {
+		return nil, epoch, ErrClosed
+	}
+	switch c.decideLocked(epoch, retry, period) {
+	case syncCurrent:
+		return nil, epoch, nil
+	case syncFailed:
+		return nil, epoch, st.syncErr
+	case syncResyncDue:
+		if !st.bgResync {
+			st.bgResync = true
+			c.wg.Add(1) // ordered before Close's Wait: Close sets st.closed under statusMu first
+			go c.backgroundResync()
 		}
-		return nil, false
+		return nil, epoch, nil
 	}
-	if period > 0 && time.Since(st.syncTime) >= period && !st.bgResync {
-		st.bgResync = true
-		c.wg.Add(1)
-		go c.backgroundResync()
+	if st.flight != nil {
+		return st.flight, epoch, nil
 	}
-	return nil, true
+	if err := ctx.Err(); err != nil {
+		return nil, epoch, fmt.Errorf("wait for cluster cache sync: %w", err)
+	}
+	f := &syncFlight{done: make(chan struct{})}
+	st.flight = f
+	c.wg.Add(1)
+	go c.runFlight(f)
+	return f, epoch, nil
+}
+
+// runFlight performs the foreground sync f. Its result is published under statusMu together
+// with the recorded status, so a caller either joins f before it completes or sees the
+// recorded status.
+func (c *Cluster) runFlight(f *syncFlight) {
+	defer c.wg.Done()
+	defer close(f.done)
+	select {
+	case c.syncSem <- struct{}{}:
+	case <-c.rootCtx.Done():
+		c.finishFlight(f, ErrClosed)
+		return
+	}
+	defer func() { <-c.syncSem }()
+
+	// A background resync may have completed while this flight waited for syncSem.
+	retry, period := c.syncSettings()
+	epoch := c.epoch.Load()
+	c.statusMu.Lock()
+	switch c.decideLocked(epoch, retry, period) {
+	case syncCurrent, syncResyncDue:
+		f.err, f.epoch = nil, epoch
+		c.status.flight = nil
+		c.statusMu.Unlock()
+		return
+	case syncFailed:
+		f.err, f.epoch = c.status.syncErr, epoch
+		c.status.flight = nil
+		c.statusMu.Unlock()
+		return
+	}
+	c.statusMu.Unlock()
+	c.syncLocked(f)
+}
+
+// finishFlight publishes err as the result of f without recording a sync.
+func (c *Cluster) finishFlight(f *syncFlight, err error) {
+	c.statusMu.Lock()
+	f.err = err
+	if c.status.flight == f {
+		c.status.flight = nil
+	}
+	c.statusMu.Unlock()
 }
 
 func (c *Cluster) backgroundResync() {
@@ -324,28 +429,28 @@ func (c *Cluster) backgroundResync() {
 	}
 	defer func() { <-c.syncSem }()
 	c.log.Info("starting periodic cluster resync")
-	_ = c.syncLocked(c.rootCtx)
+	c.syncLocked(nil)
 }
 
-// syncLocked runs a full sync and records its outcome. The caller holds syncSem.
-func (c *Cluster) syncLocked(ctx context.Context) error {
+// syncLocked runs a full sync under the cache's root context and records its outcome; when
+// f is not nil, the outcome is also published as f's result. The caller holds syncSem.
+func (c *Cluster) syncLocked(f *syncFlight) {
 	start := time.Now()
 	var (
 		err   error
 		epoch uint64
 	)
 	for range maxSyncAttempts {
-		epoch, err = c.fullSync(ctx)
+		epoch, err = c.fullSync(c.rootCtx)
 		if !errors.Is(err, errSuperseded) {
 			break
 		}
 	}
 	if c.rootCtx.Err() != nil {
-		return ErrClosed
-	}
-	if err != nil && ctx.Err() != nil {
-		// The caller gave up; do not record its cancellation as the cluster's state.
-		return fmt.Errorf("sync cluster cache: %w", ctx.Err())
+		if f != nil {
+			c.finishFlight(f, ErrClosed)
+		}
+		return
 	}
 	c.mu.RLock()
 	server, metrics := c.cfg.Host, c.settings.Metrics
@@ -356,6 +461,12 @@ func (c *Cluster) syncLocked(ctx context.Context) error {
 	c.status.syncTime = time.Now()
 	c.status.syncErr = err
 	c.status.epoch = epoch
+	if f != nil {
+		f.err, f.epoch = err, epoch
+		if c.status.flight == f {
+			c.status.flight = nil
+		}
+	}
 	c.statusMu.Unlock()
 	d := time.Since(start)
 	if metrics.SyncCompleted != nil {
@@ -363,10 +474,9 @@ func (c *Cluster) syncLocked(ctx context.Context) error {
 	}
 	if err != nil {
 		c.log.Warn("cluster cache sync failed", "duration", d, "error", err)
-		return err
+		return
 	}
 	c.log.Info("cluster cache synced", "duration", d, "resources", c.GetClusterInfo().ResourcesCount)
-	return nil
 }
 
 type scopeResult struct {
@@ -777,9 +887,11 @@ func (c *Cluster) flush(batch []queueItem) {
 	}
 }
 
+// tokenValid reports whether it comes from the current, live registration of its API. Items
+// of a registration whose API was reported gone are dropped: its objects were removed.
 func (c *Cluster) tokenValid(it queueItem) bool {
 	w := c.apis[it.gk]
-	return w != nil && w.token == it.token
+	return w != nil && w.token == it.token && !w.dead
 }
 
 // safeCall runs a caller-provided handler, converting a panic into an error log so that the
@@ -846,11 +958,17 @@ func (s *clusterSink) relisted(t watchTarget, reason string) {
 
 func (s *clusterSink) gone(t watchTarget) {
 	c := s.c
+	gk := t.api.GroupKind
 	c.mu.Lock()
-	if w := c.apis[t.api.GroupKind]; w != nil && w.token == s.token {
+	if w := c.apis[gk]; w != nil && w.token == s.token && !w.dead {
+		// Like upstream, drop the API's objects as soon as the server reports it gone. Later
+		// items of this registration are dropped (tokenValid), and the refresh below lists
+		// the API again under a new registration if it is still served.
 		w.dead = true
+		c.pending = append(c.pending, queueItem{kind: qRemoveAPI, gk: gk})
 	}
 	c.mu.Unlock()
+	c.wakeProcessor()
 	c.log.Info("API no longer served", "group", t.api.GroupKind.Group, "kind", t.api.GroupKind.Kind)
 	c.requestRefresh(map[schema.GroupKind]bool{t.api.GroupKind: false})
 }
@@ -959,7 +1077,12 @@ func (c *Cluster) runRefresh() {
 }
 
 // refreshAPIs re-runs discovery and starts/stops watches to match it without a full resync.
-// It reports whether discovery agreed with expect.
+// It reports whether discovery agreed with expect (and with the API server).
+//
+// Group versions whose discovery failed are unknown, not absent: registrations of their
+// groups are kept as they are, and their previous discovery data is carried over. A stopped
+// registration always has its objects removed; when its API is still served it is listed
+// again from scratch, so nothing it cached survives without a live watch behind it.
 func (c *Cluster) refreshAPIs(ctx context.Context, expect map[schema.GroupKind]bool) (bool, error) {
 	select {
 	case c.syncSem <- struct{}{}:
@@ -982,9 +1105,11 @@ func (c *Cluster) refreshAPIs(ctx context.Context, expect map[schema.GroupKind]b
 	if err != nil {
 		return false, err
 	}
+	failedGroups := disc.failedGroups()
 	satisfied := true
 	for gk, present := range expect {
-		if disc.served(gk) != present {
+		// An expectation about a group whose discovery failed cannot be confirmed: retry.
+		if failedGroups[gk.Group] || disc.served(gk) != present {
 			satisfied = false
 		}
 	}
@@ -999,9 +1124,11 @@ func (c *Cluster) refreshAPIs(ctx context.Context, expect map[schema.GroupKind]b
 		c.mu.Unlock()
 		return true, nil
 	}
+	disc.inheritFailed(c.disc)
 	for gk, w := range c.apis {
 		nw, ok := want[gk]
-		if ok && nw.GroupVersionResource == w.info.GroupVersionResource && nw.Meta.Namespaced == w.info.Meta.Namespaced && !w.dead {
+		unchanged := ok && nw.GroupVersionResource == w.info.GroupVersionResource && nw.Meta.Namespaced == w.info.Meta.Namespaced
+		if !w.dead && (unchanged || failedGroups[gk.Group]) {
 			continue
 		}
 		w.cancel()
@@ -1011,9 +1138,9 @@ func (c *Cluster) refreshAPIs(ctx context.Context, expect map[schema.GroupKind]b
 				delete(c.denied, k)
 			}
 		}
-		if !ok || nw.GroupVersionResource != w.info.GroupVersionResource {
-			c.pending = append(c.pending, queueItem{kind: qRemoveAPI, gk: gk})
-		}
+		// Drop what the stopped registration cached. If the API is still served it is
+		// listed again below; if that list fails, nothing stale remains without a watch.
+		c.pending = append(c.pending, queueItem{kind: qRemoveAPI, gk: gk})
 		c.log.Info("stopping watch", "group", gk.Group, "kind", gk.Kind)
 	}
 	for gk, api := range want {
@@ -1040,7 +1167,8 @@ func (c *Cluster) refreshAPIs(ctx context.Context, expect map[schema.GroupKind]b
 				denied, gone, cerr := c.classifyListError(ctx, cl, &settings, api, ns, err)
 				switch {
 				case gone:
-					failed = true
+					// Discovery serves the API but the server does not: retry until they agree.
+					satisfied, failed = false, true
 				case denied != nil:
 					c.mu.Lock()
 					c.denied[deniedKey{api.GroupKind, ns}] = *denied

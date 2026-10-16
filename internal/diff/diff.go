@@ -31,6 +31,10 @@ var nullJSON = []byte("null")
 //  3. Otherwise a three-way diff against the live last-applied-configuration annotation; if
 //     the annotation is missing, unparsable, or the three-way diff fails, a two-way diff that
 //     uses config as the original state.
+//
+// If ctx is done before Diff returns, the error wraps ctx.Err() and no Result is returned:
+// normalization (ignore rules in particular) may have been cut short, so a Result could report
+// ignored fields as drift.
 func Diff(ctx context.Context, config, live *unstructured.Unstructured, o Options) (*Result, error) {
 	if config == nil && live == nil {
 		return nil, ErrNilObjects
@@ -38,10 +42,38 @@ func Diff(ctx context.Context, config, live *unstructured.Unstructured, o Option
 	if err := ctx.Err(); err != nil {
 		return nil, fmt.Errorf("diff: %w", err)
 	}
-	o = o.withDefaults()
+	res, err := diffObjects(ctx, config, live, o.withDefaults())
+	if err != nil {
+		return nil, err
+	}
+	if err := ctx.Err(); err != nil {
+		return nil, fmt.Errorf("diff of %s: %w", describe(firstNonNil(config, live)), err)
+	}
+	return res, nil
+}
 
-	var err error
-	// managedFieldsManagers: drop fields owned by trusted managers before anything else.
+func firstNonNil(a, b *unstructured.Unstructured) *unstructured.Unstructured {
+	if a != nil {
+		return a
+	}
+	return b
+}
+
+// diffObjects implements Diff for options with defaults applied.
+func diffObjects(ctx context.Context, config, live *unstructured.Unstructured, o Options) (*Result, error) {
+	// Work on JSON-typed copies: the inputs are never modified, and Go values that are not
+	// JSON types (int, int32, typed slices...) cannot break deep copies later on.
+	config, live, err := jsonCopies(config, live)
+	if err != nil {
+		return nil, err
+	}
+	// Tracking metadata first, then managedFieldsManagers (the baseline's pre-diff order).
+	if config != nil && live != nil && o.Tracking.enabled() {
+		if err := NormalizeTracking(config, live, o.Tracking); err != nil {
+			o.Log.Debug("tracking metadata not normalized", "object", describe(live), "error", err)
+		}
+	}
+	// managedFieldsManagers: drop fields owned by trusted managers.
 	if config != nil && live != nil {
 		if config, live, err = normalizeTrustedManagers(config, live, o); err != nil {
 			return nil, err
@@ -60,8 +92,12 @@ func Diff(ctx context.Context, config, live *unstructured.Unstructured, o Option
 
 	// Server-side diff applies the user normalizer only after the dry run, so the config sent
 	// to the API server is complete.
-	normalizeObject(ctx, config, o, o.ServerSide)
-	normalizeObject(ctx, live, o, o.ServerSide)
+	if err := normalizeObject(ctx, config, o, o.ServerSide); err != nil {
+		return nil, err
+	}
+	if err := normalizeObject(ctx, live, o, o.ServerSide); err != nil {
+		return nil, err
+	}
 
 	if o.ServerSide {
 		if config == nil || live == nil {
@@ -75,7 +111,7 @@ func Diff(ctx context.Context, config, live *unstructured.Unstructured, o Option
 	}
 
 	if o.StructuredMerge || (config != nil && HasAnnotationOption(config.GetAnnotations(), o.SyncOptionsAnnotation, "ServerSideApply=true")) {
-		res, err := StructuredMergeDiff(config, live, o.GVKParser, o.Manager)
+		res, err := structuredMergeDiff(config, live, o.GVKParser, o.Manager)
 		if err != nil {
 			return nil, fmt.Errorf("structured merge diff of %s: %w", describe(config), err)
 		}
@@ -87,14 +123,32 @@ func Diff(ctx context.Context, config, live *unstructured.Unstructured, o Option
 	case err != nil:
 		o.Log.Debug("ignoring unparsable last-applied-configuration", "object", describe(live))
 	case orig != nil && config != nil:
-		normalizeObject(ctx, orig, o, false)
-		res, err := ThreeWayDiff(orig, config, live)
+		if err := normalizeObject(ctx, orig, o, false); err != nil {
+			return nil, err
+		}
+		res, err := threeWayDiff(orig, config, live)
 		if err == nil {
 			return res, nil
 		}
 		o.Log.Debug("three-way diff failed; falling back to two-way diff", "object", describe(live), "error", sanitizeError(live, err))
 	}
-	return TwoWayDiff(config, live)
+	return twoWayDiff(config, live)
+}
+
+// jsonCopies returns JSON-typed deep copies of a and b; nil stays nil.
+func jsonCopies(a, b *unstructured.Unstructured) (*unstructured.Unstructured, *unstructured.Unstructured, error) {
+	var err error
+	if a != nil {
+		if a, err = roundTrip(a); err != nil {
+			return nil, nil, err
+		}
+	}
+	if b != nil {
+		if b, err = roundTrip(b); err != nil {
+			return nil, nil, err
+		}
+	}
+	return a, b, nil
 }
 
 // DiffArray diffs configs[i] against lives[i] for every i. The slices must have equal length.
@@ -116,10 +170,19 @@ func DiffArray(ctx context.Context, configs, lives []*unstructured.Unstructured,
 	return list, nil
 }
 
-// TwoWayDiff is a three-way diff that uses config as the last-applied state.
+// TwoWayDiff is a three-way diff that uses config as the last-applied state. Unlike Diff it
+// performs no normalization. The inputs are not modified.
 func TwoWayDiff(config, live *unstructured.Unstructured) (*Result, error) {
+	config, live, err := jsonCopies(config, live)
+	if err != nil {
+		return nil, err
+	}
+	return twoWayDiff(config, live)
+}
+
+func twoWayDiff(config, live *unstructured.Unstructured) (*Result, error) {
 	if config != nil && live != nil {
-		return ThreeWayDiff(config, config.DeepCopy(), live)
+		return threeWayDiff(config, config, live)
 	}
 	return createOrDeleteResult(config, live)
 }
@@ -128,11 +191,24 @@ func TwoWayDiff(config, live *unstructured.Unstructured) (*Result, error) {
 // (orig → config, relative to live) to live. Fields that exist in live but in neither orig
 // nor config are preserved, so server-populated and defaulted fields are not drift. Built-in
 // kinds use strategic-merge semantics (merge keys, retainKeys) and API defaults; other kinds
-// use JSON merge patch semantics.
+// use JSON merge patch semantics. Unlike Diff it performs no normalization. The inputs are
+// not modified.
 func ThreeWayDiff(orig, config, live *unstructured.Unstructured) (*Result, error) {
 	if orig == nil || config == nil || live == nil {
 		return nil, errors.New("diff: three-way diff needs orig, config and live")
 	}
+	orig, config, err := jsonCopies(orig, config)
+	if err != nil {
+		return nil, err
+	}
+	if live, err = roundTrip(live); err != nil {
+		return nil, err
+	}
+	return threeWayDiff(orig, config, live)
+}
+
+// threeWayDiff implements ThreeWayDiff for JSON-typed inputs, which it does not modify.
+func threeWayDiff(orig, config, live *unstructured.Unstructured) (*Result, error) {
 	orig = withoutNamespaceAndEmptyAnnotations(orig)
 	config = withoutNamespaceAndEmptyAnnotations(config)
 
@@ -348,7 +424,8 @@ func defaultsPatch(obj runtime.Object) ([]byte, error) {
 }
 
 // LastAppliedConfig parses the last-applied-configuration annotation of live. It returns
-// (nil, nil) when live is nil or has no annotation.
+// (nil, nil) when live is nil or has no annotation. Like the baseline (which decodes it as an
+// unstructured object), a document that is not a JSON object with a string kind is an error.
 func LastAppliedConfig(live *unstructured.Unstructured) (*unstructured.Unstructured, error) {
 	if live == nil {
 		return nil, nil
@@ -361,6 +438,9 @@ func LastAppliedConfig(live *unstructured.Unstructured) (*unstructured.Unstructu
 	if err != nil {
 		// The error text can quote the annotation (and therefore Secret values): do not wrap it.
 		return nil, fmt.Errorf("parse %s of %s: invalid JSON", AnnotationLastAppliedConfig, describe(live))
+	}
+	if kind, _ := m["kind"].(string); kind == "" {
+		return nil, fmt.Errorf("parse %s of %s: kind is missing", AnnotationLastAppliedConfig, describe(live))
 	}
 	return &unstructured.Unstructured{Object: m}, nil
 }

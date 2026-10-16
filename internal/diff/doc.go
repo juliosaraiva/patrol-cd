@@ -18,7 +18,9 @@
 //
 // Normalization (ignore rules with JSON pointers, jq path expressions and managedFields
 // managers; known Kubernetes types embedded in CRDs; status and aggregated ClusterRole
-// handling) and Secret masking are provided as reusable building blocks.
+// handling; tracking metadata), Secret masking and the API-server defaults the legacy
+// strategy needs (verified against kube-apiserver 1.36 by the envtest-backed tests) are
+// provided as reusable building blocks.
 //
 // The package deliberately does not import the Patrol CRD types. Callers translate
 // Application/settings structures into the neutral types declared here (IgnoreRule,

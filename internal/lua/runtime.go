@@ -7,9 +7,11 @@
 // customizations/ (Apache-2.0 data copied from upstream resource_customizations/).
 //
 // Every evaluation gets a fresh Lua state with a restricted library set, an execution
-// deadline, a bounded call stack and a bounded value stack. Compiled scripts are cached by
-// content hash. A Runtime is immutable and safe for concurrent use; build a new one when
-// settings change.
+// deadline, a bounded call stack and a bounded value stack, bounded string building and a
+// bounded result. The deadline is enforced twice: the VM and the pattern matcher check
+// the context while they run, and a watchdog abandons an evaluation stuck in a Go call
+// that cannot be interrupted (see exec). Compiled scripts are cached by content hash. A
+// Runtime is immutable and safe for concurrent use; build a new one when settings change.
 package lua
 
 import (
@@ -22,6 +24,7 @@ import (
 	"slices"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"github.com/gobwas/glob"
@@ -47,6 +50,36 @@ var (
 	ErrNoDiscovery = errors.New("no action discovery script")
 	// ErrInvalidOutput means a script returned a value of the wrong shape.
 	ErrInvalidOutput = errors.New("invalid lua script output")
+	// ErrResultTooLarge means a script returned a table with more than maxResultNodes
+	// values or maxResultBytes bytes of strings.
+	ErrResultTooLarge = errors.New("lua script result too large")
+	// ErrOverloaded means evaluations are refused because too many abandoned ones (see
+	// exec) are still running in the process.
+	ErrOverloaded = errors.New("too many lua evaluations still running past their deadline")
+)
+
+// Watchdog settings.
+const (
+	// minStallGrace and maxStallGrace bound how long exec waits after the deadline for
+	// the evaluation to stop on its own before abandoning it (half the timeout in
+	// between). The VM and the matcher stop within microseconds; the grace only absorbs
+	// scheduling delays (CPU throttling, GC) so that slow-but-interruptible evaluations
+	// are not counted as stalled.
+	minStallGrace = 100 * time.Millisecond
+	maxStallGrace = time.Second
+	// maxStalled is the number of abandoned, still running evaluations at which new
+	// evaluations are refused with ErrOverloaded.
+	maxStalled = 16
+)
+
+func stallGrace(timeout time.Duration) time.Duration {
+	return min(max(timeout/2, minStallGrace), maxStallGrace)
+}
+
+// Process-wide watchdog counters (see RegisterMetrics).
+var (
+	stalledEvaluations   atomic.Int64 // abandoned and still running
+	abandonedEvaluations atomic.Int64 // abandoned since process start
 )
 
 // ScriptError is a failure reported by the Lua runtime (syntax error, runtime error,
@@ -86,6 +119,8 @@ type Runtime struct {
 	builtins  *builtinFS
 	timeout   time.Duration
 	logger    *slog.Logger
+	// stateHook runs on every new Lua state before the script (tests).
+	stateHook func(*glua.LState)
 }
 
 type wildcardOverride struct {
@@ -113,6 +148,11 @@ func WithLogger(l *slog.Logger) Option {
 			r.logger = l
 		}
 	}
+}
+
+// withStateHook registers a function that prepares every new Lua state (tests).
+func withStateHook(fn func(*glua.LState)) Option {
+	return func(r *Runtime) { r.stateHook = fn }
 }
 
 // withBuiltinFS replaces the embedded customizations (tests).
@@ -180,7 +220,7 @@ func compile(script string) (*glua.FunctionProto, error) {
 	if err != nil {
 		return nil, &ScriptError{Message: err.Error(), cause: err}
 	}
-	proto, err := glua.Compile(chunk, chunkName)
+	proto, err := glua.Compile(rewriteChunk(chunk), chunkName)
 	if err != nil {
 		return nil, &ScriptError{Message: err.Error(), cause: err}
 	}
@@ -203,28 +243,60 @@ type result struct {
 	json []byte
 }
 
+// execOutcome is what the evaluation goroutine reports.
+type execOutcome struct {
+	res result
+	err error
+}
+
 // exec runs script with obj (and params) bound as globals and returns its last return
-// value. Library profile, deadline and stack limits are applied per call. A nil Runtime
-// uses the defaults.
+// value. Library profile, deadline, string limits and stack limits are applied per call.
+// A nil Runtime uses the defaults.
+//
+// The script runs on its own goroutine. The VM and the pattern matcher stop at the
+// deadline by themselves; if the evaluation is still running stallGrace(timeout) after the
+// deadline (a Go library call that cannot be interrupted, such as table.sort on a huge
+// table or, with useOpenLibs, a blocking os.execute), exec returns the timeout error and
+// abandons the goroutine, which exits when that call returns. Abandoned evaluations are
+// counted; while maxStalled of them are still running, exec fails fast with
+// ErrOverloaded.
 func (r *Runtime) exec(ctx context.Context, obj *unstructured.Unstructured, script string, profile libProfile, params []ActionParameter) (result, error) {
+	if stalledEvaluations.Load() >= maxStalled {
+		return result{}, ErrOverloaded
+	}
 	proto, err := compile(script)
 	if err != nil {
 		return result{}, err
 	}
-	L, err := newState(profile)
+	st, err := newState(profile)
 	if err != nil {
 		return result{}, err
 	}
-	defer L.Close()
+	L := st.L
+	handedOff := false
+	defer func() {
+		if !handedOff {
+			L.Close()
+		}
+	}()
 
 	timeout := DefaultTimeout
-	if r != nil && r.timeout > 0 {
-		timeout = r.timeout
+	logger := slog.Default()
+	if r != nil {
+		if r.timeout > 0 {
+			timeout = r.timeout
+		}
+		logger = r.logger
+		if r.stateHook != nil {
+			r.stateHook(L)
+		}
 	}
 	runCtx, cancel := context.WithTimeout(ctx, timeout)
 	defer cancel()
 	L.SetContext(runCtx)
 
+	// Globals are prepared on the caller's goroutine: the evaluation goroutine must not
+	// touch obj, which the caller owns again once exec returns.
 	paramTable := L.CreateTable(0, len(params))
 	for _, p := range params {
 		paramTable.RawSetString(p.Name, glua.LString(p.Value))
@@ -238,22 +310,66 @@ func (r *Runtime) exec(ctx context.Context, obj *unstructured.Unstructured, scri
 		}
 	}
 	L.SetGlobal("obj", objValue)
+	fn := L.NewFunctionFromProto(proto)
 
-	L.Push(L.NewFunctionFromProto(proto))
-	if err := L.PCall(0, glua.MultRet, nil); err != nil {
-		return result{}, scriptError(ctx, runCtx, timeout, err)
+	done := make(chan execOutcome, 1)
+	handedOff = true
+	go func() {
+		defer L.Close()
+		done <- run(ctx, runCtx, timeout, L, fn, st.concat)
+	}()
+	select {
+	case out := <-done:
+		return out.res, out.err
+	case <-runCtx.Done():
+	}
+	grace := time.NewTimer(stallGrace(timeout))
+	defer grace.Stop()
+	select {
+	case out := <-done:
+		return out.res, out.err
+	case <-grace.C:
+	}
+	stalled := stalledEvaluations.Add(1)
+	abandonedEvaluations.Add(1)
+	go func() {
+		<-done
+		stalledEvaluations.Add(-1)
+	}()
+	logger.Warn("abandoned a lua evaluation still running past its deadline",
+		"timeout", timeout, "stalledEvaluations", stalled)
+	return result{}, withDeadline(&ScriptError{}, ctx, runCtx, timeout)
+}
+
+// run executes the compiled chunk on L and converts its last return value. It runs on
+// the evaluation goroutine and never panics.
+func run(parent, runCtx context.Context, timeout time.Duration, L *glua.LState, fn, concat *glua.LFunction) (out execOutcome) {
+	defer func() {
+		if p := recover(); p != nil {
+			out = execOutcome{err: fmt.Errorf("lua evaluation failed: %v", p)}
+		}
+	}()
+	L.Push(fn)
+	L.Push(concat) // bound to the chunk's hidden concatenation local (rewrite.go)
+	if err := L.PCall(1, glua.MultRet, nil); err != nil {
+		return execOutcome{err: scriptError(parent, runCtx, timeout, err)}
 	}
 	ret := glua.LNil
 	if L.GetTop() > 0 {
 		ret = L.Get(-1)
 	}
-	out := result{typ: ret.Type()}
-	if out.typ == glua.LTTable {
-		if out.json, err = toJSON(ret); err != nil {
-			return result{}, err
+	res := result{typ: ret.Type()}
+	if res.typ == glua.LTTable {
+		b, err := toJSONContext(runCtx, ret)
+		if err != nil {
+			if runCtx.Err() != nil && (errors.Is(err, context.DeadlineExceeded) || errors.Is(err, context.Canceled)) {
+				return execOutcome{err: withDeadline(&ScriptError{}, parent, runCtx, timeout)}
+			}
+			return execOutcome{err: err}
 		}
+		res.json = b
 	}
-	return out, nil
+	return execOutcome{res: res}
 }
 
 // scriptError converts a gopher-lua error into a ScriptError without stack trace.
@@ -269,6 +385,11 @@ func scriptError(parent, runCtx context.Context, timeout time.Duration, err erro
 			se.Message = apiErr.Object.String()
 		}
 	}
+	return withDeadline(se, parent, runCtx, timeout)
+}
+
+// withDeadline marks se as a timeout or cancellation when runCtx has ended.
+func withDeadline(se *ScriptError, parent, runCtx context.Context, timeout time.Duration) error {
 	ctxErr := runCtx.Err()
 	if ctxErr == nil {
 		return se

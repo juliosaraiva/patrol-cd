@@ -115,6 +115,10 @@ type Options struct {
 	// SyncOptionsAnnotation overrides the per-resource sync-options annotation key. Empty
 	// means DefaultSyncOptionsAnnotation.
 	SyncOptionsAnnotation string
+	// Tracking enables the tracking-metadata pre-normalization (see NormalizeTracking) for
+	// annotation-based tracking methods. The zero value disables it (label tracking, or the
+	// caller normalizes tracking metadata itself).
+	Tracking TrackingOptions
 	// Log receives debug/error diagnostics. Nil discards them. Secret values are never logged.
 	Log *slog.Logger
 }

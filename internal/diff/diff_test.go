@@ -660,3 +660,65 @@ webhooks:
     resources: [pods]
     scope: "*"
 `
+
+// TestDiffIgnoredFieldOutput models the baseline's behavior for ignored fields in the legacy
+// strategies: the ignore rule decides the comparison, and the outputs are not otherwise
+// rewritten, so a defaulted field such as sessionAffinity reappears (with its default) on
+// both sides.
+func TestDiffIgnoredFieldOutput(t *testing.T) {
+	t.Parallel()
+	n, err := NewIgnoreNormalizer([]IgnoreRule{{Kind: "Service", JSONPointers: []string{"/spec/sessionAffinity"}}}, IgnoreNormalizerOptions{})
+	require.NoError(t, err)
+	svc := func(affinity string) *unstructured.Unstructured {
+		return obj(t, `{"apiVersion":"v1","kind":"Service","metadata":{"name":"s"},"spec":{"selector":{"app":"a"},"ports":[{"port":80}],"type":"ClusterIP","sessionAffinity":"`+affinity+`"}}`)
+	}
+	twoWayLive := svc("None")
+	threeWayLive := withLastApplied(t, svc("None"), svc("None"))
+	for name, live := range map[string]*unstructured.Unstructured{"two-way": twoWayLive, "three-way": threeWayLive} {
+		t.Run(name, func(t *testing.T) {
+			t.Parallel()
+			assert.True(t, mustDiff(t, svc("ClientIP"), live, Options{}).Modified, "without the rule")
+			res := mustDiff(t, svc("ClientIP"), live, Options{Normalizer: n})
+			assert.False(t, res.Modified)
+			for _, side := range [][]byte{res.NormalizedLive, res.PredictedLive} {
+				v, ok := nested(t, side, "spec", "sessionAffinity")
+				assert.True(t, ok)
+				assert.Equal(t, "None", v)
+			}
+		})
+	}
+}
+
+func TestLastAppliedConfig(t *testing.T) {
+	t.Parallel()
+	withAnnotation := func(v string) *unstructured.Unstructured {
+		u := obj(t, deployLive)
+		u.SetAnnotations(map[string]string{AnnotationLastAppliedConfig: v})
+		return u
+	}
+	got, err := LastAppliedConfig(withAnnotation(`{"apiVersion":"apps/v1","kind":"Deployment","metadata":{"name":"web"},"spec":{"replicas":2}}`))
+	require.NoError(t, err)
+	assert.Equal(t, "Deployment", got.GetKind())
+	replicas, _, _ := unstructured.NestedInt64(got.Object, "spec", "replicas")
+	assert.EqualValues(t, 2, replicas, "integers decode as int64")
+
+	got, err = LastAppliedConfig(obj(t, deployLive))
+	require.NoError(t, err)
+	assert.Nil(t, got, "no annotation")
+	got, err = LastAppliedConfig(nil)
+	require.NoError(t, err)
+	assert.Nil(t, got)
+
+	for _, bad := range []string{`{not json`, `[]`, `{"apiVersion":"v1","metadata":{"name":"x"}}`, `{"kind":7}`, `{"kind":"Secret","data":{"token":"c2VjcmV0"}} trailing`} {
+		_, err := LastAppliedConfig(withAnnotation(bad))
+		require.Error(t, err, bad)
+		assert.NotContains(t, err.Error(), "c2VjcmV0", "annotation content never appears in errors")
+	}
+
+	// A last-applied document without kind is unparsable, so the diff falls back to two-way:
+	// the label removed from config is then invisible, exactly like the baseline.
+	config := obj(t, deployConfig)
+	config.SetLabels(nil)
+	live := withAnnotation(`{"metadata":{"labels":{"app.kubernetes.io/instance":"shop"}}}`)
+	assert.False(t, mustDiff(t, config, live, Options{}).Modified)
+}

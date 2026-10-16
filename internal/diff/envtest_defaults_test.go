@@ -72,8 +72,8 @@ var defaultsCorpus = []string{
 	`{"apiVersion":"autoscaling/v1","kind":"HorizontalPodAutoscaler","metadata":{"name":"hpa1"},"spec":{"maxReplicas":3,"scaleTargetRef":{"apiVersion":"apps/v1","kind":"Deployment","name":"d"}}}`,
 	`{"apiVersion":"autoscaling/v2","kind":"HorizontalPodAutoscaler","metadata":{"name":"hpa2"},"spec":{"maxReplicas":3,"scaleTargetRef":{"apiVersion":"apps/v1","kind":"Deployment","name":"d"}}}`,
 	`{"apiVersion":"autoscaling/v2","kind":"HorizontalPodAutoscaler","metadata":{"name":"hpa3"},"spec":{"maxReplicas":3,"scaleTargetRef":{"apiVersion":"apps/v1","kind":"Deployment","name":"d"},"behavior":{"scaleDown":{"stabilizationWindowSeconds":60}}}}`,
-	`{"apiVersion":"admissionregistration.k8s.io/v1","kind":"MutatingWebhookConfiguration","metadata":{"name":"mwc-defaults"},"webhooks":[{"name":"m.example.com","admissionReviewVersions":["v1"],"sideEffects":"None","clientConfig":{"service":{"name":"s","namespace":"default"}},"rules":[{"apiGroups":[""],"apiVersions":["v1"],"operations":["CREATE"],"resources":["pods"]}]}]}`,
-	`{"apiVersion":"admissionregistration.k8s.io/v1","kind":"ValidatingWebhookConfiguration","metadata":{"name":"vwc-defaults"},"webhooks":[{"name":"v.example.com","admissionReviewVersions":["v1"],"sideEffects":"None","clientConfig":{"url":"https://hook.example.com/validate"},"rules":[{"apiGroups":["apps"],"apiVersions":["v1"],"operations":["*"],"resources":["deployments"]}]}]}`,
+	`{"apiVersion":"admissionregistration.k8s.io/v1","kind":"MutatingWebhookConfiguration","metadata":{"name":"mwc-defaults"},"webhooks":[{"name":"m.example.com","admissionReviewVersions":["v1"],"sideEffects":"None","clientConfig":{"service":{"name":"s","namespace":"default"}},"rules":[{"apiGroups":["example.com"],"apiVersions":["v1"],"operations":["CREATE"],"resources":["widgets"]}]}]}`,
+	`{"apiVersion":"admissionregistration.k8s.io/v1","kind":"ValidatingWebhookConfiguration","metadata":{"name":"vwc-defaults"},"webhooks":[{"name":"v.example.com","admissionReviewVersions":["v1"],"sideEffects":"None","clientConfig":{"url":"https://hook.example.com/validate"},"rules":[{"apiGroups":["example.com"],"apiVersions":["v1"],"operations":["*"],"resources":["widgets"]}]}]}`,
 	`{"apiVersion":"storage.k8s.io/v1","kind":"StorageClass","metadata":{"name":"sc-defaults"},"provisioner":"example.com/disk"}`,
 	`{"apiVersion":"scheduling.k8s.io/v1","kind":"PriorityClass","metadata":{"name":"pc-defaults"},"value":1000}`,
 	`{"apiVersion":"rbac.authorization.k8s.io/v1","kind":"ClusterRole","metadata":{"name":"cr-defaults"},"rules":[{"apiGroups":[""],"resources":["pods"],"verbs":["get"]}]}`,
@@ -85,16 +85,16 @@ var defaultsCorpus = []string{
 	`{"apiVersion":"networking.k8s.io/v1","kind":"IngressClass","metadata":{"name":"ic-defaults"},"spec":{"controller":"example.com/ingress","parameters":{"apiGroup":"example.com","kind":"Params","name":"p"}}}`,
 	`{"apiVersion":"storage.k8s.io/v1","kind":"CSIDriver","metadata":{"name":"csi.example.com"},"spec":{}}`,
 	`{"apiVersion":"discovery.k8s.io/v1","kind":"EndpointSlice","metadata":{"name":"es1"},"addressType":"IPv4","endpoints":[{"addresses":["10.0.0.1"]}],"ports":[{"port":80}]}`,
-	`{"apiVersion":"admissionregistration.k8s.io/v1","kind":"ValidatingAdmissionPolicy","metadata":{"name":"vap-defaults"},"spec":{"matchConstraints":{"resourceRules":[{"apiGroups":["apps"],"apiVersions":["v1"],"operations":["CREATE"],"resources":["deployments"]}]},"validations":[{"expression":"object.spec.replicas <= 5"}]}}`,
+	`{"apiVersion":"admissionregistration.k8s.io/v1","kind":"ValidatingAdmissionPolicy","metadata":{"name":"vap-defaults"},"spec":{"matchConstraints":{"resourceRules":[{"apiGroups":["example.com"],"apiVersions":["v1"],"operations":["CREATE"],"resources":["widgets"]}]},"validations":[{"expression":"object.spec.replicas <= 5"}]}}`,
 	`{"apiVersion":"v1","kind":"Endpoints","metadata":{"name":"ep1"},"subsets":[{"addresses":[{"ip":"10.0.0.1"}],"ports":[{"port":80}]}]}`,
 	`{"apiVersion":"v1","kind":"Pod","metadata":{"name":"p4"},"spec":{"resources":{"limits":{"cpu":"2","memory":"256Mi","hugepages-2Mi":"4Mi"}},"initContainers":[{"name":"side","image":"s:1","restartPolicy":"Always","resources":{"requests":{"cpu":"100m"}}},{"name":"init","image":"i:1","resources":{"requests":{"cpu":"1500m","memory":"10Mi"}}}],"containers":[{"name":"c","image":"nginx:1","resources":{"requests":{"cpu":"250m","memory":"64Mi","hugepages-2Mi":"2Mi"},"limits":{"hugepages-2Mi":"2Mi"}}},{"name":"d","image":"nginx:1","resources":{"limits":{"cpu":"300m"}}}]}}`,
-	`{"apiVersion":"admissionregistration.k8s.io/v1","kind":"ValidatingAdmissionPolicyBinding","metadata":{"name":"vapb-defaults"},"spec":{"policyName":"vap-defaults","validationActions":["Deny"],"matchResources":{"resourceRules":[{"apiGroups":["apps"],"apiVersions":["v1"],"operations":["CREATE"],"resources":["deployments"]}]}}}`,
+	`{"apiVersion":"admissionregistration.k8s.io/v1","kind":"ValidatingAdmissionPolicyBinding","metadata":{"name":"vapb-defaults"},"spec":{"policyName":"vap-defaults","validationActions":["Deny"],"matchResources":{"resourceRules":[{"apiGroups":["example.com"],"apiVersions":["v1"],"operations":["CREATE"],"resources":["widgets"]}]}}}`,
 	`{"apiVersion":"v1","kind":"Service","metadata":{"name":"svc8"},"spec":{"type":"LoadBalancer","externalTrafficPolicy":"Local","selector":{"a":"b"},"ports":[{"port":80}]}}`,
 	`{"apiVersion":"apps/v1","kind":"Deployment","metadata":{"name":"d4"},"spec":{"selector":{"matchLabels":{"a":"b"}},"template":{"metadata":{"labels":{"a":"b"}},"spec":{"containers":[{"name":"c","image":"app:1","readinessProbe":{"exec":{"command":["true"]},"periodSeconds":5}}],"volumes":[{"name":"pr","projected":{"sources":[{"configMap":{"name":"x"}}]}},{"name":"iscsi","iscsi":{"targetPortal":"10.0.0.1:3260","iqn":"iqn.2001-04.com.example:storage","lun":0}},{"name":"rbd","rbd":{"monitors":["10.0.0.2:6789"],"image":"img"}},{"name":"az","azureDisk":{"diskName":"d","diskURI":"https://example/d"}}]}}}}`,
 	`{"apiVersion":"apps/v1","kind":"Deployment","metadata":{"name":"d5"},"spec":{"selector":{"matchLabels":{"a":"b"}},"template":{"metadata":{"labels":{"a":"b"}},"spec":{"containers":[{"name":"c","image":"app:1"}],"volumes":[{"name":"sio","scaleIO":{"gateway":"https://gw","system":"s","volumeName":"v","secretRef":{"name":"x"}}},{"name":"sos","storageos":{"volumeName":"v"}},{"name":"fc","fc":{"wwids":["w"]}},{"name":"nfs","nfs":{"server":"s","path":"/p"}}]}}}}`,
 	`{"apiVersion":"storage.k8s.io/v1","kind":"CSIDriver","metadata":{"name":"csi2.example.com"},"spec":{"tokenRequests":[{"audience":"a"}]}}`,
-	`{"apiVersion":"admissionregistration.k8s.io/v1","kind":"MutatingAdmissionPolicy","metadata":{"name":"map-defaults"},"spec":{"matchConstraints":{"resourceRules":[{"apiGroups":["apps"],"apiVersions":["v1"],"operations":["CREATE"],"resources":["deployments"]}]},"reinvocationPolicy":"Never","mutations":[{"patchType":"ApplyConfiguration","applyConfiguration":{"expression":"Object{metadata: Object.metadata{labels: {\"a\": \"b\"}}}"}}]}}`,
-	`{"apiVersion":"admissionregistration.k8s.io/v1","kind":"MutatingAdmissionPolicyBinding","metadata":{"name":"mapb-defaults"},"spec":{"policyName":"map-defaults","matchResources":{"resourceRules":[{"apiGroups":["apps"],"apiVersions":["v1"],"operations":["CREATE"],"resources":["deployments"]}]}}}`,
+	`{"apiVersion":"admissionregistration.k8s.io/v1","kind":"MutatingAdmissionPolicy","metadata":{"name":"map-defaults"},"spec":{"matchConstraints":{"resourceRules":[{"apiGroups":["example.com"],"apiVersions":["v1"],"operations":["CREATE"],"resources":["widgets"]}]},"reinvocationPolicy":"Never","mutations":[{"patchType":"ApplyConfiguration","applyConfiguration":{"expression":"Object{metadata: Object.metadata{labels: {\"a\": \"b\"}}}"}}]}}`,
+	`{"apiVersion":"admissionregistration.k8s.io/v1","kind":"MutatingAdmissionPolicyBinding","metadata":{"name":"mapb-defaults"},"spec":{"policyName":"map-defaults","matchResources":{"resourceRules":[{"apiGroups":["example.com"],"apiVersions":["v1"],"operations":["CREATE"],"resources":["widgets"]}]}}}`,
 }
 
 // serverOnlyFields lists fields the API server adds on create that are not produced by the
@@ -302,14 +302,36 @@ func TestEnvtestCorpusInSync(t *testing.T) {
 	ctx, cancel := context.WithTimeout(context.Background(), 3*time.Minute)
 	defer cancel()
 
-	for _, manifest := range defaultsCorpus {
+	for i, manifest := range defaultsCorpus {
 		base := obj(t, manifest)
 		t.Run(base.GetKind()+"/"+base.GetName(), func(t *testing.T) {
 			m, err := k.mapper.RESTMapping(base.GroupVersionKind().GroupKind(), base.GroupVersionKind().Version)
 			require.NoError(t, err)
 			if m.Scope.Name() == "namespace" {
-				base.SetNamespace("default")
+				// One namespace per object: LimitRanges and ResourceQuotas in the corpus
+				// must not constrain the Pods of other entries.
+				ns := &unstructured.Unstructured{Object: map[string]any{
+					"apiVersion": "v1", "kind": "Namespace",
+					"metadata": map[string]any{"name": fmt.Sprintf("insync-%d", i)},
+				}}
+				_, err := k.create(ctx, ns)
+				require.NoError(t, err)
+				base.SetNamespace(ns.GetName())
 			}
+			// Managed resources always carry tracking metadata, so the field manager owns at
+			// least one field (a dry run of a manifest without any owned field returns no
+			// managedFields entry for the manager, which server-side diff rejects like the
+			// baseline does).
+			labels := base.GetLabels()
+			if labels == nil {
+				labels = map[string]string{}
+			}
+			labels["app.kubernetes.io/part-of"] = "diff-envtest"
+			base.SetLabels(labels)
+			// Baseline quirk: EndpointSlice endpoints is an atomic list and the server
+			// serializes the non-omitempty conditions struct, so the legacy strategy reports
+			// drift for endpoints declared without conditions.
+			legacyDrift := base.GetKind() == "EndpointSlice"
 
 			// Client-side apply: the manifest is stored with its last-applied annotation.
 			csaConfig := base.DeepCopy()
@@ -317,17 +339,14 @@ func TestEnvtestCorpusInSync(t *testing.T) {
 			created, err := k.create(ctx, withLastApplied(t, csaConfig, csaConfig))
 			require.NoError(t, err)
 			three := mustDiff(t, csaConfig, created, Options{})
-			assert.False(t, three.Modified, "three-way\nlive: %s\npredicted: %s", three.NormalizedLive, three.PredictedLive)
+			assert.Equal(t, legacyDrift, three.Modified, "three-way\nlive: %s\npredicted: %s", three.NormalizedLive, three.PredictedLive)
 			two := created.DeepCopy()
 			unstructured.RemoveNestedField(two.Object, "metadata", "annotations", AnnotationLastAppliedConfig)
 			res := mustDiff(t, csaConfig, two, Options{})
-			assert.False(t, res.Modified, "two-way\nlive: %s\npredicted: %s", res.NormalizedLive, res.PredictedLive)
+			assert.Equal(t, legacyDrift, res.Modified, "two-way\nlive: %s\npredicted: %s", res.NormalizedLive, res.PredictedLive)
 
 			changed := csaConfig.DeepCopy()
-			labels := changed.GetLabels()
-			if labels == nil {
-				labels = map[string]string{}
-			}
+			labels = changed.GetLabels()
 			labels["changed"] = "true"
 			changed.SetLabels(labels)
 			assert.True(t, mustDiff(t, changed, created, Options{}).Modified, "label change (three-way)")
@@ -342,13 +361,10 @@ func TestEnvtestCorpusInSync(t *testing.T) {
 			ssd := mustDiff(t, ssaConfig, applied, o)
 			assert.False(t, ssd.Modified, "server-side\nlive: %s\npredicted: %s", ssd.NormalizedLive, ssd.PredictedLive)
 			legacy := mustDiff(t, ssaConfig, applied, Options{})
-			assert.False(t, legacy.Modified, "legacy on SSA object\nlive: %s\npredicted: %s", legacy.NormalizedLive, legacy.PredictedLive)
+			assert.Equal(t, legacyDrift, legacy.Modified, "legacy on SSA object\nlive: %s\npredicted: %s", legacy.NormalizedLive, legacy.PredictedLive)
 
 			changed = ssaConfig.DeepCopy()
 			labels = changed.GetLabels()
-			if labels == nil {
-				labels = map[string]string{}
-			}
 			labels["changed"] = "true"
 			changed.SetLabels(labels)
 			assert.True(t, mustDiff(t, changed, applied, o).Modified, "label change (server-side)")

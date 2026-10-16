@@ -250,7 +250,7 @@ func TestWatcherRelistOnExpiredWatch(t *testing.T) {
 		first func(metav1.ListOptions) (watch.Interface, error)
 	}{
 		{"watch request returns 410", watchErr(apierrors.NewResourceExpired("too old"))},
-		{"watch request returns Gone", watchErr(apierrors.NewGone("gone"))},
+		{"watch request returns Gone", watchErr(apierrors.NewGone("gone"))}, //nolint:staticcheck // servers can still answer a plain 410 Gone
 		{"error event with typed status", streamOf(false, watch.Event{Type: watch.Error, Object: expiredStatus(false)})},
 		{"error event with unstructured status", streamOf(false, watch.Event{Type: watch.Error, Object: expiredStatus(true)})},
 	}

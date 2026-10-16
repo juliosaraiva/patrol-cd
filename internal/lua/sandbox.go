@@ -2,7 +2,6 @@ package lua
 
 import (
 	"fmt"
-	"strings"
 	"sync"
 
 	glua "github.com/yuin/gopher-lua"
@@ -29,11 +28,6 @@ const (
 	registrySize     = 1024      // initial value stack slots (grows on demand)
 	registryMaxSize  = 256 * 256 // hard cap on value stack slots ("registry overflow")
 	registryGrowStep = 1024
-	// maxStringBuild caps results of string.rep, the one standard function that can build a
-	// huge string from tiny input in a single (uninterruptible) Go call.
-	maxStringBuild = 4 << 20
-	// maxFormatSpec is Lua 5.1's limit on format width/precision digits.
-	maxFormatSpec = 2
 )
 
 // safeBaseRemoved lists base functions removed in the safe profile: file and code loading,
@@ -67,8 +61,15 @@ var safeOsFuncs = sync.OnceValue(func() map[string]glua.LGFunction {
 	return out
 })
 
+// evalState is a fresh Lua state for one evaluation and the function that implements
+// the .. operator of scripts compiled by compile (see rewrite.go).
+type evalState struct {
+	L      *glua.LState
+	concat *glua.LFunction
+}
+
 // newState creates a Lua state with the libraries of profile p and the package limits.
-func newState(p libProfile) (*glua.LState, error) {
+func newState(p libProfile) (*evalState, error) {
 	L := glua.NewState(glua.Options{
 		SkipOpenLibs:        true,
 		CallStackSize:       callStackSize,
@@ -99,14 +100,15 @@ func newState(p libProfile) (*glua.LState, error) {
 		L.Close()
 		return nil, err
 	}
-	if err := hardenString(L); err != nil {
+	concat, err := installStringLimits(L)
+	if err != nil {
 		L.Close()
 		return nil, err
 	}
 	// print never reaches the controller's stdout: scripts process untrusted objects and
 	// their output would be an unbounded, unstructured log channel.
 	L.SetGlobal("print", L.NewFunction(func(*glua.LState) int { return 0 }))
-	return L, nil
+	return &evalState{L: L, concat: concat}, nil
 }
 
 type libOpener struct {
@@ -155,85 +157,5 @@ func openSafe(L *glua.LState) error {
 		L.Push(mod)
 		return 1
 	}))
-	return nil
-}
-
-// hardenString replaces string.rep with a size-capped version, rejects over-long format
-// widths (as Lua 5.1 does) and removes string.dump. The string metatable indexes the same
-// table, so method calls ("x"):rep(n) are covered too.
-func hardenString(L *glua.LState) error {
-	mod, ok := L.GetGlobal(glua.StringLibName).(*glua.LTable)
-	if !ok {
-		return nil
-	}
-	origFormat, ok := mod.RawGetString("format").(*glua.LFunction)
-	if !ok || !origFormat.IsG {
-		return fmt.Errorf("lua string library has no native format function")
-	}
-	format := origFormat.GFunction
-	mod.RawSetString("rep", L.NewFunction(func(L *glua.LState) int {
-		s := L.CheckString(1)
-		n := L.CheckInt(2)
-		if n <= 0 || s == "" {
-			L.Push(glua.LString(""))
-			return 1
-		}
-		if n > maxStringBuild/len(s) {
-			L.RaiseError("string.rep result exceeds %d bytes", maxStringBuild)
-			return 0
-		}
-		L.Push(glua.LString(strings.Repeat(s, n)))
-		return 1
-	}))
-	mod.RawSetString("format", L.NewFunction(func(L *glua.LState) int {
-		if err := checkFormat(L.CheckString(1)); err != nil {
-			L.RaiseError("%s", err.Error())
-			return 0
-		}
-		return format(L)
-	}))
-	mod.RawSetString("dump", glua.LNil)
-	return nil
-}
-
-// checkFormat enforces Lua 5.1's string.format limits: at most 5 flag characters and at
-// most two digits each for width and precision.
-func checkFormat(f string) error {
-	for i := 0; i < len(f); i++ {
-		if f[i] != '%' {
-			continue
-		}
-		i++
-		if i < len(f) && f[i] == '%' {
-			continue
-		}
-		flags := 0
-		for i < len(f) && strings.IndexByte("-+ #0", f[i]) >= 0 {
-			flags++
-			i++
-		}
-		if flags > 5 {
-			return fmt.Errorf("invalid format (repeated flags)")
-		}
-		digits := 0
-		for i < len(f) && f[i] >= '0' && f[i] <= '9' {
-			digits++
-			i++
-		}
-		if i < len(f) && f[i] == '.' {
-			i++
-			prec := 0
-			for i < len(f) && f[i] >= '0' && f[i] <= '9' {
-				prec++
-				i++
-			}
-			if prec > maxFormatSpec {
-				return fmt.Errorf("invalid format (width or precision too long)")
-			}
-		}
-		if digits > maxFormatSpec {
-			return fmt.Errorf("invalid format (width or precision too long)")
-		}
-	}
 	return nil
 }

@@ -53,7 +53,8 @@ func NewManager(opts ManagerOptions) *Manager {
 // Get returns the synced cache for clusterKey, creating it from cfg and settings when it does
 // not exist. An existing cache keeps its configuration: call Invalidate when the cluster's
 // REST config or cache settings change. A failed sync returns the error but keeps the cache
-// registered, so the next Get retries (subject to Settings.SyncRetryTimeout).
+// registered, so the next Get retries (subject to Settings.SyncRetryTimeout). ctx bounds the
+// wait only: a sync that outlives it keeps running and serves later calls.
 func (m *Manager) Get(ctx context.Context, clusterKey string, cfg *rest.Config, settings Settings) (ClusterCache, error) {
 	for attempt := 0; ; attempt++ {
 		c, err := m.getOrCreate(ctx, clusterKey, cfg, settings)
