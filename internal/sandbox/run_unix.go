@@ -33,10 +33,15 @@ const (
 // Run executes c and returns its captured output.
 //
 // A non-nil error is one of: an error matching ErrInvalidCommand or a lookup error
-// (nothing was started); a start error; an error matching ErrOutputLimit; an error
-// matching ErrTimeout (Limits.Timeout or a context deadline); context.Canceled; or
-// an error wrapping *ExitError. Output captured before a failure is returned in
-// Result whenever the process was started.
+// (nothing was started, or the rlimit helper did not acknowledge); a start error;
+// an error matching ErrOutputLimit; an error matching ErrTimeout (Limits.Timeout or
+// a context deadline); context.Canceled; or an error wrapping *ExitError. Output
+// captured before a failure is returned in Result whenever the process was started.
+//
+// No descriptor above stderr reaches the child: in direct mode Run marks every
+// descriptor of the calling process close-on-exec before starting it (Go opens
+// its own descriptors that way; this catches inherited ones such as socket
+// activation), and in helper mode the helper does the same before exec.
 func Run(ctx context.Context, c Cmd) (Result, error) {
 	name := filepath.Base(c.Path)
 	if err := ctx.Err(); err != nil {
@@ -52,11 +57,23 @@ func Run(ctx context.Context, c Cmd) (Result, error) {
 	argv := make([]string, 0, len(c.Args)+1)
 	argv = append(argv, c.Path)
 	argv = append(argv, c.Args...)
-	if lim.needsHelper() {
-		hp, err := helperPath()
+	helper := lim.needsHelper()
+	var statusR, statusW *os.File
+	if helper {
+		hp, isDefault, err := helperPath()
 		if err != nil {
 			return Result{}, fmt.Errorf("sandbox: %s: resolve rlimit helper: %w", name, err)
 		}
+		if isDefault && !helperMainCalled.Load() {
+			// Re-executing a binary whose main does not handle HelperArg would run
+			// that program (for a test binary: its whole suite) instead of c.
+			return Result{}, fmt.Errorf("sandbox: %s: %w: rlimits need the helper, but sandbox.MaybeHelperMain was not called at the start of main (or TestMain)", name, ErrInvalidCommand)
+		}
+		statusR, statusW, err = os.Pipe()
+		if err != nil {
+			return Result{}, fmt.Errorf("sandbox: %s: helper status pipe: %w", name, err)
+		}
+		defer closeAll(statusR)
 		argv = encodeHelperArgs(hp, helperSpec{
 			cpu:    lim.CPUSeconds,
 			as:     lim.AddressSpaceBytes,
@@ -74,11 +91,12 @@ func Run(ctx context.Context, c Cmd) (Result, error) {
 
 	stdoutR, stdoutW, err := os.Pipe()
 	if err != nil {
+		closeAll(statusW)
 		return Result{}, fmt.Errorf("sandbox: %s: stdout pipe: %w", name, err)
 	}
 	stderrR, stderrW, err := os.Pipe()
 	if err != nil {
-		closeAll(stdoutR, stdoutW)
+		closeAll(stdoutR, stdoutW, statusW)
 		return Result{}, fmt.Errorf("sandbox: %s: stderr pipe: %w", name, err)
 	}
 
@@ -93,11 +111,16 @@ func Run(ctx context.Context, c Cmd) (Result, error) {
 		SysProcAttr: &syscall.SysProcAttr{Setpgid: true},
 		WaitDelay:   stdinWaitDelay,
 	}
+	if helper {
+		cmd.ExtraFiles = []*os.File{statusW} // descriptor helperStatusFD in the child
+	} else {
+		markInheritedCloseOnExec()
+	}
 
 	start := time.Now()
 	startErr := cmd.Start()
 	// The child holds its own copies; ours must go so EOF is observable.
-	closeAll(stdoutW, stderrW)
+	closeAll(stdoutW, stderrW, statusW)
 	if startErr != nil {
 		closeAll(stdoutR, stderrR)
 		return Result{}, fmt.Errorf("sandbox: start %s: %w", name, startErr)
@@ -124,18 +147,50 @@ func Run(ctx context.Context, c Cmd) (Result, error) {
 		timeoutC = t.C
 	}
 
+	// Helper handshake: statusC delivers the helper's status byte, or
+	// helperStatusNone at EOF (the program never acknowledged).
+	var statusC <-chan byte
+	var ackTimeoutC <-chan time.Time
+	var status byte
+	gotStatus := !helper
+	if helper {
+		statusC = readStatus(statusR)
+		t := time.NewTimer(time.Duration(helperAckTimeout.Load()))
+		defer t.Stop()
+		ackTimeoutC = t.C
+	}
+
 	var waitErr, cause error
-	select {
-	case waitErr = <-waitCh:
-	case <-timeoutC:
-		cause = ErrTimeout
-		waitErr = terminate(proc, pgid, waitCh, lim.KillGrace)
-	case <-ctx.Done():
-		cause = ctx.Err()
-		waitErr = terminate(proc, pgid, waitCh, lim.KillGrace)
-	case <-overflow:
-		cause = ErrOutputLimit
-		waitErr = terminate(proc, pgid, waitCh, 0)
+wait:
+	for {
+		select {
+		case waitErr = <-waitCh:
+			break wait
+		case status = <-statusC:
+			statusC, ackTimeoutC, gotStatus = nil, nil, true
+			if status == helperStatusReady || status == helperStatusFailed {
+				continue
+			}
+			cause = errHelperNoAck
+			waitErr = terminate(proc, pgid, waitCh, 0)
+			break wait
+		case <-ackTimeoutC:
+			cause = errHelperNoAck
+			waitErr = terminate(proc, pgid, waitCh, 0)
+			break wait
+		case <-timeoutC:
+			cause = ErrTimeout
+			waitErr = terminate(proc, pgid, waitCh, lim.KillGrace)
+			break wait
+		case <-ctx.Done():
+			cause = ctx.Err()
+			waitErr = terminate(proc, pgid, waitCh, lim.KillGrace)
+			break wait
+		case <-overflow:
+			cause = ErrOutputLimit
+			waitErr = terminate(proc, pgid, waitCh, 0)
+			break wait
+		}
 	}
 
 	// The leader has been reaped. Kill whatever is left of its process group
@@ -143,6 +198,17 @@ func Run(ctx context.Context, c Cmd) (Result, error) {
 	// alive the group ID cannot be reused, so this only reaches our descendants;
 	// with no members left the call fails with ESRCH.
 	_ = syscall.Kill(-pgid, syscall.SIGKILL)
+
+	// A helper writes its status before exec, so once the leader is gone the byte
+	// (if any) is already in the pipe; EOF follows as soon as the group is dead.
+	// Only an exit or an overflow can hide a missing acknowledgment; a timeout or
+	// cancellation may simply have come before a slow helper started.
+	if !gotStatus && (cause == nil || errors.Is(cause, ErrOutputLimit)) {
+		status = awaitStatus(statusC, statusR)
+		if status != helperStatusReady && status != helperStatusFailed {
+			cause = errHelperNoAck
+		}
+	}
 
 	drainPipes(&readers, stdoutR, stderrR)
 	closeAll(stdoutR, stderrR)
@@ -211,8 +277,45 @@ func drainPipes(readers *sync.WaitGroup, files ...*os.File) {
 	}
 }
 
+// errHelperNoAck is the internal cause for a helper that never acknowledged.
+var errHelperNoAck = errors.New("rlimit helper did not acknowledge")
+
+// readStatus reads the helper's single status byte (helperStatusNone at EOF or
+// on error) and delivers it on the returned channel.
+func readStatus(r *os.File) <-chan byte {
+	ch := make(chan byte, 1)
+	go func() {
+		var b [1]byte
+		if n, _ := r.Read(b[:]); n == 1 {
+			ch <- b[0]
+			return
+		}
+		ch <- helperStatusNone
+	}()
+	return ch
+}
+
+// awaitStatus waits up to drainTimeout for the status reader, then forces it to
+// return (a process that escaped the group could hold the pipe open).
+func awaitStatus(statusC <-chan byte, r *os.File) byte {
+	t := time.NewTimer(drainTimeout)
+	defer t.Stop()
+	select {
+	case st := <-statusC:
+		return st
+	case <-t.C:
+	}
+	_ = r.SetReadDeadline(time.Now())
+	return <-statusC
+}
+
 func classify(name string, lim Limits, redact []string, cause, waitErr error, outCap, errCap *capture, stderr []byte) error {
 	switch {
+	case errors.Is(cause, errHelperNoAck):
+		// Whatever ran was not the helper (MaybeHelperMain missing, or a wrong
+		// SetHelperPath), so neither its output nor its status describes c.
+		return fmt.Errorf("sandbox: %s: %w: %w; the helper binary must call sandbox.MaybeHelperMain first in main (or TestMain)",
+			name, ErrInvalidCommand, errHelperNoAck)
 	case outCap.exceeded() || errCap.exceeded() || errors.Is(cause, ErrOutputLimit):
 		return fmt.Errorf("%s: %w (stdout cap %d bytes, stderr cap %d bytes)",
 			name, ErrOutputLimit, lim.MaxStdout, lim.MaxStderr)

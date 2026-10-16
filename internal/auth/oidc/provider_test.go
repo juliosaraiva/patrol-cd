@@ -149,7 +149,7 @@ func TestVerifyExternal(t *testing.T) {
 
 	// Through auth.TokenService: routed by issuer, revocable by token id.
 	ks, _ := auth.NewKeySet(serverSecret)
-	revs := auth.NewMemoryRevocationStore(0, nil)
+	revs := auth.NewMemoryRevocationStore(auth.RevocationLimits{}, nil)
 	svc, err := auth.NewTokenService(auth.TokenServiceConfig{Keys: ks, Accounts: auth.Accounts{}, Revocations: revs, External: p})
 	if err != nil {
 		t.Fatal(err)

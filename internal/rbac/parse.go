@@ -120,6 +120,13 @@ func policyErrorFrom(problems []ValidationError) error {
 type Source struct {
 	Name string
 	CSV  string
+	// Builtin marks the built-in policy. A pattern that cannot be evaluated in the
+	// active match mode (an invalid regular expression, or a glob alternation without an
+	// exact RE2 equivalent) is a warning in a built-in source, and any evaluation that
+	// reaches it is denied, as upstream: the built-in policy is written for glob mode, so
+	// its '*' patterns are invalid in regex mode. In every other source such a pattern
+	// is an error, so the policy does not load and no evaluation can fail.
+	Builtin bool
 }
 
 // ParseOptions configures Parse and ParseSources.
@@ -187,7 +194,7 @@ func ParseSources(sources []Source, opts ParseOptions) (*Policy, []ValidationErr
 		lineNo := 0
 		for raw := range strings.SplitSeq(s.CSV, "\n") {
 			lineNo++
-			b.addLine(s.Name, lineNo, raw, maxLine, &problems)
+			b.addLine(s, lineNo, raw, maxLine, &problems)
 		}
 	}
 	if err := policyErrorFrom(problems); err != nil {
@@ -277,9 +284,10 @@ func splitCSVLine(text string) ([]string, error) {
 	return tokens, nil
 }
 
-// addLine parses one raw line and adds its rule or link to the builder, appending
-// problems.
-func (b *builder) addLine(source string, lineNo int, raw string, maxLine int, problems *[]ValidationError) {
+// addLine parses one raw line of src and adds its rule or link to the builder,
+// appending problems.
+func (b *builder) addLine(src Source, lineNo int, raw string, maxLine int, problems *[]ValidationError) {
+	source := src.Name
 	pl, err := tokenizeLine(raw, maxLine)
 	if err != nil {
 		*problems = append(*problems, ValidationError{Source: source, Line: lineNo, Text: pl.text, Severity: SeverityError, Message: err.Error()})
@@ -288,6 +296,9 @@ func (b *builder) addLine(source string, lineNo int, raw string, maxLine int, pr
 	loc := location{source: source, line: lineNo, text: pl.text}
 	warn := func(format string, args ...any) {
 		*problems = append(*problems, ValidationError{Source: source, Line: lineNo, Text: pl.text, Severity: SeverityWarning, Message: fmt.Sprintf(format, args...)})
+	}
+	fail := func(format string, args ...any) {
+		*problems = append(*problems, ValidationError{Source: source, Line: lineNo, Text: pl.text, Severity: SeverityError, Message: fmt.Sprintf(format, args...)})
 	}
 	switch pl.kind {
 	case lineSkip:
@@ -316,11 +327,17 @@ func (b *builder) addLine(source string, lineNo int, raw string, maxLine int, pr
 			name string
 			m    *matcher
 		}{{"resource", r.res}, {"action", r.act}, {"object", r.obj}} {
-			switch f.m.kind {
-			case matchNever:
-				warn("%s %q is not a valid glob pattern (%v): the rule never matches", f.name, f.m.lit, f.m.err)
-			case matchFail:
-				warn("%s %q is not a valid regular expression (%v): requests reaching this rule are denied", f.name, f.m.lit, f.m.err)
+			msg := f.m.problem(f.name, b.mode)
+			switch {
+			case msg == "":
+			case f.m.kind == matchNever:
+				// Upstream parity: an invalid glob is a rule that never matches. It
+				// cannot fail an evaluation, so it stays a warning.
+				warn("%s: the rule never matches", msg)
+			case src.Builtin:
+				warn("%s: requests reaching this rule are denied", msg)
+			default:
+				fail("%s: fix the pattern; a policy containing it is not loaded", msg)
 			}
 		}
 		if isLiteralToken(res, b.mode) && !isKnownResource(res) {

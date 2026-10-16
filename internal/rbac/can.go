@@ -36,6 +36,8 @@ var resourceAliases = map[string]string{
 	"repo":            ResourceRepositories,
 	"repos":           ResourceRepositories,
 	"repository":      ResourceRepositories,
+	"scm":             ResourceSCMProviders,
+	"scmprovider":     ResourceSCMProviders,
 }
 
 // actionSet maps each valid action of a resource to whether it accepts a "/<path>"
@@ -61,6 +63,7 @@ var (
 		ResourceExec:              {ActionCreate: false},
 		ResourceProjects:          crudActions,
 		ResourceRepositories:      crudActions,
+		ResourceSCMProviders:      crudActions,
 		ResourceWriteRepositories: crudActions,
 	}
 )

@@ -137,7 +137,6 @@ func TestParseWarnings(t *testing.T) {
 		{name: "unknown resource", line: "p, a, application, get, */*, allow", message: "not a known RBAC resource"},
 		{name: "unknown action", line: "p, a, applications, read, */*, allow", message: "not a known RBAC action"},
 		{name: "invalid glob", line: "p, a, applications, get, {a, allow", message: "not a valid glob pattern"},
-		{name: "invalid regex", line: "p, a, applications, get, *, allow", mode: RegexMatchMode, message: "not a valid regular expression"},
 		{name: "empty subject", line: "p, , applications, get, */*, allow", message: "empty subject"},
 		{name: "empty role", line: "g, alice, ", message: "empty member or role"},
 		{name: "noop line", line: "e, some(where (p.eft == allow))", message: "no effect"},
@@ -158,6 +157,53 @@ func TestParseWarnings(t *testing.T) {
 				}
 			}
 			assert.True(t, found, "want a warning containing %q, got %v", tt.message, problems)
+		})
+	}
+}
+
+// A pattern that cannot be evaluated is an error in a user source (the policy does not
+// load, so no evaluation can fail) and a warning in the built-in source, whose rules keep
+// the upstream error-as-deny behavior. An invalid glob only ever means "never matches",
+// so it stays a warning everywhere.
+func TestParseUnevaluablePatterns(t *testing.T) {
+	t.Parallel()
+	tests := []struct {
+		name, line, mode, message string
+		userError                 bool
+	}{
+		{name: "regex star resource", line: "p, a, *, get, .*, allow", mode: RegexMatchMode, message: `resource "*" is not a valid regular expression`, userError: true},
+		{name: "regex star action", line: "p, a, applications, *, .*, allow", mode: RegexMatchMode, message: `action "*" is not a valid regular expression`, userError: true},
+		{name: "regex star object", line: "p, a, applications, get, *, allow", mode: RegexMatchMode, message: `object "*" is not a valid regular expression`, userError: true},
+		{name: "regex bracket", line: "p, a, applications, get, p1/[, allow", mode: RegexMatchMode, message: "not a valid regular expression", userError: true},
+		{name: "regex paren", line: "p, a, applications, action/(, .*, deny", mode: RegexMatchMode, message: "not a valid regular expression", userError: true},
+		{name: "untranslatable glob alternation", line: "p, a, applications, get, \"{a,\uFFFD}/*\", deny", mode: GlobMatchMode, message: "cannot be evaluated", userError: true},
+		{name: "invalid glob", line: "p, a, applications, action/[, */*, allow", mode: GlobMatchMode, message: "not a valid glob pattern"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+			pol, problems, err := ParseSources([]Source{{Name: "policy.csv", CSV: tt.line}}, ParseOptions{MatchMode: tt.mode})
+			want := SeverityWarning
+			if tt.userError {
+				want = SeverityError
+				require.ErrorIs(t, err, ErrInvalidPolicy)
+				assert.Nil(t, pol)
+			} else {
+				require.NoError(t, err)
+			}
+			require.Len(t, problems, 1, "%v", problems)
+			assert.Equal(t, want, problems[0].Severity)
+			assert.Equal(t, "policy.csv", problems[0].Source)
+			assert.Equal(t, 1, problems[0].Line)
+			assert.Contains(t, problems[0].Message, tt.message)
+
+			// The same line in the built-in source loads with a warning.
+			pol, problems, err = ParseSources([]Source{{Name: "builtin", CSV: tt.line, Builtin: true}}, ParseOptions{MatchMode: tt.mode})
+			require.NoError(t, err)
+			require.NotNil(t, pol)
+			require.Len(t, problems, 1, "%v", problems)
+			assert.Equal(t, SeverityWarning, problems[0].Severity)
+			assert.Contains(t, problems[0].Message, tt.message)
 		})
 	}
 }

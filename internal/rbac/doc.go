@@ -15,7 +15,16 @@
 // "allow", and no such rule matches with effect "deny". Resource, action and object are
 // patterns: glob patterns (github.com/gobwas/glob, no separators, so '*' also matches '/')
 // in the default "glob" match mode, or unanchored RE2 regular expressions in "regex" mode.
+// Glob patterns with alternations ('{a,b}') are evaluated through an equivalent RE2
+// expression, because backtracking over alternations takes exponential time. Every
+// pattern therefore matches in time proportional to len(pattern) * len(value).
 // Subjects and roles are compared literally.
+//
+// Patterns are compiled when a policy loads. A pattern that cannot be evaluated (an
+// invalid regular expression, or a glob alternation without an RE2 equivalent) is an
+// error in the user policy (it does not load) and makes a project role line invalid; only
+// the built-in policy keeps such patterns, and reaching one denies the evaluated subject,
+// as upstream (see [Source]).
 //
 // # Request evaluation
 //

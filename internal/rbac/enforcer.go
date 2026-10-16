@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"log/slog"
 	"maps"
+	"slices"
 	"strconv"
 	"strings"
 	"sync"
@@ -144,23 +145,34 @@ func (e *Enforcer) update(fn func(next *snapshot)) {
 // and the match mode. If either policy has an error-severity problem, the enforcer
 // fails closed (denies every request, as upstream cannot build its enforcer either) and
 // the returned error is a *PolicyError; the next successful SetPolicy restores service.
+// In the user policy, a pattern that cannot be evaluated in the match mode (for example
+// '*' in regex mode) is such an error; in the built-in policy it is a warning (see
+// Source.Builtin).
 func (e *Enforcer) SetPolicy(builtin, user, defaultRole, matchMode string) error {
 	return e.SetPolicySources(builtin, []Source{{Name: "user", CSV: user}}, defaultRole, matchMode)
 }
 
 // SetPolicySources is SetPolicy with the user policy split into named sources (for
 // example "policy.csv" and its overlays, see PolicySources), so problems carry
-// per-source line numbers.
+// per-source line numbers. The Builtin field of the user sources is ignored: they are
+// always validated as user policy.
 func (e *Enforcer) SetPolicySources(builtin string, user []Source, defaultRole, matchMode string) error {
 	sources := make([]Source, 0, len(user)+1)
-	sources = append(sources, Source{Name: "builtin", CSV: builtin})
-	sources = append(sources, user...)
+	sources = append(sources, Source{Name: "builtin", CSV: builtin, Builtin: true})
+	for _, s := range user {
+		s.Builtin = false
+		sources = append(sources, s)
+	}
 	mode, _ := normalizeMatchMode(matchMode)
 	pol, problems, err := ParseSources(sources, ParseOptions{MatchMode: matchMode})
 
+	var recompiled map[string]*projectEntry
 	e.update(func(next *snapshot) {
 		if mode != next.matchMode {
+			// Project role lines are revalidated for the new mode: a line that was a
+			// valid glob may be an invalid regular expression ('*'), and the reverse.
 			next.projects = recompileProjects(next.projects, mode)
+			recompiled = next.projects
 		}
 		next.matchMode = mode
 		next.defaultRole = defaultRole
@@ -173,6 +185,9 @@ func (e *Enforcer) SetPolicySources(builtin string, user []Source, defaultRole, 
 		next.loadErr = nil
 	})
 
+	for _, name := range slices.Sorted(maps.Keys(recompiled)) {
+		e.logProjectProblems(recompiled[name])
+	}
 	if err != nil {
 		e.logger.Error("RBAC policy failed to load; denying all requests until it is fixed", "error", err)
 		return fmt.Errorf("load RBAC policy: %w", err)
@@ -215,7 +230,9 @@ func (e *Enforcer) SetEnforcementEnabled(enabled bool) {
 // SetProjectPolicies registers or replaces the roles of a project. The returned error
 // (a *PolicyError) lists invalid roles, policies and groups; the project is installed
 // anyway with every invalid item removed, and a role with an invalid policy keeps only
-// its deny rules, so a broken project can never grant more than a fixed one.
+// its deny rules, so a broken project can never grant more than a fixed one. A policy
+// line whose resource, action or object does not compile in the active match mode is
+// invalid, so no project rule can fail when it is evaluated.
 func (e *Enforcer) SetProjectPolicies(project string, roles []Role) error {
 	roles = cloneRoles(roles)
 	var entry *projectEntry

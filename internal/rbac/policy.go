@@ -130,11 +130,15 @@ func (b *builder) compile(pattern string) *matcher {
 }
 
 func (b *builder) addRule(sub, res, act, obj string, eft effect, loc location) *rule {
+	return b.addCompiledRule(sub, b.compile(res), b.compile(act), b.compile(obj), eft, loc)
+}
+
+func (b *builder) addCompiledRule(sub string, res, act, obj *matcher, eft effect, loc location) *rule {
 	r := &rule{
 		sub:     sub,
-		res:     b.compile(res),
-		act:     b.compile(act),
-		obj:     b.compile(obj),
+		res:     res,
+		act:     act,
+		obj:     obj,
 		eft:     eft,
 		loc:     loc,
 		matched: loc.String(),
@@ -186,7 +190,7 @@ const (
 	outcomeNone outcome = iota // no allow matched
 	outcomeAllow
 	outcomeDeny   // an explicit deny matched
-	outcomeFailed // a pattern could not be evaluated (invalid regex): treated as deny
+	outcomeFailed // a pattern could not be evaluated: treated as deny (built-in policy only)
 )
 
 // evalResult is the outcome of evaluating one subject, with the deciding rule.
@@ -271,8 +275,13 @@ func (v *visited) add(name string) bool {
 // evaluate evaluates one subject against the union of pols. The subject's roles are
 // discovered breadth-first through 'g' links of every policy, at most maxHierarchyLevel
 // hops away. The subject is allowed when some allow rule of the subject or one of its
-// roles matches and no deny rule does; an invalid regular expression reached during
-// matching fails the evaluation.
+// roles matches and no deny rule does.
+//
+// A pattern that cannot be evaluated (matchFail) fails the evaluation of this subject,
+// which is then denied: the upstream error-as-deny behavior. Only the built-in policy
+// can contain such patterns; user sources and project roles are rejected at load time.
+// The failure is deliberately not isolated to the rule: treating a failing deny as a
+// non-match would silently widen access.
 func evaluate(subject string, pols []*Policy, resource, action, object string) evalResult {
 	var (
 		seen        visited

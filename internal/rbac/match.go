@@ -19,15 +19,21 @@ const (
 	matchEqual
 	// matchContains is a regex without metacharacters: unanchored, so substring search.
 	matchContains
-	// matchGlob is a compiled glob pattern.
+	// matchGlob is a compiled glob pattern without alternations.
 	matchGlob
+	// matchGlobRegexp is a glob pattern with alternations, translated into an
+	// equivalent anchored regular expression (see globToRegexp).
+	matchGlobRegexp
 	// matchRegex is a compiled regular expression (unanchored, like regexp.MatchString).
 	matchRegex
 	// matchNever is a glob pattern that failed to compile. Upstream treats it as a
 	// non-match, so the rule containing it never applies.
 	matchNever
-	// matchFail is a regular expression that failed to compile. Upstream evaluation
-	// errors (and therefore denies) when it reaches such a pattern.
+	// matchFail is a regular expression that failed to compile, or a glob alternation
+	// pattern with no exact linear-time equivalent. Upstream evaluation errors (and
+	// therefore denies) when it reaches an invalid regular expression. Patrol rejects
+	// such patterns at load time everywhere except in the built-in policy (see
+	// Source.Builtin), whose rules keep the upstream error-as-deny behavior.
 	matchFail
 )
 
@@ -61,8 +67,8 @@ func normalizeMatchMode(mode string) (normalized string, known bool) {
 }
 
 // compilePattern compiles pattern for the given (normalized) match mode. Compilation
-// problems are recorded in the returned matcher, never returned as errors, because
-// upstream accepts such policies and only fails at match time.
+// problems are recorded in the returned matcher, never returned as errors: the caller
+// decides what a broken pattern means for its source (see matcher.problem).
 func compilePattern(pattern, mode string) *matcher {
 	if mode == RegexMatchMode {
 		if regexp.QuoteMeta(pattern) == pattern {
@@ -85,14 +91,25 @@ func compilePattern(pattern, mode string) *matcher {
 	if err != nil {
 		return &matcher{kind: matchNever, lit: pattern, err: err}
 	}
-	return &matcher{kind: matchGlob, lit: pattern, g: g}
+	if !globHasAlternation(pattern) {
+		return &matcher{kind: matchGlob, lit: pattern, g: g}
+	}
+	// Alternations make gobwas/glob's backtracking exponential: match an equivalent
+	// RE2 expression instead.
+	re, err := compileGlobRegexp(pattern)
+	if err == nil {
+		return &matcher{kind: matchGlobRegexp, lit: pattern, re: re}
+	}
+	return &matcher{kind: matchFail, lit: pattern, err: err,
+		evalErr: fmt.Errorf("%w: glob pattern %q: %w", errPatternEvaluation, pattern, err)}
 }
 
-// errPatternEvaluation is wrapped by match errors caused by invalid regular expressions.
+// errPatternEvaluation is wrapped by match errors caused by invalid regular expressions
+// and by glob alternation patterns that cannot be evaluated safely.
 var errPatternEvaluation = errors.New("pattern cannot be evaluated")
 
 // match reports whether value matches the pattern. An error is returned only for
-// regular expressions that failed to compile.
+// matchFail patterns.
 func (m *matcher) match(value string) (bool, error) {
 	switch m.kind {
 	case matchAny:
@@ -103,7 +120,7 @@ func (m *matcher) match(value string) (bool, error) {
 		return strings.Contains(value, m.lit), nil
 	case matchGlob:
 		return m.g.Match(value), nil
-	case matchRegex:
+	case matchRegex, matchGlobRegexp:
 		return m.re.MatchString(value), nil
 	case matchFail:
 		return false, m.evalErr
@@ -115,6 +132,29 @@ func (m *matcher) match(value string) (bool, error) {
 // literal reports whether the pattern can only match the exact string m.lit. Used to
 // index rules by resource.
 func (m *matcher) literal() bool { return m.kind == matchEqual }
+
+// exactMatcher matches value exactly, in either match mode. It is used for patterns
+// Patrol generates itself (the implicit project rule), which must neither depend on the
+// metacharacters of a name nor fail to compile.
+func exactMatcher(value string) *matcher { return &matcher{kind: matchEqual, lit: value} }
+
+// problem describes a pattern that did not compile for mode, prefixed with the field
+// name, or returns "" for a usable pattern. matchNever (an invalid glob) never matches;
+// matchFail (an invalid regular expression, or a glob alternation without an exact RE2
+// equivalent) fails every evaluation that reaches it.
+func (m *matcher) problem(field, mode string) string {
+	switch m.kind {
+	case matchNever:
+		return fmt.Sprintf("%s %q is not a valid glob pattern (%v)", field, m.lit, m.err)
+	case matchFail:
+		if mode == RegexMatchMode {
+			return fmt.Sprintf("%s %q is not a valid regular expression (%v)", field, m.lit, m.err)
+		}
+		return fmt.Sprintf("%s %q cannot be evaluated (%v)", field, m.lit, m.err)
+	default:
+		return ""
+	}
+}
 
 // isLiteralToken reports whether s contains no pattern metacharacters for mode, so it is
 // a candidate for "unknown resource/action" validation warnings.

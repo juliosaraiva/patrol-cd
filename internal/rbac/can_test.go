@@ -79,6 +79,7 @@ func TestCan(t *testing.T) {
 		mode        string
 		req         CanRequest
 		allowed     bool
+		loadErr     bool
 	}{
 		{name: "get applications", builtin: BuiltinPolicy(), req: CanRequest{Subject: "role:user", Action: "get", Resource: "applications", Object: "*/*"}, allowed: true},
 		{name: "get clusters, deny pattern does not match literal *", builtin: BuiltinPolicy(), req: CanRequest{Subject: "role:user", Action: "get", Resource: "clusters", Object: "*"}, allowed: true},
@@ -89,7 +90,9 @@ func TestCan(t *testing.T) {
 		{name: "get certificates", builtin: BuiltinPolicy(), req: CanRequest{Subject: "role:user", Action: "get", Resource: "certificates", Object: "*"}, allowed: false},
 		{name: "get certificates by default role", builtin: BuiltinPolicy(), defaultRole: RoleReadOnly, req: CanRequest{Subject: "role:user", Action: "get", Resource: "certificates", Object: "*"}, allowed: true},
 		{name: "default role without builtin policy", defaultRole: RoleReadOnly, req: CanRequest{Subject: "role:user", Action: "get", Resource: "certificates", Object: "*"}, allowed: false},
-		{name: "regex mode with glob object", builtin: BuiltinPolicy(), defaultRole: RoleReadOnly, mode: RegexMatchMode, req: CanRequest{Subject: "role:user", Action: "get", Resource: "certificates", Object: ".*"}, allowed: false},
+		// Upstream expects a denial. In Patrol the glob-style fixture ('*' patterns) is not a
+		// valid regex policy, so it does not load and everything is denied.
+		{name: "regex mode with glob object", builtin: BuiltinPolicy(), defaultRole: RoleReadOnly, mode: RegexMatchMode, req: CanRequest{Subject: "role:user", Action: "get", Resource: "certificates", Object: ".*"}, allowed: false, loadErr: true},
 		{name: "get logs */*", builtin: BuiltinPolicy(), req: CanRequest{Subject: "role:test", Action: "get", Resource: "logs", Object: "*/*"}, allowed: true},
 		{name: "get logs * expands to */*", builtin: BuiltinPolicy(), req: CanRequest{Subject: "role:test", Action: "get", Resource: "logs", Object: "*"}, allowed: true},
 		{name: "get logs empty expands to */*", builtin: BuiltinPolicy(), req: CanRequest{Subject: "role:test", Action: "get", Resource: "logs"}, allowed: true},
@@ -104,7 +107,13 @@ func TestCan(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			t.Parallel()
-			e := newEnforcer(t, tt.builtin, canFixture, tt.defaultRole, tt.mode)
+			e := NewEnforcer(WithLogger(discardLogger()))
+			err := e.SetPolicy(tt.builtin, canFixture, tt.defaultRole, tt.mode)
+			if tt.loadErr {
+				require.ErrorIs(t, err, ErrInvalidPolicy)
+			} else {
+				require.NoError(t, err)
+			}
 			tt.req.Strict = true
 			d, err := e.Can(tt.req)
 			require.NoError(t, err)
@@ -153,4 +162,25 @@ func TestCanStrictMode(t *testing.T) {
 	d, err = e.Can(CanRequest{Subject: "nobody", Action: "get", Resource: "app"})
 	require.NoError(t, err)
 	assert.True(t, d.Allowed)
+}
+
+func TestSCMProvidersResource(t *testing.T) {
+	t.Parallel()
+	assert.Equal(t, ResourceSCMProviders, ResolveResourceName("scm"))
+	assert.Equal(t, ResourceSCMProviders, ResolveResourceName("scmprovider"))
+	for _, a := range []string{ActionGet, ActionCreate, ActionUpdate, ActionDelete} {
+		assert.NoError(t, ValidateResourceAction(ResourceSCMProviders, a), a)
+	}
+	assert.ErrorIs(t, ValidateResourceAction(ResourceSCMProviders, ActionSync), ErrInvalidAction)
+	// role:readonly reads; only role:admin (and the admin account) mutates.
+	e := NewEnforcer()
+	require.NoError(t, e.SetPolicy(BuiltinPolicy(), "", "", ""))
+	check := func(sub, act string) bool {
+		return e.Enforce(Subjects{User: sub}, ResourceSCMProviders, act, "github").Allowed
+	}
+	assert.True(t, check("role:readonly", ActionGet))
+	assert.False(t, check("role:readonly", ActionCreate))
+	assert.True(t, check("role:admin", ActionCreate))
+	assert.True(t, check("role:admin", ActionDelete))
+	assert.False(t, check("nobody", ActionGet))
 }

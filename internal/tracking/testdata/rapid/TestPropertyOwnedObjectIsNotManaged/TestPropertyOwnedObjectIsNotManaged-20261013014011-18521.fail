@@ -1,0 +1,81 @@
+# 2026/10/13 01:40:11.718707 [TestPropertyOwnedObjectIsNotManaged] [rapid] draw controlPlane: "0"
+# 2026/10/13 01:40:11.727781 [TestPropertyOwnedObjectIsNotManaged] [rapid] draw method: ""
+# 2026/10/13 01:40:11.727794 [TestPropertyOwnedObjectIsNotManaged] [rapid] draw installationID: ""
+# 2026/10/13 01:40:11.727797 [TestPropertyOwnedObjectIsNotManaged] [rapid] draw appNamespace: ""
+# 2026/10/13 01:40:11.727805 [TestPropertyOwnedObjectIsNotManaged] [rapid] draw appName: "0"
+# 2026/10/13 01:40:11.727809 [TestPropertyOwnedObjectIsNotManaged] [rapid] draw group: ""
+# 2026/10/13 01:40:11.727811 [TestPropertyOwnedObjectIsNotManaged] [rapid] draw version: "v1"
+# 2026/10/13 01:40:11.727812 [TestPropertyOwnedObjectIsNotManaged] [rapid] draw namespaced: false
+# 2026/10/13 01:40:11.727814 [TestPropertyOwnedObjectIsNotManaged] [rapid] draw kind: "A"
+# 2026/10/13 01:40:11.727816 [TestPropertyOwnedObjectIsNotManaged] [rapid] draw name: "0"
+# 2026/10/13 01:40:11.727822 [TestPropertyOwnedObjectIsNotManaged] [rapid] draw defaultNS: ""
+# 2026/10/13 01:40:11.727839 [TestPropertyOwnedObjectIsNotManaged] [rapid] draw owners: 1
+# 2026/10/13 01:40:11.727840 [TestPropertyOwnedObjectIsNotManaged] [rapid] draw ownerKind: "A"
+# 2026/10/13 01:40:11.727841 [TestPropertyOwnedObjectIsNotManaged] [rapid] draw ownerName: "0"
+# 2026/10/13 01:40:11.727842 [TestPropertyOwnedObjectIsNotManaged] [rapid] draw ownerUID: "0"
+# 2026/10/13 01:40:11.727892 [TestPropertyOwnedObjectIsNotManaged] 
+# 	Error Trace:	/Users/juliosaraiva/Developer/patrol-cd/internal/tracking/property_test.go:224
+# 	            				/Users/juliosaraiva/go/pkg/mod/pgregory.net/rapid@v1.3.0/engine.go:458
+# 	            				/Users/juliosaraiva/go/pkg/mod/pgregory.net/rapid@v1.3.0/engine.go:467
+# 	            				/Users/juliosaraiva/go/pkg/mod/pgregory.net/rapid@v1.3.0/engine.go:292
+# 	            				/Users/juliosaraiva/go/pkg/mod/pgregory.net/rapid@v1.3.0/engine.go:207
+# 	            				/Users/juliosaraiva/Developer/patrol-cd/internal/tracking/property_test.go:202
+# 	Error:      	Should be false
+# 	Test:       	TestPropertyOwnedObjectIsNotManaged
+# 
+v0.4.8#10046761443948181094
+0x0
+0x0
+0x0
+0x0
+0x0
+0x0
+0x0
+0x0
+0x0
+0x0
+0x0
+0x0
+0x0
+0x0
+0x0
+0x0
+0x0
+0x0
+0x0
+0x0
+0x0
+0x0
+0x0
+0x0
+0x0
+0x0
+0x0
+0x0
+0x0
+0x0
+0x0
+0x0
+0x0
+0x0
+0x0
+0x0
+0x0
+0x0
+0x0
+0x0
+0x0
+0x0
+0x0
+0x0
+0x0
+0x0
+0x0
+0x0
+0x0
+0x0
+0x0
+0x0
+0x0
+0x0
+0x0

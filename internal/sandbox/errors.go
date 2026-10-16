@@ -25,6 +25,11 @@ var (
 	ErrAbsolutePath = errors.New("sandbox: absolute path not allowed")
 	// ErrTooManySymlinks reports a symlink chain that is too long (or a loop).
 	ErrTooManySymlinks = errors.New("sandbox: too many levels of symbolic links")
+	// ErrSymlinkBudget reports a path or symlink whose resolution needs more work
+	// than the package allows (very long or self-referencing targets, or a tree
+	// whose links are expensive on average). It fails closed: CheckSymlinks, Tar
+	// and extraction return it together with an *OutOfBoundsSymlinkError.
+	ErrSymlinkBudget = errors.New("sandbox: symlink resolution exceeds work budget")
 
 	// ErrUnsafeArchiveEntry reports an archive entry that is rejected for safety
 	// reasons (device or fifo, unsupported type, conflicting duplicate, symlinked

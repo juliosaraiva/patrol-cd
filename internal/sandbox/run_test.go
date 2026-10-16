@@ -408,12 +408,10 @@ func TestRunNoDescriptorInheritance(t *testing.T) {
 				open = append(open, fd)
 			}
 			assert.NotContains(t, open, heldFD, "descriptor opened by the parent leaked")
-			if helper {
-				// The helper marks every descriptor above stderr close-on-exec, so
-				// only 0-2 and the ones ls opened itself remain.
-				for _, fd := range open {
-					assert.LessOrEqual(t, fd, 4, "unexpected inherited descriptor %d in %v", fd, open)
-				}
+			// Run (direct mode) and the helper mark every descriptor above stderr
+			// close-on-exec, so only 0-2 and the ones ls opened itself remain.
+			for _, fd := range open {
+				assert.LessOrEqual(t, fd, 4, "unexpected inherited descriptor %d in %v", fd, open)
 			}
 		})
 	}
@@ -514,4 +512,127 @@ func TestSetHelperPath(t *testing.T) {
 	SetHelperPath("")
 	_, err = Run(t.Context(), Cmd{Path: "/bin/sh", Args: []string{"-c", "true"}, Limits: Limits{CPUSeconds: 5}})
 	require.NoError(t, err)
+}
+
+// withHelperState runs fn with the helper path override and the
+// MaybeHelperMain flag set as given, restoring both afterwards. Callers must not
+// be parallel: the state is package-global.
+func withHelperState(t *testing.T, path string, mainCalled bool, ackTimeout time.Duration) {
+	t.Helper()
+	prevCalled := helperMainCalled.Load()
+	prevAck := helperAckTimeout.Load()
+	SetHelperPath(path)
+	helperMainCalled.Store(mainCalled)
+	if ackTimeout > 0 {
+		helperAckTimeout.Store(int64(ackTimeout))
+	}
+	t.Cleanup(func() {
+		SetHelperPath("")
+		helperMainCalled.Store(prevCalled)
+		helperAckTimeout.Store(prevAck)
+	})
+}
+
+func TestRunHelperHandshake(t *testing.T) {
+	// Not parallel: mutates package state.
+	t.Run("program ignoring the helper protocol is not mistaken for the target", func(t *testing.T) {
+		// /bin/echo stands in for a binary whose main never calls MaybeHelperMain:
+		// before the fix Run returned its output ("__patrol-sandbox-exec cpu=5 ...")
+		// with a nil error and never ran the target.
+		withHelperState(t, "/bin/echo", true, 0)
+		res, err := Run(t.Context(), Cmd{Path: "/bin/echo", Args: []string{"hello"}, Limits: Limits{CPUSeconds: 5}})
+		require.ErrorIs(t, err, ErrInvalidCommand)
+		assert.Contains(t, err.Error(), "did not acknowledge")
+		assert.NotEqual(t, "hello\n", string(res.Stdout))
+	})
+
+	t.Run("long-running non-helper is killed after the acknowledgment timeout", func(t *testing.T) {
+		dir := t.TempDir()
+		pidFile := filepath.Join(dir, "pid")
+		script := filepath.Join(dir, "not-a-helper")
+		// Holds the inherited status descriptor open and never writes to it.
+		require.NoError(t, os.WriteFile(script, []byte("#!/bin/sh\necho $$ > '"+pidFile+"'\nexec /bin/sleep 300\n"), 0o755))
+		withHelperState(t, script, true, 500*time.Millisecond)
+		start := time.Now()
+		_, err := Run(t.Context(), Cmd{Path: "/bin/echo", Args: []string{"hello"}, Limits: Limits{CPUSeconds: 5, Timeout: 5 * time.Minute}})
+		require.ErrorIs(t, err, ErrInvalidCommand)
+		require.NotErrorIs(t, err, ErrTimeout)
+		assert.Less(t, time.Since(start), slowBound)
+		requireGone(t, readPID(t, pidFile))
+	})
+
+	t.Run("default helper requires MaybeHelperMain in this process", func(t *testing.T) {
+		withHelperState(t, "", false, 0)
+		marker := filepath.Join(t.TempDir(), "ran")
+		c := sh(`: > "$1"`, marker)
+		c.Limits.CPUSeconds = 5
+		_, err := Run(t.Context(), c)
+		require.ErrorIs(t, err, ErrInvalidCommand)
+		assert.Contains(t, err.Error(), "MaybeHelperMain")
+		assert.NoFileExists(t, marker, "nothing may be started")
+		// Direct mode does not need the helper.
+		c.Limits.CPUSeconds = 0
+		_, err = Run(t.Context(), c)
+		require.NoError(t, err)
+		assert.FileExists(t, marker)
+	})
+
+	t.Run("real helper still works and reports exec failures as exit errors", func(t *testing.T) {
+		withHelperState(t, "", true, 0)
+		c := sh(`printf ok`)
+		c.Limits.CPUSeconds = 5
+		res, err := Run(t.Context(), c)
+		require.NoError(t, err)
+		assert.Equal(t, "ok", string(res.Stdout))
+	})
+}
+
+func TestRunDirectModeDoesNotLeakRawDescriptors(t *testing.T) {
+	// Not parallel: raw descriptors without O_CLOEXEC would leak into the children
+	// of concurrently running tests.
+	var raw []int
+	t.Cleanup(func() {
+		for _, fd := range raw {
+			_ = syscall.Close(fd)
+		}
+	})
+	// Open without O_CLOEXEC, as an inherited (socket-activation style) or
+	// cgo-opened descriptor would be, until one lands above anything ls opens.
+	for range 64 {
+		fd, err := syscall.Open(os.DevNull, syscall.O_RDONLY, 0)
+		require.NoError(t, err)
+		raw = append(raw, fd)
+		if fd > 9 {
+			break
+		}
+	}
+	require.Greater(t, raw[len(raw)-1], 9, "could not obtain a descriptor above 9")
+
+	for _, helper := range []bool{false, true} {
+		t.Run(fmt.Sprintf("helper=%v", helper), func(t *testing.T) {
+			c := sh(`exec ls "$1"`, fdDir)
+			if helper {
+				c.Limits.MaxOpenFiles = 128
+			}
+			res, err := Run(t.Context(), c)
+			require.NoError(t, err, "stderr: %s", res.Stderr)
+			var open []int
+			for _, f := range strings.Fields(string(res.Stdout)) {
+				fd, err := strconv.Atoi(f)
+				require.NoError(t, err)
+				open = append(open, fd)
+			}
+			// ls itself uses 3 and 4, so a raw descriptor at those numbers is
+			// indistinguishable; everything above must be absent.
+			assert.NotContains(t, open, raw[len(raw)-1], "raw descriptor leaked into the child")
+			for _, fd := range open {
+				assert.LessOrEqual(t, fd, 4, "unexpected inherited descriptor %d in %v", fd, open)
+			}
+		})
+	}
+	// Marking close-on-exec does not close them in this process.
+	for _, fd := range raw {
+		var st syscall.Stat_t
+		require.NoError(t, syscall.Fstat(fd, &st), "fd %d", fd)
+	}
 }

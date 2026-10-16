@@ -1,10 +1,12 @@
 package sandbox
 
 import (
+	"context"
 	"errors"
 	"io/fs"
 	"os"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"testing"
 
@@ -92,6 +94,8 @@ func TestSecureJoin(t *testing.T) {
 		{rel: "p/q/a", wantErr: ErrPathEscape},
 		{rel: "/etc/passwd", wantErr: ErrAbsolutePath},
 		{rel: "loop1", wantErr: ErrTooManySymlinks},
+		{rel: "missing/\x00", wantErr: fs.ErrInvalid},
+		{rel: "a/\x00/b", wantErr: fs.ErrInvalid},
 	}
 	for _, tt := range tests {
 		t.Run(tt.rel, func(t *testing.T) {
@@ -291,4 +295,150 @@ func TestCheckSymlinksSoundness(t *testing.T) {
 
 func within(root, p string) bool {
 	return p == root || strings.HasPrefix(p, root+string(filepath.Separator))
+}
+
+// selfLoopTarget returns a ~1 KiB relative target that walks "n/.." pairs and
+// ends in name, so a link named name pointing at it refers to itself after many
+// cheap-looking components (the review's cost-amplification shape).
+func selfLoopTarget(name string) string {
+	return strings.Repeat("n/../", 200) + name
+}
+
+func TestCheckSymlinksSymlinkedRootFailsClosed(t *testing.T) {
+	t.Parallel()
+	base := t.TempDir()
+	real := filepath.Join(base, "real")
+	buildTree(t, real, []fsEntry{{path: "d", link: "."}, {path: "x", link: "d/.."}})
+	link := filepath.Join(base, "root")
+	require.NoError(t, os.Symlink("real", link))
+
+	// Walking the real directory finds the chain escape ...
+	var oob *OutOfBoundsSymlinkError
+	require.ErrorAs(t, CheckSymlinks(real), &oob)
+	assert.Equal(t, "x", oob.Path)
+	// ... and a symlinked root must not hide it (WalkDir does not descend).
+	err := CheckSymlinks(link)
+	require.ErrorAs(t, err, &oob)
+	require.ErrorIs(t, err, ErrPathEscape)
+	assert.Equal(t, ".", oob.Path)
+	assert.Equal(t, "real", oob.Target)
+}
+
+func TestSecureJoinSelfLoopBoundedWork(t *testing.T) {
+	t.Parallel()
+	root := t.TempDir()
+	buildTree(t, root, []fsEntry{{path: "n/"}, {path: "l0", link: selfLoopTarget("l0")}})
+
+	r := newResolver(root)
+	_, err := r.resolve(nil, "l0")
+	require.ErrorIs(t, err, ErrSymlinkBudget)
+	// Every repeated component is served from the lookup cache: l0 and n only.
+	// (The review estimated ~51k lstat calls before the fix.)
+	assert.LessOrEqual(t, r.lstats, 4)
+
+	_, err = SecureJoin(root, "l0/x")
+	require.ErrorIs(t, err, ErrSymlinkBudget)
+	require.NotErrorIs(t, err, ErrPathEscape, "budget failures are not reported as escapes by SecureJoin")
+}
+
+func TestCheckSymlinksSelfLoopsFailClosedCheaply(t *testing.T) {
+	t.Parallel()
+	root := t.TempDir()
+	entries := []fsEntry{{path: "n/"}}
+	for i := range 20 {
+		name := "l" + strconv.Itoa(i)
+		entries = append(entries, fsEntry{path: name, link: selfLoopTarget(name)})
+	}
+	buildTree(t, root, entries)
+
+	r, err := checkSymlinks(t.Context(), root, nil)
+	require.ErrorIs(t, err, ErrSymlinkBudget)
+	var oob *OutOfBoundsSymlinkError
+	require.ErrorAs(t, err, &oob, "budget failures fail closed as out-of-bounds links")
+	assert.Equal(t, "l0", oob.Path)
+	assert.LessOrEqual(t, r.lstats, 8)
+}
+
+func TestResolveStepBudget(t *testing.T) {
+	t.Parallel()
+	// m0 -> ... -> m10 -> f, each target ~1 KiB (401 components).
+	root := t.TempDir()
+	entries := []fsEntry{{path: "n/"}, {path: "f"}}
+	for i := range 11 {
+		next := "m" + strconv.Itoa(i+1)
+		if i == 10 {
+			next = "f"
+		}
+		entries = append(entries, fsEntry{path: "m" + strconv.Itoa(i), link: strings.Repeat("n/../", 200) + next})
+	}
+	buildTree(t, root, entries)
+
+	// Nine hops (~3.6k components) fit the per-resolution budget ...
+	got, err := SecureJoin(root, "m2")
+	require.NoError(t, err)
+	assert.Equal(t, filepath.Join(root, "f"), got)
+	// ... eleven (~4.4k) do not, and fail closed.
+	_, err = SecureJoin(root, "m0")
+	require.ErrorIs(t, err, ErrSymlinkBudget)
+
+	// An over-long input path fails the same way before any lstat.
+	r := newResolver(root)
+	_, err = r.resolve(nil, strings.Repeat("n/", maxResolveSteps+1))
+	require.ErrorIs(t, err, ErrSymlinkBudget)
+	assert.Zero(t, r.lstats)
+}
+
+func TestResolveSimpleLoopsStillAccepted(t *testing.T) {
+	t.Parallel()
+	// Loops with short targets end at the hop limit, not the budget: they stay
+	// "not an escape", as upstream and the kernel treat them.
+	root := t.TempDir()
+	buildTree(t, root, []fsEntry{{path: "a", link: "b"}, {path: "b", link: "a"}, {path: "s", link: "s"}})
+	require.NoError(t, CheckSymlinks(root))
+	_, err := SecureJoin(root, "a")
+	require.ErrorIs(t, err, ErrTooManySymlinks)
+}
+
+func TestCheckSymlinksWalkBudget(t *testing.T) {
+	t.Parallel()
+	// Every l<i> -> m0 is cheap to store but costs ~3.6k resolution steps (m0..m8
+	// chain), under the per-link budget. Many of them exhaust the per-walk budget
+	// (walkInitialSteps + walkStepsPerEntry per entry) and fail closed.
+	build := func(t *testing.T, links int) string {
+		root := t.TempDir()
+		entries := []fsEntry{{path: "n/"}, {path: "f"}}
+		for i := range 9 {
+			next := "m" + strconv.Itoa(i+1)
+			if i == 8 {
+				next = "f"
+			}
+			entries = append(entries, fsEntry{path: "m" + strconv.Itoa(i), link: strings.Repeat("n/../", 200) + next})
+		}
+		for i := range links {
+			entries = append(entries, fsEntry{path: "z/l" + strconv.Itoa(i), link: "../m0"})
+		}
+		buildTree(t, root, entries)
+		return root
+	}
+	t.Run("within budget", func(t *testing.T) {
+		t.Parallel()
+		require.NoError(t, CheckSymlinks(build(t, 150)))
+	})
+	t.Run("exhausted", func(t *testing.T) {
+		t.Parallel()
+		err := CheckSymlinks(build(t, 400))
+		require.ErrorIs(t, err, ErrSymlinkBudget)
+		var oob *OutOfBoundsSymlinkError
+		require.ErrorAs(t, err, &oob)
+		assert.True(t, strings.HasPrefix(oob.Path, filepath.Join("z", "l")), oob.Path)
+	})
+}
+
+func TestCheckSymlinksContextCanceled(t *testing.T) {
+	t.Parallel()
+	root := t.TempDir()
+	buildTree(t, root, []fsEntry{{path: "a/b"}})
+	ctx, cancel := context.WithCancel(t.Context())
+	cancel()
+	require.ErrorIs(t, CheckSymlinksContext(ctx, root), context.Canceled)
 }

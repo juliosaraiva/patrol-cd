@@ -36,6 +36,8 @@ const (
 	ResourceLogs              = "logs"
 	ResourceExec              = "exec"
 	ResourceExtensions        = "extensions"
+	// ResourceSCMProviders guards SCMProvider objects (a Patrol addition; absent upstream).
+	ResourceSCMProviders = "scmproviders"
 )
 
 // Actions of the baseline RBAC model. Applications additionally use the path forms
@@ -77,6 +79,7 @@ var (
 		ResourceLogs,
 		ResourceExec,
 		ResourceExtensions,
+		ResourceSCMProviders,
 	}
 	actions = []string{
 		ActionGet,

@@ -84,8 +84,11 @@ func recompileProjects(projects map[string]*projectEntry, mode string) map[strin
 // compileProject validates and compiles a project's roles with the upstream AppProject
 // rules: role names, 'p' lines whose subject is the role's own subject, a project-scoped
 // resource, a valid action, an object inside the project and an allow/deny effect, and
-// well-formed group names. Each role also gets the implicit rule
-// "p, proj:<project>:<role>, projects, get, <project>, allow".
+// well-formed group names. In addition, the resource, action and object of every line
+// must compile in mode with the evaluator's own compiler (checkRolePatterns), so no
+// project rule can fail when it is evaluated. Each role also gets the implicit rule
+// "p, proj:<project>:<role>, projects, get, <project>, allow", whose object matches the
+// project name exactly.
 func compileProject(project string, roles []Role, mode string) *projectEntry {
 	entry := &projectEntry{name: project, roles: roles}
 	if project == "" || strings.ContainsAny(project, projectNameInvalid) || strings.TrimSpace(project) != project {
@@ -139,6 +142,9 @@ func compileProject(project string, roles []Role, mode string) *projectEntry {
 			if err == nil {
 				err = validateRolePolicy(pl, subject, objectRegexp)
 			}
+			if err == nil {
+				err = b.checkRolePatterns(pl)
+			}
 			if err != nil {
 				roleValid = false
 				fail(lineNo, pl.text, "%v; the line is ignored", err)
@@ -158,8 +164,12 @@ func compileProject(project string, roles []Role, mode string) *projectEntry {
 		if !roleValid {
 			fail(0, "", "role %q has invalid policies: its allow rules are ignored until they are fixed", role.Name)
 		} else {
+			// The object is matched exactly rather than compiled: only requests whose
+			// object is this project's name reach the project's rules, and a name with
+			// pattern metacharacters must not turn the rule into a broken pattern (an
+			// invalid regular expression would fail every evaluation reaching it).
 			implicit := fmt.Sprintf("p, %s, %s, %s, %s, %s", subject, ResourceProjects, ActionGet, project, EffectAllow)
-			b.addRule(subject, ResourceProjects, ActionGet, project, effectAllow, location{source: source, text: implicit})
+			b.addCompiledRule(subject, b.compile(ResourceProjects), b.compile(ActionGet), exactMatcher(project), effectAllow, location{source: source, text: implicit})
 			for _, p := range allows {
 				b.addRule(p.tokens[1], p.tokens[2], p.tokens[3], p.tokens[4], parseEffect(p.tokens[5]), p.loc)
 			}
@@ -192,9 +202,14 @@ func compileProject(project string, roles []Role, mode string) *projectEntry {
 // validateRolePolicy applies the upstream AppProject policy validation to a tokenized
 // role policy line. Field values are compared with surrounding spaces trimmed, as
 // upstream does.
+//
+// Like upstream, the raw line must split on ',' into exactly six parts before any CSV
+// unquoting. So no field of a project policy can contain a comma, even a quoted one.
+// This keeps glob alternations ('{a,b}') out of project-editor input: alternations
+// whose branches contain '*' make backtracking glob matchers take exponential time.
 func validateRolePolicy(pl parsedLine, subject string, objectRegexp *regexp.Regexp) error {
-	if pl.kind != linePolicy {
-		return fmt.Errorf("invalid policy rule %q: must be of the form 'p, sub, res, act, obj, eft'", pl.text)
+	if pl.kind != linePolicy || strings.Count(pl.text, ",") != 5 {
+		return fmt.Errorf("invalid policy rule %q: must be of the form 'p, sub, res, act, obj, eft' with exactly six comma-separated fields (quoted fields cannot contain commas)", pl.text)
 	}
 	field := func(i int) string { return strings.TrimSpace(pl.tokens[i]) }
 	if field(1) != subject {
@@ -215,9 +230,27 @@ func validateRolePolicy(pl parsedLine, subject string, objectRegexp *regexp.Rege
 	return nil
 }
 
+// checkRolePatterns rejects a role policy line whose resource, action or object does
+// not compile in the builder's match mode. It compiles the exact tokens addRule will
+// use, through the same cache, so a line that passes can never yield a matchFail (an
+// invalid regular expression or an untranslatable glob alternation, which would fail
+// every evaluation reaching the rule) or a matchNever (an invalid glob, which would
+// silently never match). The subject is not a pattern: rules are looked up by exact
+// subject name, and validateRolePolicy already requires "proj:<project>:<role>".
+func (b *builder) checkRolePatterns(pl parsedLine) error {
+	for i, field := range []string{"resource", "action", "object"} {
+		if msg := b.compile(pl.tokens[i+2]).problem(field, b.mode); msg != "" {
+			return fmt.Errorf("invalid policy rule %q: %s", pl.text, msg)
+		}
+	}
+	return nil
+}
+
 // isValidRoleAction mirrors upstream: the plain verbs get/create/update/delete/sync/
 // override, "*", or any action containing "action/", "update/" or "delete/" (upstream
-// uses unanchored regular expressions for those).
+// uses unanchored regular expressions for those). Other glob syntax ('*', '?', '[...]',
+// and '{...}' without commas, which is a no-op group) stays allowed, as upstream: none
+// of it can make matching super-linear (see validateRolePolicy and compilePattern).
 func isValidRoleAction(action string) bool {
 	if validRoleActions[action] {
 		return true

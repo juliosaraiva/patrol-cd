@@ -1,0 +1,85 @@
+# 2026/10/13 01:08:11.081960 [TestRevocationTableProperties] [rapid] draw maxEntries: 2
+# 2026/10/13 01:08:11.081994 [TestRevocationTableProperties] [rapid] draw maxBytes: 78
+# 2026/10/13 01:08:11.081996 [TestRevocationTableProperties] [rapid] draw perSubject: 1
+# 2026/10/13 01:08:11.081998 [TestRevocationTableProperties] [rapid] draw steps: 3
+# 2026/10/13 01:08:11.081999 [TestRevocationTableProperties] [rapid] draw dt: 0
+# 2026/10/13 01:08:11.082002 [TestRevocationTableProperties] [rapid] draw id: "b"
+# 2026/10/13 01:08:11.082003 [TestRevocationTableProperties] [rapid] draw subject: "s3"
+# 2026/10/13 01:08:11.082004 [TestRevocationTableProperties] [rapid] draw age: 0
+# 2026/10/13 01:08:11.082004 [TestRevocationTableProperties] [rapid] draw ttl: 1
+# 2026/10/13 01:08:11.082004 [TestRevocationTableProperties] [rapid] draw ms: 1
+# 2026/10/13 01:08:11.082022 [TestRevocationTableProperties] [rapid] draw dt: 1
+# 2026/10/13 01:08:11.082023 [TestRevocationTableProperties] [rapid] draw id: "b"
+# 2026/10/13 01:08:11.082023 [TestRevocationTableProperties] [rapid] draw subject: "s3"
+# 2026/10/13 01:08:11.082024 [TestRevocationTableProperties] [rapid] draw age: 0
+# 2026/10/13 01:08:11.082024 [TestRevocationTableProperties] [rapid] draw ttl: 0
+# 2026/10/13 01:08:11.082024 [TestRevocationTableProperties] [rapid] draw ms: 1
+# 2026/10/13 01:08:11.082031 [TestRevocationTableProperties] [rapid] draw dt: 0
+# 2026/10/13 01:08:11.082031 [TestRevocationTableProperties] [rapid] draw id: "a"
+# 2026/10/13 01:08:11.082031 [TestRevocationTableProperties] [rapid] draw subject: "s1"
+# 2026/10/13 01:08:11.082035 [TestRevocationTableProperties] [rapid] draw age: 0
+# 2026/10/13 01:08:11.082035 [TestRevocationTableProperties] [rapid] draw ttl: 0
+# 2026/10/13 01:08:11.082035 [TestRevocationTableProperties] [rapid] draw ms: 1
+# 2026/10/13 01:08:11.082042 [TestRevocationTableProperties] revoked token {ID:b Subject:s3 IssuedAt:2026-10-12 12:00:01 +0000 UTC ExpiresAt:2026-10-12 12:00:01.001 +0000 UTC} reported valid at 2026-10-12 12:00:01 +0000 UTC
+# 
+v0.4.8#12299837724063930299
+0x0
+0x0
+0x1
+0x0
+0xb908c4741e25e
+0x12
+0x0
+0x0
+0x0
+0x0
+0x38e38e38e38e4
+0x2
+0x0
+0x0
+0x0
+0x0
+0x1
+0x38e38e38e38e4
+0x2
+0x0
+0x0
+0x0
+0x0
+0x0
+0x1
+0x0
+0x0
+0x1
+0x0
+0x0
+0x1
+0x0
+0x1
+0x38e38e38e38e4
+0x2
+0x0
+0x0
+0x0
+0x0
+0x0
+0x0
+0x0
+0x0
+0x1
+0x0
+0x0
+0x0
+0x0
+0x0
+0x0
+0x0
+0x0
+0x0
+0x0
+0x0
+0x0
+0x0
+0x0
+0x0
+0x1

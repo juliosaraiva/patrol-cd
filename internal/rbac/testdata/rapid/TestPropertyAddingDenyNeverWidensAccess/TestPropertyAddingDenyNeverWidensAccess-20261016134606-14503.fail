@@ -1,0 +1,78 @@
+# 2026/10/16 13:46:06.570912 [TestPropertyAddingDenyNeverWidensAccess] [rapid] draw mode: "regex"
+# 2026/10/16 13:46:06.570928 [TestPropertyAddingDenyNeverWidensAccess] [rapid] draw defaultRole: ""
+# 2026/10/16 13:46:06.570979 [TestPropertyAddingDenyNeverWidensAccess] [rapid] draw policy: []string{"g, bob, role:b", "p, bob, applications, get, .*, allow"}
+# 2026/10/16 13:46:06.571062 [TestPropertyAddingDenyNeverWidensAccess] [rapid] draw roles: []rbac.Role{rbac.Role{Name:"r", Policies:[]string{"p, proj:p1:r, applications, get, p1/.*, allow", "p, proj:p1:r, applications, get, p1/.*, allow", "p, proj:p1:r, applications, get, p1/.*, allow", "p, proj:p1:r, applications, *, p1/.*, allow"}, Groups:[]string{"role:b"}}}
+# 2026/10/16 13:46:06.574060 [TestPropertyAddingDenyNeverWidensAccess] [rapid] draw where: 2
+# 2026/10/16 13:46:06.574077 [TestPropertyAddingDenyNeverWidensAccess] [rapid] draw projectDeny: "p, proj:p1:r, applications, *, p2/a, deny"
+# 2026/10/16 13:46:06.576953 [TestPropertyAddingDenyNeverWidensAccess] deny widened access for {User:bob Groups:[] ProjectRole:<nil>} applications get p1/a
+# 
+v0.4.8#905287933278798381
+0x0
+0x1
+0x0
+0x0
+0x5555555555555
+0x0
+0x1
+0x0
+0x1
+0x0
+0x1
+0x5555555555555
+0x0
+0x0
+0x0
+0x1
+0x0
+0x0
+0x0
+0x0
+0x0
+0x0
+0x0
+0x0
+0x0
+0x0
+0x6b74f03291620
+0x4
+0x0
+0x0
+0x0
+0x0
+0x0
+0x0
+0x0
+0x0
+0x0
+0x0
+0x0
+0x0
+0x0
+0x0
+0x0
+0x0
+0x0
+0x0
+0x0
+0x0
+0x0
+0x0
+0x0
+0x0
+0x0
+0x0
+0x38e38e38e38e4
+0x3
+0x0
+0x0
+0x0
+0x0
+0x10000000000000
+0x38e38e38e38e4
+0x3
+0x0
+0x0
+0x38e38e38e38e4
+0x2
+0x38e38e38e38e4
+0x2

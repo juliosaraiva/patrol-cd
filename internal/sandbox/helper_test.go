@@ -6,6 +6,7 @@ import (
 	"bytes"
 	"io"
 	"math"
+	"os"
 	"strings"
 	"testing"
 	"testing/iotest"
@@ -63,9 +64,38 @@ func TestDecodeHelperArgsRejects(t *testing.T) {
 
 func TestHelperMainFailsClosed(t *testing.T) {
 	t.Parallel()
-	// Invalid arguments never reach exec; the helper reports a setup failure.
-	assert.Equal(t, helperExitSetup, helperMain([]string{"bogus"}))
-	assert.Equal(t, helperExitSetup, helperMain([]string{"cpu=1", "as=0", "nofile=0", "--", "relative", "x"}))
+	valid := []string{"cpu=1", "as=0", "nofile=0", "--", "/bin/true", "true"}
+	tests := []struct {
+		name       string
+		args       []string
+		withStatus bool
+	}{
+		{"bad arguments", []string{"bogus"}, true},
+		{"relative target", []string{"cpu=1", "as=0", "nofile=0", "--", "relative", "x"}, true},
+		// Not started by Run (no status pipe): never exec, even with valid arguments.
+		{"no status descriptor", valid, false},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+			var status *os.File
+			var r *os.File
+			if tt.withStatus {
+				var err error
+				r, status, err = os.Pipe()
+				require.NoError(t, err)
+				defer func() { _ = r.Close() }()
+			}
+			assert.Equal(t, helperExitSetup, helperMain(tt.args, status))
+			if status != nil {
+				require.NoError(t, status.Close())
+				got, err := io.ReadAll(r)
+				require.NoError(t, err)
+				// A failing helper reports failure, never readiness.
+				assert.Equal(t, []byte{helperStatusFailed}, got)
+			}
+		})
+	}
 }
 
 func TestLowerRlimitHandlesExtremes(t *testing.T) {

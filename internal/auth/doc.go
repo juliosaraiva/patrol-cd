@@ -10,8 +10,9 @@
 //     watcher calling AccountsFromMaps on every ConfigMap/Secret change).
 //   - TokenRegistry answers whether a project-role token (subject "proj:<project>:<role>")
 //     is still recorded in AppProject status.
-//   - RevocationStore records revoked token IDs until they expire (see the revocation
-//     sub-package for the Secret-backed implementation).
+//   - RevocationStore records revoked tokens until they expire, bounded per subject
+//     (RevocationTable holds the shared rules; see the revocation sub-package for the
+//     Secret-backed implementation).
 //   - ExternalVerifier verifies bearer tokens issued by an external IdP (see the oidc
 //     sub-package).
 //

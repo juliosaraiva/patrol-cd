@@ -18,6 +18,7 @@ p, role:readonly, write-repositories, get, *, allow
 p, role:readonly, projects, get, *, allow
 p, role:readonly, accounts, get, *, allow
 p, role:readonly, gpgkeys, get, *, allow
+p, role:readonly, scmproviders, get, *, allow
 p, role:readonly, logs, get, */*, allow
 
 p, role:admin, applications, create, */*, allow
@@ -50,6 +51,9 @@ p, role:admin, projects, delete, *, allow
 p, role:admin, accounts, update, *, allow
 p, role:admin, gpgkeys, create, *, allow
 p, role:admin, gpgkeys, delete, *, allow
+p, role:admin, scmproviders, create, *, allow
+p, role:admin, scmproviders, update, *, allow
+p, role:admin, scmproviders, delete, *, allow
 p, role:admin, exec, create, */*, allow
 
 g, role:admin, role:readonly

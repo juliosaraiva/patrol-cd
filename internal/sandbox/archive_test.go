@@ -4,11 +4,13 @@ import (
 	"archive/tar"
 	"bytes"
 	"compress/gzip"
+	"context"
 	"errors"
 	"io"
 	"io/fs"
 	"os"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"testing"
 	"time"
@@ -625,4 +627,139 @@ func (c *countingReader) Read(p []byte) (int, error) {
 	n, err := c.r.Read(p)
 	c.n += int64(n)
 	return n, err
+}
+
+func TestExtractTarRejectsOverlongNamesBeforeTouchingDisk(t *testing.T) {
+	t.Parallel()
+	deep := strings.Repeat("a/", maxEntryNameComponents) + "f" // 257 components
+	tests := []struct {
+		name  string
+		entry tarEntry
+	}{
+		{"name over 4096 bytes", reg(strings.Repeat("abcdefgh/", 460)+"f", "x")},
+		{"too many components", reg(deep, "x")},
+		{"component over 255 bytes", reg("d/"+strings.Repeat("c", 256), "x")},
+		{"deep directory", dir(deep + "/")},
+		{"deep symlink", symlink(deep, "x")},
+		{"symlink target over 4096 bytes", symlink("l", strings.Repeat("n/", 2049))},
+		{"hard link to deep name", hardlink("h", deep)},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+			dest := filepath.Join(t.TempDir(), "dest")
+			err := ExtractTar(bytes.NewReader(makeTar(t, tt.entry)), dest, ArchiveLimits{})
+			require.ErrorIs(t, err, ErrUnsafeArchiveEntry)
+			entries, rerr := os.ReadDir(dest)
+			require.NoError(t, rerr)
+			assert.Empty(t, entries, "rejected before any filesystem work")
+		})
+	}
+}
+
+// TestExtractTarDeepEntriesLinearWork checks that per-entry filesystem work is
+// linear in the entry's depth. The review measured the old per-prefix Lstat walk
+// (each Root.Lstat re-walking from the root) at O(depth²) per entry: 10 files at
+// depth 250 took 26 s on a loaded host.
+func TestExtractTarDeepEntriesLinearWork(t *testing.T) {
+	t.Parallel()
+	const depth = 250
+	const files = 40
+	prefix := strings.Repeat("a/", depth-2)
+	var entries []tarEntry
+	for i := range files {
+		// A distinct parent per pair of entries: half the lookups miss the
+		// parent cache and walk all existing components.
+		entries = append(entries, reg(prefix+"b"+strconv.Itoa(i/2)+"/f"+strconv.Itoa(i), "x"))
+	}
+	entries = append(entries, hardlink(prefix+"b0/h", prefix+"b0/f0"), symlink(prefix+"b1/s", "f2"))
+	dest := filepath.Join(t.TempDir(), "dest")
+	require.NoError(t, os.MkdirAll(dest, 0o755))
+	root, err := os.OpenRoot(dest)
+	require.NoError(t, err)
+	defer func() { _ = root.Close() }()
+	data := makeTar(t, entries...)
+	stream := &budgetReader{r: bytes.NewReader(data), budget: archiveInitialStreamAllowance}
+	x := &extractor{ctx: t.Context(), root: root, tr: tar.NewReader(stream), stream: stream, lim: ArchiveLimits{}.normalized()}
+	defer x.close()
+	start := time.Now()
+	require.NoError(t, x.run())
+	elapsed := time.Since(start)
+
+	// Linear: a small constant number of component traversals per level and
+	// entry. Quadratic work would be about depth/2 = 125 per level and entry.
+	limit := 8 * depth * len(entries)
+	assert.LessOrEqual(t, x.walked, limit, "walked %d components for %d entries at depth %d", x.walked, len(entries), depth)
+	t.Logf("walked %d components (limit %d) in %s", x.walked, limit, elapsed)
+
+	got, err := os.ReadFile(filepath.Join(dest, filepath.FromSlash(prefix), "b1", "s"))
+	require.NoError(t, err)
+	assert.Equal(t, "x", string(got))
+	require.NoError(t, CheckSymlinks(dest))
+}
+
+func TestExtractTarImplicitDirectoriesCountAsEntries(t *testing.T) {
+	t.Parallel()
+	data := makeTar(t, reg("a/b/c/d/e/f/g/h/i/file", "x")) // 9 implicit dirs + 1 file
+	err := ExtractTar(bytes.NewReader(data), filepath.Join(t.TempDir(), "d"), ArchiveLimits{MaxFiles: 9})
+	require.ErrorIs(t, err, ErrArchiveLimit)
+	require.NoError(t, ExtractTar(bytes.NewReader(data), filepath.Join(t.TempDir(), "d"), ArchiveLimits{MaxFiles: 10}))
+}
+
+func TestExtractTarIntoSymlinkedDestFailsClosed(t *testing.T) {
+	t.Parallel()
+	base := t.TempDir()
+	real := filepath.Join(base, "real")
+	require.NoError(t, os.Mkdir(real, 0o755))
+	dest := filepath.Join(base, "dest")
+	require.NoError(t, os.Symlink("real", dest))
+
+	// Before the fix this archive was accepted: entries went to real/ through the
+	// symlink, and the final CheckSymlinks(dest) did not descend into it.
+	data := makeTar(t, symlink("d", "."), symlink("x", "d/.."))
+	err := ExtractTar(bytes.NewReader(data), dest, ArchiveLimits{})
+	require.ErrorIs(t, err, ErrPathEscape)
+	var oob *OutOfBoundsSymlinkError
+	require.ErrorAs(t, err, &oob)
+	assert.Equal(t, ".", oob.Path)
+	entries, err := os.ReadDir(real)
+	require.NoError(t, err)
+	assert.Empty(t, entries)
+}
+
+func TestTarSymlinkedRootFailsClosed(t *testing.T) {
+	t.Parallel()
+	base := t.TempDir()
+	real := filepath.Join(base, "real")
+	buildTree(t, real, []fsEntry{{path: "file.yaml"}})
+	link := filepath.Join(base, "link")
+	require.NoError(t, os.Symlink("real", link))
+
+	// Before the fix this returned files=0, err=nil and an empty archive.
+	var buf bytes.Buffer
+	n, err := TarCount(link, &buf, nil)
+	require.ErrorIs(t, err, ErrPathEscape)
+	assert.Zero(t, n)
+	assert.Zero(t, buf.Len(), "nothing is streamed")
+
+	n, err = TarCount(real, &buf, nil)
+	require.NoError(t, err)
+	assert.Equal(t, 1, n)
+}
+
+func TestArchiveContextCanceled(t *testing.T) {
+	t.Parallel()
+	ctx, cancel := context.WithCancel(t.Context())
+	cancel()
+	dest := filepath.Join(t.TempDir(), "dest")
+	err := ExtractTarContext(ctx, bytes.NewReader(makeTar(t, reg("a", "x"))), dest, ArchiveLimits{})
+	require.ErrorIs(t, err, context.Canceled)
+	entries, rerr := os.ReadDir(dest)
+	require.NoError(t, rerr)
+	assert.Empty(t, entries)
+
+	src := t.TempDir()
+	buildTree(t, src, []fsEntry{{path: "a"}})
+	_, err = TarCountContext(ctx, src, io.Discard, nil)
+	require.ErrorIs(t, err, context.Canceled)
 }

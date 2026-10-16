@@ -341,7 +341,7 @@ func (s *TokenService) Verify(ctx context.Context, raw string) (*Principal, erro
 			return nil, errors.New("external verifier returned no principal")
 		}
 		if p.TokenID != "" {
-			if err := s.checkRevoked(ctx, p.TokenID); err != nil {
+			if err := s.checkRevoked(ctx, p); err != nil {
 				return nil, err
 			}
 		}
@@ -436,7 +436,7 @@ func (s *TokenService) verifyLocal(ctx context.Context, raw string) (*Principal,
 		return nil, invalid(fmt.Errorf("unknown token kind %q", truncate(kind, 32)))
 	}
 
-	if err := s.checkRevoked(ctx, jti); err != nil {
+	if err := s.checkRevoked(ctx, p); err != nil {
 		return nil, err
 	}
 
@@ -484,8 +484,8 @@ func (s *TokenService) checkAccountToken(ctx context.Context, p *Principal) erro
 	return nil
 }
 
-func (s *TokenService) checkRevoked(ctx context.Context, jti string) error {
-	revoked, err := s.revocations.IsRevoked(ctx, jti)
+func (s *TokenService) checkRevoked(ctx context.Context, p *Principal) error {
+	revoked, err := s.revocations.IsRevoked(ctx, s.revocationRef(p))
 	if err != nil {
 		return fmt.Errorf("check token revocation: %w", err)
 	}
@@ -521,8 +521,14 @@ func (s *TokenService) RenewIfExpiring(_ context.Context, p *Principal) (Issued,
 	return iss, true, nil
 }
 
-// Revoke records p's token ID in the revocation store until the token expires (logout).
-// Tokens without expiry return ErrNotRevocable: delete their metadata instead.
+// Revoke records p's token in the revocation store until the token can no longer verify
+// (its expiry plus the verification leeway); this is logout. Tokens without expiry
+// return ErrNotRevocable: delete their metadata instead.
+//
+// Revocations are scoped to the principal (kind, issuer, subject): a principal that
+// revokes more tokens than the store's per-subject limit has them collapsed into a
+// watermark that also ends its own other sessions issued at or before the newest
+// collapsed one, but it cannot make other principals' revocations fail.
 func (s *TokenService) Revoke(ctx context.Context, p *Principal) error {
 	if p == nil || p.TokenID == "" {
 		return errors.New("revoke: token has no id")
@@ -530,10 +536,25 @@ func (s *TokenService) Revoke(ctx context.Context, p *Principal) error {
 	if p.ExpiresAt.IsZero() {
 		return ErrNotRevocable
 	}
-	if err := s.revocations.Revoke(ctx, p.TokenID, p.ExpiresAt); err != nil {
+	if err := s.revocations.Revoke(ctx, s.revocationRef(p)); err != nil {
 		return fmt.Errorf("revoke token: %w", err)
 	}
 	return nil
+}
+
+// revocationRef identifies p's token for the revocation store. The subject scope
+// separates token kinds and issuers, so collapsing an account's login sessions never
+// touches its API tokens and an SSO subject never shares a scope with a local account.
+func (s *TokenService) revocationRef(p *Principal) TokenRef {
+	ref := TokenRef{
+		ID:       p.TokenID,
+		Subject:  string(p.Kind) + "\x00" + p.Issuer + "\x00" + p.Subject,
+		IssuedAt: p.IssuedAt,
+	}
+	if !p.ExpiresAt.IsZero() {
+		ref.ExpiresAt = p.ExpiresAt.Add(s.leeway)
+	}
+	return ref
 }
 
 // ProjectSubject returns "proj:<project>:<role>" after validating both parts.

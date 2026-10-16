@@ -337,14 +337,23 @@ p, alice, applications, delete, \*/literal, allow
 			{user("bob"), "applications", "get", "my-team/x", false},
 		})
 	})
-	t.Run("glob star is an invalid regex and fails closed", func(t *testing.T) {
+	t.Run("glob star is an invalid regex and the user policy fails closed", func(t *testing.T) {
 		t.Parallel()
-		e := newEnforcer(t, "", "p, alice, applications, get, *, allow\np, alice, clusters, get, .*, allow", "", RegexMatchMode)
-		d := e.Enforce(user("alice"), "applications", "get", "p/a")
-		assert.False(t, d.Allowed)
-		assert.Contains(t, d.Reason, "policy evaluation failed")
-		// The failing rule is only reached when resource and action match first.
-		assert.True(t, e.Enforce(user("alice"), "clusters", "get", "https://x").Allowed)
+		e := NewEnforcer(WithLogger(discardLogger()))
+		err := e.SetPolicy("", "p, alice, applications, get, *, allow\np, alice, clusters, get, .*, allow", "", RegexMatchMode)
+		require.ErrorIs(t, err, ErrInvalidPolicy)
+		assert.Contains(t, err.Error(), `user:1: error: object "*" is not a valid regular expression`)
+		require.Error(t, e.LoadError())
+		// The whole policy is rejected, so even the valid rule does not apply, and no
+		// evaluation can fail on the broken pattern.
+		for _, r := range [][3]string{{"applications", "get", "p/a"}, {"clusters", "get", "https://x"}} {
+			d := e.Enforce(user("alice"), r[0], r[1], r[2])
+			assert.False(t, d.Allowed)
+			assert.Contains(t, d.Reason, "RBAC policy failed to load")
+		}
+		// The next valid policy restores service.
+		require.NoError(t, e.SetPolicy("", "p, alice, applications, get, .*, allow", "", RegexMatchMode))
+		assert.True(t, e.Enforce(user("alice"), "applications", "get", "p/a").Allowed)
 	})
 	t.Run("invalid glob never matches", func(t *testing.T) {
 		t.Parallel()

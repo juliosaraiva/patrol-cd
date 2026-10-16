@@ -49,7 +49,7 @@ func TestPolicySources(t *testing.T) {
 		"policy.a.csv":        "a",
 		ConfigMapScopesKey:    "[groups]",
 	})
-	assert.Equal(t, []Source{{ConfigMapPolicyCSVKey, "main"}, {"policy.a.csv", "a"}, {"policy.b.csv", "b"}}, got)
+	assert.Equal(t, []Source{{Name: ConfigMapPolicyCSVKey, CSV: "main"}, {Name: "policy.a.csv", CSV: "a"}, {Name: "policy.b.csv", CSV: "b"}}, got)
 	assert.Empty(t, PolicySources(map[string]string{"other": "x"}))
 }
 

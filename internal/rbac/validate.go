@@ -12,13 +12,19 @@ type ValidateOptions struct {
 }
 
 // Validate checks a policy for "patrol admin settings rbac validate". It returns every
-// problem: syntax errors (which make the policy unloadable; err is then a *PolicyError
-// matching ErrInvalidPolicy) and warnings, including roles that are assigned by 'g'
-// lines but grant nothing, directly or through inherited roles.
+// problem: errors (which make the policy unloadable; err is then a *PolicyError
+// matching ErrInvalidPolicy), including patterns of the sources that cannot be
+// evaluated in the match mode, and warnings, including roles that are assigned by 'g'
+// lines but grant nothing, directly or through inherited roles. Sources are always
+// validated as user sources; only opts.Builtin is treated as the built-in policy.
 func Validate(sources []Source, opts ValidateOptions) ([]ValidationError, error) {
-	all := sources
+	all := make([]Source, 0, len(sources)+1)
 	if opts.Builtin != "" {
-		all = append([]Source{{Name: "builtin", CSV: opts.Builtin}}, sources...)
+		all = append(all, Source{Name: "builtin", CSV: opts.Builtin, Builtin: true})
+	}
+	for _, s := range sources {
+		s.Builtin = false
+		all = append(all, s)
 	}
 	pol, problems, err := ParseSources(all, ParseOptions{MatchMode: opts.MatchMode})
 	if err != nil {

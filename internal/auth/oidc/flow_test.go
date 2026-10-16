@@ -406,7 +406,7 @@ func TestOIDCLoginToPatrolSession(t *testing.T) {
 	}
 	ks, _ := auth.NewKeySet(serverSecret)
 	svc, err := auth.NewTokenService(auth.TokenServiceConfig{
-		Keys: ks, Accounts: auth.Accounts{}, Revocations: auth.NewMemoryRevocationStore(0, nil),
+		Keys: ks, Accounts: auth.Accounts{}, Revocations: auth.NewMemoryRevocationStore(auth.RevocationLimits{}, nil),
 	})
 	if err != nil {
 		t.Fatal(err)

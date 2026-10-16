@@ -261,7 +261,9 @@ func TestHelpers(t *testing.T) {
 	}
 	assert.True(t, IsProjectScoped(ResourceExec))
 	assert.False(t, IsProjectScoped(ResourceProjects))
-	assert.Len(t, Resources(), 12)
+	assert.Len(t, Resources(), 13) // 12 baseline resources + scmproviders (Patrol addition)
+	assert.Contains(t, Resources(), ResourceSCMProviders)
+	assert.False(t, IsProjectScoped(ResourceSCMProviders))
 	assert.Len(t, Actions(), 8)
 	assert.True(t, strings.HasPrefix(BuiltinPolicy(), "#"))
 }

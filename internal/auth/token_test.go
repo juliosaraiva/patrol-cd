@@ -47,7 +47,7 @@ func newTokenEnv(t testing.TB) *tokenEnv {
 		secret:   map[string]string{},
 		projects: map[string]bool{},
 	}
-	e.revs = NewMemoryRevocationStore(0, e.clock.Now)
+	e.revs = NewMemoryRevocationStore(RevocationLimits{}, e.clock.Now)
 	ks, err := NewKeySet(testSecret)
 	if err != nil {
 		t.Fatal(err)
@@ -674,8 +674,8 @@ func TestExternalVerifierRouting(t *testing.T) {
 
 type failingRevocations struct{}
 
-func (failingRevocations) Revoke(context.Context, string, time.Time) error { return errors.New("down") }
-func (failingRevocations) IsRevoked(context.Context, string) (bool, error) {
+func (failingRevocations) Revoke(context.Context, TokenRef) error { return errors.New("down") }
+func (failingRevocations) IsRevoked(context.Context, TokenRef) (bool, error) {
 	return false, errors.New("down")
 }
 
@@ -701,7 +701,7 @@ func TestNewTokenServiceValidation(t *testing.T) {
 	t.Parallel()
 	ks, _ := NewKeySet(testSecret)
 	acc := Accounts{}
-	revs := NewMemoryRevocationStore(0, nil)
+	revs := NewMemoryRevocationStore(RevocationLimits{}, nil)
 	for name, cfg := range map[string]TokenServiceConfig{
 		"no keys":        {Accounts: acc, Revocations: revs},
 		"no accounts":    {Keys: ks, Revocations: revs},
@@ -710,38 +710,6 @@ func TestNewTokenServiceValidation(t *testing.T) {
 		if _, err := NewTokenService(cfg); err == nil {
 			t.Errorf("%s: accepted", name)
 		}
-	}
-}
-
-func TestMemoryRevocationStore(t *testing.T) {
-	t.Parallel()
-	clock := newFakeClock()
-	m := NewMemoryRevocationStore(2, clock.Now)
-	ctx := context.Background()
-	if err := m.Revoke(ctx, "a", clock.Now().Add(time.Minute)); err != nil {
-		t.Fatal(err)
-	}
-	if err := m.Revoke(ctx, "expired", clock.Now().Add(-time.Minute)); err != nil {
-		t.Fatal(err)
-	}
-	if ok, _ := m.IsRevoked(ctx, "expired"); ok {
-		t.Fatal("expired token stored")
-	}
-	if err := m.Revoke(ctx, "b", clock.Now().Add(time.Hour)); err != nil {
-		t.Fatal(err)
-	}
-	if err := m.Revoke(ctx, "c", clock.Now().Add(time.Hour)); !errors.Is(err, ErrRevocationStoreFull) {
-		t.Fatalf("full: %v", err)
-	}
-	clock.Advance(2 * time.Minute) // "a" expires and can be pruned
-	if err := m.Revoke(ctx, "c", clock.Now().Add(time.Hour)); err != nil {
-		t.Fatal(err)
-	}
-	if err := m.Revoke(ctx, "", clock.Now().Add(time.Hour)); err == nil {
-		t.Fatal("empty id accepted")
-	}
-	if err := m.Revoke(ctx, "d", time.Time{}); !errors.Is(err, ErrNotRevocable) {
-		t.Fatalf("zero exp: %v", err)
 	}
 }
 

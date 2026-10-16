@@ -60,18 +60,35 @@ func genPolicy(mode string) *rapid.Generator[[]string] {
 	return rapid.SliceOfN(line, 0, 14)
 }
 
-// genProjectRoles draws roles for project p1 that pass project validation.
+// Project role fields. The first entries of each list pass upstream's structural
+// AppProject validation in both modes. The later ones exercise pattern validation: they
+// are appended (never inserted) so that saved rapid fail files keep decoding to the same
+// values.
+var (
+	// '*' is not a project-scoped resource: rejected in both modes.
+	propRoleResources = []string{ResourceApplications, ResourceLogs, "*"}
+	// '*' is a valid glob and an invalid regular expression; "action/[" is invalid in
+	// both modes; "update/(" is a valid glob literal and an invalid regular expression.
+	propRoleActions = []string{ActionGet, ActionSync, ActionDelete, "*", "action/[", "update/(", "action/*"}
+	// "p1/**" is a valid glob and an invalid regular expression (nested repetition).
+	propRoleGlobObjects  = []string{"p1/*", "p1/a", "p1/b", "p1/**"}
+	propRoleRegexObjects = []string{"p1/.*", "p1/a", "p1/b", "p1/**", "p1/a**"}
+)
+
+// genProjectRoles draws roles for project p1. Lines pass upstream's structural
+// AppProject validation most of the time; some fields do not compile in the drawn mode
+// (regex: '*', '[', '(' and '**'; glob: '['), or fail the structural rules.
 func genProjectRoles(mode string) *rapid.Generator[[]Role] {
-	objs := []string{"p1/*", "p1/a", "p1/b"}
+	objs := propRoleGlobObjects
 	if mode == RegexMatchMode {
-		objs = []string{"p1/.*", "p1/a", "p1/b"}
+		objs = propRoleRegexObjects
 	}
 	return rapid.Custom(func(t *rapid.T) []Role {
 		var policies []string
 		for i := range rapid.IntRange(0, 4).Draw(t, "n") {
 			policies = append(policies, fmt.Sprintf("p, proj:p1:r, %s, %s, %s, %s",
-				rapid.SampledFrom([]string{ResourceApplications, ResourceLogs}).Draw(t, fmt.Sprintf("res%d", i)),
-				rapid.SampledFrom([]string{ActionGet, ActionSync, ActionDelete, "*"}).Draw(t, fmt.Sprintf("act%d", i)),
+				rapid.SampledFrom(propRoleResources).Draw(t, fmt.Sprintf("res%d", i)),
+				rapid.SampledFrom(propRoleActions).Draw(t, fmt.Sprintf("act%d", i)),
 				rapid.SampledFrom(objs).Draw(t, fmt.Sprintf("obj%d", i)),
 				rapid.SampledFrom([]string{EffectAllow, EffectDeny}).Draw(t, fmt.Sprintf("eft%d", i))))
 		}
@@ -166,10 +183,15 @@ func TestPropertyAddingDenyNeverWidensAccess(t *testing.T) {
 			widened.lines = append(widened.lines, rapid.SampledFrom([]string{"p, x, deny", `p, "x, a, b, c, deny`, "deny"}).Draw(t, "broken"))
 		default: // a deny, valid or not, in the project role
 			deny := rapid.SampledFrom([]string{
-				"p, proj:p1:r, applications, *, p1/a, deny",
+				"p, proj:p1:r, applications, *, p1/a, deny", // regex mode: invalid pattern
 				"p, proj:p1:r, logs, get, p1/b, deny",
 				"p, proj:p1:r, applications, *, p2/a, deny", // out of scope: invalid
 				"p, proj:p1:r, applications, get, p1/a",     // malformed: invalid
+				// Appended: patterns that do not compile in one or both modes.
+				"p, proj:p1:r, applications, action/[, p1/a, deny",
+				"p, proj:p1:r, logs, get, p1/**, deny",
+				"p, proj:p1:r, applications, update/(, p1/b, deny",
+				"p, proj:p1:r, applications, get, p1/(, deny", // invalid object in both modes
 			}).Draw(t, "projectDeny")
 			widened.roles[0].Policies = append(widened.roles[0].Policies, deny)
 		}
@@ -184,18 +206,132 @@ func TestPropertyAddingDenyNeverWidensAccess(t *testing.T) {
 	})
 }
 
-// The order of policy lines does not change any decision (upstream's effect is
-// "some allow and no deny", which is order-independent).
+// The order of policy lines, global or project role, does not change any decision
+// (upstream's effect is "some allow and no deny", which is order-independent, and an
+// invalid project line reduces its role whatever its position).
 func TestPropertyLineOrderIsIrrelevant(t *testing.T) {
 	t.Parallel()
 	rapid.Check(t, func(t *rapid.T) {
 		base := drawSetup(t)
 		shuffled := base
 		shuffled.lines = rapid.Permutation(base.lines).Draw(t, "perm")
+		shuffled.roles = cloneRoles(base.roles)
+		shuffled.roles[0].Policies = rapid.Permutation(base.roles[0].Policies).Draw(t, "rolePerm")
 		a, b := allowedSet(base.build(t)), allowedSet(shuffled.build(t))
 		for i := range a {
 			if a[i] != b[i] {
 				t.Fatalf("decision %d differs after reordering", i)
+			}
+		}
+	})
+}
+
+// unevaluableRules returns the rules of pol with a pattern that does not compile (an
+// invalid glob or regular expression, or an untranslatable glob alternation).
+func unevaluableRules(pol *Policy) []string {
+	var out []string
+	if pol == nil {
+		return nil
+	}
+	for _, sr := range pol.bySubject {
+		rules := sr.other
+		for _, rs := range sr.byResource {
+			rules = append(rules, rs...)
+		}
+		for _, r := range rules {
+			for _, m := range []*matcher{r.res, r.act, r.obj} {
+				if m.kind == matchFail || m.kind == matchNever {
+					out = append(out, r.matched)
+				}
+			}
+		}
+	}
+	return out
+}
+
+// Project-role confinement, with invalid patterns in the project's lines:
+//   - p1's roles never change a decision outside p1;
+//   - a p1 token gets nothing in the registered project p2 beyond what the default role
+//     alone grants;
+//   - no compiled p1 rule contains a pattern that does not compile, and no decision is
+//     an evaluation failure (no built-in policy is loaded here, and user policies with
+//     such patterns do not load).
+func TestPropertyProjectRoleConfinement(t *testing.T) {
+	t.Parallel()
+	rapid.Check(t, func(t *rapid.T) {
+		withRoles := drawSetup(t)
+		withoutRoles := withRoles
+		withoutRoles.roles = []Role{}
+		e1, e0 := withRoles.build(t), withoutRoles.build(t)
+		if bad := unevaluableRules(e1.load().projects["p1"].policy); len(bad) > 0 {
+			t.Fatalf("project rules with patterns that do not compile: %q", bad)
+		}
+		anonymous := Subjects{}
+		for _, r := range propRequests() {
+			d1 := e1.Enforce(r.s, r.resource, r.action, r.object)
+			if strings.Contains(d1.Reason, "evaluation failed") {
+				t.Fatalf("%+v %s %s %s: %s", r.s, r.resource, r.action, r.object, d1.Reason)
+			}
+			project, _ := ProjectFromObject(r.resource, r.object)
+			if project != "p1" {
+				if d0 := e0.Enforce(r.s, r.resource, r.action, r.object); d0.Allowed != d1.Allowed {
+					t.Fatalf("p1's roles changed a decision outside p1 for %+v %s %s %s: %v -> %v (%s)", r.s, r.resource, r.action, r.object, d0.Allowed, d1.Allowed, d1.Reason)
+				}
+			}
+			if r.s.ProjectRole != nil && r.s.ProjectRole.Project == "p1" && project == "p2" && d1.Allowed &&
+				!e1.Enforce(anonymous, r.resource, r.action, r.object).Allowed {
+				t.Fatalf("p1 token allowed in p2 beyond the default role: %s %s %s (%s)", r.resource, r.action, r.object, d1.Reason)
+			}
+		}
+	})
+}
+
+// A project role made only of allow lines, valid or not (including patterns that do
+// not compile in the mode, such as '*' in regex mode), never denies anything: it can
+// only add access. This is the property the evaluation-time regex error broke: an allow
+// line with action '*' used to deny the role's members every request in the project.
+func TestPropertyProjectAllowLinesNeverDeny(t *testing.T) {
+	t.Parallel()
+	rapid.Check(t, func(t *rapid.T) {
+		withRoles := drawSetup(t)
+		withRoles.roles = cloneRoles(withRoles.roles)
+		for i, l := range withRoles.roles[0].Policies {
+			if rest, ok := strings.CutSuffix(l, EffectDeny); ok {
+				withRoles.roles[0].Policies[i] = rest + EffectAllow
+			}
+		}
+		withRoles.roles[0].Policies = append(withRoles.roles[0].Policies, rapid.SliceOfN(rapid.SampledFrom([]string{
+			"p, proj:p1:r, applications, *, p1/.*, allow",
+			"p, proj:p1:r, applications, action/[, p1/a, allow",
+			"p, proj:p1:r, logs, update/(, p1/b, allow",
+			"p, proj:p1:r, applications, get, p1/**, allow",
+			"p, proj:p1:r, applications, get, p2/a, allow",
+		}), 0, 2).Draw(t, "extraAllows")...)
+		// Make the role's members hold global grants the role could wrongly take away:
+		// at least one bound group, and a global allow on everything for a drawn subset
+		// of the bound groups.
+		if len(withRoles.roles[0].Groups) == 0 {
+			withRoles.roles[0].Groups = []string{genSubjectName().Draw(t, "group")}
+		}
+		withRoles.lines = append([]string(nil), withRoles.lines...)
+		all := "*"
+		if withRoles.mode == RegexMatchMode {
+			all = ".*"
+		}
+		for _, g := range withRoles.roles[0].Groups {
+			if rapid.Bool().Draw(t, "grant-"+g) {
+				for _, res := range []string{ResourceApplications, ResourceLogs} {
+					withRoles.lines = append(withRoles.lines, fmt.Sprintf("p, %s, %s, %s, %s, allow", g, res, all, all))
+				}
+			}
+		}
+		withoutRoles := withRoles
+		withoutRoles.roles = []Role{}
+		before, after := allowedSet(withoutRoles.build(t)), allowedSet(withRoles.build(t))
+		reqs := propRequests()
+		for i := range reqs {
+			if before[i] && !after[i] {
+				t.Fatalf("project allow lines denied %+v %s %s %s", reqs[i].s, reqs[i].resource, reqs[i].action, reqs[i].object)
 			}
 		}
 	})
@@ -275,15 +411,40 @@ func naiveAllowed(lines []string, mode, subject, resource, action, object string
 	return allow
 }
 
-// The indexed, compiled evaluator agrees with the naive oracle for raw subjects.
+// oracleHasInvalidRegex reports whether a 'p' line of lines has a resource, action or
+// object that regexp.Compile rejects.
+func oracleHasInvalidRegex(lines []string) bool {
+	for _, l := range lines {
+		pl, err := tokenizeLine(l, DefaultMaxLineBytes)
+		if err != nil || pl.kind != linePolicy {
+			continue
+		}
+		for _, f := range pl.tokens[2:5] {
+			if _, err := regexp.Compile(f); err != nil {
+				return true
+			}
+		}
+	}
+	return false
+}
+
+// The indexed, compiled evaluator agrees with the naive oracle for raw subjects. A user
+// source with an invalid regular expression does not load; the same lines in the
+// built-in source load, and their evaluation fails closed exactly where the oracle (and
+// upstream Casbin) errors.
 func TestPropertyEvaluatorMatchesNaiveOracle(t *testing.T) {
 	t.Parallel()
 	rapid.Check(t, func(t *rapid.T) {
 		mode := rapid.SampledFrom([]string{GlobMatchMode, RegexMatchMode}).Draw(t, "mode")
 		lines := genPolicy(mode).Draw(t, "policy")
-		pol, _, err := Parse(strings.Join(lines, "\n"), ParseOptions{MatchMode: mode})
+		text := strings.Join(lines, "\n")
+		_, _, userErr := Parse(text, ParseOptions{MatchMode: mode})
+		if wantErr := mode == RegexMatchMode && oracleHasInvalidRegex(lines); (userErr != nil) != wantErr {
+			t.Fatalf("user policy load error %v, want error: %v", userErr, wantErr)
+		}
+		pol, _, err := ParseSources([]Source{{Name: "builtin", CSV: text, Builtin: true}}, ParseOptions{MatchMode: mode})
 		if err != nil {
-			t.Fatalf("generated policy failed to parse: %v", err)
+			t.Fatalf("generated policy failed to parse as built-in: %v", err)
 		}
 		subjects := append(append(append([]string{}, propUsers...), propGroups...), propRoles...)
 		for _, sub := range subjects {
