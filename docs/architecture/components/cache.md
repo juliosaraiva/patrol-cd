@@ -103,6 +103,13 @@ reading settings (`internal/settings`), shard assignment (`internal/controller`)
 6. A sync result is valid only for the `Invalidate` epoch it started in. A sync that an
    `Invalidate` supersedes is retried, never installed.
 7. Nothing is persisted. Every cache can be rebuilt by `EnsureSynced`.
+8. **No orphaned objects.** Every cached object belongs to a live watch registration (until
+   the next processor flush). A registration that stops (its API reported gone by a 404,
+   dropped from discovery, or moved to another version or scope) has its objects removed.
+   When its API is still served it is listed again from scratch under a new registration.
+   A registration whose API is reported gone is dead at once: its objects are removed and
+   its later events are dropped. A transient discovery failure of a group never stops that
+   group's registrations.
 
 ## Concurrency and data flow
 
@@ -114,9 +121,15 @@ watch goroutine (one per API × scope)            processor goroutine (one per c
   strip manifest)                                    │  unlock
   enqueue ──► bounded queue (1024) ─────────────────►└─ OnResourceUpdated / OnProcessEvents
 refresh goroutine: CRD/APIService/404 → discovery → start/stop watches (pending ops)
-EnsureSynced / background resync: discovery → parallel lists into a staging graph → swap
+sync goroutine (single flight, root context): discovery → parallel lists into a staging
+  graph → swap; EnsureSynced callers wait on it with their own context
 ```
 
+- A foreground full sync runs on a goroutine owned by the cache, under the cache's root
+  context, and is shared by every concurrent `EnsureSynced` caller. A caller's context only
+  bounds its wait. A caller that gives up does not cancel the sync, whose outcome is recorded
+  for later calls. A caller never receives the result of a sync that completed for an
+  `Invalidate` epoch older than the call; it waits for a newer sync instead.
 - A full sync builds a staging graph without locks. Readers keep using the previous state
   until an O(1) swap under the write lock. After a resync (not the first sync), changes are
   computed by resourceVersion diff and delivered to `OnResourceUpdated`.
@@ -134,15 +147,16 @@ EnsureSynced / background resync: discovery → parallel lists into a staging gr
 | Condition | Behavior |
 |-----------|----------|
 | API server unreachable (transport error, DNS, timeout, 503/504) | `EnsureSynced` returns `*UnreachableError` (`errors.Is(err, ErrClusterUnreachable)`). Calls within `SyncRetryTimeout` (default 10s) return the same error. The next call after that retries. `Invalidate` forces an immediate retry. |
-| Caller context cancelled during sync | Returns the context error. Nothing is recorded, and the next call syncs. |
-| Partial discovery failure (some group versions) | The sync continues. Failed group versions appear as `DiscoveryFailed` in `ClusterInfo.UnavailableAPIs`. If discovery returns no resource lists at all, the sync fails. |
-| List 401/403 | `none`: the sync fails with the API error. `normal`: the scope is skipped and reported as `ListForbidden`. `strict`: an SSAR confirms the denial. If the SSAR allows access, the sync fails (as upstream does); if the SSAR request fails, the sync fails. |
+| Caller context ends during sync | The caller gets the context error (wrapped). The sync continues under the cache's context, its outcome is recorded, and later callers get it without a new sync. A context that is already done when a sync would be needed starts nothing. |
+| `Close` during sync | Waiting callers get `ErrClosed`. |
+| Partial discovery failure (some group versions) | Full sync: it continues without the failed groups (as upstream does). Failed group versions appear as `DiscoveryFailed` in `ClusterInfo.UnavailableAPIs`. If discovery returns no resource lists at all, the sync fails. API refresh: the failed groups are treated as unknown, not absent. Their watches and objects are kept, their previous discovery data (`IsNamespaced`, `GetAPIResources`, GET resolution) is carried over, and expectations about them count as unconfirmed, so the refresh is retried. |
+| List 401/403 | `none`: the sync fails with the API error. `normal`: the scope is skipped and reported as `ListForbidden`. `strict`: an SSAR confirms the denial. If the SSAR allows access, the sync fails (as upstream does); if the SSAR request fails, the sync fails. `GetManagedLiveObjs` fetches targets in a `ListForbidden` scope with GET, and a 401/403 on that GET is returned as an error. |
 | Watch 401/403 | Reported as `WatchForbidden`. The scope is relisted every `WatchResyncTimeout` (polling). The entry clears when a watch succeeds. |
 | 410 Gone/Expired (watch request or error event) | Immediate relist, then watch from the new resourceVersion. |
 | Expired continue token during pagination | The list restarts (at most 3 times). |
 | Watch stream closed | Resumes from the last resourceVersion, including bookmarks. A stream that closes faster than 1s backs off. |
 | Other watch/list errors | Jittered exponential backoff: watches 1s→30s, list pages 200ms→5s for at most `ListRetryAttempts`. |
-| API removed (404, CRD deleted) | Discovery refresh. The API's objects are removed and its watch stops. |
+| API removed (404, CRD deleted) | A watch or relist that gets 404 marks its registration dead and removes the API's objects at once (upstream semantics), then requests a discovery refresh. While discovery still serves the API (aggregated discovery lags), the refresh relists it. On another 404 the API stays unregistered and the refresh is retried until discovery agrees. Targets of an unregistered or dead API are fetched with GET. |
 | New CRD or Available APIService | Discovery refresh, retried 9 times from 500ms (×1.5) until discovery serves the kind or group. |
 | OpenAPI load failure | Returned to the caller of `GetOpenAPISchema`/`GetGVKParser` and retried on the next call. A group version that disappears during the load is skipped. |
 | Periodic resync fails | The previous state and watches stay in place. `EnsureSynced` reports the error within the retry window. |
@@ -220,6 +234,15 @@ and server-side diff) need.
   snapshot is post-batch (see above).
 - **List page prefetch.** `ARGOCD_CLUSTER_CACHE_LIST_PAGE_BUFFER_SIZE` is not implemented;
   pages are fetched one after another.
+- **Forbidden relists keep the previous objects.** When a relist of a registered scope becomes
+  forbidden (`ListForbidden` after a watch 403), the objects cached before stay until a
+  later relist succeeds or a full resync runs. `GetManagedLiveObjs` fetches targets in that
+  scope with GET, but its `isManaged` scan can still return those older copies.
+- **`Close` waits for in-flight discovery.** client-go discovery calls take no context, so
+  `Close` during a sync can wait for the running discovery requests, up to the 32s timeout.
+- **A GET is authoritative in `GetManagedLiveObjs`.** A 404 on a GET removes the target from
+  the result even when a copy was cached (for example in another API version). Upstream
+  keeps the cached copy in that case.
 - **`GetManagedLiveObjs` takes a `context.Context`.** This follows repository conventions;
   the method is otherwise as specified.
 - **`ignoreResourceUpdates`** (DIFF-033 to 037), health (DIFF-066) and info enrichment
@@ -238,6 +261,15 @@ Tests live in `internal/cache/*_test.go`:
   lister, the watcher state machine (410 relist, bookmarks, reconnect, 401/403, 404,
   periodic relist, backoff), processor ordering and batching, OpenAPI parsing, error
   classification, and unreachable clusters (closed local port, local 503 `httptest` server).
+- Hermetic fake-cluster tests (`fakeapi_test.go`: an `httptest` server for discovery and
+  GETs, and injected `ListerWatcher`s): an API that returns 404 while discovery still serves
+  it loses its objects and converges once discovery drops it; a stopped registration whose
+  relist fails leaves nothing behind; a transient discovery failure of a group (single
+  version, or preferred version only) keeps its watches, objects and discovery data;
+  `GetManagedLiveObjs` uses GET for list-denied scopes and dead registrations (object, 403
+  error, 404 absent); `EnsureSynced` outlives callers with short deadlines and runs one sync
+  for all of them, ignores the result of a sync for an older epoch, and releases waiters on
+  `Close`.
 - envtest integration tests (skipped unless `KUBEBUILDER_ASSETS` is set): initial sync;
   create, update and delete events; hierarchy across namespaced and cluster-scoped owners
   and inferred relations; CRD registration and removal at runtime; exclusions;

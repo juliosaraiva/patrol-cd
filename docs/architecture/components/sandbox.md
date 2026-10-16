@@ -8,7 +8,7 @@ Status: implemented (phase 1). Decision record: [ADR-0007](../adr/0007-rendering
    (`git`, `helm`, `kustomize`, `patrolcd jsonnet-eval`, CMP commands) with:
    an exact environment (nothing inherited), its own process group, a wall-clock
    timeout, optional SIGTERM grace, output caps, CPU/address-space/open-file rlimits,
-   and only stdin/stdout/stderr as open descriptors.
+   and only stdin/stdout/stderr as open descriptors (in both direct and helper mode).
 2. Keep file-system access to untrusted trees inside a root: secure path joins,
    out-of-bounds symlink scans, safe tar/tar.gz extraction with limits, and a
    deterministic tar.gz writer for streaming source trees to CMP sidecars.
@@ -20,32 +20,42 @@ neutral `Limits` / `ArchiveLimits` / exclude lists (see "Adapting configuration"
 
 | Symbol | Purpose |
 |--------|---------|
-| `Run(ctx, Cmd) (Result, error)` | Execute one command. Unix only (`errors.ErrUnsupported` elsewhere). |
+| `Run(ctx, Cmd) (Result, error)` | Execute one command. Unix only (`errors.ErrUnsupported` elsewhere). Marks every descriptor of the calling process close-on-exec before a direct-mode start. |
 | `Cmd{Path, Args, Dir, Env, Stdin, Limits, Redact}` | `Path` absolute or a bare name looked up in **`Env`'s** `PATH` (relative PATH entries ignored); `Args` exclude argv[0]; `Env` is exact (nil = empty). |
 | `Limits{Timeout, KillGrace, MaxStdout, MaxStderr, CPUSeconds, AddressSpaceBytes, MaxOpenFiles}` | Zero = default (`DefaultTimeout` 90s, `DefaultMaxStdout` 256 MiB, `DefaultMaxStderr` 16 MiB, rlimits unset); negative timeout/caps = disabled. |
 | `Result{Stdout, Stderr, Duration}` | Captured output (truncated at caps, **not** redacted). |
 | `ErrTimeout`, `ErrOutputLimit`, `ErrInvalidCommand`, `*ExitError{Code, Signal, StderrTail}` | Run errors. Context deadline matches both `ErrTimeout` and `context.DeadlineExceeded`; cancellation matches `context.Canceled`. |
-| `MaybeHelperMain()` | Must be the first call in `main` of `cmd/patrolcd` (and in `TestMain` of packages whose tests set rlimits). Enters rlimit-helper mode when `os.Args[1] == HelperArg` (`__patrol-sandbox-exec`). |
-| `SetHelperPath(path)` | Override the helper binary (default `os.Executable()`). |
+| `MaybeHelperMain()` | Must be the first call in `main` of `cmd/patrolcd` (and in `TestMain` of packages whose tests set rlimits). Enters rlimit-helper mode when `os.Args[1] == HelperArg` (`__patrol-sandbox-exec`); otherwise records that the helper is installed. |
+| `SetHelperPath(path)` | Override the helper binary (default `os.Executable()`). The override must also call `MaybeHelperMain`; the handshake enforces it. |
 | `BaseEnv(extra...)` | `PATH`, `HOME`, `TMPDIR`, `LANG=C.UTF-8` + extras (later keys replace earlier ones in place). |
-| `SecureJoin(root, rel)` | Kernel-equivalent symlink resolution confined to root. |
-| `CheckSymlinks(root, skip...)` | Upstream `CheckOutOfBoundsSymlinks` semantics + physical chain check; `*OutOfBoundsSymlinkError{Path, Target}`. |
-| `ExtractTar` / `ExtractTarGz(r, dest, ArchiveLimits{MaxFiles, MaxTotalBytes, MaxFileBytes, StripExecBits})` | Safe extraction. Defaults: 500 000 entries, 1 GiB total, 1 GiB per file. |
-| `Tar(dir, w, excludes)` / `TarCount(...) (files, error)` | Deterministic tar.gz of a tree for CMP streaming. |
-| `ErrPathEscape`, `ErrAbsolutePath`, `ErrTooManySymlinks`, `ErrUnsafeArchiveEntry`, `ErrArchiveLimit`, `ErrInvalidArchive` | File-system errors (`*OutOfBoundsSymlinkError` unwraps to `ErrPathEscape`). |
+| `SecureJoin(root, rel)` | Kernel-equivalent symlink resolution confined to root, with bounded work. |
+| `CheckSymlinks(root, skip...)` / `CheckSymlinksContext(ctx, ...)` | Upstream `CheckOutOfBoundsSymlinks` semantics + physical chain check + work budgets; `*OutOfBoundsSymlinkError{Path, Target}`. A symlinked root is reported as `Path: "."`. |
+| `ExtractTar` / `ExtractTarGz(r, dest, ArchiveLimits{MaxFiles, MaxTotalBytes, MaxFileBytes, StripExecBits})` and `...Context(ctx, ...)` | Safe extraction. Defaults: 500 000 entries (implicit parent directories included), 1 GiB total, 1 GiB per file. `dest` must not be a symlink. |
+| `Tar(dir, w, excludes)` / `TarCount(...) (files, error)` / `TarCountContext(ctx, ...)` | Deterministic tar.gz of a tree for CMP streaming. `dir` must not be a symlink. |
+| `ErrPathEscape`, `ErrAbsolutePath`, `ErrTooManySymlinks`, `ErrSymlinkBudget`, `ErrUnsafeArchiveEntry`, `ErrArchiveLimit`, `ErrInvalidArchive` | File-system errors (`*OutOfBoundsSymlinkError` unwraps to `ErrPathEscape`; budget failures in scans match both `ErrSymlinkBudget` and `*OutOfBoundsSymlinkError`). |
 
 ## How `Run` works
 
 1. Resolve the executable (absolute path, or bare name in the command's own PATH).
 2. If any rlimit is set, the argv becomes
-   `<helper> __patrol-sandbox-exec cpu=N as=N nofile=N -- <abs target> <argv0> <args...>`;
-   the helper (same binary) lowers the limits (clamped to the current hard limit;
-   CPU hard limit = soft + 1 s so SIGXCPU precedes SIGKILL), marks every descriptor
-   above 2 close-on-exec, and `execve`s the target in place, keeping PID and process
-   group. Helper failures exit 126 (setup) / 127 (target missing) with a stderr line.
-3. The child starts with `Setpgid`, the exact env, `/dev/null` stdin when none is
-   given, and two `os.Pipe`s for stdout/stderr (parent copies of the write ends are
-   closed immediately so EOF is observable).
+   `<helper> __patrol-sandbox-exec cpu=N as=N nofile=N -- <abs target> <argv0> <args...>`.
+   With the default helper (this binary) `Run` first refuses (`ErrInvalidCommand`,
+   nothing started) unless this process called `MaybeHelperMain`. The write end of a
+   status pipe is passed as fd 3. The helper lowers the limits (clamped to the
+   current hard limit; CPU hard limit = soft + 1 s so SIGXCPU precedes SIGKILL), marks
+   every descriptor above 2 close-on-exec (fd 3 included), writes the status byte
+   `R` to fd 3 and `execve`s the target in place, keeping PID and process group.
+   Helper setup failures write `F`, then exit 126 (setup) / 127 (target missing)
+   with a stderr line. If the pipe reaches EOF without a status byte (the program
+   ignored the protocol and exited, or overflowed its output), or no byte arrives
+   within 30 s, the group is killed and `Run` fails with `ErrInvalidCommand`; the
+   other program's output is never reported as the target's.
+3. In direct mode `Run` marks every descriptor of the calling process above 2
+   close-on-exec (listing `/proc/self/fd` or `/dev/fd`; this only sets a flag, the
+   descriptors stay usable in-process, and `os/exec` clears it on `ExtraFiles`
+   copies). The child starts with `Setpgid`, the exact env, `/dev/null` stdin when
+   none is given, and two `os.Pipe`s for stdout/stderr (parent copies of the write
+   ends are closed immediately so EOF is observable).
 4. Reader goroutines capture up to the caps and keep draining after overflow; the
    first overflow kills the group immediately.
 5. On timeout or context end: SIGTERM to the group and leader, wait `KillGrace`, then
@@ -53,7 +63,9 @@ neutral `Limits` / `ArchiveLimits` / exclude lists (see "Adapting configuration"
 6. After the leader is reaped, SIGKILL goes to the whole group so background
    grandchildren never outlive the call; pipes are then drained, bounded by a 2 s
    deadline for writers that escaped the group with `setsid`.
-7. Error precedence: output limit > timeout > context > exit status. Exit errors carry
+7. Error precedence: helper not acknowledged > output limit > timeout > context >
+   exit status (a timeout or cancellation before a slow helper acknowledged stays a
+   timeout/cancellation). Exit errors carry
    the last 4 KiB of stderr after redacting **all** of stderr (so a secret straddling
    the cut cannot leak), cut on a rune boundary.
 
@@ -66,16 +78,38 @@ neutral `Limits` / `ArchiveLimits` / exclude lists (see "Adapting configuration"
   a pipe cannot take a read deadline, plus 1 s for a stuck stdin copier) even if
   descendants keep the output pipes open.
 - `len(Result.Stdout) <= MaxStdout`, `len(Result.Stderr) <= MaxStderr` (when capped).
-- In helper mode no descriptor above 2 reaches the target; in direct mode every
-  descriptor opened by the Go runtime is close-on-exec.
+- No descriptor above 2 reaches the target in either mode, including descriptors
+  the server inherited or opened without `O_CLOEXEC` (tested with raw `open(2)`
+  descriptors in both modes). Residual race: a raw non-`O_CLOEXEC` descriptor
+  created by another thread between the sweep and the fork (cgo/raw syscalls only).
+- With rlimits set, `Run` never returns success unless the helper acknowledged, so
+  the output is the target's (tested with `/bin/echo` and a long-running script as
+  helper, and with `MaybeHelperMain` not called).
 - `SecureJoin` results are always `root` or below it, and their OS resolution (deepest
   existing prefix) stays inside the real root (fuzzed).
 - If `CheckSymlinks(root) == nil`, no path made only of names (no `..`) resolves
   outside root (property-tested against `filepath.EvalSymlinks`, and mutation-checked:
-  removing the physical chain check makes the property fail).
+  removing the physical chain check makes the property fail). A symlinked root is
+  never accepted (it would not be descended).
+- Resolution work is bounded: per resolution at most 255 symlink hops (the
+  `filepath.EvalSymlinks` limit, above Linux's 40 and macOS's 32, so loops for those
+  resolvers are loops here) and 4096 processed components; per `CheckSymlinks`/`Tar`
+  walk at most 2^20 + 256 × entries components. lstat results are cached per walk
+  (8 MiB cap), and components below a missing one are joined without system calls
+  (one final lstat of the result still surfaces `ENAMETOOLONG`/`EINVAL`).
+  A self-referencing 1 KiB target costs 2 lstat calls (the review estimated ~51k before;
+  measured here: `SecureJoin` 676 ms and `CheckSymlinks` 487 ms for one such link under
+  load average ~170).
 - Extraction writes only through `os.Root`; nothing is created outside `dest`
   (asserted for every rejection case and fuzzed); an accepted archive passes
-  `CheckSymlinks`.
+  `CheckSymlinks`; the tree written is the tree checked (`dest` must be a real
+  directory, verified with `SameFile` after opening).
+- Per-entry extraction work is O(depth): names are capped (4096 bytes, 256
+  components, 255-byte components, 4096-byte link targets) before any filesystem
+  work, and parents are verified by descending one component at a time with
+  `os.Root.OpenRoot` (last verified parent cached). A test asserts the traversal
+  count stays under 8 × depth per entry at depth 250; the old per-prefix walk
+  re-introduced as a mutation, walked 665 186 components (limit 84 000) and took 52 s.
 - `Tar` output is byte-identical for identical trees regardless of mtimes/ownership,
   and `Tar` → `ExtractTarGz` round-trips trees (property-tested).
 
@@ -91,9 +125,14 @@ neutral `Limits` / `ArchiveLimits` / exclude lists (see "Adapting configuration"
 | Non-zero exit / signal | `*ExitError` (Code −1 and `Signal` set when signalled; `SIGXCPU`/`SIGKILL` for CPU rlimit) |
 | Helper missing (bad `SetHelperPath`) | start error wrapping `fs.ErrNotExist` |
 | Archive: absolute name / `..` component / backslash traversal | `ErrAbsolutePath` / `ErrUnsafeArchiveEntry` |
+| Archive: name > 4096 bytes, > 256 components, a component > 255 bytes, link target > 4096 bytes | `ErrUnsafeArchiveEntry`, before any filesystem work |
+| `dest` (extraction) or `dir` (`Tar`) or the `CheckSymlinks` root is a symlink | `*OutOfBoundsSymlinkError{Path: "."}` (`ErrPathEscape`); nothing extracted/streamed |
+| Symlink resolution over budget (per link or per walk) | `ErrSymlinkBudget` + `*OutOfBoundsSymlinkError` from scans; `ErrSymlinkBudget` from `SecureJoin` |
+| Rlimit helper did not acknowledge / `MaybeHelperMain` not called | `ErrInvalidCommand` |
+| Context cancelled during a scan, extraction or tar | `context.Canceled` / `context.DeadlineExceeded` (checked per entry) |
 | Archive: symlink absolute or leaving dest at any step, or chain escape found after extraction | `*OutOfBoundsSymlinkError` (`ErrPathEscape`) |
 | Archive: entry under a symlinked parent, type conflicts with an existing entry, device/fifo/unsupported type, hard link to a non-regular or missing file | `ErrUnsafeArchiveEntry` |
-| Archive: too many entries, file or total too big, stream larger than its entries justify (chained/oversized PAX headers) | `ErrArchiveLimit` |
+| Archive: too many entries (implicit parent directories included), file or total too big, stream larger than its entries justify (chained/oversized PAX headers) | `ErrArchiveLimit` |
 | Corrupt gzip/tar | `ErrInvalidArchive` |
 
 On extraction errors `dest` may contain partial content; callers extract into a fresh
@@ -146,6 +185,20 @@ per-request directory and remove it on failure.
 
 ## Verification
 
+Review follow-up (2026-10-13) regression tests: `TestExtractTarRejectsOverlongNamesBeforeTouchingDisk`,
+`TestExtractTarDeepEntriesLinearWork`, `TestExtractTarImplicitDirectoriesCountAsEntries`,
+`TestExtractTarIntoSymlinkedDestFailsClosed`, `TestTarSymlinkedRootFailsClosed`,
+`TestArchiveContextCanceled`, `TestCheckSymlinksSymlinkedRootFailsClosed`,
+`TestSecureJoinSelfLoopBoundedWork`, `TestCheckSymlinksSelfLoopsFailClosedCheaply`,
+`TestResolveStepBudget`, `TestResolveSimpleLoopsStillAccepted`, `TestCheckSymlinksWalkBudget`,
+`TestCheckSymlinksContextCanceled`, `TestRunHelperHandshake`,
+`TestRunDirectModeDoesNotLeakRawDescriptors`, `TestHelperMainFailsClosed`. Each was
+mutation-checked: re-introducing the original defect (per-prefix `Root.Lstat`, no
+cache/budget, no symlinked-root check, ignored handshake, no direct-mode sweep) makes
+it fail. Fuzzing found two regressions of the "skip lstat below a missing component"
+optimization (NUL byte, over-long path accepted); both are fixed and kept as corpus
+entries in `testdata/fuzz/FuzzSecureJoin`.
+
 Tests live next to the code (`*_test.go`); `TestMain` calls `MaybeHelperMain` and
 provides a `setsid` child for the escaped-writer case. Covered: grandchild kill on
 timeout and cancel, background children killed after leader exit, escaped writer does
@@ -165,9 +218,18 @@ cross-compiled and vetted but executed only on darwin so far.
   only the pipe drain is bounded. A Linux follow-up could use a cgroup per call or
   `PR_SET_CHILD_SUBREAPER`.
 - No seccomp, namespaces or cgroups; isolation beyond rlimits is the container's job.
-- Direct mode (no rlimits) relies on Go's close-on-exec; descriptors the server
-  process itself inherited without `O_CLOEXEC` reach children unless a limit is set
-  (helper mode sweeps them).
+- The direct-mode descriptor sweep costs one directory listing plus one `fcntl` per
+  open descriptor per `Run`; a raw non-`O_CLOEXEC` descriptor opened by another
+  thread between the sweep and the fork can still leak (Go never opens such
+  descriptors; only cgo or raw syscalls could).
+- The helper acknowledgment timeout is fixed at 30 s; a helper that has not started
+  by then on an overloaded node fails with `ErrInvalidCommand` (a command timeout
+  shorter than that still reports `ErrTimeout`).
+- Loops with long targets can exceed the 4096-component budget before the hop limit
+  and are then rejected (fail closed), where upstream's lexical check accepts them;
+  short loops (`a -> b -> a`) are still accepted.
+- `lowerRlimit` does not compile for FreeBSD (`syscall.Rlimit` fields are `int64`
+  there; pre-existing). Linux and darwin are the supported targets.
 - A blocking non-`*os.File` `Stdin` reader can leave its copier goroutine running after
   `Run` returns (bounded wait of 1 s, then `Run` proceeds).
 - `SecureJoin` rejects absolute symlinks even when they point inside root; upstream
@@ -178,8 +240,8 @@ cross-compiled and vetted but executed only on darwin so far.
 - Upstream `preserveFileMode: true` keeps exact modes; Patrol masks to 0755/0644.
 - `Tar` fails on out-of-bounds symlinks even when the caller allows them (upstream
   sends them, and its CMP extraction then fails).
-- `ExtractTar`/`Tar` take no `context.Context` (fixed signatures); cancel by closing
-  the reader/writer.
+- The `Context` variants check the context between entries; a `Read`/`Write` blocked
+  inside one entry is only interrupted by closing the reader/writer.
 - Upstream memoizes OOB scans for 12 h per revision; caching is the repo-server's job.
 - Walk errors from `CheckSymlinks`/`Tar` may contain absolute temp paths; callers
   sanitize per SRC-118.

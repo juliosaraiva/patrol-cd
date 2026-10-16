@@ -19,11 +19,13 @@ packages do not import `api/v1alpha1`; callers adapt CRD types (see below).
   sentinels for `errors.Is` (`ErrNotFound`, `ErrRateLimited`, …).
 - Provide shared HTTP plumbing so every provider applies the same rules: TLS/CA/proxy base
   transport, client-side pacing (`x/time/rate`), bounded retries honoring `Retry-After` and
-  rate-limit headers, response body size cap, cursor-generic pagination with a page cap and
-  loop detection, credential host pinning, and redacted request logging.
+  rate-limit headers, a per-attempt timeout (never a whole-call client timeout), response
+  body size cap, cursor-generic pagination with a page cap and loop detection, credential
+  host pinning, and redacted request logging.
 - Provide webhook helpers: bounded body reading, constant-time HMAC-SHA256 verification over
-  raw bytes, normalized `Event` model, changed-file normalization, and the replay/dedup
-  `DeliveryCache` (bounded LRU + TTL).
+  raw bytes, normalized `Event` model, changed-file normalization, delivery ID validation,
+  and the redelivery de-duplication `DeliveryCache` (bounded LRU + TTL over fixed-size
+  digests; not replay protection, see "Webhook semantics").
 - Provide a registry of provider factories, an in-memory reference provider with fault
   injection (`pkg/scm/fake`) and a conformance suite every provider runs
   (`pkg/scm/conformance`).
@@ -56,13 +58,13 @@ transport (`internal/git`), Secret resolution and the SCMProvider CRD (`api/v1al
 | `CredentialSource.Token(ctx) (Token, error)` | `Token{Value, ExpiresAt, Username}`; `String`/`GoString`/`LogValue` redact the value. |
 | `InstallationLister{ListInstallations, FindInstallation(owner)}` | App installations. |
 | Data types | `RepoRef{Owner, Name}` (+`Validate`, `FullName`, `ParseFullName`), `Repository`, `Branch`, `PullRequest`, `Installation`, `InstallationRef`, `Event`, `EventRepo`. |
-| Errors | `Error`, `ErrorKind` (`NotFound`, `Unauthorized`, `Forbidden`, `RateLimited`, `Unavailable`, `Invalid`, `Conflict`), `KindOf`, `IsNotFound`, `IsRateLimited`, `IsRetryable`, `RetryAfter`, `NewError`; extra sentinels `ErrPageLimit`, `ErrPaginationLoop`, `ErrResponseTooLarge`, `ErrUnknownProviderType`, `ErrStatusLimit` (commit status limit per commit and context; notifiers treat it as delivered), `ErrSignatureMissing`, `ErrSignatureMismatch`, `ErrPayloadTooLarge`, `ErrMalformedPayload`, `ErrUnsupportedEvent`. |
+| Errors | `Error`, `ErrorKind` (`NotFound`, `Unauthorized`, `Forbidden`, `RateLimited`, `Unavailable`, `Invalid`, `Conflict`), `KindOf`, `IsNotFound`, `IsRateLimited`, `IsRetryable`, `RetryAfter`, `NewError`; extra sentinels `ErrPageLimit`, `ErrPaginationLoop`, `ErrResponseTooLarge`, `ErrUnknownProviderType`, `ErrStatusLimit` (commit status limit per commit and context; notifiers treat it as delivered), `ErrAttemptTimeout` (one HTTP attempt exceeded `Config.Timeout`; classified `Unavailable`), `ErrSignatureMissing`, `ErrSignatureMismatch`, `ErrPayloadTooLarge`, `ErrMalformedPayload`, `ErrUnsupportedEvent`, `ErrInvalidDeliveryID`. |
 | Registry | `Factory func(ctx, Config) (Provider, error)`, `NewRegistry`, `(*Registry).Register/New/Types`, package-level `DefaultRegistry`, `Register`, `New`. `New` rejects providers reporting another contract version. Factories must not do network I/O. |
-| `Config` | `Type, Name, APIURL, Insecure, CAData, ProxyURL, NoProxy, Token TokenFunc, GitHubApp *GitHubAppConfig{AppID, InstallationID, PrivateKey, EnterpriseBaseURL, Owner}, HTTPClient, RateLimit{RPS, Burst}, Retry RetryPolicy{MaxAttempts, BaseDelay, MaxDelay, MaxWait}, MaxPages, MaxResponseBytes, Timeout, UserAgent, Logger, Observer RequestObserver, Clock`; `WithDefaults()`; `LogValue` and `GitHubAppConfig.String/LogValue` redact secrets. |
-| Transport helpers | `BaseTransport(cfg)`, `ProxyFunc(proxyURL, noProxy)`, `LimitResponseBody(rt, max)`, `NewLimiter(RateLimit)`, `Chain(inner, ChainOptions)` (logging → retry → pacing → observer → inner), `DefaultRetryClassifier`, `ParseRetryAfter`, `RateLimitWait`, `HostGuard(host, authed, plain)`, `BearerTransport(next, TokenFunc, onUnauthorized)` (on 401 invalidates and replays once with a fresh token), `RedactURL`, `RedactURLString`, `RedactHeaders`. |
+| `Config` | `Type, Name, APIURL, Insecure, CAData, ProxyURL, NoProxy, Token TokenFunc, GitHubApp *GitHubAppConfig{AppID, InstallationID, PrivateKey, EnterpriseBaseURL, Owner}, HTTPClient, RateLimit{RPS, Burst}, Retry RetryPolicy{MaxAttempts, BaseDelay, MaxDelay, MaxWait}, MaxPages, MaxResponseBytes, Timeout, UserAgent, Logger, Observer RequestObserver, Clock`; `WithDefaults()`; `LogValue` and `GitHubAppConfig.String/LogValue` redact secrets. `Timeout` (default 60s; a non-zero `HTTPClient.Timeout` replaces it) bounds **one HTTP attempt** including the body read, excluding pacing and retry waits; a call is bounded by its context and by `RetryPolicy.CallBudget(Timeout)` per HTTP request (`MaxAttempts × Timeout + (MaxAttempts−1) × max(MaxWait, MaxDelay)`, 7 minutes with defaults). |
+| Transport helpers | `BaseTransport(cfg)`, `ProxyFunc(proxyURL, noProxy)`, `AttemptTimeout(rt, d)` (per-attempt deadline kept until the body is closed; expiry is a retryable timeout `net.Error` matching `ErrAttemptTimeout` and not `context.DeadlineExceeded`), `LimitResponseBody(rt, max)`, `NewLimiter(RateLimit)`, `Chain(inner, ChainOptions)` (logging → retry → pacing → observer → inner; retry waits never sleep past the request context's deadline: the last response or error is returned instead), `RetryPolicy.CallBudget(attemptTimeout)`, `DefaultRetryClassifier`, `ParseRetryAfter`, `RateLimitWait`, `HostGuard(host, authed, plain)`, `BearerTransport(next, TokenFunc, onUnauthorized)` (on 401 invalidates and replays once with a fresh token), `RedactURL`, `RedactURLString`, `RedactHeaders`. |
 | Metrics hook | `RequestObserver func(ctx, RequestInfo)` called after every HTTP attempt (retries, pagination and App token requests included) with `RequestInfo{Provider, Method, Host, Path, StatusCode (0 = no response), Duration, Err, RateLimit}`; `RateLimitInfo{Present, Limit, Remaining, Used, Reset, Resource}` from `ParseRateLimitHeaders` (`X-RateLimit-*` or GitLab `RateLimit-*`). No headers, bodies or credentials are exposed. |
 | Pagination | `PageFunc[T, C]`, `Pages(ctx, maxPages, fetch) iter.Seq2[[]T, error]`, `CollectPages` (no partial results on error). |
-| Webhook helpers | `ReadWebhookBody(r, max)`, `SignHMACSHA256`, `VerifyHMACSHA256(header, prefix, body, secret)`, `ParseRevision`, `NormalizeChangedFiles`, `DeliveryKey(provider, id)`, `NewDeliveryCache(capacity, ttl, WithDeliveryClock)` with `Seen`, `Forget`, `Len`, `WebhookSignatureError`. |
+| Webhook helpers | `ReadWebhookBody(r, max)`, `SignHMACSHA256`, `VerifyHMACSHA256(header, prefix, body, secret)`, `ParseRevision`, `NormalizeChangedFiles`, `MaxDeliveryIDBytes` (128), `ValidateDeliveryID(id)` (≤ 128 bytes of printable non-space ASCII; empty allowed), `DeliveryKey(provider, id)` (empty, i.e. never recorded, for empty or invalid IDs), `NewDeliveryCache(capacity, ttl, WithDeliveryClock)` with `SeenEvent(ev)` (records verified events only), `Seen`, `Forget`, `Len`, `WebhookSignatureError`. |
 | Utilities | `ShortSHA(sha, n)` (for `short_sha`/`head_short_sha`), `TruncateRunes`. |
 
 ### Reference provider (`pkg/scm/fake`)
@@ -73,7 +75,10 @@ injection with `InjectError(op, err, times)`, `InjectRateLimit(retryAfter, times
 `SetLatency`, `SetFaultHook`, `ClearFaults`, `SetStatusLimit(n)` (emulates GitHub's
 per-context status limit with `ErrStatusLimit`); observation with `Calls(op)`, `CommitStatuses`, `CheckRuns`;
 webhooks with `SignedDelivery(Delivery, id, secret)` (headers `X-Fake-Event`,
-`X-Fake-Delivery`, `X-Fake-Signature: sha256=…`); `Factory()` / `Register(r, p)`.
+`X-Fake-Delivery`, `X-Fake-Signature: sha256=…`; delivery IDs failing
+`scm.ValidateDeliveryID` are rejected like GitHub's); `Factory()` / `Register(r, p)`.
+Seeding helpers and readers may run concurrently: readers snapshot repository maps and
+slices under the provider lock (covered by a `-race` mutate-while-listing test).
 
 ### Conformance suite (`pkg/scm/conformance`)
 
@@ -86,7 +91,7 @@ filter, default-branch SHA and empty-repository omission, all-branches expansion
 pushdown, clone protocol and invalid protocol, not-found mapping; branch listing (all/default,
 not found); revision resolution (not found); path existence and traversal rejection; PR
 pagination, label AND-filter, not found; webhook valid signature, tampered body, wrong
-secret, missing signature, empty-secret policy, delivery dedup with `DeliveryCache`, PR event;
+secret, missing signature, empty-secret policy, delivery dedup with `DeliveryCache.SeenEvent`, PR event;
 commit status write, pre-validation and (with `StatusLimitFixture`) the per-context limit
 mapped to `ErrStatusLimit`; check run idempotent upsert; credential token;
 installations; rate-limit mapping with `RetryAfter`.
@@ -140,6 +145,15 @@ GitHub behavior:
   with upstream's text `failed to discover GitHub App installation ID for organization
   <owner>: ensure the GitHub App (ID: <id>) is installed for this organization:
   installation not found for org: <owner>`. A missing owner fails with `installation ID is required for github`.
+- Timeouts: `Config.Timeout` is applied per attempt below authentication
+  (`AttemptTimeout` over the base transport), and the go-github `http.Client` has no
+  `Timeout`, so rate-limit waits up to `MaxWait` are honored even when longer than one
+  attempt (a whole-chain client timeout used to cut them off as an unclassified deadline
+  error). A stalled attempt is retried (idempotent methods), then fails `Unavailable`
+  wrapping `ErrAttemptTimeout`. App installation discovery and token minting run as shared
+  fetches detached from the first caller and are bounded by `CallBudget` (discovery: twice,
+  for the organization then user lookup) instead of a fixed 30s, so they too can wait out
+  accepted rate limits; each waiter still honors its own context.
 - Errors: `RateLimitError` (403/429 with `X-RateLimit-Remaining: 0`) → `RateLimited` with
   `RetryAfter` until `X-RateLimit-Reset`; secondary limits (`AbuseRateLimitError`, or a 403
   whose message mentions "rate limit") → `RateLimited` with `Retry-After` or 60s; 400/422 →
@@ -168,8 +182,19 @@ GitHub behavior:
    `package` is left to the GHCR registry parser (`MatchesWebhook` = false), as are Gogs/Gitea
    deliveries that also carry GitHub headers. JSON and form-encoded (`payload=`) bodies are
    accepted.
-5. Dedup: `DeliveryCache.Seen(DeliveryKey(ev.Provider, ev.DeliveryID))` after verification;
-   `Forget` when processing fails so a redelivery is handled.
+5. Delivery IDs: the ID header (`X-GitHub-Delivery`) is **not covered by the signature**.
+   `VerifyAndParse` rejects IDs failing `ValidateDeliveryID` (over 128 bytes, or not
+   printable non-space ASCII) with `KindInvalid` + `ErrInvalidDeliveryID`, signed or not;
+   genuine IDs are 36-character GUIDs.
+6. Dedup: `DeliveryCache.SeenEvent(ev)` after verification; `Forget(DeliveryKey(…))` when
+   processing fails so a redelivery is handled. This de-duplicates benign redeliveries
+   only. It is **not replay protection**: whoever holds one signed body can resend it under
+   fresh delivery IDs (GitHub signs no timestamp or nonce), so handlers must stay
+   idempotent (they are: refreshes and generator requeues). Only verified events are
+   recorded; unverified events (no secret configured) can come from anyone, and recording
+   them would only let unauthenticated senders evict legitimate entries. Memory is bounded
+   by capacity alone: keys are stored as SHA-256 digests and invalid IDs are never
+   recorded.
 
 ### Adapting CRD types (callers)
 
@@ -204,6 +229,8 @@ GitHub behavior:
 - Listings are complete or fail: pagination errors (page cap, cursor loop, any page error)
   return no partial result, so generators never delete Applications because of a truncated
   listing.
+- Timeouts bound single attempts, never the retry chain: no `http.Client.Timeout` over
+  `Chain`; a call's total time is bounded by its context and `CallBudget`.
 - Every response body is size-capped; every listing is page-capped; retries are bounded in
   attempts and in honored wait (`MaxWait`, default 60s; longer waits surface as
   `RateLimited` with `RetryAfter`); only idempotent methods with replayable bodies are
@@ -228,8 +255,10 @@ GitHub behavior:
 | Failure | Behavior |
 |---------|----------|
 | API down / 5xx / network error | Idempotent requests retried with jittered exponential backoff (default 4 attempts), then `KindUnavailable`. |
+| API stalls (no headers or body within `Timeout`) | The attempt is abandoned and retried like a network error; when all attempts stall, `KindUnavailable` wrapping `ErrAttemptTimeout` (not `context.DeadlineExceeded`). |
+| Caller deadline shorter than an advised wait | The response is returned at once (no sleep into the deadline): `KindRateLimited` (or `Unavailable`) with `RetryAfter`, never a bare deadline error. |
 | Primary rate limit | Waited out inside the call if the reset is within `MaxWait`; otherwise `KindRateLimited` with `RetryAfter`; go-github also stops sending requests until the known reset. |
-| Secondary rate limit | Waited out when `Retry-After` ≤ `MaxWait`; else `KindRateLimited` (`RetryAfter` from header or 60s). |
+| Secondary rate limit | Waited out when `Retry-After` ≤ `MaxWait` (also when longer than `Timeout`); else `KindRateLimited` (`RetryAfter` from header or 60s). Non-idempotent requests (POST status/check run, POST installation token) are never retried, so a rate-limited POST surfaces as `KindRateLimited` with `RetryAfter`. |
 | Token revoked / expired early | App: 401 invalidates the cached installation token and the request is replayed once with a new token (transparent to callers); a second 401 → `KindUnauthorized`. PAT: `KindUnauthorized`. |
 | Token function fails (Secret missing) | `KindUnauthorized` wrapping the cause; nothing is sent or retried. |
 | Commit status limit (1000 per SHA and context) | `KindInvalid` wrapping `ErrStatusLimit`. |
@@ -240,6 +269,7 @@ GitHub behavior:
 | Repository missing or invisible | `KindNotFound` (`continueOnRepoNotFoundError` applies); `PathExists` returns false. |
 | Bad webhook signature / missing signature | `KindUnauthorized` + `ErrSignatureMismatch` / `ErrSignatureMissing`. |
 | Unknown webhook event | `ErrUnsupportedEvent` (`KindInvalid`) after verification. |
+| Oversized or non-ASCII delivery ID | `ErrInvalidDeliveryID` (`KindInvalid`); never reaches the dedup cache. |
 | Process restart | All caches (tokens, discovery, deliveries) are memory-only and rebuilt on demand; delivery dedup is per replica (effects are idempotent). |
 
 ## Security notes
@@ -258,6 +288,9 @@ GitHub behavior:
 - Webhook bodies, PR metadata, branch names and file paths are untrusted: bounded reads,
   bounded changed-file lists, strict JSON decoding into minimal structs, and name validation
   before URL construction.
+- Webhook delivery IDs are unsigned and attacker-controlled: they are length- and
+  charset-checked, the dedup cache stores digests only, and dedup is documented as
+  redelivery suppression, not replay protection.
 - Callers must apply the ApplicationSet API URL allow-list (ASET-101) to `Config.APIURL`
   before building providers, to avoid SSRF through user-controlled `api` fields.
 
@@ -306,20 +339,40 @@ GitHub behavior:
   a tag has the default branch's name (upstream compares the short name only).
 - Check run upserts are not atomic across concurrent callers for the same (SHA, name,
   external ID); callers serialize per Application.
-- Webhook delivery dedup is per replica (by design, see architecture overview).
+- Webhook delivery dedup is per replica (by design, see architecture overview) and is not
+  replay protection (GitHub signs no timestamp/nonce; see "Webhook semantics").
+- Provider implementers (other `pkg/scm/*` packages) must: build their HTTP client without
+  `http.Client.Timeout` and wrap the base transport with `scm.AttemptTimeout(base,
+  cfg.Timeout)`; call `scm.ValidateDeliveryID` in `VerifyAndParse`. The conformance suite
+  does not yet enforce either (adding a mandatory check would fail providers still under
+  construction by other tasks); `DeliveryKey`/`DeliveryCache` keep consumers memory-safe
+  regardless.
+- Rate-limited POST requests (commit statuses, check runs, installation token minting) are
+  not retried in-call even though GitHub does not process rejected requests; callers retry
+  them using `RetryAfter`.
 
 ## Verification
 
-Run on 2026-10-13 (darwin/arm64, Go 1.27):
+Run on 2026-10-13 (darwin/arm64, Go 1.27.2), after the review follow-up (attempt timeouts,
+fake snapshot race, delivery ID bounds):
 
 | Command | Result |
 |---------|--------|
-| `go build ./pkg/...` | exit 0 |
-| `go build ./...` | exit 1, only in `internal/git` (another task's in-progress package: undefined `SignatureInfo`, `askpassExecutable`, `askpassPayload`); nothing outside `pkg/scm` imports `pkg/scm` yet |
-| `go vet ./pkg/scm/...` | exit 0 |
-| `golangci-lint run ./pkg/scm/...` | 0 issues |
-| `go test -race -count=1 ./pkg/scm/...` | exit 0; 94 top-level tests pass; 340 tests+subtests pass, 24 skipped (all conformance checks for capabilities the variant does not declare: anonymous GitHub, PAT without App, capability-subset fake) |
-| `go test -race -count=3 ./pkg/scm/...` | exit 0 (flakiness check) |
+| `go build ./...` | exit 0 |
+| `go vet ./pkg/scm/ ./pkg/scm/fake/... ./pkg/scm/conformance/... ./pkg/scm/github/...` | exit 0 |
+| `golangci-lint run` (same packages) | 0 issues |
+| `go test -race -count=1 -json` (same packages) | exit 0; 105 top-level tests pass; 375 tests+subtests pass, 24 skipped (conformance checks for capabilities the variant does not declare: anonymous GitHub, PAT without App, capability-subset fake) |
+| `go test -race -count=3` (same packages) | all packages `ok` (flakiness check) |
+| `go test -race -count=1 ./pkg/scm/gitlab/... ./pkg/scm/gitea/... ./pkg/scm/gogs/...` | all `ok` (sibling providers unaffected by the shared-helper changes) |
+
+Regression tests were checked against the pre-fix code with `go test -overlay` (no repo
+file modified): restoring the whole-chain `http.Client.Timeout` fails
+`TestRateLimitWaitBeyondAttemptTimeout` (3 cases) and `TestAttemptTimeout` (2 cases);
+disabling the deadline check fails all 5 cases of `TestRetryWaitBeyondCallerDeadline`;
+restoring the shallow repository copy in the fake fails `TestConcurrentMutationAndReads`
+under `-race` in 5 of 5 runs; storing raw keys fails `TestDeliveryCacheBoundsKeyMemory`
+(67 MB retained for 64 one-MiB keys); skipping delivery ID validation fails 4 cases of
+`TestWebhookSignatures`.
 
 Conformance runs: `fake` (all capabilities and a capability subset) and `github` (App with
 installation discovery on github.com-style URLs, App with explicit installation on a GHES

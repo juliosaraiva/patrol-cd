@@ -6,9 +6,9 @@ Decision record: [ADR-0009](../adr/0009-authn-authz.md). Parity inventory:
 
 | Package | Contents | Dependencies |
 |---------|----------|--------------|
-| `internal/auth` | accounts, passwords, signing keys, JWT issue/verify, revocation interfaces, login throttling, redirect validation, cookie/bearer helpers | `golang-jwt/jwt/v5`, `x/crypto/bcrypt`, `google/uuid` |
+| `internal/auth` | accounts, passwords, signing keys, JWT issue/verify, revocation interfaces and the bounded `RevocationTable`, login throttling, redirect validation, cookie/bearer helpers | `golang-jwt/jwt/v5`, `x/crypto/bcrypt`, `google/uuid` |
 | `internal/auth/oidc` | OIDC relying party: lazy discovery, auth-code + PKCE flow, encrypted state cookie, ID token/audience verification, groups/userinfo, Dex helpers | `coreos/go-oidc/v3`, `x/oauth2`, `x/sync/singleflight` |
-| `internal/auth/revocation` | `SecretStore`: `auth.RevocationStore` on Secret `patrol-session-revocations` | `client-go` (typed client) |
+| `internal/auth/revocation` | `SecretStore`: `auth.RevocationStore` on Secret `patrol-session-revocations` (serialized `auth.RevocationTable`) | `client-go` (typed client) |
 
 None of the packages import `api/v1alpha1`; CRD-backed state is reached through the small
 interfaces below.
@@ -39,7 +39,8 @@ interfaces below.
 | Passwords | `HashPassword`, `HashPasswordWithCost`, `VerifyPassword`, `PasswordNeedsRehash`, `NewPasswordPolicy`, `PasswordPolicyFromSettings`, `(*PasswordPolicy).Validate`, `GenerateInitialPassword` |
 | Keys/settings | `NewSigningKey`, `NewKeySet(current, previous...)`, `KeySetFromSecret(secret)`, `ParseSessionDuration` |
 | Tokens | `NewTokenService(TokenServiceConfig{Keys, Accounts, Revocations, Projects, External, Leeway, RenewWithin, Now})`; `IssueLoginSession`, `IssueSSOSession(SSOIdentity)`, `IssueAccountToken`, `IssueProjectToken`, `Verify(ctx, raw) (*Principal, error)`, `RenewIfExpiring`, `Revoke`, `SetKeys`; `ProjectSubject`, `ParseProjectSubject` |
-| Extension interfaces | `AccountLookup`, `TokenRegistry{IsTokenKnown(ctx, sub, jti, iat)}`, `RevocationStore{Revoke(ctx, jti, exp); IsRevoked(ctx, jti)}`, `ExternalVerifier{VerifyExternal(ctx, raw)}`; adapters `AccountLookupFunc`, `TokenRegistryFunc`; `MemoryRevocationStore` (tests/dev) |
+| Extension interfaces | `AccountLookup`, `TokenRegistry{IsTokenKnown(ctx, sub, jti, iat)}`, `RevocationStore{Revoke(ctx, TokenRef); IsRevoked(ctx, TokenRef)}`, `ExternalVerifier{VerifyExternal(ctx, raw)}`; adapters `AccountLookupFunc`, `TokenRegistryFunc` |
+| Revocation state | `TokenRef{ID, Subject, IssuedAt, ExpiresAt}` (+ `Validate`); `RevocationTable` (`NewRevocationTable`, `DecodeRevocationTable(data) (table, malformed)`, `Revoke(ref, now, limits) (changed, error)`, `IsRevoked(ref, now)`, `Prune`, `Data`, `Len`, `Size`); `RevocationLimits{MaxEntries, MaxBytes, MaxEntriesPerSubject}` (defaults `DefaultRevocationMaxEntries` 8192, `DefaultRevocationMaxBytes` 512 KiB, `DefaultRevocationMaxEntriesPerSubject` 1000); `NewMemoryRevocationStore(limits, now)` (tests, single-replica dev); `ErrRevocationStoreFull` |
 | Login | `DefaultLoginConfig`, `LoginConfigFromEnv(os.LookupEnv)`, `NewAuthenticator(accounts, cfg, opts...)`, `(*Authenticator).Authenticate(ctx, user, pass) (Account, error)`, `LoginError{Reason}` |
 | HTTP | `TokenFromRequest(r)`, `SetSessionCookie(w, r, token, CookieOptions{Path, Secure, Expires})`, `ClearSessionCookie`, `CookiePath`, `ValidateRedirectURL(url, allowedBases)`, `IsValidRedirectURL` |
 
@@ -61,9 +62,9 @@ skipAudienceCheckWhenTokenHasNoAudience, groupsClaim); `NewProvider(cfg, opts...
 ### `internal/auth/revocation`
 
 `NewSecretStore(kubernetes.Interface, namespace, opts...)` with `WithSecretName`,
-`WithCacheTTL` (default 5 s), `WithMaxStale` (30 s), `WithMaxEntries` (15000),
-`WithBackoff`, `WithClock`, `WithLogger`; methods `Revoke`, `IsRevoked`, `Prune`;
-`EncodeKey`.
+`WithCacheTTL` (default 5 s), `WithMaxStale` (30 s), `WithMaxEntries` (8192),
+`WithMaxBytes` (512 KiB), `WithMaxEntriesPerSubject` (1000), `WithBackoff`, `WithClock`,
+`WithLogger`; methods `Revoke`, `IsRevoked`, `Prune`; `ErrUnavailable`.
 
 ## Settings keys
 
@@ -95,6 +96,53 @@ sessions `groups`, `email`, `name` plus caller-selected extra claims.
 Every kind is checked against the revocation store. The `kind` claim must agree with the
 subject format, so an SSO subject such as `admin:login` stays an SSO identity.
 
+## Revocation storage
+
+`TokenService.Revoke` (logout) passes the store a `TokenRef` whose `Subject` is the
+revocation scope `kind NUL issuer NUL subject`, and whose `ExpiresAt` is the token expiry
+plus the verification leeway, so a revoked token stays revoked for as long as the
+verifier would still accept it. Login sessions, API tokens and project tokens of the same
+name are separate scopes, and so are SSO subjects and local accounts.
+
+`RevocationTable` (shared by `MemoryRevocationStore` and the Secret-backed store) stores
+only fixed-length hashes. Token IDs and subjects never appear in the Secret:
+
+| Key | Value | Meaning |
+|-----|-------|---------|
+| `t.<16-char subject tag>.<22-char token tag>` | `<exp>.<iat>` | one revoked token |
+| `w.<16-char subject tag>` | `<cutoff>.<until>` | watermark: every token of the scope with `iat <= cutoff` is revoked while `now < until` |
+
+Tags are base64url(SHA-256(domain, value)), truncated to 96 bits (subject) and
+128 bits (token). Every token key is 41 bytes whatever the ID length (account token IDs
+are caller-chosen, up to 256 bytes), and values are two decimal integers.
+
+Bounds, applied on every write after pruning expired entries:
+
+1. Per subject: when a scope holds more than `MaxEntriesPerSubject` (1000) token entries,
+   they are collapsed into its watermark (`cutoff` = newest collapsed `iat`, `until` =
+   latest collapsed expiry). Every collapsed token stays revoked.
+2. Global: while the table exceeds `MaxEntries` (8192) or `MaxBytes` (512 KiB of keys and
+   values), the scopes with the most entries are collapsed first. Collapses are planned
+   before they are applied; when no plan fits, `Revoke` returns `ErrRevocationStoreFull`
+   and the table (and the Secret) is left unchanged.
+
+Per-principal DoS bound: one principal (scope) occupies at most 1001 entries (about
+61 KiB), and under global pressure it is collapsed to a single 39-byte watermark before
+anyone else. It cannot make another principal's logout fail. `ErrRevocationStoreFull`
+needs every scope to be down to one entry with the limits still exceeded, i.e. about
+8192 distinct principals with live revocations at the same time. The price is collateral
+revocation inside the abusing scope only: when its entries are collapsed, its other
+tokens issued at or before the newest collapsed one (same second included) stop
+verifying until the watermark lapses. For local and SSO sessions, which share one
+lifetime, that means "logged out everywhere". Use API tokens rather than login/logout
+loops for automation that logs out more than 1000 times per session lifetime.
+
+Measured Secret size at the default limits (`TestSecretSizeAtDefaultLimits`): 8192
+entries with 10-digit timestamps = 507,904 bytes of keys and values, 557,115 bytes
+protobuf, 614,552 bytes JSON; worst case with 19-digit values (byte limit binds at 6553
+entries) = 524,240 / 563,617 / 648,899 bytes. That is below the 1 MiB Secret data limit
+and etcd's default 1.5 MiB request limit.
+
 ## Invariants
 
 - Only HS256 with a known `kid` verifies Patrol tokens; `none`, HS384/512, RS*/ES* and
@@ -117,7 +165,11 @@ subject format, so an SSO subject such as `admin:login` stays an SSO identity.
 - Return URLs are validated before any IdP request.
 - Bounded resources: tokens <= 80 KiB, <= 20 cookie chunks of <= 4093 bytes, <= 1000
   groups, <= 1 MiB per IdP response, failure cache <= `MaxCacheSize`, userinfo cache
-  <= 10000 entries, revocation Secret <= `MaxEntries`, state cookie <= 4 KiB.
+  <= 10000 entries, revocation Secret <= 8192 entries and <= 512 KiB of keys and values
+  (<= 1001 entries per principal), state cookie <= 4 KiB.
+- A revoked token is reported revoked until its expiry plus the verification leeway; a
+  failed revocation write changes nothing; collapsing never un-revokes a token
+  (property-tested).
 
 ## Failure modes
 
@@ -127,7 +179,9 @@ subject format, so an SSO subject such as `admin:login` stays an SSO identity.
 | Malformed account settings | `AccountsFromMaps` returns usable accounts plus a joined `*AccountConfigError`; affected account fail-closed (invalid `enabled` or `passwordMtime` disables it, invalid token JSON drops its API tokens) |
 | Revocation Secret unreadable | cached copy served for TTL + `MaxStale` (35 s), then `revocation.ErrUnavailable` (fail closed) |
 | Concurrent revocations | resourceVersion conflicts and create races retried (`retry.OnError`); expired entries pruned on each write |
-| Revocation Secret full | `auth.ErrRevocationStoreFull` (logout fails visibly rather than silently un-revoking) |
+| One principal logs in and out in a loop | its revocations collapse into a watermark (its own older sessions end); other principals unaffected |
+| Revocation Secret full (about 8192 distinct principals with live revocations) | `auth.ErrRevocationStoreFull`, Secret unchanged (logout fails visibly rather than silently un-revoking) |
+| Malformed or old-format entries in the revocation Secret | ignored with a warning (count only), dropped on the next write |
 | IdP down at startup | no I/O until first use; discovery retried with backoff, failures cached for 5 s, a working provider is kept if a re-discovery fails |
 | IdP key rotation | go-oidc refetches JWKS on unknown keys; a signature failure additionally triggers one re-discovery per minute |
 | Userinfo groups enabled but no cached entry for a bearer ID token | rejected (`ErrUserInfoUnavailable`), as upstream |
@@ -149,6 +203,10 @@ subject format, so an SSO subject such as `admin:login` stays an SSO identity.
   is the only trust anchor for the IdP.
 - CSRF defense (`X-Requested-With: patrol`) and RBAC are enforced by the API server, not
   here.
+- The revocation Secret holds only truncated SHA-256 tags of token IDs and principal
+  scopes plus timestamps, never token IDs, user names or tokens. A tag collision can only
+  revoke a token too many (never too few), and token IDs of login and SSO sessions are
+  server-generated UUIDs.
 
 ## Caller integration
 
@@ -169,8 +227,10 @@ subject format, so an SSO subject such as `admin:login` stays an SSO identity.
 - SSO: `/auth/login` -> `StartLogin` (allowed bases = `url` + `additionalUrls`) and
   `StateCookie`; `/auth/callback` -> `HandleCallback` with `StateCookieValue(r)`, always
   `ClearStateCookie`, then `IssueSSOSession(res.Claims.SSOIdentity(<rbac scopes>...))`.
-- Revocations: `revocation.NewSecretStore(clientset, namespace)`; run `Prune`
-  periodically (e.g. hourly).
+- Revocations: `revocation.NewSecretStore(clientset, namespace)` (RBAC: `get`, `create`,
+  `update` on that Secret); run `Prune` periodically (e.g. hourly). Map
+  `ErrRevocationStoreFull` to 503 on logout. Rate-limit `/logout` like other
+  authenticated writes (each call rewrites the Secret, see Known gaps).
 
 ## Parity feature areas served
 
@@ -198,6 +258,7 @@ derivation only).
 | No nonce in the auth-code flow; state 24 chars | nonce always sent and checked; state/nonce 256-bit | replay protection |
 | Revocation checks `uti` but logout revokes `at_hash` for Entra tokens | one `jti` -> `uti` -> `at_hash` order for both | revocation actually effective |
 | Userinfo only with `userInfoPath` | falls back to the discovered `userinfo_endpoint` | convenience |
+| Revoked token IDs stored unbounded in Redis (`revoked-token\|<jti>`) | bounded Secret with hashed fixed-length keys and per-principal collapse | ADR-0004 (no Redis); one principal cannot exhaust the store |
 
 ## Known gaps
 
@@ -211,24 +272,41 @@ derivation only).
   the CLI should exchange its ID token for a Patrol session instead (API design for
   `internal/apiserver`).
 - Login failure state is per replica (as upstream); it is not shared through Kubernetes.
+- Every revocation rewrites the whole revocation Secret (O(size), at most 512 KiB by
+  default) instead of upstream's O(1) Redis `SET`. Sharding across several Secrets
+  would cut the write size, but reads would then need either `list` on Secrets
+  (broader RBAC than `get` on one name) or one GET per shard on every cache refresh, so
+  it is not done; the size bound and HTTP rate limiting on logout are the mitigation.
+- Upstream keeps revocations unbounded in Redis; Patrol's per-principal collapse can end
+  an abusing principal's other sessions early (documented above). No metric is exported
+  for collapses yet.
 - Dex configuration generation (static clients, connector redirect URIs, `$secret`
   resolution), anonymous access, `GetUserInfo`, settings exposure and the CLI SSO flow
   belong to other components.
 
 ## Verification
 
-Run on 2026-10-12, darwin/arm64, go1.27.2. Tests are hermetic: an in-process fake OIDC
-provider on `httptest` (discovery, JWKS with per-test RSA keys, PKCE-enforcing token
-endpoint, userinfo; plain and TLS) and `k8s.io/client-go/kubernetes/fake` with a reactor
-that enforces resourceVersion conflicts.
+Run on 2026-10-13, darwin/arm64, go1.27.2, after the revocation-store review fix. Tests
+are hermetic: an in-process fake OIDC provider on `httptest` (discovery, JWKS with
+per-test RSA keys, PKCE-enforcing token endpoint, userinfo; plain and TLS) and
+`k8s.io/client-go/kubernetes/fake` with a reactor that enforces resourceVersion
+conflicts.
 
 | Command | Result |
 |---------|--------|
-| `go build ./...` | exit 0 |
+| `go build ./internal/auth/...` | exit 0 |
+| `go build ./...` | fails outside this component only, in other agents' in-progress packages (first run: `internal/settings`, `internal/sync`; second run: `internal/settings`, `pkg/scm/{azuredevops,bitbucketcloud,bitbucketserver}`); no error in `internal/auth` |
 | `go vet ./internal/auth/...` | exit 0 |
 | `golangci-lint run ./internal/auth/...` | 0 issues |
-| `go test -race -count=1 ./internal/auth/...` | pass: `internal/auth` 52 tests + 133 subtests, `internal/auth/oidc` 27 + 57, `internal/auth/revocation` 12; 0 failures |
-| `go test -count=1 -cover ./internal/auth/...` | coverage 93.0% / 90.3% / 95.3% |
+| `go test -race -count=1 ./internal/auth/...` | pass: `internal/auth` 61 tests + 137 subtests, `internal/auth/oidc` 27 + 57, `internal/auth/revocation` 14 + 2; 0 failures |
+| `go test -count=1 -cover ./internal/auth/...` | coverage 94.3% / 90.3% / 92.6% |
+
+Regression tests for the review finding: `TestRevocationTableOneSubjectCannotExhaustStore`,
+`TestLogoutStormIsContainedToOnePrincipal`, `TestOneSubjectCannotBlockOtherLogouts`,
+`TestRevocationTableKeysAreFixedLength`, `TestSecretSizeAtDefaultLimits`,
+`TestRevocationTableProperties` (rapid), `TestRevocationTableReusedIDStaysCoveredAfterCollapse`
+(a bug the property test found during the fix) and `TestRevokedTokenStaysRevokedThroughLeeway`
+(a revoked token could be pruned while still inside the verifier's leeway).
 
 Not recorded in `docs/verification/log.md` (outside this component's file ownership);
 the integrating agent should copy this table there.

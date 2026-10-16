@@ -65,7 +65,8 @@ documented: `health.ApplicationGroup` (`cd.patrol.example`), `health.HookFinaliz
 | `ParseResourceOverrides(cmData map[string]string)` | Parses `resource.customizations` (legacy YAML block, wildcards allowed) and `resource.customizations.<type>.<group_kind>` split keys (`health`, `useOpenLibs`, `actions`, `ignoreDifferences`, `ignoreResourceUpdates`, `knownTypeFields`; `<group_kind>` = `group_Kind`, `Kind` or `all` → `*/*`). Split keys are layered over the legacy block. |
 | `MarshalLegacy(map)`, `OverrideKey(schema.GroupKind)`, `CustomizationsKey` | Helpers. |
 | `ApplicationHealthLua` | The documented Patrol Application health customization (Lua). |
-| `ScriptError{Message, Timeout}`; `ErrTimeout`, `ErrActionNotFound`, `ErrNoDiscovery`, `ErrInvalidOutput`, `ErrInvalidCustomization`, `ErrNestedTable`, `ErrSparseArray`, `ErrInvalidKeys`, `ErrValueTooDeep` | Errors. `ScriptError.Error()` is the Lua message without stack trace (upstream text); it unwraps to the underlying gopher-lua error (`*lua.ApiError` for runtime errors) and to the context error. |
+| `ScriptError{Message, Timeout}`; `ErrTimeout`, `ErrActionNotFound`, `ErrNoDiscovery`, `ErrInvalidOutput`, `ErrInvalidCustomization`, `ErrNestedTable`, `ErrSparseArray`, `ErrInvalidKeys`, `ErrValueTooDeep`, `ErrResultTooLarge`, `ErrOverloaded` | Errors. `ScriptError.Error()` is the Lua message without stack trace (upstream text); it unwraps to the underlying gopher-lua error (`*lua.ApiError` for runtime errors) and to the context error. |
+| `RegisterMetrics(prometheus.Registerer) error` | Registers `patrol_lua_stalled_evaluations` (gauge: abandoned evaluations still running) and `patrol_lua_abandoned_evaluations_total` (counter). Idempotent per registry. |
 
 ### Adapting CRD and settings types
 
@@ -155,14 +156,63 @@ field layouts.
 
 | Profile | Used for | Libraries |
 |---------|----------|-----------|
-| safe | all built-in scripts, all discovery and action scripts, configured health scripts without `useOpenLibs` | base without `dofile`, `loadfile`, `load`, `loadstring`, `require`, `module`, `collectgarbage`, `print` (no-op); `table`; `string` (`rep` capped at 4 MiB, `format` width/precision ≤ 2 digits as in Lua 5.1, no `dump`); `math`; `os` with only `time`, `date`, `clock`, `difftime` (also via `require("os")`; `require` resolves only `os`, `string`, `table`, `math` and never reads files) |
+| safe | all built-in scripts, all discovery and action scripts, configured health scripts without `useOpenLibs` | base without `dofile`, `loadfile`, `load`, `loadstring`, `require`, `module`, `collectgarbage`, `print` (no-op); `table`; `string` (no `dump`); `math`; `os` with only `time`, `date`, `clock`, `difftime` (also via `require("os")`; `require` resolves only `os`, `string`, `table`, `math` and never reads files) |
 | open | configured health scripts with `useOpenLibs: true` | the complete gopher-lua standard library (`package`, `io`, full `os`, `debug`, `coroutine`, `channel`, …), as upstream; `print` is a no-op |
 
+Both profiles get the bounded string functions, pattern matcher and `..` described below.
+
 Every evaluation uses a fresh Lua state (no state leaks between objects or tenants) with:
-an execution deadline (`context.WithTimeout`, checked before every VM instruction, default
-1 s, caller cancellation honored); call stack limit 256 frames; value stack 1 024 slots
-growing to at most 65 536 ("registry overflow" beyond); Go↔Lua conversion depth limit 1 000.
-Compiled scripts are cached by SHA-256 of their source (LRU, 512 entries).
+an execution deadline (default 1 s, caller cancellation honored); call stack limit 256
+frames; value stack 1 024 slots growing to at most 65 536 ("registry overflow" beyond);
+Go↔Lua conversion depth limit 1 000. Compiled scripts are cached by SHA-256 of their source
+(LRU, 512 entries).
+
+**Deadline.** The VM checks the context before every instruction. Go library calls are
+not interrupted by gopher-lua, so the ones that can run long on untrusted input are
+replaced (both profiles):
+
+- `string.find`, `string.match`, `string.gmatch`/`gfind` and `string.gsub` use Patrol's
+  own Lua pattern matcher (`pattern.go`), which checks the context every 1 024 steps. It
+  reproduces gopher-lua v1.1's matcher (upstream's) exactly — results, quirks (anchors only
+  at the ends of the top-level pattern, no `%f`, a trailing `%` never matches, `gsub` with
+  `n = 0` still replacing when the first attempt matches), error texts and positions, and
+  the 1 000 000-level recursion limit ("pattern/input too complex"); property tests compare
+  both on generated patterns. Backtracking keeps its worst case (for example
+  `(%d+)/(%d+)` is quadratic on a long digit string), but the deadline now bounds it.
+- A watchdog backs this up for calls that still cannot be interrupted (`table.sort` on a huge
+  table; with `useOpenLibs`, blocking `io`/`os.execute`): the script runs on its own
+  goroutine; if it has not stopped `clamp(timeout/2, 100 ms, 1 s)` after the deadline or
+  the caller's cancellation, the caller gets the timeout/cancellation error and the
+  goroutine is abandoned (it exits when the call returns). Abandoned evaluations still
+  running are counted (`patrol_lua_stalled_evaluations`); at 16, new evaluations fail fast
+  with `ErrOverloaded` until they drain.
+
+**Strings.** gopher-lua has no allocation hook. Every standard function that can build a
+string much larger than its input in one call is replaced or wrapped, and so is the `..`
+operator, which is compiled into a call (below): `..`, `string.rep`, `string.gsub`,
+`string.format`, `string.upper`, `string.lower`, `string.reverse`, `table.concat` and
+`os.date`. Each checks the result size (or, for `format` and `os.date`, an upper bound of it)
+before allocating — `upper`, `lower` and `reverse`, whose output is at most 3× the input,
+right after — against a cap of 4 MiB per string and a budget of 64 MiB of built strings per
+evaluation. `string.format` keeps Lua 5.1's limits
+(≤ 5 flags, ≤ 2 digits of width and precision) and rejects Go's `%[n]` argument indexes
+and `*` widths, which gopher-lua passes to `fmt` and which would bypass the width limit.
+`string.gsub` builds its result in one pass (gopher-lua copies the whole buffer per
+replacement), and `string.gmatch` finds matches lazily (gopher-lua collects all of them up
+front).
+
+**`..` rewrite.** `compile` rewrites every concatenation in the parsed chunk into a call of
+a guarded Go function held in a hidden local of the main chunk (`rewrite.go`); the function
+is passed as the chunk's argument, and the main chunk's own `...` is rewritten to a call
+returning nothing, so scripts still see empty varargs. Right-nested chains are flattened as
+gopher-lua's compiler builds one `OP_CONCAT`, and the function reproduces `OP_CONCAT`
+(operand order, `__concat`, number formatting, error text and line). The local's name
+`(patrol concat)` is not an identifier, so scripts cannot reach it (without the `debug`
+library).
+
+**Results.** The returned table is converted inside the deadline window, with at most
+1 048 576 values and 16 MiB of string and key bytes (a table referenced several times counts
+each time); larger results fail with `ErrResultTooLarge`.
 
 ## Invariants
 
@@ -178,8 +228,13 @@ Compiled scripts are cached by SHA-256 of their source (LRU, 512 entries).
 | Failure | Result |
 |---------|--------|
 | Script syntax/runtime error | `*ScriptError` with the Lua message → `Assess` returns `Unknown` + error |
-| Infinite loop / slow script | `*ScriptError` matching `ErrTimeout` and `context.DeadlineExceeded` after the deadline |
+| Infinite loop / slow script / slow pattern match | `*ScriptError` matching `ErrTimeout` and `context.DeadlineExceeded` after the deadline |
 | Caller context canceled | `*ScriptError` matching `context.Canceled` |
+| Go call ignoring the deadline | Same timeout/cancellation error at most 1 s after the deadline; the evaluation is abandoned, counted and logged (`WARN abandoned a lua evaluation ...`) |
+| 16 abandoned evaluations still running | `ErrOverloaded` immediately, until they finish |
+| String over 4 MiB, or over 64 MiB of strings built in one evaluation | `*ScriptError` "`<op>` result exceeds 4194304 bytes" / "`<op>` exceeds the string allocation limit of 67108864 bytes per evaluation" (fast, not a timeout; catchable by `pcall`) |
+| `string.format` with `%[n]` or `*` | `*ScriptError` "invalid format (argument indexes and '*' are not supported)" |
+| Result over 1 048 576 values or 16 MiB | error matching `ErrResultTooLarge` |
 | Deep recursion / huge `unpack` | "lua callstack overflow" / "registry overflow" error (fast, no crash) |
 | Wrong return type / malformed action output | error matching `ErrInvalidOutput` (upstream message text) |
 | Cyclic or sparse result table | `ErrNestedTable` / `ErrSparseArray` / `ErrInvalidKeys` |
@@ -200,10 +255,15 @@ Compiled scripts are cached by SHA-256 of their source (LRU, 512 entries).
   `../`.
 - `print` output is discarded so scripts cannot write unbounded, unstructured data to
   controller logs. Nothing in this package logs object content or settings values.
-- Memory: there is no allocation hook in gopher-lua. Bounds are the deadline, the stack
-  limits, the `string.rep`/`string.format` caps and the conversion depth limit. A malicious
-  admin script can still allocate heavily within its deadline (for example by repeated string
-  concatenation) — see known gaps.
+- Untrusted object content cannot stall a worker: built-in scripts that pattern-match status
+  fields (for example `opentelemetry.io/OpenTelemetryCollector` and
+  `apps.kruise.io/AdvancedCronJob`) used to run for minutes on a crafted long digit string;
+  they now stop at the deadline (regression tests use 60 000 digits).
+- Memory: there is no allocation hook in gopher-lua. Strings built by scripts are capped per
+  string and per evaluation (see Sandbox and limits); results are capped; stacks are capped.
+  Tables and many small strings are not counted: a script can still allocate at the VM's
+  instruction rate until its deadline (order of a few hundred MiB in 1 s for a deliberately
+  allocating loop). Built-in scripts do not do this; configured scripts are admin-controlled.
 
 ## Parity feature areas served
 
@@ -226,7 +286,20 @@ all built-in actions). `docs/parity/areas/01-application.md`: APP-028, APP-029, 
 - All 47 upstream gitops-engine health fixtures are asserted (`internal/health/testdata`).
 - Property tests (rapid): `IsWorse` is a strict weak order; aggregation is order independent,
   hook-invariant and never better than a contributing resource; Go↔Lua conversion round-trip;
-  split-key and legacy settings round-trip; format checker never panics.
+  split-key and legacy settings round-trip; format checker never panics; the pattern matcher
+  equals gopher-lua's `pm.Find` on generated patterns/subjects/limits
+  (`TestPatternParityProperty`), and `find`/`match`/`gsub`/`gmatch` equal stock gopher-lua on
+  generated inputs (`TestPatternFunctionsParityProperty`).
+- Differential tests against stock gopher-lua: the replaced string/table/os functions
+  (`TestStringLibraryMatchesGopherLua`) and the `..` rewrite including metamethods, error
+  lines and varargs (`TestConcatRewriteMatchesGopherLua`); the recursion limit boundary
+  (`TestPatternDepthLimitMatchesGopherLua`).
+- Limits: `TestBuiltinDeadlineOnHostileInput` (OpenTelemetryCollector and AdvancedCronJob
+  built-ins with 60 000-digit fields stop at the default 1 s deadline),
+  `TestPatternHonorsContext`, `TestStringLimits` (every amplifying function fails fast;
+  legitimate large strings still work), `TestResultLimits`, and the watchdog tests
+  (`TestWatchdogAbandonsStuckEvaluation`, `TestWatchdogCallerCancellation`,
+  `TestWatchdogOverload`, `TestRegisterMetrics`).
 
 ## Known gaps and deliberate differences
 
@@ -246,10 +319,25 @@ all built-in actions). `docs/parity/areas/01-application.md`: APP-028, APP-029, 
   (non-cyclic) subtables in results are accepted (upstream's encoder rejects them).
 - **Timeout error text**: "lua script exceeded execution timeout of 1s" instead of the raw
   "<string>:N: context deadline exceeded".
-- **Uninterruptible Go builtins**: the deadline is checked between VM instructions; a single
-  long-running Go library call (pathological Lua pattern on a large string in an admin
-  script) runs to completion before the deadline takes effect.
-- **No per-state memory limit** (gopher-lua offers none besides a process-exiting `SetMx`).
+- **Abandoned evaluations keep running**: an uninterruptible Go call (`table.sort` on a
+  table built within the deadline, or blocking I/O with `useOpenLibs`) is abandoned, not
+  stopped; its goroutine uses CPU until the call returns. Pattern matching, string building
+  and result conversion are interruptible or bounded and do not need the watchdog.
+- **No per-state memory limit for tables** (gopher-lua offers none besides a
+  process-exiting `SetMx`); see Security notes.
+- **String limits are stricter than upstream**: 4 MiB per built string, 64 MiB per
+  evaluation; `string.format` rejects `%[n]` and `*`. Upstream has no limits.
+- **gopher-lua deviations kept or fixed**: `string.gmatch` returns one iterator that also
+  works when called directly (gopher-lua returns an iterator and a userdata and the
+  iterator only works in a generic `for`); `gmatch`/`gsub` match lazily, so a matcher error
+  after some matches surfaces after the replacement function ran for the earlier ones
+  (gopher-lua finds all matches first); `table.concat` does not push elements on the value
+  stack, so concatenating more than ~32 000 elements does not fail with "registry
+  overflow". Everything else (results, error texts and positions, including gopher-lua's
+  Go-panic texts for `string.find(s, p, init > #s, true)` and back references to an
+  enclosing capture) matches stock gopher-lua, checked by differential tests.
+- **Main chunk locals**: the hidden concatenation local uses one of the main chunk's 200
+  local slots.
 - **Embedded data text**: verbatim scripts still write "By Argo CD at: ..." (Flux reconcile
   actions) and "Job was terminated explicitly through Argo CD" (Job terminate).
 - **Not here**: merge-patch computation, status-subresource split, project permission checks,

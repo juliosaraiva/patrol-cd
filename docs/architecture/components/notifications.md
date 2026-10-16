@@ -27,12 +27,18 @@ library.
   (ConfigMap) and `notifiers.yaml` (Secret). `$key` references are substituted from the
   Secret inside the **parsed** YAML tree (string values and map keys), so a secret value can
   never change the document structure. Missing keys stay literal and produce a warning.
+  Service options are then decoded with `sigs.k8s.io/yaml` using the option struct as the
+  type hint, like the baseline's typed decode: an unquoted number or boolean given for a
+  string option (`account: 123456789012`, a numeric header value, API key or `serviceID`)
+  becomes its text instead of invalidating the service. Numbers are kept verbatim through
+  substitution (no float64 rounding of large integers).
 - Evaluate trigger conditions (`when`) and `oncePer` with expr v1.17.8 against the variables
   `app`, `appProject`, `context` (with `notificationType`), `secrets` (unless self-service),
   and helper namespaces `time`, `strings`, `sync`, `repo`.
 - Render templates (every string field of every section is a template) with sprig minus
   `env`, `expandenv` and `getHostByName`; extra variables `serviceType` (service **type**)
-  and `recipient`. Multiple templates of one condition are merged in order (non-empty
+  and `recipient`. Every render runs in a resource sandbox (see "Template sandbox").
+  Multiple templates of one condition are merged in order (non-empty
   `message` overrides; a section present in a later template replaces the earlier one;
   `webhook` entries merge per webhook name). Defaults: `github.repoURLPath`
   `{{.app.spec.source.repoURL}}`, `github.revisionPath`
@@ -58,6 +64,7 @@ eng, err := notifications.NewEngine(cfg,
 if ok, reason := notifications.SyncStatusRefreshed(app); !ok { /* skip, NOTIF-010 */ }
 state := notifications.DeliveryStateFromAnnotations(annotations, eng.AnnotationPrefix())
 newState, results, err := eng.Process(ctx, app, state)
+// Optional: notifications.WithTemplateLimits(notifications.TemplateLimits{MaxBytes, MaxSteps, Timeout})
 annotations, err = notifications.ApplyDeliveryState(annotations, eng.AnnotationPrefix(), newState)
 ```
 
@@ -107,6 +114,34 @@ the project object or the input state; a destination not attempted because `ctx`
 its previous state; secrets never appear in returned errors; the `Engine` is immutable and
 safe for concurrent use (rebuild it when the ConfigMap/Secret change).
 
+## Template sandbox
+
+Templates are untrusted (self-service notifications let application teams write them), and
+sprig allocates whole results before anything is written, so the output cap alone does not
+bound memory or CPU. One render (all templates and fields for one destination) gets a
+budget (`TemplateLimits`, option `WithTemplateLimits`):
+
+| Limit | Default | Enforced by |
+|-------|---------|-------------|
+| `MaxBytes` | 16 MiB | Every sandboxed function call is charged the size of its result; functions whose output is driven by a count or multiplies their input (`repeat`, `until`, `untilStep`, `seq`, `indent`/`nindent`, `rand*`, `replace`, `wrap`/`wrapWith`, `split*`, `regexReplaceAll*`, `regexFindAll`/`regexSplit`, `join`, `printf` widths/precisions/`%[n]` references, `print*`, `toJson`/`toPrettyJson`, `quote`, `html`/`js`/`urlquery`, `fromJson`, `deepCopy`) are checked **before** they allocate. Rendered output is charged too. |
+| single value | `MaxBytes/2` | Maps/lists returned by functions are measured (logical size counts every reference, so aliasing a large string 1000 times is refused). |
+| `MaxSteps` | 200,000 | One step per function call, per `range` iteration and per template invocation (the parse tree is instrumented with a tick action), which bounds loops (`range` over integers) and recursive `template` fan-out. |
+| `Timeout` | 10s | Checked at every step and every 4096 measured elements; `ctx` cancellation is honored the same way. |
+| nesting depth | 100 | Values built by functions (and `fromJson`/`deepCopy` results) deeper than 100 levels, or cyclic, are refused: fmt/encoding/json/deep copy recurse per level and a cyclic value (`set $d "self" $d`) is an unrecoverable stack overflow. |
+| shared map mutations | 256 | `set`/`merge*` on a map that may be referenced elsewhere (application data, a nested map) re-validates every value of the render; `set` on a map the template created and never stored elsewhere is updated incrementally and not counted. `set`/`merge` refuse to create cycles. |
+| key generation / hashing | 4 calls | `genPrivateKey`, `genCA*`, `genSelfSignedCert*`, `genSignedCert*`, `bcrypt`, `htpasswd`, `derivePassword`. |
+| `uniq`/`without` | 2^24 comparisons | Quadratic list functions. |
+
+`until`/`untilStep`/`seq` are re-implemented (same results; sprig's `untilStep` never
+terminates when the counter overflows). The text/template builtins `print`, `printf`,
+`println`, `html`, `js` and `urlquery` are replaced by budgeted equivalents with identical
+output; `and`/`or`/`not`/comparisons/`index`/`slice`/`len`/`call` keep the builtins. The
+`strings.ReplaceAll` helper (triggers and templates) refuses results above 4 MiB. Templates
+that use `set`/`unset`/`merge*` render against a private deep copy of the application
+data, so one render cannot affect another. Violations return `ErrTemplateLimitExceeded`.
+The sandbox wraps only the functions a template references; per render it costs one
+`Template.Clone` per field plus one `reflect.MakeFunc` per referenced function.
+
 ## Services
 
 All services implement `Send(ctx, Notification, Destination) error`, are wrapped by a
@@ -135,10 +170,10 @@ default 2m).
 | `pagerdutyv2` | `POST /v2/enqueue` `event_action: trigger`, `routing_key = serviceKeys[recipient]`, required summary/severity/source. |
 | `newrelic` | `POST {apiURL}/v2/applications/<id>/deployments.json` (`X-Api-Key`). |
 | `alertmanager` | `POST {scheme}://{target}{apiPath}` JSON array to every target concurrently; success if any target accepts; basic auth wins over bearer; per-target timeout (default 3s). |
-| `webhook` | `webhook.<name>.method/path/body` (default `GET` base URL); the rendered path is appended to `url` verbatim (baseline), so it may continue a query string, only a doubled `/` at the junction is collapsed; static headers, basic auth, `retryMax`/`retryWaitMin`/`retryWaitMax`. |
+| `webhook` | `webhook.<name>.method/path/body` (default `GET` base URL); the rendered path is appended to `url` (it may continue a query string or a path segment; a doubled `/` at the junction is collapsed). When `url` has no path, query or fragment, a path not starting with `/`, `?` or `#` is joined with `/` (`https://h` + `x` is `https://h/x`, never host `hx`), and a result whose scheme, host, port or user info differs from `url` is refused (`ErrURLNotAllowed`), so application data in the path cannot send the configured credentials elsewhere. Static headers, basic auth, `retryMax`/`retryWaitMin`/`retryWaitMax`. |
 | `github` | GitHub App (ghinstallation) + REST: commit status (description ≤140, 422 status-limit ignored), deployment (reuses an existing one for ref+environment, `autoMerge` default true) + status (description = message ≤140), PR comment upsert by tag marker `<!-- patrol-notifications TAG -->` (also finds `argocd-notifications` markers), check run. |
 | `awssqs` | aws-sdk-go-v2 SQS: `GetQueueUrl` (owner `account`) unless the queue is a URL, `SendMessage` with string attributes, group/dedup ids; static keys or default chain (IRSA). |
-| `gcppubsub` | REST `POST /v1/projects/{p}/topics/{t}:publish`, OAuth2 from `keyFile`/`keyJSON` (service_account only) or ADC. |
+| `gcppubsub` | REST `POST /v1/projects/{p}/topics/{t}:publish`, OAuth2 from `keyFile`/`keyJSON` (service_account only; `token_uri` must be https and pass `ValidateURL`) or ADC; the token client validates every request URL. |
 | `nats` | Minimal NATS client: `INFO` → optional TLS → `CONNECT` (user/pass, token in URL, nkey seed signature) → `PUB`/`HPUB` → `PING`/`PONG`. |
 | `email` | `net/smtp`: implicit TLS on 465 (or `implicitTLS`), STARTTLS when offered, PLAIN/LOGIN/CRAM-MD5 (never cleartext to non-local hosts), quoted-printable body, RFC 2047 subject, CR/LF stripped from headers; recipient may be a comma list. Once the server accepts `DATA` the delivery is successful (a failed `QUIT` or an ending context does not cause a duplicate send). |
 
@@ -157,6 +192,7 @@ default 2m).
 | AppProject lookup error | Warning log, `appProject = {}`, no project subscriptions (baseline). |
 | Repo helper failure | Template/condition error → `Failed` / not triggered. |
 | Oversized template output (>1 MiB per field) | `ErrTemplateOutputTooLarge`. |
+| Template exceeds the sandbox limits (memory, steps, time, depth, cycles) | `ErrTemplateLimitExceeded`; that render fails (`Failed`, retried next evaluation). |
 | Corrupt/oversized state annotation (>256 KiB) | Treated as empty (re-delivers currently true conditions once). |
 | `ctx` cancelled | Partial results/state returned with `ctx.Err()`; unattempted destinations untouched. |
 
@@ -168,7 +204,9 @@ default 2m).
   `Unwrap`. The engine never logs option payloads or rendered notifications.
 - SSRF: endpoints can come from user-editable places (annotations select services and
   recipients; templates render webhook paths). Only http/https (plus smtp/nats for those
-  services) are allowed; `Network.ValidateURL` is called for every endpoint and redirect;
+  services) are allowed; `Network.ValidateURL` is called for every endpoint and redirect
+  (for gcppubsub also for the key's `token_uri` and every token request); a webhook path
+  cannot change the configured host;
   `NewGuardedDialer` blocks loopback, RFC1918, link-local (cloud metadata), CGNAT, ULA,
   IPv6 addresses embedding a blocked IPv4 (NAT64 `64:ff9b::/96`, 6to4 `2002::/16`, mapped),
   multicast and reserved ranges at connect time (DNS-rebinding safe), with allow/block
@@ -176,10 +214,19 @@ default 2m).
   Alertmanager targets need an allow prefix). With an HTTP proxy configured the guard
   applies to the proxy address.
 - Templates cannot read the environment or resolve DNS (removed sprig functions); they run
-  on deep copies; output is size-bounded. `.secrets` is exposed only for controller-level
+  on deep copies (private per render when they mutate maps); memory, steps, time, value
+  size/depth are bounded and cyclic values are refused (see "Template sandbox").
+  `.secrets` is exposed only for controller-level
   configuration (baseline); self-service engines hide it.
 - GCP credentials are restricted to `service_account` keys (external-account files could
-  point token exchange at arbitrary URLs); key files are read with a 64 KiB cap.
+  point token exchange at arbitrary URLs). The key's `token_uri` (honoured by
+  `golang.org/x/oauth2/google`) must be https and pass `ValidateURL` before any token
+  request, and the token HTTP client validates every request URL (the shared client checks
+  redirects only); key files are read with a 64 KiB cap.
+- Custom trust roots (`Network.RootCAs`): the certificate is verified against the
+  negotiated server name or, for IP address endpoints (which send no SNI), against the
+  dialed address (direct HTTP connections, SMTP, NATS); a proxied HTTPS connection to an
+  IP address is refused because its address is not known at verification time.
 - SMTP: credentials are never sent over cleartext to non-local servers; `requireTLS`
   refuses unencrypted delivery; header injection is neutralized.
 
@@ -211,6 +258,14 @@ commands of NOTIF-104..108 and the UI editor NOTIF-109.
   (last key wins, with a warning).
 - `.secrets` values are strings (the baseline exposes `[]byte`).
 - `getHostByName` is removed from sprig in addition to `env`/`expandenv`.
+- Template sandbox limits (above) refuse templates the baseline would run (huge
+  allocations, unbounded loops, values deeper than 100 levels, more than 4 key
+  generations, cyclic `set`/`merge`); `merge` also refuses sources that reference a map of
+  the destination. `strings.ReplaceAll` returns an error above 4 MiB.
+- Webhook paths: a host-only `url` gets a `/` separator before a path not starting with
+  `/`, `?` or `#` (the baseline concatenation would change the host), and results changing
+  the target host are refused.
+- gcppubsub requires an https `token_uri` that passes `ValidateURL`.
 - Context key `patrolUrl` is aliased to/from `argocdUrl`; the catalog uses `patrolUrl`.
 - Telegram positive numeric recipients are chat ids (baseline would prefix `@`).
 - Opsgenie messages are truncated to 130 runes instead of being rejected.
@@ -253,6 +308,13 @@ commands of NOTIF-104..108 and the UI editor NOTIF-109.
   catalog data files. Both are outside this component's ownership.
 - Failed deliveries are surfaced as results/metrics/logs; emitting Kubernetes Events is the
   controller's job.
+- Template sandbox residuals: `call` on the helper namespaces is not charged (only
+  `strings.ReplaceAll` can amplify and it is capped); a `repo.*` helper call is bounded by
+  the helper timeout (30s), not by the render deadline; a single sprig call is not
+  preemptible (its size is checked first); printing data that was never passed through a
+  function (application fields) is bounded only by the object size the API server accepts;
+  fmt may build up to about twice a value's logical size before the 1 MiB output cap
+  applies.
 
 ## Verification
 
