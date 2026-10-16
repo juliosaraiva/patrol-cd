@@ -1,0 +1,8 @@
+apiVersion: cd.patrol.example/v1alpha1
+kind: AppProject
+metadata:
+  name: from-file
+spec:
+  description: original
+  sourceRepos:
+  - https://github.com/example/*

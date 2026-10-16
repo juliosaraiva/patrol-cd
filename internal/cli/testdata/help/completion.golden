@@ -1,0 +1,52 @@
+Write shell completion code for the specified shell (bash, zsh, fish or powershell).
+The shell code must be evaluated to provide interactive completion of patrol commands,
+including the names of applications, projects, repositories, clusters and contexts.
+
+Usage:
+  patrol completion SHELL [flags]
+
+Examples:
+# For bash, ensure you have bash completions installed and enabled.
+# To access completions in your current shell, run
+$ source <(patrol completion bash)
+# Alternatively, write it to a file and source in .bash_profile
+$ patrol completion bash > ~/.patrol_completion
+$ echo 'source ~/.patrol_completion' >> ~/.bash_profile
+
+# For zsh, add the following to your ~/.zshrc file:
+source <(patrol completion zsh)
+compdef _patrol patrol
+
+# For fish, write the completion to the fish completions directory:
+patrol completion fish > ~/.config/fish/completions/patrol.fish
+
+# For PowerShell, add the following to your profile:
+patrol completion powershell | Out-String | Invoke-Expression
+
+Flags:
+  -h, --help   help for completion
+
+Global Flags:
+      --auth-token string               Authentication token; set this or the PATROL_AUTH_TOKEN environment variable
+      --client-crt string               Client certificate file
+      --client-crt-key string           Client certificate key file
+      --config string                   Path to Patrol CD config (default "/home/patrol/.config/patrol/config")
+      --controller-name string          Name of the Patrol CD Application controller; set this or the PATROL_APPLICATION_CONTROLLER_NAME environment variable when the controller's name label differs from the default, for example when installing via the Helm chart (default "patrol-application-controller")
+      --core                            If set to true then CLI talks directly to Kubernetes instead of talking to Patrol CD API server
+      --grpc-web                        Accepted for compatibility with Argo CD and ignored: Patrol CD serves JSON over HTTP, which works through any HTTP proxy.
+      --grpc-web-root-path string       Root path of the Patrol CD server when it is served under a sub-path (Argo CD flag name kept for compatibility).
+  -H, --header strings                  Sets additional header to all requests made by Patrol CD CLI. (Can be repeated multiple times to add multiple headers, also supports comma separated headers)
+      --http-retry-max int              Maximum number of retries to establish http connection to Patrol CD server
+      --insecure                        Skip server certificate and domain verification
+      --kube-context string             Directs the command to the given kube-context
+      --logformat string                Set the logging format. One of: json|text (default "json")
+      --loglevel string                 Set the logging level. One of: debug|info|warn|error (default "info")
+      --patrol-context string           The name of the Patrol CD server context to use
+      --plaintext                       Disable TLS
+      --port-forward                    Connect to a random patrol-server port using port forwarding
+      --port-forward-namespace string   Namespace name which should be used for port forwarding
+      --prompts-enabled                 Force optional interactive prompts to be enabled or disabled, overriding local configuration. If not specified, the local configuration value will be used, which is false by default.
+      --repo-server-name string         Name of the Patrol CD Repo server; set this or the PATROL_REPO_SERVER_NAME environment variable when the server's name label differs from the default, for example when installing via the Helm chart (default "patrol-repo-server")
+      --server string                   Patrol CD server address
+      --server-crt string               Server certificate file
+      --server-name string              Name of the Patrol CD API server; set this or the PATROL_SERVER_NAME environment variable when the server's name label differs from the default, for example when installing via the Helm chart (default "patrol-server")

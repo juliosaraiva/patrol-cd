@@ -1,0 +1,470 @@
+# Representative Argo CD v3.5.5 export (the output of 'argocd admin export -n argocd').
+# Every credential below is a fake test value.
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: argocd-cm
+  labels:
+    app.kubernetes.io/name: argocd-cm
+    app.kubernetes.io/part-of: argocd
+data:
+  url: https://argocd.example.com
+  application.resourceTrackingMethod: annotation
+  admin.enabled: "true"
+  accounts.ci: apiKey
+  timeout.reconciliation: 180s
+  resource.customizations.health.argoproj.io_Application: |
+    hs = {}
+    hs.status = "Progressing"
+    hs.message = ""
+    if obj.status ~= nil and obj.status.health ~= nil then
+      hs.status = obj.status.health.status
+    end
+    return hs
+  resource.customizations.ignoreDifferences.apps_Deployment: |
+    jsonPointers:
+    - /spec/replicas
+  configManagementPlugins: |
+    - name: legacy-plugin
+      generate:
+        command: [sh, -c, "cat manifests.yaml"]
+  dex.config: |
+    connectors:
+    - type: github
+      id: github
+      name: GitHub
+      config:
+        clientID: example-client-id
+        clientSecret: $dex-github-secret:clientSecret
+        orgs:
+        - name: example
+---
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: argocd-rbac-cm
+  labels:
+    app.kubernetes.io/part-of: argocd
+data:
+  policy.default: role:readonly
+  policy.csv: |
+    p, role:deployer, applications, sync, */*, allow
+    p, role:deployer, applications, get, */*, allow
+    g, example:platform, role:deployer
+  scopes: "[groups]"
+---
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: argocd-cmd-params-cm
+  labels:
+    app.kubernetes.io/part-of: argocd
+data:
+  repo.server: argocd-repo-server:8081
+  application.namespaces: team-*
+  hydrator.enabled: "true"
+  redis.server: argocd-redis:6379
+---
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: argocd-ssh-known-hosts-cm
+  labels:
+    app.kubernetes.io/part-of: argocd
+data:
+  ssh_known_hosts: |
+    github.com ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIOMqqnkVzrm0SdG6UOoqKLsabgH5C9okWi0dh2l9GKJl
+---
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: argocd-tls-certs-cm
+  labels:
+    app.kubernetes.io/part-of: argocd
+---
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: argocd-notifications-cm
+data:
+  service.webhook.deployments: |
+    url: https://hooks.example.com/deployments
+  template.app-sync-succeeded: |
+    webhook:
+      deployments:
+        method: POST
+        body: |
+          {"app": "{{.app.metadata.name}}"}
+  trigger.on-sync-succeeded: |
+    - when: app.status.operationState.phase in ['Succeeded']
+      send: [app-sync-succeeded]
+---
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: unrelated-config
+data:
+  key: value
+---
+apiVersion: v1
+kind: Secret
+metadata:
+  name: argocd-secret
+  labels:
+    app.kubernetes.io/name: argocd-secret
+    app.kubernetes.io/part-of: argocd
+type: Opaque
+data:
+  admin.password: JDJhJDEwJGZha2VmYWtlZmFrZWZha2VmYWtlZnVGQUtFSEFTSEZBS0VIQVNIRkFLRUhBU0hGQUtFSEE=
+  admin.passwordMtime: MjAyNi0wMS0wMVQwMDowMDowMFo=
+  server.secretkey: ZmFrZS1zZXJ2ZXItc2lnbmluZy1rZXk=
+  accounts.ci.tokens: W3siaWQiOiJmYWtlLXRva2VuLWlkIiwiaWF0IjoxNzY3MjI1NjAwfV0=
+  webhook.github.secret: ZmFrZS1naXRodWItd2ViaG9vay1zZWNyZXQ=
+---
+apiVersion: v1
+kind: Secret
+metadata:
+  name: argocd-notifications-secret
+type: Opaque
+stringData:
+  deployments-token: fake-notifications-token
+---
+apiVersion: v1
+kind: Secret
+metadata:
+  name: dex-github-secret
+  labels:
+    app.kubernetes.io/part-of: argocd
+type: Opaque
+stringData:
+  clientSecret: fake-dex-client-secret
+---
+apiVersion: v1
+kind: Secret
+metadata:
+  name: repo-apps
+  labels:
+    argocd.argoproj.io/secret-type: repository
+type: Opaque
+data:
+  url: aHR0cHM6Ly9naXRodWIuY29tL2V4YW1wbGUvYXBwcy5naXQ=
+  type: Z2l0
+  project: ZGVmYXVsdA==
+  username: ZGVwbG95LWJvdA==
+  password: ZmFrZS1yZXBvLXBhc3N3b3Jk
+---
+apiVersion: v1
+kind: Secret
+metadata:
+  name: repo-private
+  labels:
+    argocd.argoproj.io/secret-type: repository
+  annotations:
+    managed-by: argocd.argoproj.io
+type: Opaque
+stringData:
+  url: git@github.com:example/private.git
+  sshPrivateKey: fake-ssh-private-key-material
+  enableLfs: "true"
+  legacyKey: unused
+---
+apiVersion: v1
+kind: Secret
+metadata:
+  name: repo-charts
+  labels:
+    argocd.argoproj.io/secret-type: repository
+type: Opaque
+stringData:
+  url: https://charts.example.com
+  type: helm
+  name: example-charts
+---
+apiVersion: v1
+kind: Secret
+metadata:
+  name: creds-github-app
+  labels:
+    argocd.argoproj.io/secret-type: repo-creds
+type: Opaque
+stringData:
+  url: https://github.com/example
+  githubAppID: "12345"
+  githubAppInstallationID: "678"
+  githubAppPrivateKey: fake-github-app-private-key
+---
+apiVersion: v1
+kind: Secret
+metadata:
+  name: repo-hydrated-write
+  labels:
+    argocd.argoproj.io/secret-type: repository-write
+type: Opaque
+stringData:
+  url: https://github.com/example/hydrated.git
+  username: x-access-token
+  password: fake-write-token
+---
+apiVersion: v1
+kind: Secret
+metadata:
+  name: cluster-prod
+  labels:
+    argocd.argoproj.io/secret-type: cluster
+    env: prod
+type: Opaque
+data:
+  name: cHJvZA==
+  server: aHR0cHM6Ly9wcm9kLmV4YW1wbGUuY29tOjY0NDM=
+  namespaces: YXBwcyxtb25pdG9yaW5n
+  config: eyJiZWFyZXJUb2tlbiI6ICJmYWtlLWNsdXN0ZXItYmVhcmVyLXRva2VuIiwgInRsc0NsaWVudENvbmZpZyI6IHsiaW5zZWN1cmUiOiBmYWxzZSwgImNhRGF0YSI6ICJSa0ZMUlMxRFFTMURSVkpVU1VaSlEwRlVSUzFHVDFJdFZFVlRWRk09In19
+---
+apiVersion: v1
+kind: Secret
+metadata:
+  name: cluster-eks
+  labels:
+    argocd.argoproj.io/secret-type: cluster
+    env: prod
+type: Opaque
+stringData:
+  name: eks-prod
+  server: https://ABCDEF.gr7.eu-west-1.eks.amazonaws.com
+  shard: "1"
+  config: '{"awsAuthConfig": {"clusterName": "eks-prod", "roleARN": "arn:aws:iam::123456789012:role/argocd-deployer"}, "tlsClientConfig": {"caData": "RkFLRS1DQS1DRVJUSUZJQ0FURS1GT1ItVEVTVFM="}}'
+---
+apiVersion: v1
+kind: Secret
+metadata:
+  name: cluster-aks
+  labels:
+    argocd.argoproj.io/secret-type: cluster
+type: Opaque
+stringData:
+  name: aks-dev
+  server: https://aks-dev.example.com
+  clusterResources: "true"
+  project: team-a
+  config: '{"execProviderConfig": {"command": "kubelogin", "args": ["get-token", "--login", "azurecli"], "env": {"AZURE_CLIENT_SECRET": "fake-exec-env-secret"}, "apiVersion": "client.authentication.k8s.io/v1beta1"}, "tlsClientConfig": {"insecure": true}}'
+---
+apiVersion: argoproj.io/v1alpha1
+kind: AppProject
+metadata:
+  name: team-a
+  finalizers:
+  - resources-finalizer.argocd.argoproj.io
+spec:
+  description: Team A
+  sourceRepos:
+  - https://github.com/example/*
+  destinations:
+  - server: https://prod.example.com:6443
+    namespace: team-a-*
+  - name: aks-dev
+    namespace: "*"
+  sourceNamespaces:
+  - team-a
+  clusterResourceWhitelist:
+  - group: ""
+    kind: Namespace
+  namespaceResourceBlacklist:
+  - group: ""
+    kind: ResourceQuota
+  roles:
+  - name: ci
+    description: CI pipeline
+    policies:
+    - p, proj:team-a:ci, applications, sync, team-a/*, allow
+    jwtTokens:
+    - iat: 1767225600
+      id: fake-project-token-id
+status:
+  jwtTokensByRole:
+    ci:
+      items:
+      - iat: 1767225600
+        id: fake-project-token-id
+---
+apiVersion: argoproj.io/v1alpha1
+kind: AppProject
+metadata:
+  name: default
+spec:
+  sourceRepos: ["*"]
+  destinations:
+  - server: "*"
+    namespace: "*"
+  clusterResourceWhitelist:
+  - group: "*"
+    kind: "*"
+---
+apiVersion: argoproj.io/v1alpha1
+kind: Application
+metadata:
+  name: guestbook
+  finalizers:
+  - resources-finalizer.argocd.argoproj.io
+  annotations:
+    notifications.argoproj.io/subscribe.on-sync-succeeded.deployments: ""
+    notified.notifications.argoproj.io: '{"on-sync-succeeded:abc:deployments:":1767225600}'
+    argocd.argoproj.io/manifest-generate-paths: .
+    argocd.argoproj.io/refresh: hard
+  labels:
+    team: platform
+spec:
+  project: default
+  source:
+    repoURL: https://github.com/example/apps.git
+    path: guestbook
+    targetRevision: HEAD
+  destination:
+    server: https://kubernetes.default.svc
+    namespace: guestbook
+  syncPolicy:
+    automated:
+      prune: true
+      selfHeal: true
+    syncOptions:
+    - CreateNamespace=true
+    retry:
+      limit: 3
+      backoff:
+        duration: 5s
+        factor: 2
+        maxDuration: 1m
+  ignoreDifferences:
+  - group: argoproj.io
+    kind: Application
+    jsonPointers:
+    - /spec/syncPolicy
+operation:
+  sync:
+    revision: HEAD
+  initiatedBy:
+    username: admin
+status:
+  sync:
+    status: Synced
+  health:
+    status: Healthy
+---
+apiVersion: argoproj.io/v1alpha1
+kind: Application
+metadata:
+  name: guestbook-hydrated
+spec:
+  project: default
+  sourceHydrator:
+    drySource:
+      repoURL: https://github.com/example/apps.git
+      path: guestbook
+      targetRevision: HEAD
+    syncSource:
+      repoURL: https://github.com/example/hydrated.git
+      targetBranch: environments/prod
+      path: guestbook
+  destination:
+    server: https://kubernetes.default.svc
+    namespace: guestbook-hydrated
+---
+apiVersion: argoproj.io/v1alpha1
+kind: Application
+metadata:
+  name: api
+  namespace: team-a
+  finalizers:
+  - resources-finalizer.argocd.argoproj.io/background
+  annotations:
+    argocd.argoproj.io/tracking-id: root:argoproj.io/Application:team-a/api
+spec:
+  project: team-a
+  sources:
+  - repoURL: https://charts.example.com
+    chart: api
+    targetRevision: 1.4.2
+    helm:
+      releaseName: api
+      valueFiles:
+      - $values/api/values-prod.yaml
+  - repoURL: https://github.com/example/apps.git
+    targetRevision: main
+    ref: values
+  destination:
+    name: prod
+    namespace: team-a-api
+  syncPolicy:
+    automated: {}
+---
+apiVersion: argoproj.io/v1alpha1
+kind: ApplicationSet
+metadata:
+  name: cluster-addons
+spec:
+  goTemplate: true
+  goTemplateOptions: ["missingkey=error"]
+  generators:
+  - clusters:
+      selector:
+        matchLabels:
+          argocd.argoproj.io/secret-type: cluster
+          env: prod
+  template:
+    metadata:
+      name: "{{.name}}-addons"
+      finalizers:
+      - resources-finalizer.argocd.argoproj.io
+      annotations:
+        notifications.argoproj.io/subscribe.on-sync-succeeded.deployments: ""
+    spec:
+      project: default
+      source:
+        repoURL: https://github.com/example/apps.git
+        path: addons
+        targetRevision: HEAD
+      destination:
+        server: "{{.server}}"
+        namespace: addons
+      syncPolicy:
+        automated:
+          prune: true
+  syncPolicy:
+    preserveResourcesOnDeletion: true
+---
+apiVersion: argoproj.io/v1alpha1
+kind: ApplicationSet
+metadata:
+  name: team-repos
+spec:
+  generators:
+  - scmProvider:
+      github:
+        organization: example
+        tokenRef:
+          secretName: github-token
+          key: token
+      # Generator-level template: its fields win over spec.template when merged.
+      template:
+        metadata:
+          finalizers:
+          - resources-finalizer.argocd.argoproj.io
+          annotations:
+            argocd.argoproj.io/sync-wave: "1"
+        spec:
+          project: team-a
+          destination: {}
+          syncPolicy:
+            automated:
+              prune: true
+              selfHeal: true
+  template:
+    metadata:
+      name: "{{repository}}"
+    spec:
+      project: team-a
+      source:
+        repoURL: "{{url}}"
+        path: deploy
+        targetRevision: "{{branch}}"
+      destination:
+        server: https://prod.example.com:6443
+        namespace: "team-a-{{repository}}"

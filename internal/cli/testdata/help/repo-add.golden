@@ -1,0 +1,109 @@
+Add git, oci or helm repository connection parameters
+
+Usage:
+  patrol repo add REPOURL [flags]
+
+Examples:
+  # Add a Git repository via SSH using a private key for authentication, ignoring the server's host key:
+  patrol repo add git@git.example.com:repos/repo --insecure-ignore-host-key --ssh-private-key-path ~/id_rsa
+
+  # Add a Git repository via SSH on a non-default port - need to use ssh:// style URLs here
+  patrol repo add ssh://git@git.example.com:2222/repos/repo --ssh-private-key-path ~/id_rsa
+
+  # Add a private Git repository via HTTPS using username/password and TLS client certificates:
+  patrol repo add https://git.example.com/repos/repo --username git --password secret --tls-client-cert-path ~/mycert.crt --tls-client-cert-key-path ~/mycert.key
+
+  # Add a private Git repository via HTTPS using username/password without verifying the server's TLS certificate
+  patrol repo add https://git.example.com/repos/repo --username git --password secret --insecure-skip-server-verification
+
+  # Add a public Helm repository named 'stable' via HTTPS
+  patrol repo add https://charts.helm.sh/stable --type helm --name stable
+
+  # Add a private Helm OCI-based repository named 'stable' via HTTPS
+  patrol repo add helm-oci-registry.example.com --type helm --name stable --enable-oci --username test --password test
+
+  # Add a private HTTPS OCI repository named 'stable'
+  patrol repo add oci://helm-oci-registry.example.com --type oci --name stable --username test --password test
+
+  # Add a private HTTP OCI repository named 'stable'
+  patrol repo add oci://helm-oci-registry.example.com --type oci --name stable --username test --password test --insecure-oci-force-http
+
+  # Add a private Git repository on GitHub.com via GitHub App. github-app-installation-id is optional, if not provided, the installation id will be fetched from the GitHub API.
+  patrol repo add https://git.example.com/repos/repo --github-app-id 1 --github-app-installation-id 2 --github-app-private-key-path test.private-key.pem
+
+  # Add a private Git repository on GitHub Enterprise via GitHub App.
+  patrol repo add https://ghe.example.com/repos/repo --github-app-id 1 --github-app-private-key-path test.private-key.pem --github-app-enterprise-base-url https://ghe.example.com/api/v3
+
+  # Add a private Git repository on Google Cloud Sources via GCP service account credentials
+  patrol repo add https://source.developers.google.com/p/my-google-cloud-project/r/my-repo --gcp-service-account-key-path service-account-key.json
+
+  # Add a private Git repository on Azure Devops via Azure Service Principal credentials
+  patrol repo add https://dev.azure.com/my-devops-organization/my-devops-project/_git/my-devops-repo --azure-service-principal-client-id 12345678-1234-1234-1234-123456789012 --azure-service-principal-client-secret test --azure-service-principal-tenant-id 12345678-1234-1234-1234-123456789012
+
+
+Flags:
+      --azure-active-directory-endpoint string         Active Directory endpoint when not using default Azure public cloud (e.g. https://login.microsoftonline.de)
+      --azure-service-principal-client-id string       client id of the Azure Service Principal
+      --azure-service-principal-client-secret string   client secret of the Azure Service Principal
+      --azure-service-principal-tenant-id string       tenant id of the Azure Service Principal
+      --bearer-token string                            bearer token to the Git BitBucket Data Center repository
+      --depth int                                      Specify a custom depth for git clone operations. Unless specified, a full clone is performed using the depth of 0
+      --enable-lfs                                     enable git-lfs (Large File Support) on this repository
+      --enable-oci                                     enable helm-oci (Helm OCI-Based Repository) (only valid for helm type repositories)
+      --force-http-basic-auth                          whether to force use of basic auth when connecting repository via HTTP
+      --gcp-service-account-key-path string            service account key for the Google Cloud Platform
+      --github-app-enterprise-base-url string          base url to use when using GitHub Enterprise (e.g. https://ghe.example.com/api/v3
+      --github-app-id int                              id of the GitHub Application
+      --github-app-installation-id int                 installation id of the GitHub Application (optional, will be auto-discovered if not provided)
+      --github-app-private-key-path string             private key of the GitHub Application
+  -h, --help                                           help for add
+      --insecure-ignore-host-key                       disables SSH strict host key checking (deprecated, use --insecure-skip-server-verification instead)
+      --insecure-oci-force-http                        Use http when accessing an OCI repository
+      --insecure-skip-server-verification              disables server certificate and host key checks
+      --name string                                    name of the repository, mandatory for repositories of type helm
+      --no-proxy string                                don't access these targets via proxy
+      --password string                                password to the repository
+      --project string                                 project of the repository
+      --proxy string                                   use proxy to access repository
+      --ssh-private-key-path string                    path to the private ssh key (e.g. ~/.ssh/id_rsa)
+      --tls-client-cert-key-path string                path to the TLS client cert's key (must be PEM format)
+      --tls-client-cert-path string                    path to the TLS client cert (must be PEM format)
+      --type string                                    type of the repository, "git", "oci" or "helm" (default "git")
+      --upsert                                         Override an existing repository with the same name even if the spec differs
+      --use-azure-workload-identity                    whether to use azure workload identity for authentication
+      --username string                                username to the repository
+      --webhook-manifest-cache-warm-disabled           disable manifest cache warming during webhook processing for this repository (recommended for large monorepos with plain YAML manifests)
+
+Global Flags:
+      --auth-token string               Authentication token; set this or the PATROL_AUTH_TOKEN environment variable
+      --client-crt string               Client certificate file
+      --client-crt-key string           Client certificate key file
+      --cluster string                  The name of the kubeconfig cluster to use
+      --config string                   Path to Patrol CD config (default "/home/patrol/.config/patrol/config")
+      --context string                  The name of the kubeconfig context to use
+      --controller-name string          Name of the Patrol CD Application controller; set this or the PATROL_APPLICATION_CONTROLLER_NAME environment variable when the controller's name label differs from the default, for example when installing via the Helm chart (default "patrol-application-controller")
+      --core                            If set to true then CLI talks directly to Kubernetes instead of talking to Patrol CD API server
+      --grpc-web                        Accepted for compatibility with Argo CD and ignored: Patrol CD serves JSON over HTTP, which works through any HTTP proxy.
+      --grpc-web-root-path string       Root path of the Patrol CD server when it is served under a sub-path (Argo CD flag name kept for compatibility).
+  -H, --header strings                  Sets additional header to all requests made by Patrol CD CLI. (Can be repeated multiple times to add multiple headers, also supports comma separated headers)
+      --http-retry-max int              Maximum number of retries to establish http connection to Patrol CD server
+      --insecure                        Skip server certificate and domain verification
+      --insecure-skip-tls-verify        If true, the server's certificate will not be checked for validity. This will make your HTTPS connections insecure
+      --kube-context string             Directs the command to the given kube-context
+      --kubeconfig string               Path to a kube config. Only required if out-of-cluster
+      --logformat string                Set the logging format. One of: json|text (default "json")
+      --loglevel string                 Set the logging level. One of: debug|info|warn|error (default "info")
+  -n, --namespace string                If present, the namespace scope for this CLI request
+      --patrol-context string           The name of the Patrol CD server context to use
+      --plaintext                       Disable TLS
+      --port-forward                    Connect to a random patrol-server port using port forwarding
+      --port-forward-namespace string   Namespace name which should be used for port forwarding
+      --prompts-enabled                 Force optional interactive prompts to be enabled or disabled, overriding local configuration. If not specified, the local configuration value will be used, which is false by default.
+      --proxy-url string                If provided, this URL will be used to connect via proxy
+      --repo-server-name string         Name of the Patrol CD Repo server; set this or the PATROL_REPO_SERVER_NAME environment variable when the server's name label differs from the default, for example when installing via the Helm chart (default "patrol-repo-server")
+      --request-timeout string          The length of time to wait before giving up on a single server request. Non-zero values should contain a corresponding time unit (e.g. 1s, 2m, 3h). A value of zero means don't timeout requests. (default "0")
+      --server string                   Patrol CD server address
+      --server-crt string               Server certificate file
+      --server-name string              Name of the Patrol CD API server; set this or the PATROL_SERVER_NAME environment variable when the server's name label differs from the default, for example when installing via the Helm chart (default "patrol-server")
+      --token string                    Bearer token for authentication to the API server
+      --user string                     The name of the kubeconfig user to use

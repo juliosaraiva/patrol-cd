@@ -1,0 +1,26 @@
+apiVersion: cd.patrol.example/v1alpha1
+kind: Application
+metadata:
+  annotations:
+    note: x
+  finalizers:
+  - resources-finalizer.cd.patrol.example
+  labels:
+    team: a
+  name: guestbook
+spec:
+  destination:
+    namespace: default
+    server: https://kubernetes.default.svc
+  project: team-a
+  source:
+    directory:
+      recurse: true
+    path: guestbook
+    repoURL: https://github.com/example/apps.git
+  syncPolicy:
+    automated:
+      prune: true
+      selfHeal: true
+    syncOptions:
+    - CreateNamespace=true

@@ -1,0 +1,117 @@
+# Argo CD export with constructs Patrol CD cannot convert. Credentials are fake test values.
+apiVersion: argoproj.io/v1alpha1
+kind: Rollout
+metadata:
+  name: canary
+spec:
+  replicas: 2
+---
+apiVersion: argoproj.io/v1alpha1
+kind: Application
+metadata:
+  name: unknown-field
+spec:
+  project: default
+  source:
+    repoURL: https://github.com/example/apps.git
+    path: app
+    targetRevision: HEAD
+    futureOption: true
+  destination:
+    server: https://kubernetes.default.svc
+    namespace: app
+---
+apiVersion: argoproj.io/v1alpha1
+kind: Application
+metadata:
+  name: two-sources
+spec:
+  project: default
+  source:
+    repoURL: https://github.com/example/apps.git
+    path: app
+    targetRevision: HEAD
+  sources:
+  - repoURL: https://github.com/example/apps.git
+    path: other
+    targetRevision: HEAD
+  destination:
+    server: https://kubernetes.default.svc
+    namespace: app
+---
+apiVersion: argoproj.io/v1alpha1
+kind: Application
+metadata:
+  name: valid
+spec:
+  project: default
+  source:
+    repoURL: https://github.com/example/apps.git
+    path: app
+    targetRevision: HEAD
+  destination:
+    server: https://kubernetes.default.svc
+    namespace: app
+---
+apiVersion: argoproj.io/v1alpha1
+kind: AppProject
+metadata:
+  name: bad-policy
+spec:
+  sourceRepos: ["*"]
+  roles:
+  - name: ci
+    policies:
+    - p, proj:another-project:ci, applications, sync, another-project/*, allow
+---
+apiVersion: v1
+kind: Secret
+metadata:
+  name: repo-svn
+  labels:
+    argocd.argoproj.io/secret-type: repository
+stringData:
+  url: svn://svn.example.com/repo
+  type: svn
+  password: fake-blocking-svn-password
+---
+apiVersion: v1
+kind: Secret
+metadata:
+  name: repo-bad-bool
+  labels:
+    argocd.argoproj.io/secret-type: repository
+stringData:
+  url: https://github.com/example/bad.git
+  insecure: maybe
+---
+apiVersion: v1
+kind: Secret
+metadata:
+  name: cluster-bad-config
+  labels:
+    argocd.argoproj.io/secret-type: cluster
+stringData:
+  name: broken
+  server: https://broken.example.com
+  config: '{"bearerToken": "fake-blocking-token"'
+---
+apiVersion: v1
+kind: Secret
+metadata:
+  name: cluster-bad-shard
+  labels:
+    argocd.argoproj.io/secret-type: cluster
+stringData:
+  name: sharded
+  server: https://sharded.example.com
+  shard: first
+---
+apiVersion: v1
+kind: Secret
+metadata:
+  name: mystery
+  labels:
+    argocd.argoproj.io/secret-type: vault
+stringData:
+  token: fake-blocking-vault-token

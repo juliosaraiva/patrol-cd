@@ -1,0 +1,4 @@
+p, role:deployer, applications, sync, team-a/*, allow
+p, role:deployer, applications, get, team-a/*, allow
+p, role:deployer, applications, delete, team-a/*-prod, deny
+g, alice, role:deployer

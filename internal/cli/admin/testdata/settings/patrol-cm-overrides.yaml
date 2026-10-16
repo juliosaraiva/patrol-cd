@@ -1,0 +1,42 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: patrol-cm
+  labels:
+    app.kubernetes.io/part-of: patrol-cd
+data:
+  resource.customizations.health.example.com_Widget: |
+    hs = {}
+    if obj.status ~= nil and obj.status.ready == false then
+      hs.status = "Degraded"
+      hs.message = "widget is broken"
+      return hs
+    end
+    hs.status = "Healthy"
+    hs.message = "widget works"
+    return hs
+  resource.customizations.ignoreDifferences.apps_Deployment: |
+    jsonPointers:
+    - /spec/replicas
+  resource.customizations.ignoreResourceUpdates.external-secrets.io_ExternalSecret: |
+    jsonPointers:
+    - /status/refreshTime
+  resource.customizations.actions.apps_Deployment: |
+    discovery.lua: |
+      actions = {}
+      actions["scale-up"] = {}
+      actions["annotate"] = {["disabled"] = false}
+      actions["pause"] = {["disabled"] = true}
+      return actions
+    definitions:
+    - name: scale-up
+      action.lua: |
+        obj.spec.replicas = obj.spec.replicas + 1
+        return obj
+    - name: annotate
+      action.lua: |
+        if obj.metadata.annotations == nil then
+          obj.metadata.annotations = {}
+        end
+        obj.metadata.annotations["example.com/note"] = actionParams["note"]
+        return obj

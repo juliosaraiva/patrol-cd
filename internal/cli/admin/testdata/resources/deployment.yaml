@@ -1,0 +1,23 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: web
+  namespace: default
+  generation: 1
+spec:
+  replicas: 3
+  selector:
+    matchLabels: {app: web}
+  template:
+    metadata:
+      labels: {app: web}
+    spec:
+      containers:
+      - name: web
+        image: nginx:1.27
+status:
+  observedGeneration: 1
+  replicas: 3
+  readyReplicas: 3
+  updatedReplicas: 3
+  availableReplicas: 3

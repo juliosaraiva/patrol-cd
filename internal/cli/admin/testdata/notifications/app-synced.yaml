@@ -1,0 +1,19 @@
+apiVersion: cd.patrol.example/v1alpha1
+kind: Application
+metadata:
+  name: guestbook
+  namespace: patrol
+spec:
+  project: default
+  source:
+    repoURL: https://git.example.com/platform/patrol-examples.git
+    path: apps/plain-yaml/manifests
+    targetRevision: main
+  destination:
+    server: https://kubernetes.default.svc
+    namespace: guestbook
+status:
+  sync:
+    status: Synced
+  health:
+    status: Healthy

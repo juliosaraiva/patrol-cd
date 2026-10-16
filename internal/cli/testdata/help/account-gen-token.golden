@@ -1,0 +1,53 @@
+Generate account token
+
+Usage:
+  patrol account generate-token [flags]
+
+Examples:
+# Generate token for the currently logged in account
+patrol account generate-token
+
+# Generate token for the account with the specified name
+patrol account generate-token --account <account-name>
+
+Flags:
+  -a, --account string      Account name. Defaults to the current account.
+  -e, --expires-in string   Duration before the token will expire. (Default: No expiration) (default "0s")
+  -h, --help                help for generate-token
+      --id string           Optional token id. Fall back to uuid if not value specified.
+
+Global Flags:
+      --auth-token string               Authentication token; set this or the PATROL_AUTH_TOKEN environment variable
+      --client-crt string               Client certificate file
+      --client-crt-key string           Client certificate key file
+      --cluster string                  The name of the kubeconfig cluster to use
+      --config string                   Path to Patrol CD config (default "/home/patrol/.config/patrol/config")
+      --context string                  The name of the kubeconfig context to use
+      --controller-name string          Name of the Patrol CD Application controller; set this or the PATROL_APPLICATION_CONTROLLER_NAME environment variable when the controller's name label differs from the default, for example when installing via the Helm chart (default "patrol-application-controller")
+      --core                            If set to true then CLI talks directly to Kubernetes instead of talking to Patrol CD API server
+      --grpc-web                        Accepted for compatibility with Argo CD and ignored: Patrol CD serves JSON over HTTP, which works through any HTTP proxy.
+      --grpc-web-root-path string       Root path of the Patrol CD server when it is served under a sub-path (Argo CD flag name kept for compatibility).
+  -H, --header strings                  Sets additional header to all requests made by Patrol CD CLI. (Can be repeated multiple times to add multiple headers, also supports comma separated headers)
+      --http-retry-max int              Maximum number of retries to establish http connection to Patrol CD server
+      --insecure                        Skip server certificate and domain verification
+      --insecure-skip-tls-verify        If true, the server's certificate will not be checked for validity. This will make your HTTPS connections insecure
+      --kube-context string             Directs the command to the given kube-context
+      --kubeconfig string               Path to a kube config. Only required if out-of-cluster
+      --logformat string                Set the logging format. One of: json|text (default "json")
+      --loglevel string                 Set the logging level. One of: debug|info|warn|error (default "info")
+  -n, --namespace string                If present, the namespace scope for this CLI request
+      --password string                 Password for basic authentication to the API server
+      --patrol-context string           The name of the Patrol CD server context to use
+      --plaintext                       Disable TLS
+      --port-forward                    Connect to a random patrol-server port using port forwarding
+      --port-forward-namespace string   Namespace name which should be used for port forwarding
+      --prompts-enabled                 Force optional interactive prompts to be enabled or disabled, overriding local configuration. If not specified, the local configuration value will be used, which is false by default.
+      --proxy-url string                If provided, this URL will be used to connect via proxy
+      --repo-server-name string         Name of the Patrol CD Repo server; set this or the PATROL_REPO_SERVER_NAME environment variable when the server's name label differs from the default, for example when installing via the Helm chart (default "patrol-repo-server")
+      --request-timeout string          The length of time to wait before giving up on a single server request. Non-zero values should contain a corresponding time unit (e.g. 1s, 2m, 3h). A value of zero means don't timeout requests. (default "0")
+      --server string                   Patrol CD server address
+      --server-crt string               Server certificate file
+      --server-name string              Name of the Patrol CD API server; set this or the PATROL_SERVER_NAME environment variable when the server's name label differs from the default, for example when installing via the Helm chart (default "patrol-server")
+      --token string                    Bearer token for authentication to the API server
+      --user string                     The name of the kubeconfig user to use
+      --username string                 Username for basic authentication to the API server
