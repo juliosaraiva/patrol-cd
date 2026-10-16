@@ -10,9 +10,38 @@ Resume rule: read this file, then `docs/parity/matrix.md`, then `docs/verificati
 - W2 CRD types: implemented + reviewed; review-fix re-running (run wf_3b816f38-c83)
 - W3 Phase 1a libraries (run wf_b4bb6ee9-d6b): done impl — sandbox, rbac, auth, lua+health, cache, scm-core, notifications; re-running — diff, git, helm/oci, scm-providers impl and all reviews/fixes
 - W4 UI foundation (run wf_20ba85e9-0a8): scaffold, design system, shell, API layer
+- W5 Phase 1b (run wf_0e7d0d9a-708): settings, project, tracking, clusters, sync engine
+- W6 Phase 2a (run wf_e0428cb6-bde): repository creds, render, cmp, repo-server, compare, controllers, sharding/tree API, appset, apiserver core
+- W1 research DONE: 1,457 features; aliases in docs/parity/aliases.yaml
 - Session limit interrupted W1–W3 on 2026-10-12; resumed 2026-10-13 via resumeFromRunId. Checkpoint commit cee7e81.
 
+## GATE (user instruction, 2026-10-16)
+
+**When Phase 3 (API, CLI, UI: T3.1–T3.4) is complete and verified, BEFORE starting any further Phase 4 work (Dockerfile, Helm chart, manifests, e2e, packaging): create a PRIVATE GitHub repository for this project under the authenticated account (`gh`, user juliosaraiva) and push the code.**
+- Explicitly authorized by the user in chat; covers creating the private repo and pushing. Nothing else external (no releases, no image publishing, no making it public).
+- Before pushing: run gitleaks (installed in ~/go/bin) over the tree and history, confirm `.env*`/kubeconfigs/keys are not tracked, and review test-only keys are clearly marked.
+- Needs real commits: local commit signing (1Password SSH agent) must work; do not bypass the user's signing config.
+- Already in flight before this instruction (do not start more Phase 4 items): envs-and-examples workflow wf_8ca37009-3bd (kind env, fixtures, examples).
+
+## Resume state (2026-10-16)
+
+Phase 1a (sandbox, git, helm, oci, rbac, auth, lua, health, cache, diff, scm + 8 providers, notifications engine) and Phase 1b (settings, project, tracking, clusters, sync) are implemented, reviewed and fixed; Phase 1a re-verified by orchestrator (V-0004). UI foundation done (V-0005).
+Phase 2a, 2b and UI pages all died on the usage limit on 2026-10-13 with zero completed agents; partial files were left on disk. Relaunched 2026-10-16 with a resume note so agents finish partial work:
+- Phase 2a (repository, render, cmp, reposerver, compare, controller, sharding/treeapi, appset, apiserver-core): run wf_da6e16d6-c8f
+- Phase 2b (notifications controller, webhook, hydrator + commit-server): run wf_7ff05528-e96
+- UI pages (apps-core, apps-resources, create/appsets/extensions, settings): run wf_f74ab748-98d
+`go build ./...` is red until these land.
+
+Update 2026-10-16 (afternoon):
+- Phase 2b DONE and verified (V-0006). UI pages DONE and verified (V-0008). UI extension-host mounts: agent ad6536e1e1ec08113 running.
+- Phase 2a: repository, render, cmp, reposerver, appset, apiserver-core implemented+reviewed+fixed; reposerver fix and compare impl still running; controller and sharding/treeapi not started (wait on compare).
+- Phase 3a API handlers (repositories, clusters-projects, appsets-misc, applications core routes): run wf_b0aa8ab6-934. Application resource routes (tree, resource, logs, terminal, actions) wait on controller treeapi.
+- envs-and-examples (kind clusters, fixtures, examples): run wf_8ca37009-3bd.
+- Next once Phase 2a lands: application resource routes, CLI (3 agents), cmd/patrolcd wiring, Dockerfile + Helm chart + manifests, e2e suite, security tests, benchmarks, docs.
+
 ## Blockers
+
+- Local commits fail since 2026-10-13 ~01:00: `commit.gpgsign=true` with 1Password SSH signing returns "1Password: agent returned an error". Not overriding the user's signing config; changes accumulate in the working tree (staged). Needs: unlock/approve 1Password, then commit.
 
 - None yet. Known future dependency: live GitHub verification needs a GitHub App or token
   supplied by the user (see "Blocked on me" in the final report). Contract tests use fakes.
