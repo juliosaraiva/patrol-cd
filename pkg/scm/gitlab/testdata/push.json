@@ -1,0 +1,69 @@
+{
+  "object_kind": "push",
+  "event_name": "push",
+  "before": "0000000000000000000000000000000000000063",
+  "after": "0000000000000000000000000000000000000001",
+  "ref": "refs/heads/main",
+  "ref_protected": true,
+  "checkout_sha": "0000000000000000000000000000000000000001",
+  "message": null,
+  "user_id": 4,
+  "user_name": "Alice Example",
+  "user_username": "alice",
+  "user_email": "",
+  "user_avatar": "https://gitlab.example.com/uploads/-/system/user/avatar/4/avatar.png",
+  "project_id": 42,
+  "project": {
+    "id": 42,
+    "name": "platform",
+    "description": "Platform manifests",
+    "web_url": "https://gitlab.example.com/acme/platform",
+    "avatar_url": null,
+    "git_ssh_url": "git@gitlab.example.com:acme/platform.git",
+    "git_http_url": "https://gitlab.example.com/acme/platform.git",
+    "namespace": "acme",
+    "visibility_level": 0,
+    "path_with_namespace": "acme/platform",
+    "default_branch": "main",
+    "ci_config_path": null,
+    "homepage": "https://gitlab.example.com/acme/platform",
+    "url": "git@gitlab.example.com:acme/platform.git",
+    "ssh_url": "git@gitlab.example.com:acme/platform.git",
+    "http_url": "https://gitlab.example.com/acme/platform.git"
+  },
+  "commits": [
+    {
+      "id": "0000000000000000000000000000000000000002",
+      "message": "Update app a\n",
+      "title": "Update app a",
+      "timestamp": "2026-10-01T12:00:00+00:00",
+      "url": "https://gitlab.example.com/acme/platform/-/commit/0000000000000000000000000000000000000002",
+      "author": { "name": "Alice Example", "email": "[REDACTED]" },
+      "added": ["apps/a/configmap.yaml"],
+      "modified": ["apps/a/values.yaml"],
+      "removed": []
+    },
+    {
+      "id": "0000000000000000000000000000000000000001",
+      "message": "Tidy\n",
+      "title": "Tidy",
+      "timestamp": "2026-10-01T12:05:00+00:00",
+      "url": "https://gitlab.example.com/acme/platform/-/commit/0000000000000000000000000000000000000001",
+      "author": { "name": "Alice Example", "email": "[REDACTED]" },
+      "added": [],
+      "modified": ["README.md", "apps/a/values.yaml"],
+      "removed": ["apps/old/deployment.yaml"]
+    }
+  ],
+  "total_commits_count": 2,
+  "push_options": {},
+  "repository": {
+    "name": "platform",
+    "url": "git@gitlab.example.com:acme/platform.git",
+    "description": "Platform manifests",
+    "homepage": "https://gitlab.example.com/acme/platform",
+    "git_http_url": "https://gitlab.example.com/acme/platform.git",
+    "git_ssh_url": "git@gitlab.example.com:acme/platform.git",
+    "visibility_level": 0
+  }
+}

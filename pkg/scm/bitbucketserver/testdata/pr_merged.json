@@ -1,0 +1,21 @@
+{
+  "eventKey": "pr:merged",
+  "date": "2026-10-02T09:00:00+0000",
+  "actor": { "name": "bob", "displayName": "Bob Example", "id": 3, "slug": "bob" },
+  "pullRequest": {
+    "id": 2,
+    "title": "Add b",
+    "state": "MERGED",
+    "open": false,
+    "closed": true,
+    "fromRef": { "id": "refs/heads/feature-b", "displayId": "feature-b", "latestCommit": "0000000000000000000000000000000000000003" },
+    "toRef": {
+      "id": "refs/heads/main",
+      "displayId": "main",
+      "latestCommit": "0000000000000000000000000000000000000001",
+      "repository": { "slug": "platform", "id": 42, "project": { "key": "PROJ" }, "public": true, "links": { "clone": [], "self": [] } }
+    },
+    "author": { "user": { "name": "bob", "slug": "bob" }, "role": "AUTHOR" },
+    "links": { "self": [{ "href": "https://bitbucket.example.com/projects/PROJ/repos/platform/pull-requests/2" }] }
+  }
+}

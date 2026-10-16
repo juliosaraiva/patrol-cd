@@ -617,6 +617,105 @@ func TestRateLimits(t *testing.T) {
 	})
 }
 
+// TestRateLimitWaitBeyondAttemptTimeout: provider-advised waits longer than the
+// per-attempt timeout but within MaxWait are honored (they used to be cut off by an
+// http.Client.Timeout spanning the retry chain and surfaced as an unclassified deadline
+// error), and a caller deadline too short for the wait yields RateLimited + RetryAfter.
+func TestRateLimitWaitBeyondAttemptTimeout(t *testing.T) {
+	t.Parallel()
+	retry := scm.RetryPolicy{MaxAttempts: 3, BaseDelay: time.Millisecond, MaxDelay: 2 * time.Millisecond, MaxWait: 5 * time.Second}
+	tests := []struct {
+		name    string
+		auth    authKind
+		timeout time.Duration
+		maxWait time.Duration
+	}{
+		{"Timeout < Retry-After <= MaxWait", pat, 250 * time.Millisecond, retry.MaxWait},
+		{"Timeout == Retry-After == MaxWait (default ratio)", pat, time.Second, time.Second},
+		// The first request is App installation discovery (GET), run as a shared fetch
+		// that must be bounded by the retry budget, not by the attempt timeout. (Token
+		// minting is a POST, which the retry layer never retries.)
+		{"GitHub App installation discovery", appDiscover, 250 * time.Millisecond, retry.MaxWait},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+			s := newSeed(t, "")
+			cfg := s.config(t, tc.auth)
+			cfg.Timeout, cfg.Retry = tc.timeout, retry
+			cfg.Retry.MaxWait = tc.maxWait
+			p := newProvider(t, cfg)
+			s.srv.InjectSecondaryRateLimit(time.Second, 1)
+			start := time.Now()
+			got, err := p.ListBranches(t.Context(), s.platformRepo, false)
+			if err != nil || len(got) != 1 {
+				t.Fatalf("want success after waiting out Retry-After: %v (kind %q) %v", err, scm.KindOf(err), got)
+			}
+			if el := time.Since(start); el < time.Second {
+				t.Fatalf("returned after %v, before Retry-After elapsed", el)
+			}
+		})
+	}
+	t.Run("caller deadline shorter than the wait", func(t *testing.T) {
+		t.Parallel()
+		s := newSeed(t, "")
+		cfg := s.config(t, pat)
+		cfg.Timeout, cfg.Retry = 250*time.Millisecond, retry
+		p := newProvider(t, cfg)
+		s.srv.InjectSecondaryRateLimit(2*time.Second, 1)
+		ctx, cancel := context.WithTimeout(t.Context(), time.Second)
+		defer cancel()
+		start := time.Now()
+		_, err := p.ResolveRevision(ctx, s.platformRepo, "main")
+		ra, ok := scm.RetryAfter(err)
+		if !scm.IsRateLimited(err) || !ok || ra != 2*time.Second {
+			t.Fatalf("err = %v (kind %q, retry after %v)", err, scm.KindOf(err), ra)
+		}
+		if el := time.Since(start); el >= time.Second {
+			t.Fatalf("took %v: the chain slept into the caller's deadline", el)
+		}
+	})
+}
+
+func TestAttemptTimeout(t *testing.T) {
+	t.Parallel()
+	const stall = 5 * time.Second
+	t.Run("stalled attempt is retried", func(t *testing.T) {
+		t.Parallel()
+		s := newSeed(t, "")
+		cfg := s.config(t, pat)
+		cfg.Timeout = 200 * time.Millisecond
+		p := newProvider(t, cfg)
+		s.srv.Stall(stall, 1)
+		start := time.Now()
+		got, err := p.ListBranches(t.Context(), s.platformRepo, false)
+		if err != nil || len(got) != 1 {
+			t.Fatalf("want success on retry: %v %v", err, got)
+		}
+		if el := time.Since(start); el >= stall {
+			t.Fatalf("took %v: the stalled attempt was not cut off", el)
+		}
+	})
+	t.Run("every attempt stalls", func(t *testing.T) {
+		t.Parallel()
+		s := newSeed(t, "")
+		cfg := s.config(t, pat)
+		cfg.Timeout = 200 * time.Millisecond
+		p := newProvider(t, cfg)
+		s.srv.Stall(stall, 0)
+		start := time.Now()
+		_, err := p.ResolveRevision(t.Context(), s.platformRepo, "main")
+		var se *scm.Error
+		if !errors.As(err, &se) || se.Kind != scm.KindUnavailable || se.Op != "ResolveRevision" ||
+			!errors.Is(err, scm.ErrAttemptTimeout) || errors.Is(err, context.DeadlineExceeded) {
+			t.Fatalf("err = %v (kind %q)", err, scm.KindOf(err))
+		}
+		if el := time.Since(start); el >= stall {
+			t.Fatalf("took %v", el)
+		}
+	})
+}
+
 func TestCredentialsNeverSentCrossHost(t *testing.T) {
 	t.Parallel()
 	var mu sync.Mutex

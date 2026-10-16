@@ -6,6 +6,7 @@ import (
 	"slices"
 	"sync"
 	"testing"
+	"time"
 
 	"github.com/juliosaraiva/patrol-cd/pkg/scm"
 )
@@ -89,5 +90,29 @@ func TestConfigDefaults(t *testing.T) {
 	custom := scm.Config{MaxPages: 3, RateLimit: scm.RateLimit{RPS: -1}, Retry: scm.RetryPolicy{MaxAttempts: 1}}.WithDefaults()
 	if custom.MaxPages != 3 || custom.RateLimit.RPS != -1 || custom.Retry.MaxAttempts != 1 {
 		t.Fatalf("explicit values overridden: %+v", custom)
+	}
+}
+
+func TestRetryPolicyCallBudget(t *testing.T) {
+	t.Parallel()
+	tests := []struct {
+		name    string
+		policy  scm.RetryPolicy
+		attempt time.Duration
+		want    time.Duration
+	}{
+		{"defaults", scm.RetryPolicy{}, scm.DefaultRequestTimeout, 4*scm.DefaultRequestTimeout + 3*time.Minute},
+		{"single attempt", scm.RetryPolicy{MaxAttempts: 1}, 10 * time.Second, 10 * time.Second},
+		{"MaxDelay above MaxWait", scm.RetryPolicy{MaxAttempts: 2, MaxDelay: 2 * time.Minute, MaxWait: time.Second}, time.Second, 2*time.Second + 2*time.Minute},
+		{"no attempt timeout", scm.RetryPolicy{MaxAttempts: 3, MaxWait: 5 * time.Second}, 0, 2 * 10 * time.Second},
+	}
+	for _, tc := range tests {
+		if got := tc.policy.CallBudget(tc.attempt); got != tc.want {
+			t.Errorf("%s: CallBudget = %v, want %v", tc.name, got, tc.want)
+		}
+		p := tc.policy.WithDefaults()
+		if got := tc.policy.CallBudget(tc.attempt); p.MaxAttempts > 1 && got < p.MaxWait+tc.attempt {
+			t.Errorf("%s: budget %v cannot cover one advised wait plus an attempt", tc.name, got)
+		}
 	}
 }

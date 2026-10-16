@@ -1,0 +1,27 @@
+{
+  "object_kind": "push",
+  "event_name": "push",
+  "before": "0000000000000000000000000000000000000063",
+  "after": "0000000000000000000000000000000000000005",
+  "ref": "refs/heads/hotfix",
+  "checkout_sha": "0000000000000000000000000000000000000005",
+  "user_id": 4,
+  "user_name": "Alice Example",
+  "user_username": "alice",
+  "project_id": 42,
+  "project": {
+    "id": 42,
+    "name": "platform",
+    "web_url": "https://gitlab.example.com/acme/platform",
+    "git_ssh_url": "git@gitlab.example.com:acme/platform.git",
+    "git_http_url": "https://gitlab.example.com/acme/platform.git",
+    "namespace": "acme",
+    "visibility_level": 0,
+    "path_with_namespace": "acme/platform",
+    "default_branch": "main"
+  },
+  "commits": [
+    { "id": "0000000000000000000000000000000000000005", "message": "fix", "added": [], "modified": ["apps/a/values.yaml"], "removed": [] }
+  ],
+  "total_commits_count": 25
+}

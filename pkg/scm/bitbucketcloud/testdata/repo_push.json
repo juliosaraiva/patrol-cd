@@ -1,0 +1,63 @@
+{
+  "push": {
+    "changes": [
+      {
+        "old": {
+          "name": "main",
+          "type": "branch",
+          "target": {
+            "type": "commit",
+            "hash": "0000000000000000000000000000000000000063",
+            "date": "2026-09-30T10:00:00+00:00",
+            "message": "previous\n",
+            "links": { "html": { "href": "https://bitbucket.org/acme/platform/commits/0000000000000000000000000000000000000063" } }
+          },
+          "links": { "html": { "href": "https://bitbucket.org/acme/platform/branch/main" } }
+        },
+        "new": {
+          "name": "main",
+          "type": "branch",
+          "target": {
+            "type": "commit",
+            "hash": "0000000000000000000000000000000000000001",
+            "date": "2026-10-01T12:05:00+00:00",
+            "message": "Tidy\n",
+            "author": { "type": "author", "raw": "Alice <alice@example.com>" }
+          },
+          "links": { "html": { "href": "https://bitbucket.org/acme/platform/branch/main" } }
+        },
+        "truncated": false,
+        "created": false,
+        "forced": false,
+        "closed": false,
+        "commits": [
+          { "type": "commit", "hash": "0000000000000000000000000000000000000001", "message": "Tidy\n" }
+        ]
+      },
+      {
+        "old": null,
+        "new": { "name": "feature/new", "type": "branch", "target": { "type": "commit", "hash": "0000000000000000000000000000000000000002" } },
+        "created": true,
+        "forced": false,
+        "closed": false
+      }
+    ]
+  },
+  "repository": {
+    "type": "repository",
+    "full_name": "acme/platform",
+    "name": "Platform",
+    "uuid": "{11111111-2222-3333-4444-555555555555}",
+    "is_private": true,
+    "scm": "git",
+    "links": {
+      "self": { "href": "https://api.bitbucket.org/2.0/repositories/acme/platform" },
+      "html": { "href": "https://bitbucket.org/acme/platform" },
+      "avatar": { "href": "https://bytebucket.org/ravatar/%7B11111111-2222-3333-4444-555555555555%7D?ts=default" }
+    },
+    "workspace": { "type": "workspace", "slug": "acme", "name": "ACME", "uuid": "{aaaaaaaa-0000-0000-0000-000000000000}" },
+    "project": { "type": "project", "key": "PLAT", "name": "Platform" },
+    "owner": { "type": "team", "display_name": "ACME", "username": "acme" }
+  },
+  "actor": { "type": "user", "display_name": "Alice Example", "nickname": "alice", "account_id": "557058:00000000" }
+}

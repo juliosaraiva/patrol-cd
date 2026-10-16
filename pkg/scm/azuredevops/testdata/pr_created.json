@@ -1,0 +1,35 @@
+{
+  "subscriptionId": "7e2a6d26-0000-0000-0000-000000000000",
+  "notificationId": 13,
+  "id": "EVENT-ID",
+  "eventType": "git.pullrequest.created",
+  "publisherId": "tfs",
+  "message": { "text": "Alice created a new pull request" },
+  "resource": {
+    "repository": {
+      "id": "11111111-2222-3333-4444-555555555555",
+      "name": "platform",
+      "url": "https://dev.azure.com/acme/_apis/git/repositories/11111111-2222-3333-4444-555555555555",
+      "project": { "id": "p-1", "name": "Platform Team", "state": "wellFormed" },
+      "remoteUrl": "https://acme@dev.azure.com/acme/Platform%20Team/_git/platform"
+    },
+    "pullRequestId": 1,
+    "status": "active",
+    "createdBy": { "displayName": "Alice Example", "id": "00000000-0000-0000-0000-00000000a11c", "uniqueName": "alice@example.com" },
+    "creationDate": "2026-10-01T12:00:00Z",
+    "title": "Add a",
+    "description": "",
+    "sourceRefName": "refs/heads/feature/a",
+    "targetRefName": "refs/heads/main",
+    "mergeStatus": "succeeded",
+    "mergeId": "a1b2c3",
+    "lastMergeSourceCommit": { "commitId": "0000000000000000000000000000000000000002" },
+    "lastMergeTargetCommit": { "commitId": "0000000000000000000000000000000000000001" },
+    "lastMergeCommit": { "commitId": "00000000000000000000000000000000000000ff" },
+    "labels": [{ "id": "l-1", "name": "preview", "active": true }],
+    "isDraft": false,
+    "url": "https://dev.azure.com/acme/_apis/git/repositories/11111111-2222-3333-4444-555555555555/pullRequests/1"
+  },
+  "resourceVersion": "1.0",
+  "createdDate": "2026-10-01T12:00:01.000Z"
+}

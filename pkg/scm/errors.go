@@ -45,6 +45,10 @@ var (
 	ErrPaginationLoop = errors.New("scm: pagination cursor repeated")
 	// ErrResponseTooLarge means a response body exceeded the configured size cap.
 	ErrResponseTooLarge = errors.New("scm: response body exceeds size limit")
+	// ErrAttemptTimeout means a single HTTP attempt exceeded its per-attempt timeout
+	// (Config.Timeout) while the caller's context was still live. Providers classify it
+	// as KindUnavailable.
+	ErrAttemptTimeout = errors.New("scm: HTTP attempt timed out")
 	// ErrUnknownProviderType is returned by Registry.New for unregistered types.
 	ErrUnknownProviderType = errors.New("scm: unknown provider type")
 	// ErrStatusLimit means the provider refuses further commit statuses for the commit

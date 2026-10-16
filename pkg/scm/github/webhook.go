@@ -45,7 +45,9 @@ func whErr(kind scm.ErrorKind, err error) error {
 // VerifyAndParse implements scm.WebhookVerifier. With a non-empty secret the
 // X-Hub-Signature-256 HMAC-SHA256 over the exact raw body is required and compared in
 // constant time; the legacy SHA-1 header alone is rejected as missing. Verification
-// happens before the event type is inspected. Supported events: push, pull_request,
+// happens before the event type is inspected. X-GitHub-Delivery is unsigned, so a value
+// failing scm.ValidateDeliveryID (over 128 bytes, or not printable ASCII) is rejected
+// with KindInvalid wrapping scm.ErrInvalidDeliveryID. Supported events: push, pull_request,
 // installation, installation_repositories (normalized to installation), repository and
 // ping; others fail with scm.ErrUnsupportedEvent after successful verification.
 func (WebhookVerifier) VerifyAndParse(h http.Header, body []byte, secret []byte) (*scm.Event, error) {
@@ -71,11 +73,16 @@ func (WebhookVerifier) VerifyAndParse(h http.Header, body []byte, secret []byte)
 	if event == "" {
 		return nil, whErr(scm.KindInvalid, fmt.Errorf("%w: missing %s header", scm.ErrMalformedPayload, HeaderEvent))
 	}
+	// The delivery ID is not covered by the signature: bound it before anyone stores it.
+	deliveryID := h.Get(HeaderDelivery)
+	if err := scm.ValidateDeliveryID(deliveryID); err != nil {
+		return nil, whErr(scm.KindInvalid, fmt.Errorf("%s: %w", HeaderDelivery, err))
+	}
 	payload, err := extractPayload(h.Get("Content-Type"), body)
 	if err != nil {
 		return nil, err
 	}
-	ev := &scm.Event{Provider: Type, DeliveryID: h.Get(HeaderDelivery), Verified: verified}
+	ev := &scm.Event{Provider: Type, DeliveryID: deliveryID, Verified: verified}
 	switch event {
 	case "push":
 		err = parsePush(payload, ev)

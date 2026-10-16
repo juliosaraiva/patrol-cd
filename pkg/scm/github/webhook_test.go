@@ -179,6 +179,17 @@ func TestWebhookSignatures(t *testing.T) {
 		}), body, whSecret, scm.ErrSignatureMismatch, scm.KindUnauthorized, false},
 		{"malformed json", delivery("push", "d2", []byte("{not json"), whSecret), []byte("{not json"), whSecret, scm.ErrMalformedPayload, scm.KindInvalid, false},
 		{"push without repository", delivery("push", "d3", []byte(`{"ref":"refs/heads/main"}`), whSecret), []byte(`{"ref":"refs/heads/main"}`), whSecret, scm.ErrMalformedPayload, scm.KindInvalid, false},
+		// X-GitHub-Delivery is unsigned: a captured signed body replayed with a huge or
+		// odd ID must be rejected before the ID reaches the de-duplication cache.
+		{"oversized delivery ID", with(func(h http.Header) { h.Set("X-GitHub-Delivery", strings.Repeat("a", 1<<20)) }), body, whSecret, scm.ErrInvalidDeliveryID, scm.KindInvalid, false},
+		{"delivery ID one byte over the cap", with(func(h http.Header) { h.Set("X-GitHub-Delivery", strings.Repeat("a", scm.MaxDeliveryIDBytes+1)) }), body, whSecret, scm.ErrInvalidDeliveryID, scm.KindInvalid, false},
+		{"delivery ID with control byte", with(func(h http.Header) { h.Set("X-GitHub-Delivery", "72d3162e\x00cc78") }), body, whSecret, scm.ErrInvalidDeliveryID, scm.KindInvalid, false},
+		{"oversized delivery ID without secret", with(func(h http.Header) {
+			h.Del("X-Hub-Signature-256")
+			h.Set("X-GitHub-Delivery", strings.Repeat("a", 4096))
+		}), body, nil, scm.ErrInvalidDeliveryID, scm.KindInvalid, false},
+		{"delivery ID at the cap", with(func(h http.Header) { h.Set("X-GitHub-Delivery", strings.Repeat("a", scm.MaxDeliveryIDBytes)) }), body, whSecret, nil, "", true},
+		{"no delivery ID", with(func(h http.Header) { h.Del("X-GitHub-Delivery") }), body, whSecret, nil, "", true},
 	}
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {

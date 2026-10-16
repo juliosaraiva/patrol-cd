@@ -100,6 +100,18 @@ func (p RetryPolicy) WithDefaults() RetryPolicy {
 	return p
 }
 
+// CallBudget returns the longest one request can take through Chain under this policy
+// (zero fields defaulted) when every attempt is bounded by attemptTimeout: all attempts
+// time out and every wait between them is the longest allowed (MaxWait or MaxDelay).
+// Client-side pacing is not included. Work that runs detached from a caller's context
+// (shared token minting, installation discovery) uses it as its deadline so that waits
+// the policy accepts are not cut short.
+func (p RetryPolicy) CallBudget(attemptTimeout time.Duration) time.Duration {
+	p = p.WithDefaults()
+	attempts := time.Duration(p.MaxAttempts)
+	return attempts*max(attemptTimeout, 0) + (attempts-1)*max(p.MaxWait, p.MaxDelay)
+}
+
 // Config configures a provider instance. Callers adapt the SCMProvider CRD and generator
 // specs into it; secrets are resolved by the caller (Token, GitHubApp.PrivateKey).
 type Config struct {
@@ -124,8 +136,10 @@ type Config struct {
 	Token TokenFunc
 	// GitHubApp selects GitHub App authentication (takes precedence over Token).
 	GitHubApp *GitHubAppConfig
-	// HTTPClient, when set, supplies the base transport (its Transport) and timeout.
-	// TLS, proxy and CA settings above are then the caller's responsibility.
+	// HTTPClient, when set, supplies the base transport (its Transport). A non-zero
+	// HTTPClient.Timeout is used as the per-attempt timeout in place of Timeout; it does
+	// not bound the whole call. TLS, proxy and CA settings above are then the caller's
+	// responsibility.
 	HTTPClient *http.Client
 	// RateLimit configures client-side pacing.
 	RateLimit RateLimit
@@ -135,7 +149,10 @@ type Config struct {
 	MaxPages int
 	// MaxResponseBytes caps every response body (default DefaultMaxResponseBytes).
 	MaxResponseBytes int64
-	// Timeout bounds a single HTTP attempt when HTTPClient is nil.
+	// Timeout bounds a single HTTP attempt — connecting, sending, and reading the
+	// response headers and body — excluding client-side pacing and retry waits (default
+	// DefaultRequestTimeout). A call as a whole is bounded by its context and, at most,
+	// by Retry.CallBudget(Timeout) per HTTP request.
 	Timeout time.Duration
 	// UserAgent overrides the default user agent.
 	UserAgent string

@@ -135,6 +135,8 @@ type Server struct {
 	checkRuns     []*CheckRun
 	checkSeq      int64
 	faults        []*fault
+	stall         time.Duration
+	stallLeft     int
 	requests      []Request
 	remaining     int
 	rejectTokens  bool
@@ -251,8 +253,34 @@ func (s *Server) FailNext(n, status int) {
 // statuses" error once n statuses exist for a (SHA, context); 0 disables the limit.
 func (s *Server) SetStatusLimit(n int) { s.mu.Lock(); s.statusLimit = n; s.mu.Unlock() }
 
-// ClearFaults removes injected faults.
-func (s *Server) ClearFaults() { s.mu.Lock(); s.faults = nil; s.mu.Unlock() }
+// Stall holds the next n requests (n <= 0: all) for d, or until the client gives up,
+// before serving them normally. Abandoned requests are not recorded.
+func (s *Server) Stall(d time.Duration, n int) {
+	s.mu.Lock()
+	s.stall, s.stallLeft = d, n
+	s.mu.Unlock()
+}
+
+// ClearFaults removes injected faults and stalls.
+func (s *Server) ClearFaults() {
+	s.mu.Lock()
+	s.faults = nil
+	s.stall, s.stallLeft = 0, 0
+	s.mu.Unlock()
+}
+
+func (s *Server) takeStall() time.Duration {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	d := s.stall
+	if d > 0 && s.stallLeft > 0 {
+		s.stallLeft--
+		if s.stallLeft == 0 {
+			s.stall = 0
+		}
+	}
+	return d
+}
 
 func (s *Server) addFault(f *fault) { s.mu.Lock(); s.faults = append(s.faults, f); s.mu.Unlock() }
 
@@ -357,6 +385,15 @@ func (s *Server) errorJSON(w http.ResponseWriter, status int, msg string) {
 }
 
 func (s *Server) serve(w http.ResponseWriter, r *http.Request) {
+	if d := s.takeStall(); d > 0 {
+		t := time.NewTimer(d)
+		select {
+		case <-r.Context().Done():
+			t.Stop()
+			return
+		case <-t.C:
+		}
+	}
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	path := r.URL.Path

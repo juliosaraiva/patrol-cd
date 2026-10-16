@@ -1,0 +1,52 @@
+{
+  "object_kind": "merge_request",
+  "event_type": "merge_request",
+  "user": { "id": 4, "name": "Alice Example", "username": "alice", "avatar_url": null, "email": "[REDACTED]" },
+  "project": {
+    "id": 42,
+    "name": "platform",
+    "web_url": "https://gitlab.example.com/acme/platform",
+    "git_ssh_url": "git@gitlab.example.com:acme/platform.git",
+    "git_http_url": "https://gitlab.example.com/acme/platform.git",
+    "namespace": "acme",
+    "visibility_level": 0,
+    "path_with_namespace": "acme/platform",
+    "default_branch": "main"
+  },
+  "object_attributes": {
+    "id": 1001,
+    "iid": 1,
+    "target_branch": "main",
+    "source_branch": "feature/a",
+    "source_project_id": 42,
+    "author_id": 4,
+    "title": "Add a",
+    "created_at": "2026-10-01 12:00:00 UTC",
+    "updated_at": "2026-10-01 12:00:00 UTC",
+    "state": "opened",
+    "merge_status": "checking",
+    "target_project_id": 42,
+    "description": "",
+    "url": "https://gitlab.example.com/acme/platform/-/merge_requests/1",
+    "draft": false,
+    "work_in_progress": false,
+    "last_commit": {
+      "id": "0000000000000000000000000000000000000002",
+      "message": "Update app a\n",
+      "title": "Update app a",
+      "timestamp": "2026-10-01T12:00:00+00:00",
+      "url": "https://gitlab.example.com/acme/platform/-/commit/0000000000000000000000000000000000000002",
+      "author": { "name": "Alice Example", "email": "[REDACTED]" }
+    },
+    "action": "open"
+  },
+  "labels": [
+    { "id": 206, "title": "preview", "color": "#dc143c", "project_id": 42, "type": "ProjectLabel", "group_id": null }
+  ],
+  "changes": {},
+  "repository": {
+    "name": "platform",
+    "url": "git@gitlab.example.com:acme/platform.git",
+    "homepage": "https://gitlab.example.com/acme/platform"
+  }
+}

@@ -668,3 +668,167 @@ func TestNewLimiter(t *testing.T) {
 func pemCert(der []byte) []byte {
 	return pem.EncodeToMemory(&pem.Block{Type: "CERTIFICATE", Bytes: der})
 }
+
+// blockUntilDone simulates a server that never answers: the attempt ends only when its
+// request context does, the way http.Transport reports it.
+func blockUntilDone(r *http.Request) (*http.Response, error) {
+	<-r.Context().Done()
+	return nil, &url.Error{Op: r.Method, URL: r.URL.String(), Err: r.Context().Err()}
+}
+
+// stallingBody returns headers at once and then blocks reads until ctx ends.
+type stallingBody struct{ ctx context.Context }
+
+func (b stallingBody) Read([]byte) (int, error) { <-b.ctx.Done(); return 0, b.ctx.Err() }
+func (b stallingBody) Close() error             { return nil }
+
+func TestAttemptTimeout(t *testing.T) {
+	t.Parallel()
+	const d = 50 * time.Millisecond
+	isAttemptTimeout := func(t *testing.T, err error) {
+		t.Helper()
+		if !errors.Is(err, scm.ErrAttemptTimeout) {
+			t.Fatalf("err = %v, want ErrAttemptTimeout", err)
+		}
+		if errors.Is(err, context.DeadlineExceeded) {
+			t.Fatalf("attempt timeout must not look like the caller's deadline: %v", err)
+		}
+		var ne interface{ Timeout() bool }
+		if !errors.As(err, &ne) || !ne.Timeout() {
+			t.Fatalf("attempt timeout must be a timeout net.Error: %v", err)
+		}
+	}
+
+	t.Run("stalled attempt is retried", func(t *testing.T) {
+		t.Parallel()
+		s := &scripted{responses: []func(*http.Request) (*http.Response, error){blockUntilDone, status(200)}}
+		c := chain(scm.AttemptTimeout(s, d), &sleeper{}, scm.RetryPolicy{MaxAttempts: 3})
+		req, _ := http.NewRequestWithContext(t.Context(), http.MethodGet, "https://api.example/x", nil)
+		r, err := c.Do(req)
+		if err != nil || r.StatusCode != 200 || len(s.requests) != 2 {
+			t.Fatalf("resp=%v err=%v calls=%d", r, err, len(s.requests))
+		}
+		_ = r.Body.Close()
+	})
+	t.Run("every attempt stalls", func(t *testing.T) {
+		t.Parallel()
+		s := &scripted{responses: []func(*http.Request) (*http.Response, error){blockUntilDone, blockUntilDone, blockUntilDone}}
+		c := chain(scm.AttemptTimeout(s, d), &sleeper{}, scm.RetryPolicy{MaxAttempts: 3})
+		req, _ := http.NewRequestWithContext(t.Context(), http.MethodGet, "https://api.example/x", nil)
+		_, err := c.Do(req)
+		isAttemptTimeout(t, err)
+		if len(s.requests) != 3 {
+			t.Fatalf("calls = %d, want 3", len(s.requests))
+		}
+	})
+	t.Run("body read bounded", func(t *testing.T) {
+		t.Parallel()
+		rt := scm.AttemptTimeout(roundTrip(func(r *http.Request) (*http.Response, error) {
+			return &http.Response{StatusCode: 200, Header: http.Header{}, Body: stallingBody{r.Context()}, Request: r}, nil
+		}), d)
+		req, _ := http.NewRequestWithContext(t.Context(), http.MethodGet, "https://api.example/x", nil)
+		r, err := rt.RoundTrip(req)
+		if err != nil {
+			t.Fatal(err)
+		}
+		defer func() { _ = r.Body.Close() }()
+		_, err = io.ReadAll(r.Body)
+		isAttemptTimeout(t, err)
+	})
+	t.Run("deadline released on close", func(t *testing.T) {
+		t.Parallel()
+		var attemptCtx context.Context
+		rt := scm.AttemptTimeout(roundTrip(func(r *http.Request) (*http.Response, error) {
+			attemptCtx = r.Context()
+			return resp(r, 200, nil, "ok"), nil
+		}), time.Hour)
+		req, _ := http.NewRequestWithContext(t.Context(), http.MethodGet, "https://api.example/x", nil)
+		r, err := rt.RoundTrip(req)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if attemptCtx.Err() != nil {
+			t.Fatal("attempt context ended before the body was closed")
+		}
+		_ = r.Body.Close()
+		if attemptCtx.Err() == nil {
+			t.Fatal("closing the body must release the attempt deadline")
+		}
+	})
+	t.Run("caller cancellation is not an attempt timeout", func(t *testing.T) {
+		t.Parallel()
+		ctx, cancel := context.WithCancel(t.Context())
+		rt := scm.AttemptTimeout(roundTrip(func(r *http.Request) (*http.Response, error) {
+			cancel()
+			return blockUntilDone(r)
+		}), time.Hour)
+		req, _ := http.NewRequestWithContext(ctx, http.MethodGet, "https://api.example/x", nil)
+		_, err := rt.RoundTrip(req)
+		if !errors.Is(err, context.Canceled) || errors.Is(err, scm.ErrAttemptTimeout) {
+			t.Fatalf("err = %v, want context.Canceled", err)
+		}
+	})
+	t.Run("caller deadline is not an attempt timeout", func(t *testing.T) {
+		t.Parallel()
+		ctx, cancel := context.WithTimeout(t.Context(), d)
+		defer cancel()
+		rt := scm.AttemptTimeout(roundTrip(blockUntilDone), time.Hour)
+		req, _ := http.NewRequestWithContext(ctx, http.MethodGet, "https://api.example/x", nil)
+		_, err := rt.RoundTrip(req)
+		if !errors.Is(err, context.DeadlineExceeded) || errors.Is(err, scm.ErrAttemptTimeout) {
+			t.Fatalf("err = %v, want context.DeadlineExceeded", err)
+		}
+	})
+	t.Run("zero disables", func(t *testing.T) {
+		t.Parallel()
+		var inner http.RoundTripper = roundTrip(func(r *http.Request) (*http.Response, error) { return resp(r, 200, nil, ""), nil })
+		got := scm.AttemptTimeout(inner, 0)
+		if _, ok := got.(roundTrip); !ok {
+			t.Fatalf("AttemptTimeout(rt, 0) must return rt unchanged, got %T", got)
+		}
+	})
+}
+
+// TestRetryWaitBeyondCallerDeadline: when the caller's deadline is closer than the next
+// wait, the chain returns the last response or error immediately instead of sleeping
+// into a bare deadline error.
+func TestRetryWaitBeyondCallerDeadline(t *testing.T) {
+	t.Parallel()
+	policy := scm.RetryPolicy{MaxAttempts: 3, BaseDelay: time.Minute, MaxDelay: time.Minute, MaxWait: time.Hour}
+	tests := []struct {
+		name       string
+		step       func(*http.Request) (*http.Response, error)
+		wantStatus int // 0: want the step's error
+	}{
+		{"secondary rate limit", status(403, "Retry-After", "30"), 403},
+		{"429", status(429, "Retry-After", "30"), 429},
+		{"primary rate limit", status(403, "X-RateLimit-Remaining", "0", "X-RateLimit-Reset", strconv.FormatInt(time.Now().Add(30*time.Second).Unix(), 10)), 403},
+		{"503 backoff", status(503), 503},
+		{"network error backoff", func(*http.Request) (*http.Response, error) { return nil, errors.New("connection reset") }, 0},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+			s := &scripted{responses: []func(*http.Request) (*http.Response, error){tc.step, status(200)}}
+			sl := &sleeper{}
+			c := &http.Client{Transport: scm.Chain(s, scm.ChainOptions{Provider: "test", Retry: policy, Sleep: sl.Sleep})}
+			ctx, cancel := context.WithTimeout(t.Context(), 5*time.Second)
+			defer cancel()
+			req, _ := http.NewRequestWithContext(ctx, http.MethodGet, "https://api.example/x", nil)
+			r, err := c.Do(req)
+			if tc.wantStatus == 0 {
+				if err == nil || errors.Is(err, context.DeadlineExceeded) || !strings.Contains(err.Error(), "connection reset") {
+					t.Fatalf("err = %v, want the attempt's own error", err)
+				}
+			} else {
+				if err != nil || r.StatusCode != tc.wantStatus {
+					t.Fatalf("resp=%v err=%v, want status %d", r, err, tc.wantStatus)
+				}
+				_ = r.Body.Close()
+			}
+			if len(s.requests) != 1 || len(sl.sleeps) != 0 {
+				t.Fatalf("calls=%d sleeps=%v; want 1 call and no sleep", len(s.requests), sl.sleeps)
+			}
+		})
+	}
+}

@@ -4,7 +4,9 @@ import (
 	"bytes"
 	"errors"
 	"fmt"
+	"runtime"
 	"slices"
+	"strconv"
 	"strings"
 	"sync"
 	"testing"
@@ -282,4 +284,94 @@ func TestWebhookSignatureError(t *testing.T) {
 	if !errors.Is(err, scm.ErrSignatureMismatch) || !errors.Is(err, scm.ErrUnauthorized) {
 		t.Fatalf("err = %v", err)
 	}
+}
+
+func TestValidateDeliveryID(t *testing.T) {
+	t.Parallel()
+	tests := []struct {
+		id    string
+		valid bool
+	}{
+		{"", true},
+		{"72d3162e-cc78-11e3-81ab-4c9367dc0958", true},
+		{"{a1b2c3d4-0000-0000-0000-000000000000}", true},
+		{strings.Repeat("x", scm.MaxDeliveryIDBytes), true},
+		{strings.Repeat("x", scm.MaxDeliveryIDBytes+1), false},
+		{"with space", false},
+		{"nul\x00", false},
+		{"newline\n", false},
+		{"del\x7f", false},
+		{"utf8-\u00e9", false},
+	}
+	for _, tc := range tests {
+		err := scm.ValidateDeliveryID(tc.id)
+		if (err == nil) != tc.valid || (err != nil && !errors.Is(err, scm.ErrInvalidDeliveryID)) {
+			t.Errorf("ValidateDeliveryID(%q) = %v, want valid=%v", tc.id, err, tc.valid)
+		}
+		if key := scm.DeliveryKey("github", tc.id); (key != "") != (tc.valid && tc.id != "") {
+			t.Errorf("DeliveryKey for %q = %q", tc.id, key)
+		}
+	}
+	rapid.Check(t, func(t *rapid.T) {
+		id := rapid.String().Draw(t, "id")
+		ok := len(id) <= scm.MaxDeliveryIDBytes
+		for i := 0; i < len(id); i++ {
+			ok = ok && id[i] > ' ' && id[i] <= '~'
+		}
+		if got := scm.ValidateDeliveryID(id) == nil; got != ok {
+			t.Fatalf("ValidateDeliveryID(%q) valid=%v, want %v", id, got, ok)
+		}
+	})
+}
+
+func TestDeliveryCacheSeenEvent(t *testing.T) {
+	t.Parallel()
+	c := scm.NewDeliveryCache(8, time.Hour)
+	verified := &scm.Event{Provider: "github", DeliveryID: "d1", Verified: true}
+	if c.SeenEvent(verified) || !c.SeenEvent(verified) {
+		t.Fatal("verified redelivery not de-duplicated")
+	}
+	unverified := &scm.Event{Provider: "github", DeliveryID: "d2"}
+	bad := &scm.Event{Provider: "github", DeliveryID: strings.Repeat("x", 4096), Verified: true}
+	for range 2 { // a second sighting would be reported as duplicate if recorded
+		if c.SeenEvent(unverified) {
+			t.Fatal("unverified events must never be recorded")
+		}
+		if c.SeenEvent(bad) || c.SeenEvent(nil) {
+			t.Fatal("invalid delivery IDs must never be recorded")
+		}
+	}
+	if c.Len() != 1 {
+		t.Fatalf("Len = %d, want 1", c.Len())
+	}
+}
+
+// TestDeliveryCacheBoundsKeyMemory: the cache's memory depends on its capacity, not on
+// the length of the keys it is given. Not parallel: it measures the heap.
+func TestDeliveryCacheBoundsKeyMemory(t *testing.T) {
+	const n, keyLen = 64, 1 << 20
+	c := scm.NewDeliveryCache(n, time.Hour)
+	key := func(i int) string { return strings.Repeat("k", keyLen) + strconv.Itoa(i) }
+	var before, after runtime.MemStats
+	runtime.GC()
+	runtime.ReadMemStats(&before)
+	for i := range n {
+		if c.Seen(key(i)) {
+			t.Fatalf("key %d reported as duplicate", i)
+		}
+	}
+	runtime.GC()
+	runtime.ReadMemStats(&after)
+	// Storing the raw keys would retain n MiB; digests take a few KiB.
+	if grown := int64(after.HeapAlloc) - int64(before.HeapAlloc); grown > 8<<20 {
+		t.Fatalf("heap grew by %d bytes for %d keys of %d bytes", grown, n, keyLen)
+	}
+	if !c.Seen(key(0)) || c.Seen(key(n)) {
+		t.Fatal("digest-keyed cache must still de-duplicate exactly")
+	}
+	c.Forget(key(0))
+	if c.Seen(key(0)) {
+		t.Fatal("Forget by original key")
+	}
+	runtime.KeepAlive(c)
 }

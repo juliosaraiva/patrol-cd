@@ -9,9 +9,8 @@ import (
 	"golang.org/x/sync/singleflight"
 )
 
-// fetchTimeout bounds a shared (singleflight) fetch, which runs detached from the first
-// caller's cancellation so that other waiters are not failed by it.
-const fetchTimeout = 30 * time.Second
+// defaultFetchTimeout bounds a shared fetch when the caller passes no timeout.
+const defaultFetchTimeout = 5 * time.Minute
 
 // lruCache is a small bounded LRU with per-key singleflight loading. Validity (expiry) is
 // decided by the caller at read time so callers can apply their own clock.
@@ -75,17 +74,23 @@ func (c *lruCache[V]) removeIf(key string, match func(V) bool) {
 }
 
 // load returns a valid cached value or fetches one, sharing concurrent fetches for the
-// same key. Waiters honor their own ctx.
-func (c *lruCache[V]) load(ctx context.Context, key string, valid func(V) bool, fetch func(context.Context) (V, error)) (V, error) {
+// same key. The shared fetch runs detached from the first caller's cancellation (so
+// other waiters are not failed by it) and is bounded by timeout instead, which must
+// cover the retry policy's waits (scm.RetryPolicy.CallBudget). Waiters honor their own
+// ctx.
+func (c *lruCache[V]) load(ctx context.Context, key string, timeout time.Duration, valid func(V) bool, fetch func(context.Context) (V, error)) (V, error) {
 	var zero V
 	if v, ok := c.get(key, valid); ok {
 		return v, nil
+	}
+	if timeout <= 0 {
+		timeout = defaultFetchTimeout
 	}
 	ch := c.sf.DoChan(key, func() (any, error) {
 		if v, ok := c.get(key, valid); ok {
 			return v, nil
 		}
-		fctx, cancel := context.WithTimeout(context.WithoutCancel(ctx), fetchTimeout)
+		fctx, cancel := context.WithTimeout(context.WithoutCancel(ctx), timeout)
 		defer cancel()
 		v, err := fetch(fctx)
 		if err != nil {

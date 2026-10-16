@@ -46,9 +46,13 @@ type appAuth struct {
 	keyHash        string
 	client         *gh.Client // authenticated with the App JWT
 	now            func() time.Time
+	// callBudget is the worst-case duration of one API request (scm.RetryPolicy.
+	// CallBudget). Shared fetches run detached from the caller and are bounded by it, so
+	// rate-limit waits the retry policy accepts are honored rather than cut off.
+	callBudget time.Duration
 }
 
-func newAppAuth(appID, installationID int64, owner, baseURL string, privateKey []byte, client *gh.Client, now func() time.Time) *appAuth {
+func newAppAuth(appID, installationID int64, owner, baseURL string, privateKey []byte, client *gh.Client, now func() time.Time, callBudget time.Duration) *appAuth {
 	h := sha256.New()
 	_, _ = fmt.Fprintf(h, "%s\x00%d\x00", baseURL, appID)
 	h.Write(privateKey)
@@ -59,6 +63,7 @@ func newAppAuth(appID, installationID int64, owner, baseURL string, privateKey [
 		keyHash:        hex.EncodeToString(h.Sum(nil)),
 		client:         client,
 		now:            now,
+		callBudget:     callBudget,
 	}
 }
 
@@ -101,7 +106,8 @@ func (a *appAuth) find(ctx context.Context, owner string) (scm.Installation, err
 	lower := strings.ToLower(owner)
 	key := a.keyHash + ":" + lower
 	now := a.now()
-	c, err := installationIDs.load(ctx, key, func(c cachedInstallation) bool { return a.now().Before(c.expires) },
+	// Discovery makes up to two requests (organization, then user).
+	c, err := installationIDs.load(ctx, key, 2*a.callBudget, func(c cachedInstallation) bool { return a.now().Before(c.expires) },
 		func(ctx context.Context) (cachedInstallation, error) {
 			inst, resp, err := a.client.Apps.GetOrganizationInstallation(ctx, lower)
 			if err != nil && isStatus(resp, err, http.StatusNotFound) {
@@ -130,7 +136,7 @@ func (a *appAuth) token(ctx context.Context) (scm.Token, error) {
 		return scm.Token{}, err
 	}
 	valid := func(t scm.Token) bool { return a.now().Add(tokenRefreshBefore).Before(t.ExpiresAt) }
-	return installationTokens.load(ctx, a.tokenKey(id), valid, func(ctx context.Context) (scm.Token, error) {
+	return installationTokens.load(ctx, a.tokenKey(id), a.callBudget, valid, func(ctx context.Context) (scm.Token, error) {
 		tok, resp, err := a.client.Apps.CreateInstallationToken(ctx, id, nil)
 		if err != nil {
 			return scm.Token{}, mapError("CreateInstallationToken", resp, err, a.now())

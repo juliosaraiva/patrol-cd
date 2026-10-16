@@ -1,0 +1,10 @@
+{
+  "event_name": "repository_update",
+  "user_id": 1,
+  "user_name": "Administrator",
+  "user_email": "[REDACTED]",
+  "project_id": 42,
+  "project": { "name": "platform", "path_with_namespace": "acme/platform", "web_url": "https://gitlab.example.com/acme/platform" },
+  "changes": [{ "before": "0000000000000000000000000000000000000063", "after": "0000000000000000000000000000000000000005", "ref": "refs/heads/hotfix" }],
+  "refs": ["refs/heads/hotfix"]
+}

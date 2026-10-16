@@ -99,7 +99,13 @@ func NewProvider(_ context.Context, cfg scm.Config) (*Provider, error) {
 	if err != nil {
 		return nil, err
 	}
-	limited := scm.LimitResponseBody(base, cfg.MaxResponseBytes)
+	attemptTimeout := cfg.Timeout
+	if cfg.HTTPClient != nil && cfg.HTTPClient.Timeout > 0 {
+		attemptTimeout = cfg.HTTPClient.Timeout
+	}
+	// The timeout bounds each attempt below authentication, so token acquisition (which
+	// has its own attempts and waits) and retry waits are not charged to it.
+	limited := scm.LimitResponseBody(scm.AttemptTimeout(base, attemptTimeout), cfg.MaxResponseBytes)
 	chain := scm.ChainOptions{
 		Provider: Type,
 		Logger:   cfg.Logger,
@@ -108,13 +114,11 @@ func NewProvider(_ context.Context, cfg scm.Config) (*Provider, error) {
 		Retry:    cfg.Retry,
 		Clock:    cfg.Clock,
 	}
-	timeout := cfg.Timeout
-	if cfg.HTTPClient != nil && cfg.HTTPClient.Timeout > 0 {
-		timeout = cfg.HTTPClient.Timeout
-	}
 	newClient := func(rt http.RoundTripper) (*gh.Client, error) {
+		// No http.Client.Timeout: it would span every retry and every rate-limit wait
+		// the retry policy accepts (calls are bounded by their context and CallBudget).
 		return gh.NewClient(
-			gh.WithHTTPClient(&http.Client{Transport: scm.Chain(rt, chain), Timeout: timeout}),
+			gh.WithHTTPClient(&http.Client{Transport: scm.Chain(rt, chain)}),
 			gh.WithURLs(&baseURL, &uploadURL),
 			gh.WithUserAgent(cfg.UserAgent),
 		)
@@ -146,7 +150,7 @@ func NewProvider(_ context.Context, cfg scm.Config) (*Provider, error) {
 		if err != nil {
 			return nil, invalid(err)
 		}
-		p.app = newAppAuth(a.AppID, a.InstallationID, a.Owner, baseURL, a.PrivateKey, appClient, cfg.Clock)
+		p.app = newAppAuth(a.AppID, a.InstallationID, a.Owner, baseURL, a.PrivateKey, appClient, cfg.Clock, cfg.Retry.CallBudget(attemptTimeout))
 		p.mode = authApp
 		mainRT = scm.HostGuard(host.Host, scm.BearerTransport(limited, p.app.tokenValue, p.app.invalidate), limited)
 	case cfg.Token != nil:

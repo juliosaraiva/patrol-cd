@@ -405,7 +405,7 @@ func (p *Provider) ListRepositories(ctx context.Context, q scm.RepoQuery) ([]scm
 	var owned []Repo
 	for _, r := range p.repos {
 		if strings.EqualFold(r.Owner, q.Organization) {
-			owned = append(owned, *r)
+			owned = append(owned, r.listingSnapshot())
 		}
 	}
 	pageSize, maxPages := p.opts.PageSize, p.opts.MaxPages
@@ -447,6 +447,18 @@ func (p *Provider) ListRepositories(ctx context.Context, q scm.RepoQuery) ([]scm
 		out = append(out, cand)
 	}
 	return out, nil
+}
+
+// listingSnapshot copies what ListRepositories reads after releasing p.mu. The caller
+// must hold p.mu: seeding helpers (SetBranch, AddPullRequest) mutate the maps and
+// slices of a stored *Repo in place, so a shallow struct copy would share them. Files
+// and PullRequests are not used by listings and are left out.
+func (r *Repo) listingSnapshot() Repo {
+	c := *r
+	c.Branches = maps.Clone(r.Branches)
+	c.Topics = slices.Clone(r.Topics)
+	c.Tags, c.Files, c.PullRequests = nil, nil, nil
+	return c
 }
 
 func toRepository(r Repo, proto scm.CloneProtocol) scm.Repository {
@@ -831,6 +843,10 @@ func (p *Provider) VerifyAndParse(h http.Header, body []byte, secret []byte) (*s
 		}
 		verified = true
 	}
+	deliveryID := h.Get(HeaderDelivery)
+	if err := scm.ValidateDeliveryID(deliveryID); err != nil {
+		return nil, &scm.Error{Kind: scm.KindInvalid, Provider: Type, Op: op, Err: err}
+	}
 	var d Delivery
 	if err := json.Unmarshal(body, &d); err != nil {
 		return nil, &scm.Error{Kind: scm.KindInvalid, Provider: Type, Op: op, Err: fmt.Errorf("%w: %v", scm.ErrMalformedPayload, err)}
@@ -838,7 +854,7 @@ func (p *Provider) VerifyAndParse(h http.Header, body []byte, secret []byte) (*s
 	if h.Get(HeaderEvent) != string(d.Type) {
 		return nil, &scm.Error{Kind: scm.KindInvalid, Provider: Type, Op: op, Err: fmt.Errorf("%w: event header %q does not match body type %q", scm.ErrMalformedPayload, h.Get(HeaderEvent), d.Type)}
 	}
-	ev := &scm.Event{Provider: Type, Type: d.Type, DeliveryID: h.Get(HeaderDelivery), Verified: verified, Action: d.Action}
+	ev := &scm.Event{Provider: Type, Type: d.Type, DeliveryID: deliveryID, Verified: verified, Action: d.Action}
 	if d.Owner != "" && d.Name != "" {
 		ev.Repository = &scm.EventRepo{
 			RepoRef:       scm.RepoRef{Owner: d.Owner, Name: d.Name},

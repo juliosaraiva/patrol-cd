@@ -53,6 +53,7 @@ func TestMapError(t *testing.T) {
 		{"path traversal", fmt.Errorf("x: %w", gh.ErrPathForbidden), scm.KindInvalid, 0, 0},
 		{"size cap", &url.Error{Op: "Get", URL: "u", Err: scm.ErrResponseTooLarge}, scm.KindInvalid, 0, 0},
 		{"network", &url.Error{Op: "Get", URL: "u", Err: errors.New("connection refused")}, scm.KindUnavailable, 0, 0},
+		{"attempt timeout", &url.Error{Op: "Get", URL: "u", Err: fmt.Errorf("attempt: %w", scm.ErrAttemptTimeout)}, scm.KindUnavailable, 0, 0},
 		{"bad json", syntaxErr, scm.KindUnavailable, 0, 0},
 		{"canceled", context.Canceled, scm.KindUnknown, 0, 0},
 	}

@@ -26,7 +26,31 @@ var (
 	ErrPayloadTooLarge   = errors.New("scm: webhook payload too large")
 	ErrMalformedPayload  = errors.New("scm: malformed webhook payload")
 	ErrUnsupportedEvent  = errors.New("scm: unsupported webhook event")
+	// ErrInvalidDeliveryID means a delivery ID header is longer than
+	// MaxDeliveryIDBytes or contains bytes other than printable, non-space ASCII.
+	ErrInvalidDeliveryID = errors.New("scm: invalid webhook delivery ID")
 )
+
+// MaxDeliveryIDBytes caps webhook delivery IDs. Providers send short identifiers
+// (GitHub, Gitea and Gogs: 36-character GUIDs; GitLab: UUIDs), so anything longer is
+// not a genuine delivery.
+const MaxDeliveryIDBytes = 128
+
+// ValidateDeliveryID checks an untrusted delivery ID header value: at most
+// MaxDeliveryIDBytes of printable ASCII without spaces. The empty ID (header absent) is
+// valid and means "no de-duplication". Providers call it from VerifyAndParse and fail
+// with KindInvalid wrapping the returned error.
+func ValidateDeliveryID(id string) error {
+	if len(id) > MaxDeliveryIDBytes {
+		return fmt.Errorf("%w: %d bytes exceeds the %d-byte limit", ErrInvalidDeliveryID, len(id), MaxDeliveryIDBytes)
+	}
+	for i := 0; i < len(id); i++ {
+		if c := id[i]; c <= ' ' || c > '~' {
+			return fmt.Errorf("%w: byte 0x%02x at offset %d is not printable ASCII", ErrInvalidDeliveryID, c, i)
+		}
+	}
+	return nil
+}
 
 // EventType is a normalized webhook event type.
 type EventType string
@@ -69,7 +93,10 @@ type Event struct {
 	// Provider is the provider type that parsed the event.
 	Provider string
 	Type     EventType
-	// DeliveryID is the provider's unique delivery ID, used for replay de-duplication.
+	// DeliveryID is the provider's delivery ID header, used to de-duplicate
+	// redeliveries (see DeliveryCache). It is NOT covered by the webhook signature:
+	// anyone holding one signed body can resend it under any ID. Providers reject IDs
+	// failing ValidateDeliveryID; empty means the header was absent.
 	DeliveryID string
 	// Verified is true only when a secret was configured and the signature matched.
 	Verified bool
@@ -178,29 +205,39 @@ func NormalizeChangedFiles(groups ...[]string) (files []string, truncated bool) 
 	return files, false
 }
 
-// DeliveryKey builds the de-duplication key for a delivery.
+// DeliveryKey builds the de-duplication key for a delivery: provider-scoped, or empty
+// (never recorded) when deliveryID is empty or fails ValidateDeliveryID.
 func DeliveryKey(provider, deliveryID string) string {
-	if deliveryID == "" {
+	if deliveryID == "" || ValidateDeliveryID(deliveryID) != nil {
 		return ""
 	}
 	return provider + "\x00" + deliveryID
 }
 
 // DeliveryCache is a bounded LRU of recently seen webhook delivery keys with a TTL. It is
-// safe for concurrent use. Webhook ingestion calls Seen after a delivery is verified and
-// skips duplicates; because SCM redeliveries are rare and effects are idempotent, the
-// cache is per replica and in memory.
+// safe for concurrent use, and its memory is bounded by its capacity alone: keys are
+// stored as fixed-size SHA-256 digests, whatever their length.
+//
+// It de-duplicates benign redeliveries (a provider retrying, an operator pressing
+// "redeliver"); it is not replay protection. Delivery IDs are unsigned headers, so a
+// party holding one signed body can resend it under fresh IDs, and webhook handling must
+// stay idempotent. Record only events that passed signature verification (SeenEvent
+// does this): unverified events can be sent by anyone, and recording them would only let
+// unauthenticated senders evict legitimate entries. Because SCM redeliveries are rare and
+// effects are idempotent, the cache is per replica and in memory.
 type DeliveryCache struct {
 	mu       sync.Mutex
 	capacity int
 	ttl      time.Duration
 	now      func() time.Time
 	ll       *list.List
-	items    map[string]*list.Element
+	items    map[deliveryDigest]*list.Element
 }
 
+type deliveryDigest [sha256.Size]byte
+
 type deliveryEntry struct {
-	key  string
+	key  deliveryDigest
 	seen time.Time
 }
 
@@ -221,11 +258,21 @@ func NewDeliveryCache(capacity int, ttl time.Duration, opts ...DeliveryCacheOpti
 	if ttl <= 0 {
 		ttl = time.Hour
 	}
-	c := &DeliveryCache{capacity: capacity, ttl: ttl, now: time.Now, ll: list.New(), items: map[string]*list.Element{}}
+	c := &DeliveryCache{capacity: capacity, ttl: ttl, now: time.Now, ll: list.New(), items: map[deliveryDigest]*list.Element{}}
 	for _, o := range opts {
 		o(c)
 	}
 	return c
+}
+
+// SeenEvent records a verified event's delivery and reports whether it was already
+// recorded within the TTL. Unverified events (no secret configured) and events without
+// a valid delivery ID are never recorded and report false.
+func (c *DeliveryCache) SeenEvent(ev *Event) bool {
+	if ev == nil || !ev.Verified {
+		return false
+	}
+	return c.Seen(DeliveryKey(ev.Provider, ev.DeliveryID))
 }
 
 // Seen records key and reports whether it was already recorded within the TTL. Empty
@@ -234,10 +281,11 @@ func (c *DeliveryCache) Seen(key string) bool {
 	if key == "" {
 		return false
 	}
+	d := deliveryDigest(sha256.Sum256([]byte(key)))
 	c.mu.Lock()
 	defer c.mu.Unlock()
 	now := c.now()
-	if el, ok := c.items[key]; ok {
+	if el, ok := c.items[d]; ok {
 		e := el.Value.(*deliveryEntry)
 		if now.Sub(e.seen) < c.ttl {
 			c.ll.MoveToFront(el)
@@ -247,7 +295,7 @@ func (c *DeliveryCache) Seen(key string) bool {
 		c.ll.MoveToFront(el)
 		return false
 	}
-	c.items[key] = c.ll.PushFront(&deliveryEntry{key: key, seen: now})
+	c.items[d] = c.ll.PushFront(&deliveryEntry{key: d, seen: now})
 	for c.ll.Len() > c.capacity {
 		c.removeElement(c.ll.Back())
 	}
@@ -257,9 +305,13 @@ func (c *DeliveryCache) Seen(key string) bool {
 // Forget removes key so a redelivery is processed again (call it when processing of a
 // recorded delivery failed).
 func (c *DeliveryCache) Forget(key string) {
+	if key == "" {
+		return
+	}
+	d := deliveryDigest(sha256.Sum256([]byte(key)))
 	c.mu.Lock()
 	defer c.mu.Unlock()
-	if el, ok := c.items[key]; ok {
+	if el, ok := c.items[d]; ok {
 		c.removeElement(el)
 	}
 }

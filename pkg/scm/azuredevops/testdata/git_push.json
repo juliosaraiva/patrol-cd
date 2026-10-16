@@ -1,0 +1,56 @@
+{
+  "subscriptionId": "7e2a6d26-0000-0000-0000-000000000000",
+  "notificationId": 12,
+  "id": "EVENT-ID",
+  "eventType": "git.push",
+  "publisherId": "tfs",
+  "message": { "text": "Alice pushed updates to platform:main." },
+  "detailedMessage": { "text": "Alice pushed a commit to platform:main." },
+  "resource": {
+    "commits": [
+      {
+        "commitId": "0000000000000000000000000000000000000001",
+        "author": { "name": "Alice", "email": "alice@example.com", "date": "2026-10-01T12:05:00Z" },
+        "committer": { "name": "Alice", "email": "alice@example.com", "date": "2026-10-01T12:05:00Z" },
+        "comment": "Tidy",
+        "url": "https://dev.azure.com/acme/_apis/git/repositories/11111111-2222-3333-4444-555555555555/commits/0000000000000000000000000000000000000001"
+      }
+    ],
+    "refUpdates": [
+      {
+        "name": "refs/heads/main",
+        "oldObjectId": "0000000000000000000000000000000000000063",
+        "newObjectId": "0000000000000000000000000000000000000001"
+      }
+    ],
+    "repository": {
+      "id": "11111111-2222-3333-4444-555555555555",
+      "name": "platform",
+      "url": "https://dev.azure.com/acme/_apis/git/repositories/11111111-2222-3333-4444-555555555555",
+      "project": {
+        "id": "p-1",
+        "name": "Platform Team",
+        "url": "https://dev.azure.com/acme/_apis/projects/p-1",
+        "state": "wellFormed",
+        "visibility": "private"
+      },
+      "defaultBranch": "refs/heads/main",
+      "remoteUrl": "https://acme@dev.azure.com/acme/Platform%20Team/_git/platform"
+    },
+    "pushedBy": {
+      "displayName": "Alice Example",
+      "id": "00000000-0000-0000-0000-00000000a11c",
+      "uniqueName": "alice@example.com"
+    },
+    "pushId": 14,
+    "date": "2026-10-01T12:05:00Z",
+    "url": "https://dev.azure.com/acme/_apis/git/repositories/11111111-2222-3333-4444-555555555555/pushes/14"
+  },
+  "resourceVersion": "1.0",
+  "resourceContainers": {
+    "collection": { "id": "c-1" },
+    "account": { "id": "a-1" },
+    "project": { "id": "p-1" }
+  },
+  "createdDate": "2026-10-01T12:05:01.000Z"
+}

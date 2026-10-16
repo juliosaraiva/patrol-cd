@@ -5,6 +5,8 @@ import (
 	"errors"
 	"fmt"
 	"net/http"
+	"strings"
+	"sync"
 	"testing"
 	"time"
 
@@ -277,5 +279,107 @@ func TestSeedingHelpers(t *testing.T) {
 	p.SetStatusLimit(0)
 	if err := p.SetCommitStatus(ctx, d.Repo, sha(1), st); err != nil {
 		t.Fatalf("limit disabled: %v", err)
+	}
+}
+
+// TestConcurrentMutationAndReads runs every seeding mutator concurrently with every
+// reader. Under -race it fails if a reader touches repository state (branch maps, topic
+// and file slices, pull requests) after releasing the provider lock.
+func TestConcurrentMutationAndReads(t *testing.T) {
+	t.Parallel()
+	ctx := t.Context()
+	p, d := seeded(fake.Options{})
+	const n = 500
+	var wg sync.WaitGroup
+	start := make(chan struct{})
+	gate := func(f func()) { wg.Go(func() { <-start; f() }) }
+	gate(func() {
+		for i := range n {
+			_ = p.SetBranch(d.Repo, fmt.Sprintf("b-%d", i%7), sha(i))
+			_ = p.SetBranch(scm.RepoRef{Owner: d.Organization, Name: "svc-00"}, "main", sha(i))
+		}
+	})
+	gate(func() {
+		for i := range n {
+			_ = p.AddPullRequest(d.Repo, scm.PullRequest{Number: int64(100 + i), Branch: "x", TargetBranch: "main", HeadSHA: sha(i), Labels: []string{"preview"}})
+		}
+	})
+	gate(func() {
+		for i := range n {
+			p.AddRepo(fake.Repo{Owner: d.Organization, Name: "svc-01", DefaultBranch: "main",
+				Branches: map[string]string{"main": sha(i)}, Topics: []string{"team-a"}, Files: map[string][]string{sha(i): {"a"}}})
+			p.AddInstallation(scm.Installation{ID: int64(i), Account: "acme"})
+			p.SetToken(scm.Token{Value: fmt.Sprint(i)})
+		}
+	})
+	gate(func() {
+		st := scm.CommitStatus{State: scm.CommitStatePending, Context: "c"}
+		run := scm.CheckRun{Name: "patrol", ExternalID: "e", Status: scm.CheckStatusInProgress}
+		for range n {
+			_ = p.SetCommitStatus(ctx, d.Repo, d.StatusSHA, st)
+			_, _ = p.UpsertCheckRun(ctx, d.Repo, d.StatusSHA, run)
+		}
+	})
+	readers := []func(){
+		func() {
+			_, _ = p.ListRepositories(ctx, scm.RepoQuery{Organization: d.Organization, AllBranches: true, Topics: []string{"team-a"},
+				Match: func(r scm.Repository) bool { return len(r.Labels) >= 0 }})
+		},
+		func() { _, _ = p.ListRepositories(ctx, scm.RepoQuery{Organization: d.Organization}) },
+		func() { _, _ = p.ListBranches(ctx, d.Repo, true) },
+		func() { _, _ = p.ResolveRevision(ctx, d.Repo, "b-3") },
+		func() { _, _ = p.PathExists(ctx, d.Repo, "main", "apps/a") },
+		func() { _, _ = p.ListPullRequests(ctx, d.Repo, scm.PRQuery{Labels: []string{"preview"}}) },
+		func() { _, _ = p.ListInstallations(ctx) },
+		func() { _, _ = p.FindInstallation(ctx, "acme") },
+		func() { _, _ = p.Token(ctx) },
+		func() { _ = p.CommitStatuses(d.Repo, d.StatusSHA); _ = p.CheckRuns(d.Repo, d.StatusSHA); _ = p.Info() },
+	}
+	for _, read := range readers {
+		gate(func() {
+			for range n {
+				read()
+			}
+		})
+	}
+	close(start)
+	wg.Wait()
+	// The final state is still consistent.
+	got, err := p.ListRepositories(ctx, scm.RepoQuery{Organization: d.Organization, AllBranches: true})
+	if err != nil || len(got) == 0 {
+		t.Fatalf("ListRepositories after concurrent use: %d, %v", len(got), err)
+	}
+}
+
+func TestWebhookDeliveryIDBounded(t *testing.T) {
+	t.Parallel()
+	p, _ := seeded(fake.Options{})
+	secret := []byte("s")
+	for _, tc := range []struct {
+		id      string
+		wantErr bool
+	}{
+		{"0b989ba4-242f-11e5-81e1-c7b1bd4ba7a7", false},
+		{"", false},
+		{strings.Repeat("d", scm.MaxDeliveryIDBytes), false},
+		{strings.Repeat("d", scm.MaxDeliveryIDBytes+1), true},
+		{strings.Repeat("d", 1<<20), true},
+		{"has space", true},
+		{"tab\tid", true},
+	} {
+		h, body, err := fake.SignedDelivery(fake.Delivery{Type: scm.EventPing}, tc.id, secret)
+		if err != nil {
+			t.Fatal(err)
+		}
+		ev, err := p.VerifyAndParse(h, body, secret)
+		if tc.wantErr {
+			if !errors.Is(err, scm.ErrInvalidDeliveryID) || scm.KindOf(err) != scm.KindInvalid || ev != nil {
+				t.Errorf("id of %d bytes: err = %v", len(tc.id), err)
+			}
+			continue
+		}
+		if err != nil || ev.DeliveryID != tc.id {
+			t.Errorf("id %q: ev=%+v err=%v", tc.id, ev, err)
+		}
 	}
 }

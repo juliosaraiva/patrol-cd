@@ -1,0 +1,21 @@
+{
+  "id": "EVENT-ID",
+  "eventType": "git.pullrequest.updated",
+  "publisherId": "tfs",
+  "resource": {
+    "repository": {
+      "id": "11111111-2222-3333-4444-555555555555",
+      "name": "platform",
+      "project": { "id": "p-1", "name": "Platform Team", "visibility": "public" },
+      "remoteUrl": "https://acme@dev.azure.com/acme/Platform%20Team/_git/platform"
+    },
+    "pullRequestId": 2,
+    "status": "completed",
+    "createdBy": { "displayName": "Bob Example", "uniqueName": "bob@example.com" },
+    "title": "Add b",
+    "sourceRefName": "refs/heads/feature-b",
+    "targetRefName": "refs/heads/main",
+    "lastMergeSourceCommit": { "commitId": "0000000000000000000000000000000000000003" },
+    "isDraft": true
+  }
+}

@@ -1,0 +1,49 @@
+{
+  "eventKey": "repo:refs_changed",
+  "date": "2026-10-01T12:05:00+0000",
+  "actor": {
+    "name": "alice",
+    "emailAddress": "alice@example.com",
+    "active": true,
+    "displayName": "Alice Example",
+    "id": 2,
+    "slug": "alice",
+    "type": "NORMAL"
+  },
+  "repository": {
+    "slug": "platform",
+    "id": 42,
+    "name": "Platform",
+    "hierarchyId": "6c5ae8a1d0b1d2c3e4f5",
+    "scmId": "git",
+    "state": "AVAILABLE",
+    "statusMessage": "Available",
+    "forkable": true,
+    "project": { "key": "PROJ", "id": 1, "name": "Project", "public": false, "type": "NORMAL" },
+    "public": false,
+    "archived": false,
+    "links": {
+      "clone": [
+        { "href": "ssh://git@bitbucket.example.com:7999/proj/platform.git", "name": "ssh" },
+        { "href": "https://bitbucket.example.com/scm/proj/platform.git", "name": "http" }
+      ],
+      "self": [{ "href": "https://bitbucket.example.com/projects/PROJ/repos/platform/browse" }]
+    }
+  },
+  "changes": [
+    {
+      "ref": { "id": "refs/heads/main", "displayId": "main", "type": "BRANCH" },
+      "refId": "refs/heads/main",
+      "fromHash": "0000000000000000000000000000000000000063",
+      "toHash": "0000000000000000000000000000000000000001",
+      "type": "UPDATE"
+    },
+    {
+      "ref": { "id": "refs/heads/feature/new", "displayId": "feature/new", "type": "BRANCH" },
+      "refId": "refs/heads/feature/new",
+      "fromHash": "0000000000000000000000000000000000000000",
+      "toHash": "0000000000000000000000000000000000000002",
+      "type": "ADD"
+    }
+  ]
+}

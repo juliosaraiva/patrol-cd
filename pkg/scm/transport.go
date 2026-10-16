@@ -175,6 +175,81 @@ func LimitResponseBody(rt http.RoundTripper, maxBytes int64) http.RoundTripper {
 	})
 }
 
+// AttemptTimeout wraps rt so that each request it carries — one HTTP attempt, from
+// sending the request until its response body is closed — is bounded by d. Place it
+// directly above the base transport (below authentication and Chain), and do not set
+// http.Client.Timeout on a client built over Chain: that deadline would span every retry
+// and every provider-advised wait, cutting off rate-limit waits that the retry policy
+// accepts (see RetryPolicy.CallBudget for the overall bound).
+//
+// An attempt that runs out of time fails with an error matching ErrAttemptTimeout (a
+// net.Error whose Timeout reports true) and NOT matching context.DeadlineExceeded, so
+// the retry layer retries it like any other transient network failure. Cancellation or
+// expiry of the request's own context is reported unchanged. d <= 0 returns rt as is.
+func AttemptTimeout(rt http.RoundTripper, d time.Duration) http.RoundTripper {
+	if d <= 0 {
+		return rt
+	}
+	return roundTripperFunc(func(req *http.Request) (*http.Response, error) {
+		parent := req.Context()
+		ctx, cancel := context.WithTimeoutCause(parent, d, ErrAttemptTimeout)
+		resp, err := rt.RoundTrip(req.WithContext(ctx))
+		if err != nil {
+			expired := attemptExpired(ctx, parent)
+			cancel()
+			if expired {
+				return nil, &attemptTimeoutError{after: d}
+			}
+			return nil, err
+		}
+		if resp == nil || resp.Body == nil {
+			cancel()
+			return resp, nil
+		}
+		resp.Body = &attemptBody{rc: resp.Body, ctx: ctx, parent: parent, after: d, cancel: cancel}
+		return resp, nil
+	})
+}
+
+// attemptExpired reports whether ctx ended because its own attempt deadline passed
+// while the parent context is still live.
+func attemptExpired(ctx, parent context.Context) bool {
+	return parent.Err() == nil && errors.Is(context.Cause(ctx), ErrAttemptTimeout)
+}
+
+type attemptTimeoutError struct{ after time.Duration }
+
+func (e *attemptTimeoutError) Error() string {
+	return fmt.Sprintf("%s after %s", ErrAttemptTimeout.Error(), e.after)
+}
+func (e *attemptTimeoutError) Is(target error) bool { return target == ErrAttemptTimeout }
+func (e *attemptTimeoutError) Timeout() bool        { return true }
+func (e *attemptTimeoutError) Temporary() bool      { return true }
+
+// attemptBody keeps the attempt deadline in force while the body is read and releases
+// it on Close.
+type attemptBody struct {
+	rc     io.ReadCloser
+	ctx    context.Context
+	parent context.Context
+	after  time.Duration
+	cancel context.CancelFunc
+}
+
+func (b *attemptBody) Read(p []byte) (int, error) {
+	n, err := b.rc.Read(p)
+	if err != nil && !errors.Is(err, io.EOF) && attemptExpired(b.ctx, b.parent) {
+		return n, &attemptTimeoutError{after: b.after}
+	}
+	return n, err
+}
+
+func (b *attemptBody) Close() error {
+	err := b.rc.Close()
+	b.cancel()
+	return err
+}
+
 type limitedBody struct {
 	rc        io.ReadCloser
 	remaining int64
@@ -419,11 +494,17 @@ type ChainOptions struct {
 	Sleep func(ctx context.Context, d time.Duration) error
 }
 
-// Chain wraps inner (normally an authenticating transport over BaseTransport and
-// LimitResponseBody) with request logging (redacted), bounded retries, pacing and the
-// optional per-attempt observer:
+// Chain wraps inner (normally an authenticating transport over LimitResponseBody,
+// AttemptTimeout and BaseTransport) with request logging (redacted), bounded retries,
+// pacing and the optional per-attempt observer:
 //
 //	logging → retry → rate limit → observer → inner
+//
+// Retry waits honor the request context: when the remaining time before its deadline is
+// shorter than the next wait, the last response (or error) is returned at once instead
+// of sleeping into the deadline, so a rate-limit response still maps to a RateLimited
+// error carrying RetryAfter. Bound single attempts with AttemptTimeout, not with
+// http.Client.Timeout (which would span all attempts and waits).
 func Chain(inner http.RoundTripper, o ChainOptions) http.RoundTripper {
 	if o.Logger == nil {
 		o.Logger = slog.New(slog.DiscardHandler)
@@ -514,6 +595,9 @@ func (t *retryTransport) RoundTrip(req *http.Request) (*http.Response, error) {
 				return nil, err
 			}
 			wait = t.backoff(attempt)
+			if exceedsDeadline(ctx, wait) {
+				return nil, err
+			}
 		default:
 			d := t.o.Classifier(resp, t.o.Clock())
 			if !d.Retry || last {
@@ -527,6 +611,14 @@ func (t *retryTransport) RoundTrip(req *http.Request) (*http.Response, error) {
 			if wait <= 0 {
 				wait = t.backoff(attempt)
 			}
+			if exceedsDeadline(ctx, wait) {
+				// Sleeping would only end in a bare deadline error; surface the response
+				// so it maps to a classified error (RateLimited/Unavailable + RetryAfter).
+				t.o.Logger.Debug("scm retry wait exceeds the request deadline; returning response",
+					"provider", t.o.Provider, "method", req.Method, "url", RedactURL(req.URL),
+					"status", resp.StatusCode, "wait", wait.String(), "attempt", attempt)
+				return resp, nil
+			}
 			if d.RateLimited {
 				t.o.Logger.Warn("scm request rate limited; waiting before retry",
 					"provider", t.o.Provider, "method", req.Method, "url", RedactURL(req.URL),
@@ -538,6 +630,13 @@ func (t *retryTransport) RoundTrip(req *http.Request) (*http.Response, error) {
 			return nil, err
 		}
 	}
+}
+
+// exceedsDeadline reports whether ctx's deadline is closer than wait. Context deadlines
+// are wall-clock, so this uses the real clock even when ChainOptions.Clock is faked.
+func exceedsDeadline(ctx context.Context, wait time.Duration) bool {
+	dl, ok := ctx.Deadline()
+	return ok && time.Until(dl) < wait
 }
 
 func (t *retryTransport) backoff(attempt int) time.Duration {

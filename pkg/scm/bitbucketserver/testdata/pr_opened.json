@@ -1,0 +1,60 @@
+{
+  "eventKey": "pr:opened",
+  "date": "2026-10-01T12:00:00+0000",
+  "actor": { "name": "alice", "displayName": "Alice Example", "id": 2, "slug": "alice", "type": "NORMAL" },
+  "pullRequest": {
+    "id": 1,
+    "version": 0,
+    "title": "Add a",
+    "state": "OPEN",
+    "open": true,
+    "closed": false,
+    "draft": false,
+    "createdDate": 1790000000000,
+    "updatedDate": 1790000000000,
+    "fromRef": {
+      "id": "refs/heads/feature/a",
+      "displayId": "feature/a",
+      "latestCommit": "0000000000000000000000000000000000000002",
+      "type": "BRANCH",
+      "repository": {
+        "slug": "platform",
+        "id": 42,
+        "name": "Platform",
+        "project": { "key": "PROJ", "id": 1, "name": "Project", "public": false, "type": "NORMAL" },
+        "public": false,
+        "links": { "clone": [], "self": [] }
+      }
+    },
+    "toRef": {
+      "id": "refs/heads/main",
+      "displayId": "main",
+      "latestCommit": "0000000000000000000000000000000000000001",
+      "type": "BRANCH",
+      "repository": {
+        "slug": "platform",
+        "id": 42,
+        "name": "Platform",
+        "project": { "key": "PROJ", "id": 1, "name": "Project", "public": false, "type": "NORMAL" },
+        "public": false,
+        "links": {
+          "clone": [
+            { "href": "ssh://git@bitbucket.example.com:7999/proj/platform.git", "name": "ssh" },
+            { "href": "https://bitbucket.example.com/scm/proj/platform.git", "name": "http" }
+          ],
+          "self": [{ "href": "https://bitbucket.example.com/projects/PROJ/repos/platform/browse" }]
+        }
+      }
+    },
+    "locked": false,
+    "author": {
+      "user": { "name": "alice", "emailAddress": "alice@example.com", "displayName": "Alice Example", "id": 2, "slug": "alice", "type": "NORMAL" },
+      "role": "AUTHOR",
+      "approved": false,
+      "status": "UNAPPROVED"
+    },
+    "reviewers": [],
+    "participants": [],
+    "links": { "self": [{ "href": "https://bitbucket.example.com/projects/PROJ/repos/platform/pull-requests/1" }] }
+  }
+}

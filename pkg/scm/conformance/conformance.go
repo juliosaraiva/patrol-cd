@@ -632,7 +632,7 @@ func checkWebhookDedup(t *testing.T, _ context.Context, p scm.Provider, f Fixtur
 		if err != nil {
 			t.Fatalf("attempt %d: %v", i, err)
 		}
-		if got := cache.Seen(scm.DeliveryKey(ev.Provider, ev.DeliveryID)); got != wantDup {
+		if got := cache.SeenEvent(ev); got != wantDup {
 			t.Fatalf("attempt %d: duplicate=%v want %v (delivery %q)", i, got, wantDup, ev.DeliveryID)
 		}
 	}
@@ -641,7 +641,7 @@ func checkWebhookDedup(t *testing.T, _ context.Context, p scm.Provider, f Fixtur
 	if err != nil {
 		t.Fatal(err)
 	}
-	if cache.Seen(scm.DeliveryKey(ev.Provider, ev.DeliveryID)) {
+	if cache.SeenEvent(ev) {
 		t.Fatal("a different delivery ID must not be treated as a duplicate")
 	}
 }

@@ -1,0 +1,32 @@
+{
+  "object_kind": "merge_request",
+  "event_type": "merge_request",
+  "user": { "id": 5, "name": "Bob Example", "username": "bob" },
+  "project": {
+    "id": 42,
+    "name": "platform",
+    "web_url": "https://gitlab.example.com/acme/platform",
+    "git_ssh_url": "git@gitlab.example.com:acme/platform.git",
+    "git_http_url": "https://gitlab.example.com/acme/platform.git",
+    "namespace": "acme",
+    "visibility_level": 0,
+    "path_with_namespace": "acme/platform",
+    "default_branch": "main"
+  },
+  "object_attributes": {
+    "id": 1002,
+    "iid": 2,
+    "target_branch": "main",
+    "source_branch": "feature-b",
+    "source_project_id": 77,
+    "target_project_id": 42,
+    "title": "Draft: Add b",
+    "state": "merged",
+    "url": "https://gitlab.example.com/acme/platform/-/merge_requests/2",
+    "draft": true,
+    "work_in_progress": true,
+    "last_commit": { "id": "0000000000000000000000000000000000000003" },
+    "action": "merge"
+  },
+  "labels": [{ "title": "preview" }, { "title": "team-a" }]
+}

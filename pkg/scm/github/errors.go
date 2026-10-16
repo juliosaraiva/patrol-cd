@@ -54,6 +54,9 @@ func mapError(op string, resp *gh.Response, err error, now time.Time) error {
 		te    *json.UnmarshalTypeError
 	)
 	switch {
+	case errors.Is(err, scm.ErrAttemptTimeout):
+		// The server did not answer within the per-attempt timeout (after retries).
+		e.Kind = scm.KindUnavailable
 	case errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded):
 		// Keep the context error recognizable; no kind so callers do not retry blindly.
 		return e

@@ -1,0 +1,57 @@
+{
+  "ref": "refs/heads/main",
+  "before": "0000000000000000000000000000000000000063",
+  "after": "0000000000000000000000000000000000000001",
+  "compare_url": "https://gitea.example.com/acme/platform/compare/0000000000000000000000000000000000000063...0000000000000000000000000000000000000001",
+  "commits": [
+    {
+      "id": "0000000000000000000000000000000000000002",
+      "message": "Update app a\n",
+      "url": "https://gitea.example.com/acme/platform/commit/0000000000000000000000000000000000000002",
+      "author": { "name": "Alice", "email": "alice@example.com", "username": "alice" },
+      "committer": { "name": "Alice", "email": "alice@example.com", "username": "alice" },
+      "verification": null,
+      "timestamp": "2026-10-01T12:00:00Z",
+      "added": ["apps/a/configmap.yaml"],
+      "removed": [],
+      "modified": ["apps/a/values.yaml"]
+    },
+    {
+      "id": "0000000000000000000000000000000000000001",
+      "message": "Tidy\n",
+      "url": "https://gitea.example.com/acme/platform/commit/0000000000000000000000000000000000000001",
+      "author": { "name": "Alice", "email": "alice@example.com", "username": "alice" },
+      "committer": { "name": "Alice", "email": "alice@example.com", "username": "alice" },
+      "timestamp": "2026-10-01T12:05:00Z",
+      "added": [],
+      "removed": ["apps/old/deployment.yaml"],
+      "modified": ["README.md", "apps/a/values.yaml"]
+    }
+  ],
+  "total_commits": 2,
+  "head_commit": {
+    "id": "0000000000000000000000000000000000000001",
+    "message": "Tidy\n",
+    "added": [],
+    "removed": ["apps/old/deployment.yaml"],
+    "modified": ["README.md", "apps/a/values.yaml"]
+  },
+  "repository": {
+    "id": 42,
+    "owner": { "id": 1, "login": "acme", "login_name": "", "full_name": "ACME", "email": "", "username": "acme" },
+    "name": "platform",
+    "full_name": "acme/platform",
+    "description": "Platform manifests",
+    "empty": false,
+    "private": true,
+    "fork": false,
+    "mirror": false,
+    "html_url": "https://gitea.example.com/acme/platform",
+    "ssh_url": "git@gitea.example.com:acme/platform.git",
+    "clone_url": "https://gitea.example.com/acme/platform.git",
+    "default_branch": "main",
+    "archived": false
+  },
+  "pusher": { "id": 2, "login": "alice", "username": "alice" },
+  "sender": { "id": 2, "login": "alice", "username": "alice" }
+}

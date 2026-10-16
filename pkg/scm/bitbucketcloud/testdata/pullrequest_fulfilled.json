@@ -1,0 +1,21 @@
+{
+  "pullrequest": {
+    "type": "pullrequest",
+    "id": 2,
+    "title": "Add b",
+    "state": "MERGED",
+    "author": { "type": "user", "display_name": "Bob Example", "nickname": "bob" },
+    "source": { "branch": { "name": "feature-b" }, "commit": { "hash": "000000000000" } },
+    "destination": { "branch": { "name": "main" }, "commit": { "hash": "000000000000" } },
+    "links": { "html": { "href": "https://bitbucket.org/acme/platform/pull-requests/2" } }
+  },
+  "repository": {
+    "type": "repository",
+    "full_name": "acme/platform",
+    "name": "Platform",
+    "uuid": "{11111111-2222-3333-4444-555555555555}",
+    "is_private": false,
+    "links": { "self": { "href": "https://api.bitbucket.org/2.0/repositories/acme/platform" }, "html": { "href": "https://bitbucket.org/acme/platform" } }
+  },
+  "actor": { "type": "user", "display_name": "Bob Example", "nickname": "bob" }
+}
