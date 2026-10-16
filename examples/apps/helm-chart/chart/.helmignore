@@ -1,0 +1,4 @@
+# Patterns ignored when packaging the chart (helm package).
+.DS_Store
+*.swp
+*.bak

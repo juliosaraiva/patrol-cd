@@ -1,0 +1,32 @@
+# Project of the preview environments: only the application repository, only namespaces
+# guestbook-pr-*, and the Namespace objects of exactly those namespaces (the chart renders
+# the namespace so that it is pruned when the preview is deleted).
+apiVersion: cd.patrol.example/v1alpha1
+kind: AppProject
+metadata:
+  name: previews
+  namespace: patrol
+spec:
+  description: Pull request preview environments of example-org/guestbook.
+  sourceRepos:
+    - https://github.com/example-org/guestbook.git
+  destinations:
+    - server: https://kubernetes.default.svc
+      namespace: guestbook-pr-*
+  clusterResourceWhitelist:
+    - group: ""
+      kind: Namespace
+      name: guestbook-pr-*
+  namespaceResourceWhitelist:
+    - group: ""
+      kind: ConfigMap
+    - group: ""
+      kind: Service
+    - group: apps
+      kind: Deployment
+    - group: batch
+      kind: Job
+    - group: autoscaling
+      kind: HorizontalPodAutoscaler
+  orphanedResources:
+    warn: false

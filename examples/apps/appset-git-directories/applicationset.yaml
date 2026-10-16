@@ -1,0 +1,35 @@
+# Git directories generator: one Application per overlay directory. The staging overlay is
+# excluded (it is promoted by hand). path.basename is the last path segment.
+apiVersion: cd.patrol.example/v1alpha1
+kind: ApplicationSet
+metadata:
+  name: guestbook-overlays
+  namespace: patrol
+spec:
+  goTemplate: true
+  goTemplateOptions: ["missingkey=error"]
+  generators:
+    - git:
+        repoURL: https://git.example.com/platform/patrol-examples.git
+        revision: main
+        directories:
+          - path: apps/kustomize-base-overlays/overlays/*
+          - path: apps/kustomize-base-overlays/overlays/staging
+            exclude: true
+  template:
+    metadata:
+      name: "guestbook-overlay-{{ .path.basename }}"
+    spec:
+      project: default
+      source:
+        repoURL: https://git.example.com/platform/patrol-examples.git
+        targetRevision: main
+        path: "{{ .path.path }}"
+      destination:
+        server: https://kubernetes.default.svc
+        namespace: "guestbook-{{ .path.basename }}"
+      syncPolicy:
+        automated:
+          prune: true
+        syncOptions:
+          - CreateNamespace=true

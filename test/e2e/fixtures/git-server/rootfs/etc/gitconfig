@@ -1,0 +1,9 @@
+# System git configuration of the e2e git server image.
+[uploadpack]
+	# Clients (and Patrol's repo-server) fetch commits by SHA, including ones not at a ref tip.
+	allowAnySHA1InWant = true
+	allowFilter = true
+[receive]
+	advertisePushOptions = true
+[safe]
+	directory = *

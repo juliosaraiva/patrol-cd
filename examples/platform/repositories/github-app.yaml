@@ -1,0 +1,40 @@
+# Every repository below https://github.com/example-org/ authenticates with installation
+# tokens of the GitHub App defined by the SCMProvider github-app (longest URL prefix wins).
+apiVersion: cd.patrol.example/v1alpha1
+kind: RepositoryCredential
+metadata:
+  name: github-example-org
+  namespace: patrol
+spec:
+  urlPrefix: https://github.com/example-org/
+  type: git
+  scmProviderRef:
+    name: github-app
+---
+# Without an SCMProvider: the App ID/installation in the spec and the private key in a
+# Secret (key githubAppPrivateKey), as Argo CD repository secrets do.
+apiVersion: cd.patrol.example/v1alpha1
+kind: Repository
+metadata:
+  name: guestbook
+  namespace: patrol
+spec:
+  url: https://github.com/example-org/guestbook.git
+  type: git
+  name: guestbook
+  githubApp:
+    appID: 123456
+    installationID: 7654321
+  credentialsRef:
+    name: guestbook-repo
+---
+apiVersion: v1
+kind: Secret
+metadata:
+  name: guestbook-repo
+  namespace: patrol
+  labels:
+    cd.patrol.example/secret-type: repository
+type: Opaque
+stringData:
+  githubAppPrivateKey: REPLACE_ME

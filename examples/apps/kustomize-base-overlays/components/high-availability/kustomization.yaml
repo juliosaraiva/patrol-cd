@@ -1,0 +1,7 @@
+# Reusable component: spread replicas over nodes and keep two of them during disruptions.
+apiVersion: kustomize.config.k8s.io/v1alpha1
+kind: Component
+resources:
+  - pdb.yaml
+patches:
+  - path: topology-spread.yaml

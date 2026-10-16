@@ -1,0 +1,29 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: "@@APP_NAME@@"
+  labels:
+    app.kubernetes.io/name: "@@APP_NAME@@"
+    app.kubernetes.io/part-of: patrol-examples
+    example.com/environment: "@@ENVIRONMENT@@"
+    @@EXTRA_LABELS@@
+spec:
+  replicas: @@REPLICAS@@
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: "@@APP_NAME@@"
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: "@@APP_NAME@@"
+    spec:
+      containers:
+        - name: app
+          image: "@@IMAGE@@"
+          ports:
+            - name: http
+              containerPort: 9898
+          resources:
+            requests:
+              cpu: 10m
+              memory: 32Mi

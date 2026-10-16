@@ -1,0 +1,49 @@
+# Pull request generator (GitHub, token authentication): one Application per open pull
+# request of example-org/guestbook labelled "preview". The token Secret is
+# examples/platform/scm/github-token.yaml (label cd.patrol.example/secret-type: scm-creds).
+# examples/github/ has the GitHub App + SCMProvider variant with namespace cleanup.
+apiVersion: cd.patrol.example/v1alpha1
+kind: ApplicationSet
+metadata:
+  name: guestbook-pull-requests
+  namespace: patrol
+spec:
+  goTemplate: true
+  goTemplateOptions: ["missingkey=error"]
+  generators:
+    - pullRequest:
+        github:
+          owner: example-org
+          repo: guestbook
+          tokenRef:
+            secretName: github-token
+            key: token
+          labels:
+            - preview
+        filters:
+          - targetBranchMatch: "^main$"
+        requeueAfterSeconds: 300
+  template:
+    metadata:
+      name: "pr-{{ .number }}-guestbook"
+      labels:
+        example.com/pull-request: "{{ .number }}"
+    spec:
+      project: default
+      source:
+        repoURL: https://github.com/example-org/guestbook.git
+        targetRevision: "{{ .head_sha }}"
+        path: chart
+        helm:
+          releaseName: guestbook
+          parameters:
+            - name: ui.message
+              value: "PR #{{ .number }} ({{ .branch }} @ {{ .head_short_sha }})"
+      destination:
+        server: https://kubernetes.default.svc
+        namespace: "pr-{{ .number }}-guestbook"
+      syncPolicy:
+        automated:
+          prune: true
+        syncOptions:
+          - CreateNamespace=true

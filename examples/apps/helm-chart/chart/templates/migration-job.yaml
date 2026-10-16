@@ -1,0 +1,32 @@
+{{- if .Values.migration.enabled }}
+# Helm hook. Patrol CD maps pre-install and pre-upgrade to a PreSync hook and the Helm
+# delete policies to hook delete policies, so the same chart works with `helm install`.
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: {{ include "guestbook.fullname" . }}-migrate
+  labels:
+    {{- include "guestbook.labels" . | nindent 4 }}
+  annotations:
+    helm.sh/hook: pre-install,pre-upgrade
+    helm.sh/hook-weight: "-5"
+    helm.sh/hook-delete-policy: before-hook-creation,hook-succeeded
+spec:
+  backoffLimit: 1
+  activeDeadlineSeconds: 120
+  template:
+    metadata:
+      labels:
+        {{- include "guestbook.selectorLabels" . | nindent 8 }}
+        app.kubernetes.io/component: migration
+    spec:
+      restartPolicy: Never
+      containers:
+        - name: migrate
+          image: {{ .Values.migration.image }}
+          command: ["sh", "-c", "echo 'migrating schema for release {{ .Release.Name }} revision {{ .Release.Revision }}'"]
+          securityContext:
+            allowPrivilegeEscalation: false
+            capabilities:
+              drop: ["ALL"]
+{{- end }}

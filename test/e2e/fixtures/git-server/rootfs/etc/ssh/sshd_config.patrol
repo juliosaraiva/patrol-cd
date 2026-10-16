@@ -1,0 +1,21 @@
+# sshd for the Patrol CD e2e git server: user "git" only, public keys only, git-shell login
+# shell (git upload-pack/receive-pack, nothing else). Clone URL:
+#   ssh://git@git-server.patrol-e2e.svc.cluster.local/git/<repo>.git
+Port 2222
+HostKey /etc/ssh/ssh_host_ed25519_key
+PidFile /run/sshd.pid
+AllowUsers git
+PermitRootLogin no
+PubkeyAuthentication yes
+PasswordAuthentication no
+KbdInteractiveAuthentication no
+AuthenticationMethods publickey
+AuthorizedKeysFile /etc/ssh/authorized_keys/%u
+PermitTTY no
+PermitTunnel no
+AllowTcpForwarding no
+AllowAgentForwarding no
+AllowStreamLocalForwarding no
+X11Forwarding no
+PermitUserEnvironment no
+LogLevel VERBOSE

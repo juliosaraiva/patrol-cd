@@ -1,0 +1,53 @@
+# Merge generator: parameter sets of later generators override those of the first one when
+# their merge keys match. Every cluster gets one replica, except prod-us which gets three
+# and a different message.
+apiVersion: cd.patrol.example/v1alpha1
+kind: ApplicationSet
+metadata:
+  name: guestbook-merged
+  namespace: patrol
+spec:
+  goTemplate: true
+  goTemplateOptions: ["missingkey=error"]
+  generators:
+    - merge:
+        mergeKeys:
+          - server
+        generators:
+          - clusters:
+              selector:
+                matchExpressions:
+                  - key: env
+                    operator: In
+                    values: [staging, prod]
+              values:
+                replicas: "1"
+                message: default settings
+          - list:
+              elements:
+                - server: https://prod-us.k8s.example.com
+                  values:
+                    replicas: "3"
+                    message: production override
+  template:
+    metadata:
+      name: "guestbook-merged-{{ .name }}"
+    spec:
+      project: default
+      source:
+        repoURL: https://git.example.com/platform/patrol-examples.git
+        targetRevision: main
+        path: apps/helm-chart/chart
+        helm:
+          releaseName: guestbook
+          parameters:
+            - name: replicaCount
+              value: "{{ .values.replicas }}"
+            - name: ui.message
+              value: "{{ .values.message }}"
+      destination:
+        server: "{{ .server }}"
+        namespace: guestbook-merged
+      syncPolicy:
+        syncOptions:
+          - CreateNamespace=true

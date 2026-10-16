@@ -1,0 +1,85 @@
+# Long-running client pod in patrol-control for e2e checks and debugging:
+#   kubectl --kubeconfig .cache/kind/patrol-control.kubeconfig --context kind-patrol-control \
+#     -n patrol-e2e exec -it toolbox -- sh
+# Every credential is optional so the pod also starts before deploy.sh created them:
+#   GIT_HTTP_USERNAME/PASSWORD         git-server-http-auth
+#   CHART_REPO_USERNAME/PASSWORD       chart-repo-auth
+#   /etc/patrol-e2e/git-ssh            git-server-ssh-client (sshPrivateKey, known_hosts)
+#   /etc/patrol-e2e/patrol-target      patrol-target-kubeconfig (kubeconfig with server
+#                                      https://patrol-target-control-plane:6443)
+apiVersion: v1
+kind: Pod
+metadata:
+  name: toolbox
+  namespace: patrol-e2e
+  labels:
+    app.kubernetes.io/name: toolbox
+    app.kubernetes.io/part-of: patrol-e2e-fixtures
+spec:
+  automountServiceAccountToken: false
+  enableServiceLinks: false
+  terminationGracePeriodSeconds: 5
+  securityContext:
+    runAsNonRoot: true
+    runAsUser: 1000
+    runAsGroup: 1000
+    fsGroup: 1000
+  containers:
+    - name: toolbox
+      image: patrol-cd/e2e-toolbox:dev
+      imagePullPolicy: Never
+      env:
+        - name: HOME
+          value: /home/toolbox
+        - name: GIT_HTTP_USERNAME
+          valueFrom:
+            secretKeyRef:
+              name: git-server-http-auth
+              key: username
+              optional: true
+        - name: GIT_HTTP_PASSWORD
+          valueFrom:
+            secretKeyRef:
+              name: git-server-http-auth
+              key: password
+              optional: true
+        - name: CHART_REPO_USERNAME
+          valueFrom:
+            secretKeyRef:
+              name: chart-repo-auth
+              key: username
+              optional: true
+        - name: CHART_REPO_PASSWORD
+          valueFrom:
+            secretKeyRef:
+              name: chart-repo-auth
+              key: password
+              optional: true
+      resources:
+        requests:
+          cpu: 10m
+          memory: 32Mi
+        limits:
+          memory: 256Mi
+      securityContext:
+        allowPrivilegeEscalation: false
+        capabilities:
+          drop: ["ALL"]
+      volumeMounts:
+        - name: git-ssh
+          mountPath: /etc/patrol-e2e/git-ssh
+          readOnly: true
+        - name: patrol-target
+          mountPath: /etc/patrol-e2e/patrol-target
+          readOnly: true
+  volumes:
+    - name: git-ssh
+      secret:
+        secretName: git-server-ssh-client
+        defaultMode: 0440
+        optional: true
+    - name: patrol-target
+      secret:
+        secretName: patrol-target-kubeconfig
+        defaultMode: 0440
+        optional: true

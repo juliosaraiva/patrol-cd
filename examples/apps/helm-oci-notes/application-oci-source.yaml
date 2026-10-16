@@ -1,0 +1,24 @@
+# OCI source: the artifact registry.example.com/charts/guestbook:0.1.0 is pulled and,
+# because it is a Helm chart, rendered with Helm. path must be "." for chart artifacts.
+apiVersion: cd.patrol.example/v1alpha1
+kind: Application
+metadata:
+  name: guestbook-oci
+  namespace: patrol
+spec:
+  project: default
+  source:
+    repoURL: oci://registry.example.com/charts/guestbook
+    targetRevision: 0.1.0
+    path: .
+    helm:
+      releaseName: guestbook
+      valuesObject:
+        ui:
+          message: Pulled from an OCI registry
+  destination:
+    server: https://kubernetes.default.svc
+    namespace: guestbook-oci
+  syncPolicy:
+    syncOptions:
+      - CreateNamespace=true

@@ -1,0 +1,33 @@
+# Multiple sources: the chart comes from the examples repository, environment values from a
+# separate configuration repository referenced as $values. The ref source renders nothing.
+apiVersion: cd.patrol.example/v1alpha1
+kind: Application
+metadata:
+  name: team-a-guestbook
+  namespace: patrol
+  finalizers:
+    - resources-finalizer.cd.patrol.example
+spec:
+  project: team-a
+  sources:
+    - name: chart
+      repoURL: https://git.example.com/platform/patrol-examples.git
+      targetRevision: main
+      path: apps/helm-chart/chart
+      helm:
+        releaseName: guestbook
+        valueFiles:
+          # From the chart's own repository (relative to the chart path) ...
+          - values-prod.yaml
+          # ... and from the source named by ref: values (path relative to its root).
+          - $values/teams/team-a/guestbook/values.yaml
+    - name: values
+      repoURL: https://git.example.com/platform/patrol-examples-values.git
+      targetRevision: main
+      ref: values
+  destination:
+    name: in-cluster
+    namespace: team-a-guestbook
+  syncPolicy:
+    automated:
+      prune: true

@@ -1,0 +1,16 @@
+apiVersion: v1
+kind: Service
+metadata:
+  name: chart-repo
+  namespace: patrol-e2e
+  labels:
+    app.kubernetes.io/name: chart-repo
+    app.kubernetes.io/part-of: patrol-e2e-fixtures
+spec:
+  type: ClusterIP
+  selector:
+    app.kubernetes.io/name: chart-repo
+  ports:
+    - name: http
+      port: 80
+      targetPort: http

@@ -1,0 +1,11 @@
+apiVersion: ops.example.com/v1alpha1
+kind: BackupSchedule
+metadata:
+  name: orders-db
+  namespace: backups
+  generation: 1
+spec:
+  schedule: "0 2 * * *"
+  target: orders-db
+  suspend: true
+  retentionDays: 7

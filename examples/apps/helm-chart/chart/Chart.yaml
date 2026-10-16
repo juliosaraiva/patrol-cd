@@ -1,0 +1,9 @@
+apiVersion: v2
+name: guestbook
+description: Small podinfo-based demo application used by the Patrol CD examples.
+type: application
+version: 0.1.0
+appVersion: "6.7.1"
+keywords:
+  - patrol-cd
+  - example

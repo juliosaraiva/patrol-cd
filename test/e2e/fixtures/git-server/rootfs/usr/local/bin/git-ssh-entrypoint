@@ -1,0 +1,15 @@
+#!/bin/sh
+# Starts the SSH side of the e2e git server. The host key (TEST-ONLY, from the
+# git-server-ssh-host-key Secret) and authorized_keys (from the git-server-ssh-authorized-keys
+# Secret) are copied out of their Secret volumes so that sshd's ownership/mode checks pass.
+set -eu
+
+host_key_src=${SSH_HOST_KEY_FILE:-/etc/git-server/ssh-host-key/ssh_host_ed25519_key}
+authorized_keys_src=${SSH_AUTHORIZED_KEYS_FILE:-/etc/git-server/authorized-keys/authorized_keys}
+
+install -d -o git -g git -m 0755 /git
+install -m 0600 "$host_key_src" /etc/ssh/ssh_host_ed25519_key
+install -d -m 0755 /etc/ssh/authorized_keys
+install -m 0644 "$authorized_keys_src" /etc/ssh/authorized_keys/git
+
+exec /usr/sbin/sshd -D -e -f /etc/ssh/sshd_config.patrol

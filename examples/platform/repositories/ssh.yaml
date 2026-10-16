@@ -1,0 +1,28 @@
+# Plain Git over SSH. The host key must be listed in patrol-ssh-known-hosts-cm
+# (examples/platform/settings/patrol-ssh-known-hosts-cm.yaml); never set
+# insecureIgnoreHostKey in production.
+apiVersion: cd.patrol.example/v1alpha1
+kind: Repository
+metadata:
+  name: patrol-examples-ssh
+  namespace: patrol
+spec:
+  url: git@git.example.com:platform/patrol-examples.git
+  type: git
+  name: patrol-examples
+  project: default
+  depth: 1
+  credentialsRef:
+    name: patrol-examples-ssh
+---
+apiVersion: v1
+kind: Secret
+metadata:
+  name: patrol-examples-ssh
+  namespace: patrol
+  labels:
+    cd.patrol.example/secret-type: repository
+type: Opaque
+stringData:
+  # OpenSSH private key (deploy key with read access).
+  sshPrivateKey: REPLACE_ME

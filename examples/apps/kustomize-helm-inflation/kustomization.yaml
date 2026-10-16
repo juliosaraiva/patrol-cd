@@ -1,0 +1,29 @@
+# Kustomize inflating a Helm chart, then post-processing the output with Kustomize.
+# Requires `kustomize build --enable-helm`: set `kustomize.buildOptions: --enable-helm` in
+# patrol-cm (examples/platform/settings/patrol-cm.yaml). The chart is vendored under
+# charts/ (helmGlobals.chartHome default), so no chart repository is contacted.
+#
+# Objects without a namespace are deployed to the Application's destination namespace;
+# helmCharts[].namespace only sets .Release.Namespace for the chart templates.
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+helmCharts:
+  - name: echo
+    releaseName: echo
+    namespace: echo
+    valuesFile: values-echo.yaml
+    valuesInline:
+      replicaCount: 2
+labels:
+  - pairs:
+      app.kubernetes.io/part-of: patrol-examples
+patches:
+  # Post-render patch applied to the chart output.
+  - target:
+      kind: Deployment
+      name: echo
+    patch: |-
+      - op: add
+        path: /spec/template/metadata/annotations
+        value:
+          example.com/inflated-by: kustomize

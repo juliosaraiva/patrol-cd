@@ -1,0 +1,170 @@
+#!/bin/sh
+# (Re)seeds the e2e git server. Run by the git-seed Job; also runnable on a workstation.
+#
+# Every directory under SEED_REPOS_DIR becomes repository <dir>.git, and all of them together
+# become the monorepo SEED_MONOREPO.git (one subdirectory per seed directory). Every directory
+# under SEED_EXTRA_DIR (e.g. the repository's examples/) becomes repository <dir>.git as well, but
+# is not part of the monorepo and gets no updates overlay. Each repository gets the same
+# deterministic history (fixed author, committer and dates, so commit SHAs only
+# depend on the seed content):
+#
+#   c1  "Initial import"   seed content + e2e-revision.txt "1"   tag v1.0.0 (annotated), branch release-1.0
+#   c2  "Revision 2"       + SEED_UPDATES_DIR/<dir> overlay, e2e-revision.txt "2"
+#                                                                tag v1.1.0 (lightweight), branch main
+#   c3  "Feature marker"   + e2e-feature.txt                     branch feature/e2e
+#
+# Refs are force-pushed with --prune, so re-running the Job resets every seeded repository to
+# this state (commits pushed by tests are discarded). Repositories are created on the server by
+# its push-to-create wrapper.
+#
+# Environment:
+#   GIT_SERVER_URL         required, base URL, e.g. http://git-server.patrol-e2e.svc.cluster.local/git
+#   GIT_USERNAME/PASSWORD  basic-auth credentials (answered through GIT_ASKPASS)
+#   GIT_SERVER_HEALTH_URL  optional URL polled (wget) until the server answers
+#   SEED_REPOS_DIR         default /seed/repos
+#   SEED_UPDATES_DIR       default /seed/updates
+#   SEED_EXTRA_DIR         default /seed/extra (may be empty or missing)
+#   SEED_MONOREPO          default "apps"; empty disables the monorepo
+set -eu
+
+: "${GIT_SERVER_URL:?GIT_SERVER_URL is required}"
+SEED_REPOS_DIR=${SEED_REPOS_DIR:-/seed/repos}
+SEED_UPDATES_DIR=${SEED_UPDATES_DIR:-/seed/updates}
+SEED_EXTRA_DIR=${SEED_EXTRA_DIR:-/seed/extra}
+SEED_MONOREPO=${SEED_MONOREPO-apps}
+
+GIT_AUTHOR_NAME="Patrol E2E"
+GIT_AUTHOR_EMAIL="e2e@patrol.example"
+GIT_COMMITTER_NAME=$GIT_AUTHOR_NAME
+GIT_COMMITTER_EMAIL=$GIT_AUTHOR_EMAIL
+# Ignore system and global git configuration (hooks, signing, templates, credential helpers
+# such as a workstation keychain) so results are reproducible and credentials are not stored.
+GIT_CONFIG_NOSYSTEM=1
+GIT_CONFIG_GLOBAL=/dev/null
+GIT_TERMINAL_PROMPT=0
+export GIT_AUTHOR_NAME GIT_AUTHOR_EMAIL GIT_COMMITTER_NAME GIT_COMMITTER_EMAIL
+export GIT_CONFIG_NOSYSTEM GIT_CONFIG_GLOBAL GIT_TERMINAL_PROMPT
+if [ -n "${GIT_USERNAME:-}" ]; then
+	GIT_ASKPASS=${GIT_ASKPASS:-$(dirname "$0")/git-askpass-env}
+	export GIT_ASKPASS
+fi
+
+log() { printf 'git-seed: %s\n' "$*" >&2; }
+die() {
+	log "error: $*"
+	exit 1
+}
+
+wait_for_server() {
+	[ -n "${GIT_SERVER_HEALTH_URL:-}" ] || return 0
+	i=0
+	until wget -q -O /dev/null "$GIT_SERVER_HEALTH_URL" 2>/dev/null; do
+		i=$((i + 1))
+		[ "$i" -lt 90 ] || die "git server not reachable at $GIT_SERVER_HEALTH_URL"
+		sleep 2
+	done
+}
+
+# copy_tree SRC DEST: copies SRC's contents (including dotfiles) into DEST.
+copy_tree() {
+	mkdir -p "$2"
+	cp -R "$1/." "$2/"
+}
+
+commit() { # commit DATE MESSAGE
+	git -C "$work" add -A
+	GIT_AUTHOR_DATE=$1 GIT_COMMITTER_DATE=$1 git -C "$work" commit --quiet --no-verify -m "$2"
+}
+
+# seed_repo REPO NAME... : one NAME = single repository rooted at $src_root/NAME; several
+# NAMEs = monorepo with one subdirectory per NAME. Overlays come from $updates_root/NAME.
+seed_repo() {
+	repo=$1
+	shift
+	work=$(mktemp -d "${TMPDIR:-/tmp}/git-seed.XXXXXX")
+	git init --quiet --initial-branch=main "$work"
+	git -C "$work" config commit.gpgSign false
+	git -C "$work" config tag.gpgSign false
+	git -C "$work" config core.autocrlf false
+
+	if [ $# -eq 1 ]; then
+		copy_tree "$src_root/$1" "$work"
+	else
+		for name in "$@"; do copy_tree "$src_root/$name" "$work/$name"; done
+	fi
+	printf '1\n' >"$work/e2e-revision.txt"
+	commit 2026-01-01T00:00:00Z "Initial import of $repo"
+	GIT_COMMITTER_DATE=2026-01-01T00:00:00Z git -C "$work" tag -a v1.0.0 -m "$repo v1.0.0"
+	git -C "$work" branch release-1.0
+
+	if [ $# -eq 1 ]; then
+		[ ! -d "$updates_root/$1" ] || copy_tree "$updates_root/$1" "$work"
+	else
+		for name in "$@"; do
+			[ ! -d "$updates_root/$name" ] || copy_tree "$updates_root/$name" "$work/$name"
+		done
+	fi
+	printf '2\n' >"$work/e2e-revision.txt"
+	commit 2026-01-02T00:00:00Z "Revision 2 of $repo"
+	git -C "$work" tag v1.1.0
+
+	git -C "$work" checkout --quiet -b feature/e2e
+	printf 'feature/e2e\n' >"$work/e2e-feature.txt"
+	commit 2026-01-03T00:00:00Z "Feature marker for $repo"
+	git -C "$work" checkout --quiet main
+
+	git -C "$work" -c credential.helper= push --quiet --force --prune "$GIT_SERVER_URL/$repo.git" \
+		'refs/heads/*:refs/heads/*' 'refs/tags/*:refs/tags/*'
+	refs=$(git -C "$work" for-each-ref --format='%(refname:short)=%(objectname:short=12)' refs/heads refs/tags | tr '\n' ' ')
+	log "seeded $repo.git: ${refs% }"
+	rm -rf "$work"
+}
+
+# list_repos DIR: names of the repository directories in DIR, validated.
+list_repos() {
+	for dir in "$1"/*/; do
+		[ -d "$dir" ] || continue
+		name=$(basename "$dir")
+		printf '%s\n' "$name" | grep -Eqx '[A-Za-z0-9][A-Za-z0-9._-]*' || die "invalid repository name: $name"
+		[ "$name" != "$SEED_MONOREPO" ] || die "seed directory $name collides with the monorepo name"
+		printf '%s\n' "$name"
+	done
+}
+
+[ -d "$SEED_REPOS_DIR" ] || die "seed directory $SEED_REPOS_DIR not found"
+# (die inside a command substitution only ends the subshell: propagate its status.)
+names=$(list_repos "$SEED_REPOS_DIR") || exit 1
+[ -n "$names" ] || die "no seed directories in $SEED_REPOS_DIR"
+extras=""
+if [ -d "$SEED_EXTRA_DIR" ]; then
+	extras=$(list_repos "$SEED_EXTRA_DIR") || exit 1
+fi
+for extra in $extras; do
+	for name in $names; do
+		[ "$extra" != "$name" ] || die "extra repository $extra collides with a seed repository"
+	done
+done
+
+wait_for_server
+src_root=$SEED_REPOS_DIR
+updates_root=$SEED_UPDATES_DIR
+for name in $names; do
+	seed_repo "$name" "$name"
+done
+src_root=$SEED_EXTRA_DIR
+updates_root=/nonexistent
+for name in $extras; do
+	seed_repo "$name" "$name"
+done
+src_root=$SEED_REPOS_DIR
+updates_root=$SEED_UPDATES_DIR
+if [ -n "$SEED_MONOREPO" ]; then
+	# shellcheck disable=SC2086 # word splitting of the name list is intended
+	set -- $names
+	if [ $# -eq 1 ]; then
+		log "only one seed directory; skipping monorepo $SEED_MONOREPO.git"
+	else
+		seed_repo "$SEED_MONOREPO" "$@"
+	fi
+fi
+log "done"

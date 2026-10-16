@@ -1,0 +1,7 @@
+replicaCount: 1
+image:
+  repository: hashicorp/http-echo
+  tag: "1.0"
+text: hello
+service:
+  port: 80

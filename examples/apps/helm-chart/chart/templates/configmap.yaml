@@ -1,0 +1,9 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: {{ include "guestbook.fullname" . }}
+  labels:
+    {{- include "guestbook.labels" . | nindent 4 }}
+data:
+  PODINFO_UI_MESSAGE: {{ .Values.ui.message | quote }}
+  PODINFO_UI_COLOR: {{ .Values.ui.color | quote }}

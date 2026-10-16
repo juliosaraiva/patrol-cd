@@ -1,0 +1,15 @@
+# Packages plugin.yaml and generate.sh into the ConfigMap mounted by the cmp-server sidecar
+# at /home/patrol/cmp-server/config (kustomize build examples/apps/cmp-plugin/plugin).
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+namespace: patrol
+generatorOptions:
+  disableNameSuffixHash: true
+  labels:
+    app.kubernetes.io/part-of: patrol-cd
+    app.kubernetes.io/component: cmp-tmpl-render
+configMapGenerator:
+  - name: patrol-cmp-tmpl-render
+    files:
+      - plugin.yaml
+      - generate.sh

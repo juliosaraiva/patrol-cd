@@ -1,0 +1,69 @@
+# Progressive sync (RollingSync): generated Applications are synced step by step, each step
+# selecting Applications by label. A step starts when every Application of the previous
+# step is Healthy. Requires applicationsetcontroller.enable.progressive.syncs: "true" in
+# patrol-cmd-params-cm. Automated sync of the generated Applications is managed by the
+# controller during the rollout.
+apiVersion: cd.patrol.example/v1alpha1
+kind: ApplicationSet
+metadata:
+  name: guestbook-rollout
+  namespace: patrol
+spec:
+  goTemplate: true
+  goTemplateOptions: ["missingkey=error"]
+  generators:
+    - list:
+        elements:
+          - env: dev
+            region: eu
+          - env: staging
+            region: eu
+          - env: prod
+            region: eu
+          - env: prod
+            region: us
+  strategy:
+    type: RollingSync
+    # Delete in reverse step order (prod first) when the ApplicationSet is deleted.
+    deletionOrder: Reverse
+    rollingSync:
+      steps:
+        - matchExpressions:
+            - key: env
+              operator: In
+              values: [dev]
+        - matchExpressions:
+            - key: env
+              operator: In
+              values: [staging]
+        - matchExpressions:
+            - key: env
+              operator: In
+              values: [prod]
+          # At most half of the prod Applications are updated at a time.
+          maxUpdate: 50%
+  template:
+    metadata:
+      name: "guestbook-rollout-{{ .env }}-{{ .region }}"
+      labels:
+        env: "{{ .env }}"
+        region: "{{ .region }}"
+    spec:
+      project: default
+      source:
+        repoURL: https://git.example.com/platform/patrol-examples.git
+        targetRevision: main
+        path: apps/helm-chart/chart
+        helm:
+          releaseName: guestbook
+          parameters:
+            - name: ui.message
+              value: "{{ .env }} in {{ .region }}"
+      destination:
+        server: https://kubernetes.default.svc
+        namespace: "guestbook-rollout-{{ .env }}-{{ .region }}"
+      syncPolicy:
+        automated:
+          prune: true
+        syncOptions:
+          - CreateNamespace=true

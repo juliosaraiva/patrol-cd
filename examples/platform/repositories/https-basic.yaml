@@ -1,0 +1,24 @@
+# The examples repository over HTTPS with a username and token; also serves
+# patrol-examples-values.git through the credential template below.
+apiVersion: cd.patrol.example/v1alpha1
+kind: RepositoryCredential
+metadata:
+  name: git-example-com-platform
+  namespace: patrol
+spec:
+  urlPrefix: https://git.example.com/platform/
+  type: git
+  credentialsRef:
+    name: git-example-com-platform
+---
+apiVersion: v1
+kind: Secret
+metadata:
+  name: git-example-com-platform
+  namespace: patrol
+  labels:
+    cd.patrol.example/secret-type: repo-creds
+type: Opaque
+stringData:
+  username: REPLACE_ME
+  password: REPLACE_ME

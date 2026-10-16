@@ -1,0 +1,34 @@
+# The disposable kind cluster "patrol-target" as seen from the control-plane kind cluster
+# (both run in the same Docker network, so the API server is reachable by container name).
+# Create a service account token on the target and put it, with the target's CA, into the
+# Secret below. Labels are cluster generator parameters (.metadata.labels).
+apiVersion: cd.patrol.example/v1alpha1
+kind: Cluster
+metadata:
+  name: staging-eu
+  namespace: patrol
+  labels:
+    env: staging
+    region: eu
+    team-a: enabled
+    # Keep the cd.patrol.example/kubernetes-version label up to date.
+    cd.patrol.example/auto-label-cluster-info: "true"
+spec:
+  name: staging-eu
+  server: https://patrol-target-control-plane:6443
+  config:
+    credentialsRef:
+      name: cluster-staging-eu
+---
+apiVersion: v1
+kind: Secret
+metadata:
+  name: cluster-staging-eu
+  namespace: patrol
+  labels:
+    cd.patrol.example/secret-type: cluster
+type: Opaque
+stringData:
+  bearerToken: REPLACE_ME
+  # PEM CA of the target API server.
+  caData: REPLACE_ME

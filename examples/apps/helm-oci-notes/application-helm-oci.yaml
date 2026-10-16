@@ -1,0 +1,24 @@
+# Helm repository served over OCI: repoURL has no scheme and the chart is selected by name.
+# The Repository registry.example.com/charts (type helm, enableOCI true) holds credentials.
+apiVersion: cd.patrol.example/v1alpha1
+kind: Application
+metadata:
+  name: guestbook-helm-oci
+  namespace: patrol
+spec:
+  project: default
+  source:
+    repoURL: registry.example.com/charts
+    chart: guestbook
+    targetRevision: 0.1.*
+    helm:
+      releaseName: guestbook
+      parameters:
+        - name: replicaCount
+          value: "2"
+  destination:
+    server: https://kubernetes.default.svc
+    namespace: guestbook-helm-oci
+  syncPolicy:
+    syncOptions:
+      - CreateNamespace=true

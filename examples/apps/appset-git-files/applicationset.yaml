@@ -1,0 +1,40 @@
+# Git files generator: every config.json below config/ becomes one parameter set; JSON
+# fields are template parameters and path.* describes the file location.
+apiVersion: cd.patrol.example/v1alpha1
+kind: ApplicationSet
+metadata:
+  name: guestbook-from-config
+  namespace: patrol
+spec:
+  goTemplate: true
+  goTemplateOptions: ["missingkey=error"]
+  generators:
+    - git:
+        repoURL: https://git.example.com/platform/patrol-examples.git
+        revision: main
+        files:
+          - path: apps/appset-git-files/config/*/config.json
+  template:
+    metadata:
+      name: "guestbook-config-{{ .env }}"
+      annotations:
+        example.com/config-file: "{{ .path.path }}/{{ .path.filename }}"
+    spec:
+      project: default
+      source:
+        repoURL: https://git.example.com/platform/patrol-examples.git
+        targetRevision: main
+        path: apps/helm-chart/chart
+        helm:
+          releaseName: guestbook
+          parameters:
+            - name: replicaCount
+              value: "{{ .replicas }}"
+            - name: ui.message
+              value: "{{ .message }}"
+      destination:
+        server: "{{ .cluster.server }}"
+        namespace: "{{ .cluster.namespace }}"
+      syncPolicy:
+        syncOptions:
+          - CreateNamespace=true

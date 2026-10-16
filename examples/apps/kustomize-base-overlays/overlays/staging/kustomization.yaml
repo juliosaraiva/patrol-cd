@@ -1,0 +1,18 @@
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+namespace: guestbook-staging
+resources:
+  - ../../base
+components:
+  - ../../components/monitoring
+images:
+  - name: ghcr.io/stefanprodan/podinfo
+    newTag: 6.7.1
+replicas:
+  - name: guestbook
+    count: 2
+configMapGenerator:
+  - name: guestbook-config
+    behavior: merge
+    literals:
+      - PODINFO_UI_MESSAGE=Hello from staging

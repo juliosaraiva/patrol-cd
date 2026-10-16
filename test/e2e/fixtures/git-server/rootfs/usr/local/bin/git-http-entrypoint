@@ -1,0 +1,31 @@
+#!/bin/sh
+# Starts the smart-HTTP side of the e2e git server: writes the htpasswd file from
+# GIT_HTTP_USERNAME/GIT_HTTP_PASSWORD (injected from the git-server-http-auth Secret), starts
+# fcgiwrap as user git and runs nginx in the foreground.
+set -eu
+
+: "${GIT_HTTP_USERNAME:?GIT_HTTP_USERNAME is required}"
+: "${GIT_HTTP_PASSWORD:?GIT_HTTP_PASSWORD is required}"
+
+install -d -o git -g git -m 0755 /git
+install -d -o git -g git -m 0700 /run/fcgiwrap /tmp/nginx
+install -d -m 0755 /run/nginx /run/git-server
+
+# -i reads the password from stdin (not argv); -m is APR1-MD5, which nginx verifies natively.
+printf '%s\n' "$GIT_HTTP_PASSWORD" | htpasswd -i -m -c /run/git-server/htpasswd "$GIT_HTTP_USERNAME"
+chown root:git /run/git-server/htpasswd
+chmod 0640 /run/git-server/htpasswd
+unset GIT_HTTP_PASSWORD
+
+su-exec git:git fcgiwrap -c "${FCGIWRAP_CHILDREN:-4}" -s unix:/run/fcgiwrap/fcgiwrap.sock &
+i=0
+while [ ! -S /run/fcgiwrap/fcgiwrap.sock ]; do
+	i=$((i + 1))
+	if [ "$i" -gt 100 ]; then
+		echo "git-http-entrypoint: fcgiwrap socket did not appear" >&2
+		exit 1
+	fi
+	sleep 0.1
+done
+
+exec nginx -g 'daemon off;'

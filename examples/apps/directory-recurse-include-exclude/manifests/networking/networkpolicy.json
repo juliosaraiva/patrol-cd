@@ -1,0 +1,28 @@
+{
+  "apiVersion": "networking.k8s.io/v1",
+  "kind": "NetworkPolicy",
+  "metadata": {
+    "name": "guestbook-ingress",
+    "labels": {
+      "app.kubernetes.io/name": "guestbook"
+    }
+  },
+  "spec": {
+    "podSelector": {
+      "matchLabels": {
+        "app.kubernetes.io/name": "guestbook"
+      }
+    },
+    "policyTypes": ["Ingress"],
+    "ingress": [
+      {
+        "ports": [
+          {
+            "protocol": "TCP",
+            "port": 9898
+          }
+        ]
+      }
+    ]
+  }
+}

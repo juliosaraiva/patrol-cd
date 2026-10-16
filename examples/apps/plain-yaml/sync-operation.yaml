@@ -1,0 +1,34 @@
+# A manual sync request: an Operation names its Application and carries the sync options.
+# The controller runs it and records progress and per-resource results in its status.
+# Normally the UI/API (patrol-server) creates Operations; with kubectl use
+# `kubectl create -f` (generateName) and leave initiatedBy empty or set it to your own
+# Kubernetes user name (enforced by the operations.cd.patrol.example admission policy).
+# The spec is immutable except spec.cancel, which stops the operation when set to true.
+apiVersion: cd.patrol.example/v1alpha1
+kind: Operation
+metadata:
+  generateName: guestbook-plain-sync-
+  namespace: patrol
+  labels:
+    cd.patrol.example/application: guestbook-plain
+spec:
+  application: guestbook-plain
+  sync:
+    revision: main
+    prune: true
+    syncOptions:
+      - ApplyOutOfSyncOnly=true
+    # Selective sync: only this resource.
+    resources:
+      - group: apps
+        kind: Deployment
+        name: guestbook
+  info:
+    - name: Reason
+      value: Roll out the hotfix approved in CHANGE-1234
+  retry:
+    limit: 2
+    backoff:
+      duration: 5s
+      factor: 2
+      maxDuration: 1m

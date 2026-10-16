@@ -1,0 +1,25 @@
+#!/bin/sh
+# CGI wrapper around git-http-backend. When PATROL_ALLOW_CREATE=1 (set by nginx only on the
+# authenticated /git/ path) the first request of a push (GET <repo>.git/info/refs?service=
+# git-receive-pack) creates the bare repository if it does not exist ("push to create").
+# Repository names are restricted to [A-Za-z0-9._-] ending in .git, one path level.
+set -eu
+
+backend=${GIT_HTTP_BACKEND:-/usr/libexec/git-core/git-http-backend}
+
+if [ "${PATROL_ALLOW_CREATE:-}" = 1 ] && [ -n "${REMOTE_USER:-}" ] &&
+	[ "${REQUEST_METHOD:-}" = GET ] && [ "${QUERY_STRING:-}" = service=git-receive-pack ]; then
+	case "${PATH_INFO:-}" in
+	/*.git/info/refs)
+		repo=${PATH_INFO#/}
+		repo=${repo%/info/refs}
+		if printf '%s\n' "$repo" | grep -Eqx '[A-Za-z0-9][A-Za-z0-9._-]*\.git' &&
+			[ ! -e "${GIT_PROJECT_ROOT:?}/$repo" ]; then
+			git init --quiet --bare --initial-branch=main "$GIT_PROJECT_ROOT/$repo" >&2
+			echo "git-http-backend-wrapper: created $repo for $REMOTE_USER" >&2
+		fi
+		;;
+	esac
+fi
+
+exec "$backend"

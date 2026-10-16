@@ -1,0 +1,20 @@
+{
+  "name": "@patrol-examples/extension-backup-schedule",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Patrol CD UI extension example: a Backups tab for ops.example.com/BackupSchedule resources.",
+  "license": "Apache-2.0",
+  "type": "module",
+  "scripts": {
+    "typecheck": "tsc -p tsconfig.json",
+    "build": "esbuild src/index.tsx --bundle --format=iife --target=es2022 --jsx=automatic --alias:react/jsx-runtime=./src/shims/jsx-runtime.ts --alias:react=./src/shims/react.ts --minify --legal-comments=none --outfile=dist/extension-backup-schedule.js",
+    "smoke": "node scripts/smoke.mjs"
+  },
+  "devDependencies": {
+    "@types/react": "19.2.18",
+    "esbuild": "0.28.2",
+    "react": "19.2.8",
+    "react-dom": "19.2.8",
+    "typescript": "5.9.3"
+  }
+}

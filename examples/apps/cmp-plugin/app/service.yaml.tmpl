@@ -1,0 +1,15 @@
+apiVersion: v1
+kind: Service
+metadata:
+  name: "@@APP_NAME@@"
+  labels:
+    app.kubernetes.io/name: "@@APP_NAME@@"
+    app.kubernetes.io/part-of: patrol-examples
+    @@EXTRA_LABELS@@
+spec:
+  selector:
+    app.kubernetes.io/name: "@@APP_NAME@@"
+  ports:
+    - name: http
+      port: 9898
+      targetPort: http

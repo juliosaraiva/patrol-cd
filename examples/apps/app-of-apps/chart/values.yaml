@@ -1,0 +1,28 @@
+# Shared settings of every child Application.
+repoURL: https://git.example.com/platform/patrol-examples.git
+targetRevision: main
+project: default
+destination:
+  server: https://kubernetes.default.svc
+
+# One child Application per entry. wave orders the children: a wave is applied only after
+# the previous waves are synced and healthy. Waiting for health requires the Application
+# health customization resource.customizations.health.cd.patrol.example_Application in
+# patrol-cm (examples/platform/settings/patrol-cm.yaml); without it, Applications have no
+# health check and every wave is applied right after the previous one.
+applications:
+  - name: child-plain-yaml
+    path: apps/plain-yaml/manifests
+    namespace: child-plain-yaml
+    wave: 0
+  - name: child-helm
+    path: apps/helm-chart/chart
+    namespace: child-helm
+    wave: 1
+    helm:
+      valueFiles:
+        - values-prod.yaml
+  - name: child-kustomize
+    path: apps/kustomize-base-overlays/overlays/dev
+    namespace: guestbook-dev
+    wave: 1

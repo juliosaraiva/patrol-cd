@@ -1,0 +1,25 @@
+tests:
+  - healthStatus:
+      status: Progressing
+      message: Waiting for the backup controller
+    inputPath: testdata/progressing-no-status.yaml
+  - healthStatus:
+      status: Progressing
+      message: Waiting for the backup controller to observe the latest spec
+    inputPath: testdata/progressing-stale-generation.yaml
+  - healthStatus:
+      status: Suspended
+      message: Backups are suspended
+    inputPath: testdata/suspended.yaml
+  - healthStatus:
+      status: Degraded
+      message: "database orders-db is unreachable"
+    inputPath: testdata/degraded-not-ready.yaml
+  - healthStatus:
+      status: Degraded
+      message: Last backup failed at 2026-10-15T02:00:00Z
+    inputPath: testdata/degraded-last-backup-failed.yaml
+  - healthStatus:
+      status: Healthy
+      message: Next backup at 02:00 UTC
+    inputPath: testdata/healthy.yaml

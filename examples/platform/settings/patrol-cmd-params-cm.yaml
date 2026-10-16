@@ -1,0 +1,42 @@
+# patrol-cmd-params-cm: process parameters of the components (Argo CD's
+# argocd-cmd-params-cm, same keys). Changes take effect when the components restart.
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: patrol-cmd-params-cm
+  namespace: patrol
+  labels:
+    app.kubernetes.io/name: patrol-cmd-params-cm
+    app.kubernetes.io/part-of: patrol-cd
+data:
+  # Applications may also live in these namespaces (glob); their AppProject must list the
+  # namespace in sourceNamespaces (examples/platform/projects/team-a.yaml).
+  application.namespaces: team-*-apps
+  # Source hydrator (examples/apps/source-hydrator).
+  hydrator.enabled: "true"
+
+  # Application controller.
+  controller.status.processors: "20"
+  controller.operation.processors: "10"
+  controller.self.heal.timeout.seconds: "5"
+  controller.sync.timeout.seconds: "1800"
+  controller.diff.server.side: "false"
+
+  # API server.
+  server.enable.gzip: "true"
+  server.x.frame.options: sameorigin
+
+  # Repo server.
+  reposerver.parallelism.limit: "10"
+  reposerver.plugin.use.manifest.generate.paths: "true"
+
+  # ApplicationSet controller: SCM provider / pull request generators, progressive syncs
+  # (examples/apps/appset-progressive-rollingsync) and the custom API URLs generators may use.
+  applicationsetcontroller.enable.scm.providers: "true"
+  applicationsetcontroller.allowed.scm.providers: https://ghes.example.com/api/v3
+  applicationsetcontroller.enable.tokenref.strict.mode: "true"
+  applicationsetcontroller.enable.progressive.syncs: "true"
+  applicationsetcontroller.policy: sync
+
+  # Notifications controller: let teams configure notifications in their own namespaces.
+  notificationscontroller.selfservice.enabled: "false"

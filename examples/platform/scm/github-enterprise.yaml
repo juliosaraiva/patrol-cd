@@ -1,0 +1,57 @@
+# GitHub Enterprise Server: API and web URLs of the appliance and a private CA bundle.
+apiVersion: cd.patrol.example/v1alpha1
+kind: SCMProvider
+metadata:
+  name: ghes
+  namespace: patrol
+spec:
+  type: github
+  apiURL: https://ghes.example.com/api/v3
+  webURL: https://ghes.example.com
+  caSecretRef:
+    name: ghes-ca
+    key: ca.crt
+  auth:
+    githubApp:
+      appID: 42
+      privateKeySecretRef:
+        name: ghes-app-private-key
+        key: privateKey
+  webhook:
+    secretRef:
+      name: ghes-webhook
+      key: secret
+---
+apiVersion: v1
+kind: Secret
+metadata:
+  name: ghes-ca
+  namespace: patrol
+  labels:
+    cd.patrol.example/secret-type: scm-creds
+type: Opaque
+stringData:
+  # PEM bundle of the CA that issued the GHES certificate.
+  ca.crt: REPLACE_ME
+---
+apiVersion: v1
+kind: Secret
+metadata:
+  name: ghes-app-private-key
+  namespace: patrol
+  labels:
+    cd.patrol.example/secret-type: scm-creds
+type: Opaque
+stringData:
+  privateKey: REPLACE_ME
+---
+apiVersion: v1
+kind: Secret
+metadata:
+  name: ghes-webhook
+  namespace: patrol
+  labels:
+    cd.patrol.example/secret-type: scm-creds
+type: Opaque
+stringData:
+  secret: REPLACE_ME

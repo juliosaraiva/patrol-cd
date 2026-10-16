@@ -1,0 +1,55 @@
+# GitHub App identity shared by repositories (installation tokens for clone/fetch),
+# ApplicationSet generators (SCM provider and pull request generators via providerRef) and
+# webhook verification. Least-privilege permissions per feature:
+# docs/integrations/github-permissions.md.
+apiVersion: cd.patrol.example/v1alpha1
+kind: SCMProvider
+metadata:
+  name: github-app
+  namespace: patrol
+spec:
+  type: github
+  auth:
+    githubApp:
+      appID: 123456
+      # Omit installationID to discover the installation per organization.
+      installationID: 7654321
+      privateKeySecretRef:
+        name: github-app-private-key
+        key: privateKey
+  webhook:
+    secretRef:
+      name: github-app-webhook
+      key: secret
+  statusReporting:
+    enabled: true
+    # Check runs require GitHub App authentication.
+    mode: checks
+    contextPrefix: patrol-cd
+  rateLimit:
+    requestsPerSecond: 10
+    burst: 20
+---
+# The App's private key (PEM). Generated in the GitHub App settings; never commit it.
+apiVersion: v1
+kind: Secret
+metadata:
+  name: github-app-private-key
+  namespace: patrol
+  labels:
+    cd.patrol.example/secret-type: scm-creds
+type: Opaque
+stringData:
+  privateKey: REPLACE_ME
+---
+# Webhook secret configured on the GitHub App ("Webhook secret").
+apiVersion: v1
+kind: Secret
+metadata:
+  name: github-app-webhook
+  namespace: patrol
+  labels:
+    cd.patrol.example/secret-type: scm-creds
+type: Opaque
+stringData:
+  secret: REPLACE_ME

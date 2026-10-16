@@ -1,0 +1,31 @@
+{{- range .Values.applications }}
+---
+apiVersion: cd.patrol.example/v1alpha1
+kind: Application
+metadata:
+  name: {{ .name }}
+  namespace: patrol
+  annotations:
+    cd.patrol.example/sync-wave: {{ .wave | default 0 | quote }}
+  finalizers:
+    - resources-finalizer.cd.patrol.example
+spec:
+  project: {{ $.Values.project }}
+  source:
+    repoURL: {{ $.Values.repoURL }}
+    targetRevision: {{ $.Values.targetRevision }}
+    path: {{ .path }}
+    {{- with .helm }}
+    helm:
+      {{- toYaml . | nindent 6 }}
+    {{- end }}
+  destination:
+    server: {{ $.Values.destination.server }}
+    namespace: {{ .namespace }}
+  syncPolicy:
+    automated:
+      prune: true
+      selfHeal: true
+    syncOptions:
+      - CreateNamespace=true
+{{- end }}

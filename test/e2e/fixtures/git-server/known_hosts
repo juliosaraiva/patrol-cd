@@ -1,0 +1,6 @@
+# TEST-ONLY known_hosts for the e2e git server (host key in manifests/ssh-host-key.secret.yaml).
+# Append these lines to the ssh_known_hosts key of patrol-ssh-known-hosts-cm to trust it.
+git-server.patrol-e2e.svc.cluster.local ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIGdj4PFj2//E3Y6uLK6H1/jZOpI+hOiW26W9dvIdLVKq
+git-server.patrol-e2e.svc ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIGdj4PFj2//E3Y6uLK6H1/jZOpI+hOiW26W9dvIdLVKq
+git-server.patrol-e2e ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIGdj4PFj2//E3Y6uLK6H1/jZOpI+hOiW26W9dvIdLVKq
+git-server ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIGdj4PFj2//E3Y6uLK6H1/jZOpI+hOiW26W9dvIdLVKq

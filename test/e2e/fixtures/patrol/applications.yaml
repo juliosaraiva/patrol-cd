@@ -1,0 +1,148 @@
+# One Application per fixture source type, all targeting the patrol-target cluster (registered by
+# hack/kind/register-target.sh) and syncing manually. Namespace-less: apply into the namespace
+# Patrol CD runs in, after repositories.yaml. Destination namespaces are created by the sync
+# (CreateNamespace=true).
+apiVersion: cd.patrol.example/v1alpha1
+kind: Application
+metadata:
+  name: e2e-guestbook
+  labels:
+    app.kubernetes.io/part-of: patrol-e2e-fixtures
+spec:
+  project: default
+  source:
+    repoURL: http://git-server.patrol-e2e.svc.cluster.local/git/guestbook.git
+    targetRevision: v1.0.0
+    path: .
+  destination:
+    name: patrol-target
+    namespace: e2e-guestbook
+  syncPolicy:
+    syncOptions:
+      - CreateNamespace=true
+---
+apiVersion: cd.patrol.example/v1alpha1
+kind: Application
+metadata:
+  name: e2e-guestbook-ssh
+  labels:
+    app.kubernetes.io/part-of: patrol-e2e-fixtures
+spec:
+  project: default
+  source:
+    repoURL: ssh://git@git-server.patrol-e2e.svc.cluster.local/git/guestbook.git
+    targetRevision: main
+    path: .
+  destination:
+    name: patrol-target
+    namespace: e2e-guestbook-ssh
+  syncPolicy:
+    syncOptions:
+      - CreateNamespace=true
+---
+apiVersion: cd.patrol.example/v1alpha1
+kind: Application
+metadata:
+  name: e2e-helm-git
+  labels:
+    app.kubernetes.io/part-of: patrol-e2e-fixtures
+spec:
+  project: default
+  source:
+    repoURL: http://git-server.patrol-e2e.svc.cluster.local/git/helm-guestbook.git
+    targetRevision: release-1.0
+    path: .
+    helm:
+      releaseName: e2e-helm-git
+  destination:
+    name: patrol-target
+    namespace: e2e-helm-git
+  syncPolicy:
+    syncOptions:
+      - CreateNamespace=true
+---
+apiVersion: cd.patrol.example/v1alpha1
+kind: Application
+metadata:
+  name: e2e-kustomize-staging
+  labels:
+    app.kubernetes.io/part-of: patrol-e2e-fixtures
+spec:
+  project: default
+  source:
+    repoURL: http://git-server.patrol-e2e.svc.cluster.local/git/kustomize-guestbook.git
+    targetRevision: main
+    path: overlays/staging
+  destination:
+    name: patrol-target
+    namespace: e2e-kustomize-staging
+  syncPolicy:
+    syncOptions:
+      - CreateNamespace=true
+---
+# Chart from the Helm repository, values from the git values repository ($values).
+apiVersion: cd.patrol.example/v1alpha1
+kind: Application
+metadata:
+  name: e2e-multi-source
+  labels:
+    app.kubernetes.io/part-of: patrol-e2e-fixtures
+spec:
+  project: default
+  sources:
+    - repoURL: http://chart-repo.patrol-e2e.svc.cluster.local
+      chart: helm-guestbook
+      targetRevision: 0.1.0
+      helm:
+        releaseName: e2e-multi-source
+        valueFiles:
+          - $values/values/dev.yaml
+    - repoURL: http://git-server.patrol-e2e.svc.cluster.local/git/helm-values.git
+      targetRevision: main
+      ref: values
+  destination:
+    name: patrol-target
+    namespace: e2e-multi-source
+  syncPolicy:
+    syncOptions:
+      - CreateNamespace=true
+---
+apiVersion: cd.patrol.example/v1alpha1
+kind: Application
+metadata:
+  name: e2e-oci-chart
+  labels:
+    app.kubernetes.io/part-of: patrol-e2e-fixtures
+spec:
+  project: default
+  source:
+    repoURL: oci://patrol-registry:5000/patrol-e2e/charts/helm-guestbook
+    targetRevision: 0.2.0
+    path: .
+    helm:
+      releaseName: e2e-oci-chart
+  destination:
+    name: patrol-target
+    namespace: e2e-oci-chart
+  syncPolicy:
+    syncOptions:
+      - CreateNamespace=true
+---
+apiVersion: cd.patrol.example/v1alpha1
+kind: Application
+metadata:
+  name: e2e-oci-manifests
+  labels:
+    app.kubernetes.io/part-of: patrol-e2e-fixtures
+spec:
+  project: default
+  source:
+    repoURL: oci://patrol-registry:5000/patrol-e2e/manifests/guestbook
+    targetRevision: v1.0.0
+    path: .
+  destination:
+    name: patrol-target
+    namespace: e2e-oci-manifests
+  syncPolicy:
+    syncOptions:
+      - CreateNamespace=true

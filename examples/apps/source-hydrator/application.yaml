@@ -1,0 +1,32 @@
+# Source hydrator: Patrol CD renders the "dry" source (here a Kustomize overlay) and commits
+# the plain manifests to a hydrated branch; the Application syncs from that branch.
+# Requires hydrator.enabled: "true" in patrol-cmd-params-cm and write credentials for the
+# repository (repository-write-credentials.yaml in this directory).
+apiVersion: cd.patrol.example/v1alpha1
+kind: Application
+metadata:
+  name: guestbook-hydrated
+  namespace: patrol
+spec:
+  project: default
+  sourceHydrator:
+    drySource:
+      repoURL: https://git.example.com/platform/patrol-examples.git
+      targetRevision: main
+      path: apps/kustomize-base-overlays/overlays/prod
+    # Hydrated manifests are pushed to this branch, below path ...
+    syncSource:
+      targetBranch: environments/prod
+      path: guestbook-prod
+    # ... optionally through a staging branch that is promoted to targetBranch by a merge
+    # (pull request) instead of a direct push.
+    hydrateTo:
+      targetBranch: environments/prod-next
+  destination:
+    server: https://kubernetes.default.svc
+    namespace: guestbook-prod
+  syncPolicy:
+    automated:
+      prune: true
+    syncOptions:
+      - CreateNamespace=true

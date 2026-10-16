@@ -1,0 +1,16 @@
+#!/bin/sh
+# Writes the htpasswd file for /private/ from CHART_REPO_USERNAME/CHART_REPO_PASSWORD (injected
+# from the chart-repo-auth Secret) and runs nginx in the foreground.
+set -eu
+
+: "${CHART_REPO_USERNAME:?CHART_REPO_USERNAME is required}"
+: "${CHART_REPO_PASSWORD:?CHART_REPO_PASSWORD is required}"
+
+install -d -m 0755 /run/nginx /run/chart-repo
+install -d -o nginx -g nginx -m 0700 /tmp/nginx
+printf '%s\n' "$CHART_REPO_PASSWORD" | htpasswd -i -m -c /run/chart-repo/htpasswd "$CHART_REPO_USERNAME"
+chown root:nginx /run/chart-repo/htpasswd
+chmod 0640 /run/chart-repo/htpasswd
+unset CHART_REPO_PASSWORD
+
+exec nginx -g 'daemon off;'

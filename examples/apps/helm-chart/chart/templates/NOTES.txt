@@ -1,0 +1,3 @@
+guestbook {{ .Chart.AppVersion }} is deployed as release {{ .Release.Name }} in {{ .Release.Namespace }}.
+
+  kubectl -n {{ .Release.Namespace }} port-forward svc/{{ include "guestbook.fullname" . }} 9898:{{ .Values.service.port }}

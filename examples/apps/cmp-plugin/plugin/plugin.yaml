@@ -1,0 +1,33 @@
+# Config Management Plugin served by a cmp-server sidecar of the repo-server.
+# Mount this file at /home/patrol/cmp-server/config/plugin.yaml and generate.sh next to it
+# (see kustomization.yaml in this directory and README.md one level up).
+apiVersion: cd.patrol.example/v1alpha1
+kind: ConfigManagementPlugin
+metadata:
+  name: tmpl-render
+spec:
+  # Socket and plugin name become "tmpl-render-v1.0"; Applications select it by that name.
+  version: v1.0
+  generate:
+    command: [sh]
+    args: [/home/patrol/cmp-server/config/generate.sh]
+  # The plugin is chosen for application directories that contain a *.yaml.tmpl file
+  # (when spec.source.plugin.name is not set).
+  discover:
+    fileName: "*.yaml.tmpl"
+  parameters:
+    static:
+      - name: image
+        title: Container image
+        tooltip: Image reference rendered into the Deployment.
+        required: true
+        collectionType: string
+      - name: replicas
+        title: Replicas
+        tooltip: Number of pod replicas.
+        collectionType: string
+        string: "1"
+      - name: extra-labels
+        title: Extra labels
+        tooltip: Labels added to every rendered object as example.com/<key>.
+        collectionType: map

@@ -1,0 +1,16 @@
+# patrol-ssh-known-hosts-cm: SSH host keys of Git servers (Argo CD's
+# argocd-ssh-known-hosts-cm). The keys below are example keys generated for
+# git.example.com; collect the real ones with `ssh-keyscan <host>` and verify their
+# fingerprints against the fingerprints your Git hosting provider publishes.
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: patrol-ssh-known-hosts-cm
+  namespace: patrol
+  labels:
+    app.kubernetes.io/name: patrol-ssh-known-hosts-cm
+    app.kubernetes.io/part-of: patrol-cd
+data:
+  ssh_known_hosts: |
+    git.example.com ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIDjpZoAWvEMFhzGiXIWodUXV+8bABGNuCr/tNUNdm2AZ
+    git.example.com ecdsa-sha2-nistp256 AAAAE2VjZHNhLXNoYTItbmlzdHAyNTYAAAAIbmlzdHAyNTYAAABBBOWvzgLqExyaE5O/NzqIdAwmSr7x8Tb6zVizcoOnNcwdv9gTwsciDMwfRhM7Q7Gpxz1On614l10iZdYZwlrHYu0=

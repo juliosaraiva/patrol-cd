@@ -1,0 +1,47 @@
+# List generator: one Application per element. Go templates with missingkey=error fail the
+# generation instead of rendering "<no value>" when a parameter is missing.
+apiVersion: cd.patrol.example/v1alpha1
+kind: ApplicationSet
+metadata:
+  name: guestbook-envs
+  namespace: patrol
+spec:
+  goTemplate: true
+  goTemplateOptions: ["missingkey=error"]
+  generators:
+    - list:
+        elements:
+          - env: dev
+            replicas: "1"
+            message: Development
+          - env: staging
+            replicas: "2"
+            message: Staging
+  template:
+    metadata:
+      name: "guestbook-list-{{ .env }}"
+      labels:
+        env: "{{ .env }}"
+      finalizers:
+        - resources-finalizer.cd.patrol.example
+    spec:
+      project: default
+      source:
+        repoURL: https://git.example.com/platform/patrol-examples.git
+        targetRevision: main
+        path: apps/helm-chart/chart
+        helm:
+          releaseName: guestbook
+          parameters:
+            - name: replicaCount
+              value: "{{ .replicas }}"
+            - name: ui.message
+              value: "{{ .message }}"
+      destination:
+        server: https://kubernetes.default.svc
+        namespace: "guestbook-{{ .env }}"
+      syncPolicy:
+        automated:
+          prune: true
+        syncOptions:
+          - CreateNamespace=true

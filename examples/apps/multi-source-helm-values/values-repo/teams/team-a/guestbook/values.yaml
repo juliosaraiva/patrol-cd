@@ -1,0 +1,11 @@
+# Team A overrides on top of the chart's values-prod.yaml.
+ui:
+  message: Hello from team A (values from a second repository)
+  color: "#5b3a7c"
+podAnnotations:
+  example.com/team: team-a
+autoscaling:
+  enabled: true
+  minReplicas: 2
+  maxReplicas: 4
+  targetCPUUtilizationPercentage: 75

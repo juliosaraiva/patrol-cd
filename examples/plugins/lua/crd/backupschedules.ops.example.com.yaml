@@ -1,0 +1,79 @@
+# Example custom resource used by the Lua health check and resource actions in this
+# directory. It stands for any operator-managed CRD whose health Patrol CD cannot infer.
+apiVersion: apiextensions.k8s.io/v1
+kind: CustomResourceDefinition
+metadata:
+  name: backupschedules.ops.example.com
+spec:
+  group: ops.example.com
+  scope: Namespaced
+  names:
+    kind: BackupSchedule
+    listKind: BackupScheduleList
+    plural: backupschedules
+    singular: backupschedule
+  versions:
+    - name: v1alpha1
+      served: true
+      storage: true
+      subresources:
+        status: {}
+      additionalPrinterColumns:
+        - name: Schedule
+          type: string
+          jsonPath: .spec.schedule
+        - name: Suspended
+          type: boolean
+          jsonPath: .spec.suspend
+        - name: Last result
+          type: string
+          jsonPath: .status.lastBackupResult
+      schema:
+        openAPIV3Schema:
+          type: object
+          properties:
+            spec:
+              type: object
+              required: [schedule, target]
+              properties:
+                schedule:
+                  type: string
+                  description: Cron schedule of the backups.
+                target:
+                  type: string
+                  description: Name of the database to back up.
+                suspend:
+                  type: boolean
+                retentionDays:
+                  type: integer
+                  minimum: 1
+                  maximum: 3650
+            status:
+              type: object
+              properties:
+                observedGeneration:
+                  type: integer
+                lastBackupTime:
+                  type: string
+                  format: date-time
+                lastBackupResult:
+                  type: string
+                  enum: [Succeeded, Failed]
+                conditions:
+                  type: array
+                  items:
+                    type: object
+                    required: [type, status]
+                    properties:
+                      type:
+                        type: string
+                      status:
+                        type: string
+                        enum: ["True", "False", "Unknown"]
+                      reason:
+                        type: string
+                      message:
+                        type: string
+                      lastTransitionTime:
+                        type: string
+                        format: date-time

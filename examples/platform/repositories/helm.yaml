@@ -1,0 +1,24 @@
+# Classic (index.yaml based) Helm chart repository with basic authentication.
+apiVersion: cd.patrol.example/v1alpha1
+kind: Repository
+metadata:
+  name: charts-example-com
+  namespace: patrol
+spec:
+  url: https://charts.example.com/stable
+  type: helm
+  name: example-stable
+  credentialsRef:
+    name: charts-example-com
+---
+apiVersion: v1
+kind: Secret
+metadata:
+  name: charts-example-com
+  namespace: patrol
+  labels:
+    cd.patrol.example/secret-type: repository
+type: Opaque
+stringData:
+  username: REPLACE_ME
+  password: REPLACE_ME

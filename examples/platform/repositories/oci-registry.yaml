@@ -1,0 +1,50 @@
+# OCI source: oci:// artifacts below registry.example.com/charts (Helm charts or plain
+# manifest images). See examples/apps/helm-oci-notes.
+apiVersion: cd.patrol.example/v1alpha1
+kind: RepositoryCredential
+metadata:
+  name: registry-example-com-oci
+  namespace: patrol
+spec:
+  urlPrefix: oci://registry.example.com/
+  type: oci
+  credentialsRef:
+    name: registry-example-com-oci
+---
+apiVersion: v1
+kind: Secret
+metadata:
+  name: registry-example-com-oci
+  namespace: patrol
+  labels:
+    cd.patrol.example/secret-type: repo-creds
+type: Opaque
+stringData:
+  username: REPLACE_ME
+  password: REPLACE_ME
+---
+# Helm repository served by an OCI registry: no scheme in the URL, enableOCI: true.
+apiVersion: cd.patrol.example/v1alpha1
+kind: Repository
+metadata:
+  name: registry-example-com-charts
+  namespace: patrol
+spec:
+  url: registry.example.com/charts
+  type: helm
+  name: example-oci-charts
+  enableOCI: true
+  credentialsRef:
+    name: registry-example-com-charts
+---
+apiVersion: v1
+kind: Secret
+metadata:
+  name: registry-example-com-charts
+  namespace: patrol
+  labels:
+    cd.patrol.example/secret-type: repository
+type: Opaque
+stringData:
+  username: REPLACE_ME
+  password: REPLACE_ME

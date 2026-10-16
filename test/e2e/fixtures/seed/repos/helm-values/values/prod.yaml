@@ -1,0 +1,5 @@
+# Values for the helm-guestbook chart, referenced from a multi-source Application as
+# $values/values/prod.yaml.
+replicaCount: 2
+podAnnotations:
+  e2e.patrol.example/environment: prod

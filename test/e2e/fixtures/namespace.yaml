@@ -1,0 +1,7 @@
+# Namespace of the in-cluster e2e fixtures (deployed into patrol-control).
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: patrol-e2e
+  labels:
+    app.kubernetes.io/part-of: patrol-e2e-fixtures

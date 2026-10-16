@@ -1,0 +1,109 @@
+# Strict tenant project for team A:
+# - only the listed repositories,
+# - only namespaces team-a-* on the in-cluster, staging-eu and prod-us clusters,
+# - no cluster-scoped resources and an explicit list of namespaced kinds,
+# - orphaned resource warnings, project roles for SSO groups and CI tokens,
+# - sync windows: no automated syncs to the prod-us cluster at night, and automated syncs
+#   of the guestbook applications only during business hours (other applications are not
+#   restricted by the allow window),
+# - service accounts impersonated for syncs when application.sync.impersonation.enabled is
+#   "true" in patrol-cm.
+apiVersion: cd.patrol.example/v1alpha1
+kind: AppProject
+metadata:
+  name: team-a
+  namespace: patrol
+spec:
+  description: Team A tenant. Own namespaces only, no cluster-scoped resources.
+  sourceRepos:
+    - https://git.example.com/platform/patrol-examples.git
+    - https://git.example.com/platform/patrol-examples-values.git
+    - https://github.com/example-org/team-a-*
+  # Applications of this project may also live in these namespaces (besides "patrol"),
+  # when application.namespaces in patrol-cmd-params-cm allows them.
+  sourceNamespaces:
+    - team-a-apps
+  destinations:
+    - server: https://kubernetes.default.svc
+      namespace: team-a-*
+    - name: staging-eu
+      namespace: team-a-*
+    - name: prod-us
+      namespace: team-a-*
+  clusterResourceWhitelist: []
+  namespaceResourceWhitelist:
+    - group: ""
+      kind: ConfigMap
+    - group: ""
+      kind: Service
+    - group: ""
+      kind: ServiceAccount
+    - group: apps
+      kind: Deployment
+    - group: apps
+      kind: StatefulSet
+    - group: batch
+      kind: Job
+    - group: autoscaling
+      kind: HorizontalPodAutoscaler
+    - group: policy
+      kind: PodDisruptionBudget
+    - group: networking.k8s.io
+      kind: Ingress
+    - group: networking.k8s.io
+      kind: NetworkPolicy
+  namespaceResourceBlacklist:
+    - group: ""
+      kind: ResourceQuota
+    - group: ""
+      kind: LimitRange
+  orphanedResources:
+    warn: true
+    ignore:
+      - group: ""
+        kind: ConfigMap
+        name: kube-root-ca.crt
+      - group: ""
+        kind: ServiceAccount
+        name: default
+  roles:
+    - name: developer
+      description: Team members (SSO group) may view, sync and read logs of team-a apps.
+      groups:
+        - example-org:team-a
+      policies:
+        - p, proj:team-a:developer, applications, get, team-a/*, allow
+        - p, proj:team-a:developer, applications, sync, team-a/*, allow
+        - p, proj:team-a:developer, logs, get, team-a/*, allow
+    - name: ci
+      description: Project tokens used by CI may only sync the guestbook applications.
+      policies:
+        - p, proj:team-a:ci, applications, get, team-a/team-a-guestbook*, allow
+        - p, proj:team-a:ci, applications, sync, team-a/team-a-guestbook*, allow
+  # A window applies to an Application when ANY of its selectors (applications, clusters,
+  # namespaces) matches, unless andOperator: true requires all of them. clusters matches
+  # spec.destination.name or spec.destination.server as written, so list both forms.
+  syncWindows:
+    - kind: deny
+      description: No automated syncs to production at night; manual syncs stay allowed.
+      schedule: "0 20 * * *"
+      duration: 11h
+      timeZone: Europe/Berlin
+      clusters:
+        - prod-us
+        - https://prod-us.k8s.example.com
+      manualSync: true
+    - kind: allow
+      description: Business hours window for the guestbook applications.
+      schedule: "0 8 * * 1-5"
+      duration: 10h
+      timeZone: Europe/Berlin
+      applications:
+        - team-a-guestbook*
+  destinationServiceAccounts:
+    - server: https://kubernetes.default.svc
+      namespace: team-a-*
+      defaultServiceAccount: team-a-deployer
+    - server: "*"
+      namespace: "*"
+      defaultServiceAccount: team-a-deployer

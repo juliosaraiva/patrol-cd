@@ -1,0 +1,46 @@
+# Helm source rendered from a chart directory in Git. Precedence, lowest to highest: the
+# chart's values.yaml, valueFiles (in order), valuesObject, parameters (--set).
+apiVersion: cd.patrol.example/v1alpha1
+kind: Application
+metadata:
+  name: guestbook-helm
+  namespace: patrol
+  finalizers:
+    - resources-finalizer.cd.patrol.example
+spec:
+  project: default
+  source:
+    repoURL: https://git.example.com/platform/patrol-examples.git
+    targetRevision: main
+    path: apps/helm-chart/chart
+    helm:
+      releaseName: guestbook
+      # Relative to the chart directory.
+      valueFiles:
+        - values-prod.yaml
+      parameters:
+        - name: ui.message
+          value: Deployed by Patrol CD from a Helm chart
+        - name: image.tag
+          value: "6.7.1"
+          forceString: true
+      valuesObject:
+        podAnnotations:
+          example.com/owner: platform-team
+      skipTests: true
+  destination:
+    server: https://kubernetes.default.svc
+    namespace: guestbook-helm
+  syncPolicy:
+    automated:
+      prune: true
+      selfHeal: true
+    syncOptions:
+      - CreateNamespace=true
+      - ServerSideApply=true
+  # Ignore replica changes made by the HorizontalPodAutoscaler that values-prod.yaml enables.
+  ignoreDifferences:
+    - group: apps
+      kind: Deployment
+      jsonPointers:
+        - /spec/replicas

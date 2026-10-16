@@ -1,0 +1,89 @@
+# Patrol CD repository objects for the e2e fixtures. Namespace-less: apply into the namespace
+# Patrol CD runs in (test/e2e/fixtures/patrol/register.sh does, after copying the credentials
+# into the Secrets referenced below). Hosts are in-cluster names of patrol-control.
+#
+# Git over HTTP with basic auth: every repository under /git/ (credential template).
+apiVersion: cd.patrol.example/v1alpha1
+kind: RepositoryCredential
+metadata:
+  name: e2e-git-http
+  labels:
+    app.kubernetes.io/part-of: patrol-e2e-fixtures
+spec:
+  urlPrefix: http://git-server.patrol-e2e.svc.cluster.local/git/
+  type: git
+  credentialsRef:
+    name: e2e-git-http-creds
+---
+# Git over SSH: every repository under ssh://git@git-server.../git/. The server's TEST-ONLY host
+# key is in test/e2e/fixtures/git-server/known_hosts (add it to patrol-ssh-known-hosts-cm).
+apiVersion: cd.patrol.example/v1alpha1
+kind: RepositoryCredential
+metadata:
+  name: e2e-git-ssh
+  labels:
+    app.kubernetes.io/part-of: patrol-e2e-fixtures
+spec:
+  urlPrefix: ssh://git@git-server.patrol-e2e.svc.cluster.local/git/
+  type: git
+  credentialsRef:
+    name: e2e-git-ssh-creds
+---
+# Anonymous read-only git (no credentials).
+apiVersion: cd.patrol.example/v1alpha1
+kind: Repository
+metadata:
+  name: e2e-git-public-guestbook
+  labels:
+    app.kubernetes.io/part-of: patrol-e2e-fixtures
+spec:
+  url: http://git-server.patrol-e2e.svc.cluster.local/public/guestbook.git
+  type: git
+---
+apiVersion: cd.patrol.example/v1alpha1
+kind: Repository
+metadata:
+  name: e2e-helm
+  labels:
+    app.kubernetes.io/part-of: patrol-e2e-fixtures
+spec:
+  name: e2e
+  url: http://chart-repo.patrol-e2e.svc.cluster.local
+  type: helm
+---
+apiVersion: cd.patrol.example/v1alpha1
+kind: Repository
+metadata:
+  name: e2e-helm-private
+  labels:
+    app.kubernetes.io/part-of: patrol-e2e-fixtures
+spec:
+  name: e2e-private
+  url: http://chart-repo.patrol-e2e.svc.cluster.local/private
+  type: helm
+  credentialsRef:
+    name: e2e-chart-repo-creds
+---
+# OCI Helm chart in the local registry (plain HTTP).
+apiVersion: cd.patrol.example/v1alpha1
+kind: Repository
+metadata:
+  name: e2e-oci-chart
+  labels:
+    app.kubernetes.io/part-of: patrol-e2e-fixtures
+spec:
+  url: oci://patrol-registry:5000/patrol-e2e/charts/helm-guestbook
+  type: oci
+  insecureOCIForceHTTP: true
+---
+# OCI plain-manifest bundle in the local registry (plain HTTP).
+apiVersion: cd.patrol.example/v1alpha1
+kind: Repository
+metadata:
+  name: e2e-oci-manifests
+  labels:
+    app.kubernetes.io/part-of: patrol-e2e-fixtures
+spec:
+  url: oci://patrol-registry:5000/patrol-e2e/manifests/guestbook
+  type: oci
+  insecureOCIForceHTTP: true

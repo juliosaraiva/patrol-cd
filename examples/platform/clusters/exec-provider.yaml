@@ -1,0 +1,37 @@
+# Cluster authenticated by an exec credential plugin available in the controller image.
+# Never put credentials in args or env; use credentialsRef. The cluster is scoped to the
+# team-a project and Patrol CD only manages the listed namespaces on it (no cluster-scoped
+# resources, so namespaces must exist; CreateNamespace=true cannot be used).
+apiVersion: cd.patrol.example/v1alpha1
+kind: Cluster
+metadata:
+  name: edge-lab
+  namespace: patrol
+  labels:
+    env: lab
+spec:
+  name: edge-lab
+  server: https://edge-lab.k8s.example.com:6443
+  project: team-a
+  namespaces:
+    - team-a-lab
+  clusterResources: false
+  config:
+    execProviderConfig:
+      command: /usr/local/bin/example-credential-helper
+      args: ["token", "--cluster", "edge-lab"]
+      apiVersion: client.authentication.k8s.io/v1
+      installHint: Mount example-credential-helper into the controller image.
+    credentialsRef:
+      name: cluster-edge-lab
+---
+apiVersion: v1
+kind: Secret
+metadata:
+  name: cluster-edge-lab
+  namespace: patrol
+  labels:
+    cd.patrol.example/secret-type: cluster
+type: Opaque
+stringData:
+  caData: REPLACE_ME

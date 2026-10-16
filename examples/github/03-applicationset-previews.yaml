@@ -1,0 +1,80 @@
+# One preview environment per open pull request labelled "preview":
+# - namespace guestbook-pr-<number>, rendered by the chart (namespace.create) so that it is
+#   pruned with the Application,
+# - the pull request head commit is deployed and re-deployed on every push,
+# - when the pull request is closed or merged (or loses the label) the generator stops
+#   producing it, the ApplicationSet deletes the Application, and the resources finalizer
+#   deletes its resources including the namespace,
+# - sync results are reported to the pull request by the notifications in
+#   04-notifications.yaml (subscription annotations below) and as check runs by the
+#   SCMProvider (statusReporting).
+# The webhook (README.md) refreshes the generator immediately; requeueAfterSeconds is the
+# polling fallback.
+apiVersion: cd.patrol.example/v1alpha1
+kind: ApplicationSet
+metadata:
+  name: guestbook-previews
+  namespace: patrol
+spec:
+  goTemplate: true
+  goTemplateOptions: ["missingkey=error"]
+  generators:
+    - pullRequest:
+        github:
+          owner: example-org
+          repo: guestbook
+          providerRef:
+            name: example-org-github
+          labels:
+            - preview
+        requeueAfterSeconds: 1800
+  syncPolicy:
+    # Create, update and delete generated Applications (the default, stated explicitly
+    # because preview cleanup depends on it).
+    applicationsSync: sync
+    preserveResourcesOnDeletion: false
+  template:
+    metadata:
+      name: "guestbook-pr-{{ .number }}"
+      labels:
+        example.com/preview: "true"
+      annotations:
+        notifications.cd.patrol.example/subscribe.on-preview-deployed.github: ""
+        notifications.cd.patrol.example/subscribe.on-preview-failed.github: ""
+      finalizers:
+        - resources-finalizer.cd.patrol.example
+    spec:
+      project: previews
+      info:
+        - name: Pull request
+          value: "https://github.com/example-org/guestbook/pull/{{ .number }}"
+        - name: Author
+          value: "{{ .author }}"
+      source:
+        repoURL: https://github.com/example-org/guestbook.git
+        targetRevision: "{{ .head_sha }}"
+        path: chart
+        helm:
+          releaseName: guestbook
+          valuesObject:
+            namespace:
+              create: true
+              labels:
+                example.com/pull-request: "{{ .number }}"
+            ui:
+              message: "Preview of {{ .branch }} at {{ .head_short_sha }}"
+            migration:
+              enabled: false
+      destination:
+        server: https://kubernetes.default.svc
+        namespace: "guestbook-pr-{{ .number }}"
+      syncPolicy:
+        automated:
+          prune: true
+          selfHeal: true
+        retry:
+          limit: 3
+          backoff:
+            duration: 15s
+            factor: 2
+            maxDuration: 2m

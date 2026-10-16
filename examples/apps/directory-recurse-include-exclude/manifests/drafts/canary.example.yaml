@@ -1,0 +1,20 @@
+# Excluded by the '*.example.yaml' pattern: a draft kept next to the real manifests.
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: guestbook-canary
+  labels:
+    app.kubernetes.io/name: guestbook-canary
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: guestbook-canary
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: guestbook-canary
+    spec:
+      containers:
+        - name: podinfo
+          image: ghcr.io/stefanprodan/podinfo:6.7.1

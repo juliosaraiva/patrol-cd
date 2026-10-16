@@ -1,0 +1,13 @@
+# Wave -1: configuration is applied (and must be healthy) before the workload in wave 0.
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: guestbook-config
+  labels:
+    app.kubernetes.io/name: guestbook
+    app.kubernetes.io/part-of: patrol-examples
+  annotations:
+    cd.patrol.example/sync-wave: "-1"
+data:
+  PODINFO_UI_MESSAGE: Hello from a plain YAML directory source
+  PODINFO_UI_COLOR: "#34577c"

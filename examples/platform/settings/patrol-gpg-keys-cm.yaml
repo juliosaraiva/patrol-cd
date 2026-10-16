@@ -1,0 +1,31 @@
+# patrol-gpg-keys-cm: GnuPG public keys trusted for commit signature verification
+# (AppProject spec.sourceIntegrity), keyed by the 16-hex-digit key ID (Argo CD's
+# argocd-gpg-keys-cm). The key below is an example key generated for these examples
+# ("Patrol CD Examples"); its private key was discarded. Replace it with your signers' keys
+# (gpg --armor --export <key-id>).
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: patrol-gpg-keys-cm
+  namespace: patrol
+  labels:
+    app.kubernetes.io/name: patrol-gpg-keys-cm
+    app.kubernetes.io/part-of: patrol-cd
+data:
+  ECAA5017BAAC22F6: |
+    -----BEGIN PGP PUBLIC KEY BLOCK-----
+
+    xjMEatI8zRYJKwYBBAHaRw8BAQdAi+kS3OZT3PcTwBETK1Am5EyV9MnpHLqXNJKl
+    J3d/bsrNSFBhdHJvbCBDRCBFeGFtcGxlcyAoZXhhbXBsZSBzaWduaW5nIGtleSwg
+    cmVwbGFjZSkgPGV4YW1wbGVzQGV4YW1wbGUuY29tPsK8BBMWCABvBYJq0jzNAgsH
+    CRDsqlAXuqwi9jUUAAAAAAAcABBzYWx0QG5vdGF0aW9ucy5vcGVucGdwanMub3Jn
+    HRmqflgA6zcU0RWJRTXC5gIVCAIWAAIZAQKbAwIeARYhBF3pIWmM8GMoVbldSeyq
+    UBe6rCL2AADOMAD47i4pXGsdPYo9ZEWUEn6Nis97mff41kG1sgSCnYoXhwEA+elg
+    ModD4JnS48R2AMLeTfgyEqyO0Xwm+IAZf2KbVg/OOARq0jzNEgorBgEEAZdVAQUB
+    AQdAY3lx0IVhrtHlmrCXnafXT11Pwz80Q931Yn/cCDTptiwDAQoJwq4EGBYIAGAF
+    gmrSPM0JEOyqUBe6rCL2NRQAAAAAABwAEHNhbHRAbm90YXRpb25zLm9wZW5wZ3Bq
+    cy5vcmeg02OmTNoZI7r29fGvsTskApsMFiEEXekhaYzwYyhVuV1J7KpQF7qsIvYA
+    ALzvAP9jjsfC3FuR2iG8zqgYQ0P+QTsbiYeNreQeV98N3b60EAEA5M9C0jYoCdUi
+    IPNWNu/dOGwDw/MVVLghrYzJ6F4ItgQ=
+    =gWGo
+    -----END PGP PUBLIC KEY BLOCK-----

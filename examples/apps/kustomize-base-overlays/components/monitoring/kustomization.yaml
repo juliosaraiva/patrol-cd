@@ -1,0 +1,15 @@
+# Reusable component: Prometheus scrape annotations on the pod template (podinfo serves
+# /metrics on its HTTP port).
+apiVersion: kustomize.config.k8s.io/v1alpha1
+kind: Component
+patches:
+  - target:
+      kind: Deployment
+      name: guestbook
+    patch: |-
+      - op: add
+        path: /spec/template/metadata/annotations
+        value:
+          prometheus.io/scrape: "true"
+          prometheus.io/port: "9898"
+          prometheus.io/path: /metrics

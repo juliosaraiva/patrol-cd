@@ -1,0 +1,35 @@
+# Amazon EKS cluster authenticated with IAM (role assumed by the controller's workload
+# identity), pinned to controller shard 1.
+apiVersion: cd.patrol.example/v1alpha1
+kind: Cluster
+metadata:
+  name: prod-us
+  namespace: patrol
+  labels:
+    env: prod
+    region: us
+    team-a: enabled
+  annotations:
+    example.com/owner: platform-team
+spec:
+  name: prod-us
+  server: https://prod-us.k8s.example.com
+  shard: 1
+  config:
+    awsAuthConfig:
+      clusterName: prod-us
+      roleARN: arn:aws:iam::111122223333:role/patrol-deployer
+    credentialsRef:
+      name: cluster-prod-us
+---
+apiVersion: v1
+kind: Secret
+metadata:
+  name: cluster-prod-us
+  namespace: patrol
+  labels:
+    cd.patrol.example/secret-type: cluster
+type: Opaque
+stringData:
+  # PEM CA of the EKS API server (no token: IAM authentication).
+  caData: REPLACE_ME

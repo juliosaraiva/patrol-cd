@@ -1,0 +1,18 @@
+# Permissive project, equivalent to Argo CD's built-in "default" project: any repository,
+# any destination, any resource. Applications without spec.project use it. Restrict or
+# replace it before onboarding tenants.
+apiVersion: cd.patrol.example/v1alpha1
+kind: AppProject
+metadata:
+  name: default
+  namespace: patrol
+spec:
+  description: Default project. Everything is permitted.
+  sourceRepos:
+    - "*"
+  destinations:
+    - server: "*"
+      namespace: "*"
+  clusterResourceWhitelist:
+    - group: "*"
+      kind: "*"

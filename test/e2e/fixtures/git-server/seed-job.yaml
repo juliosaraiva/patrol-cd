@@ -1,0 +1,59 @@
+# Seeds (or resets) the e2e repositories on the git server over authenticated smart HTTP; see
+# /usr/local/bin/git-seed in the image for the repositories, refs and commit dates it creates.
+# Jobs are immutable: delete the previous git-seed Job before applying this again (deploy.sh does).
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: git-seed
+  namespace: patrol-e2e
+  labels:
+    app.kubernetes.io/name: git-seed
+    app.kubernetes.io/part-of: patrol-e2e-fixtures
+spec:
+  backoffLimit: 3
+  activeDeadlineSeconds: 600
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: git-seed
+        app.kubernetes.io/part-of: patrol-e2e-fixtures
+    spec:
+      restartPolicy: Never
+      automountServiceAccountToken: false
+      enableServiceLinks: false
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 1000
+        runAsGroup: 1000
+      containers:
+        - name: seed
+          image: patrol-cd/e2e-git-server:dev
+          imagePullPolicy: Never
+          command: ["/usr/local/bin/git-seed"]
+          env:
+            - name: HOME
+              value: /tmp
+            - name: GIT_SERVER_URL
+              value: http://git-server.patrol-e2e.svc.cluster.local/git
+            - name: GIT_SERVER_HEALTH_URL
+              value: http://git-server.patrol-e2e.svc.cluster.local/healthz
+            - name: GIT_USERNAME
+              valueFrom:
+                secretKeyRef:
+                  name: git-server-http-auth
+                  key: username
+            - name: GIT_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: git-server-http-auth
+                  key: password
+          resources:
+            requests:
+              cpu: 20m
+              memory: 32Mi
+            limits:
+              memory: 256Mi
+          securityContext:
+            allowPrivilegeEscalation: false
+            capabilities:
+              drop: ["ALL"]

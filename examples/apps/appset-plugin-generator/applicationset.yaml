@@ -1,0 +1,73 @@
+# Plugin generator: parameter sets come from an HTTP service (POST
+# <baseUrl>/api/v1/getparams.execute with "Authorization: Bearer <token>"). The ConfigMap
+# below names the service and the Secret key holding the token.
+#
+# Request body:  {"applicationSetName": "tenants", "input": {"parameters": {"tier": "standard"}}}
+# Response body: {"output": {"parameters": [{"tenant": "alpha", "namespace": "tenant-alpha"}, ...]}}
+apiVersion: cd.patrol.example/v1alpha1
+kind: ApplicationSet
+metadata:
+  name: tenants
+  namespace: patrol
+spec:
+  goTemplate: true
+  goTemplateOptions: ["missingkey=error"]
+  generators:
+    - plugin:
+        configMapRef:
+          name: appset-plugin-tenant-catalog
+        input:
+          parameters:
+            tier: standard
+        requeueAfterSeconds: 600
+        # Extra parameters available as .values.<key> in the template.
+        values:
+          requestedBy: platform-team
+  template:
+    metadata:
+      name: "tenant-{{ .tenant }}"
+      annotations:
+        example.com/requested-by: "{{ .values.requestedBy }}"
+        example.com/tier: "{{ .generator.input.parameters.tier }}"
+    spec:
+      project: default
+      source:
+        repoURL: https://git.example.com/platform/patrol-examples.git
+        targetRevision: main
+        path: apps/helm-chart/chart
+        helm:
+          releaseName: "{{ .tenant }}"
+          parameters:
+            - name: ui.message
+              value: "Tenant {{ .tenant }}"
+      destination:
+        server: https://kubernetes.default.svc
+        namespace: "{{ .namespace }}"
+      syncPolicy:
+        syncOptions:
+          - CreateNamespace=true
+---
+# Plugin generator configuration, in the control-plane namespace. token is "$<key>" (a key of
+# patrol-secret) or "$<secret>:<key>"; requestTimeout is in seconds.
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: appset-plugin-tenant-catalog
+  namespace: patrol
+  labels:
+    app.kubernetes.io/part-of: patrol-cd
+data:
+  baseUrl: http://tenant-catalog.platform-tools.svc.cluster.local:8080
+  token: $appset-plugin-tenant-catalog:token
+  requestTimeout: "30"
+---
+apiVersion: v1
+kind: Secret
+metadata:
+  name: appset-plugin-tenant-catalog
+  namespace: patrol
+  labels:
+    app.kubernetes.io/part-of: patrol-cd
+type: Opaque
+stringData:
+  token: REPLACE_ME

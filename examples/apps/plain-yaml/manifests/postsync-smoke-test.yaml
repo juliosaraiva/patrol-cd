@@ -1,0 +1,26 @@
+# PostSync hook: runs after every resource of the sync is synced and healthy. The Job is
+# deleted once it succeeded (HookSucceeded) and before it is recreated (BeforeHookCreation).
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: guestbook-smoke-test
+  labels:
+    app.kubernetes.io/name: guestbook-smoke-test
+    app.kubernetes.io/part-of: patrol-examples
+  annotations:
+    cd.patrol.example/hook: PostSync
+    cd.patrol.example/hook-delete-policy: HookSucceeded,BeforeHookCreation
+spec:
+  backoffLimit: 2
+  activeDeadlineSeconds: 180
+  template:
+    spec:
+      restartPolicy: Never
+      containers:
+        - name: smoke-test
+          image: busybox:1.36
+          command: ["sh", "-c", "wget -q -O- http://guestbook:9898/readyz && echo ' post-sync: guestbook is ready'"]
+          securityContext:
+            allowPrivilegeEscalation: false
+            capabilities:
+              drop: ["ALL"]

@@ -1,0 +1,47 @@
+# patrol-rbac-cm: global RBAC policy (Argo CD's argocd-rbac-cm, same syntax).
+#   p, <subject>, <resource>, <action>, <object>, <allow|deny>
+#   g, <user or SSO group>, <role>
+# Application objects are "<project>/<application>"; project-scoped repositories,
+# clusters and logs use "<project>/<name>". Project roles (proj:<project>:<role>) are
+# defined in the AppProject (examples/platform/projects/team-a.yaml).
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: patrol-rbac-cm
+  namespace: patrol
+  labels:
+    app.kubernetes.io/name: patrol-rbac-cm
+    app.kubernetes.io/part-of: patrol-cd
+data:
+  # Every authenticated user can read everything.
+  policy.default: role:readonly
+  policy.matchMode: glob
+  # OIDC claims evaluated as groups.
+  scopes: "[groups, email]"
+  policy.csv: |
+    # Platform team: administrators.
+    g, example-org:platform, role:admin
+
+    # Team A leads: manage team-a applications, application sets and the project itself.
+    p, role:team-a-lead, projects, get, team-a, allow
+    p, role:team-a-lead, projects, update, team-a, allow
+    p, role:team-a-lead, applications, *, team-a/*, allow
+    p, role:team-a-lead, applicationsets, *, team-a/*, allow
+    p, role:team-a-lead, logs, get, team-a/*, allow
+    p, role:team-a-lead, repositories, get, team-a/*, allow
+    # ... but never delete production applications (deny wins over allow).
+    p, role:team-a-lead, applications, delete, team-a/*-prod, deny
+    g, example-org:team-a-leads, role:team-a-lead
+
+    # Support engineers: read-only plus logs and the restart action everywhere.
+    p, role:support, logs, get, */*, allow
+    p, role:support, applications, action/apps/Deployment/restart, */*, allow
+    g, example-org:support, role:readonly
+    g, example-org:support, role:support
+  # Overlays (policy.<name>.csv) are appended to policy.csv in key order, so separate
+  # owners can manage separate keys.
+  policy.ci.csv: |
+    # The ci-bot local account (patrol-cm accounts.ci-bot) may sync any application.
+    p, role:ci, applications, get, */*, allow
+    p, role:ci, applications, sync, */*, allow
+    g, ci-bot, role:ci

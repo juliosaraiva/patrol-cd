@@ -1,0 +1,26 @@
+# GitHub Enterprise Server repositories: GitHub App on the appliance (enterpriseBaseURL is
+# the API URL) for every repository of the platform organization.
+apiVersion: cd.patrol.example/v1alpha1
+kind: RepositoryCredential
+metadata:
+  name: ghes-platform
+  namespace: patrol
+spec:
+  urlPrefix: https://ghes.example.com/platform/
+  type: git
+  githubApp:
+    appID: 42
+    enterpriseBaseURL: https://ghes.example.com/api/v3
+  credentialsRef:
+    name: ghes-platform-repo-creds
+---
+apiVersion: v1
+kind: Secret
+metadata:
+  name: ghes-platform-repo-creds
+  namespace: patrol
+  labels:
+    cd.patrol.example/secret-type: repo-creds
+type: Opaque
+stringData:
+  githubAppPrivateKey: REPLACE_ME

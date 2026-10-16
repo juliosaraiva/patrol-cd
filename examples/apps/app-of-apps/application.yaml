@@ -1,0 +1,28 @@
+# App of apps: the parent Application renders a Helm chart whose output is child
+# Application objects in the control-plane namespace. Deleting the parent cascades to the
+# children (resources finalizer), whose own finalizers cascade to their workloads.
+# The children carry sync waves; the parent waits for each wave to be healthy only when
+# patrol-cm defines resource.customizations.health.cd.patrol.example_Application (as
+# examples/platform/settings/patrol-cm.yaml does).
+apiVersion: cd.patrol.example/v1alpha1
+kind: Application
+metadata:
+  name: platform-apps
+  namespace: patrol
+  finalizers:
+    - resources-finalizer.cd.patrol.example
+spec:
+  project: default
+  source:
+    repoURL: https://git.example.com/platform/patrol-examples.git
+    targetRevision: main
+    path: apps/app-of-apps/chart
+  # Child Applications are created in the control-plane namespace ("patrol"), on the
+  # cluster Patrol CD runs in.
+  destination:
+    server: https://kubernetes.default.svc
+    namespace: patrol
+  syncPolicy:
+    automated:
+      prune: true
+      selfHeal: true

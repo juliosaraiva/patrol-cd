@@ -1,0 +1,9 @@
+{
+  "env": "prod",
+  "replicas": 3,
+  "message": "Configured by config/prod/config.json",
+  "cluster": {
+    "server": "https://prod-us.k8s.example.com",
+    "namespace": "guestbook"
+  }
+}

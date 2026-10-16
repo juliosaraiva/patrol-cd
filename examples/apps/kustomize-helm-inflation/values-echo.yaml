@@ -1,0 +1,3 @@
+text: Hello from a Helm chart inflated by Kustomize
+service:
+  port: 8080

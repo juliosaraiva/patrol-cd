@@ -1,0 +1,200 @@
+# patrol-cm: main settings of Patrol CD (Argo CD's argocd-cm, same key names). Must live in
+# the control-plane namespace and carry app.kubernetes.io/part-of: patrol-cd.
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: patrol-cm
+  namespace: patrol
+  labels:
+    app.kubernetes.io/name: patrol-cm
+    app.kubernetes.io/part-of: patrol-cd
+data:
+  # External URL of the UI/API; required for SSO redirects and notification links.
+  url: https://patrol.example.com
+
+  # --- Users and SSO --------------------------------------------------------------------
+  users.anonymous.enabled: "false"
+  users.session.duration: 12h
+  admin.enabled: "true"
+  # Local account for automation; create tokens with the API. Its policy is in
+  # patrol-rbac-cm (policy.ci.csv).
+  accounts.ci-bot: apiKey
+  accounts.ci-bot.enabled: "true"
+  # OIDC provider. "$patrol-oidc:clientSecret" reads key clientSecret of the Secret
+  # patrol-oidc (labelled app.kubernetes.io/part-of: patrol-cd); "$<key>" reads patrol-secret.
+  oidc.config: |
+    name: Example SSO
+    issuer: https://sso.example.com/realms/platform
+    clientID: patrol
+    clientSecret: $patrol-oidc:clientSecret
+    requestedScopes: ["openid", "profile", "email", "groups"]
+    requestedIDTokenClaims:
+      groups:
+        essential: true
+
+  # --- Reconciliation and tracking --------------------------------------------------------
+  application.resourceTrackingMethod: annotation
+  timeout.reconciliation: 180s
+  timeout.reconciliation.jitter: 60s
+
+  # --- Tools -------------------------------------------------------------------------------
+  # Kustomize: build options for the default binary (needed by
+  # examples/apps/kustomize-helm-inflation) and an additional pinned version that
+  # Applications select with spec.source.kustomize.version: v5.8.1.
+  kustomize.buildOptions: --enable-helm
+  kustomize.path.v5.8.1: /usr/local/bin/kustomize-v5.8.1
+  kustomize.buildOptions.v5.8.1: --enable-helm
+  helm.valuesFileSchemes: https
+
+  # --- Resource customizations -----------------------------------------------------------
+  # Health of Patrol CD Applications. There is no built-in check for Applications, so
+  # without this key an app of apps (examples/apps/app-of-apps) applies every sync wave of
+  # child Applications without waiting for the previous wave to become healthy. Progressing
+  # until the child records status.health, then its health. This is lua.ApplicationHealthLua
+  # (test/examples checks that they are identical).
+  resource.customizations.health.cd.patrol.example_Application: |
+    hs = {}
+    hs.status = "Progressing"
+    hs.message = ""
+    if obj.status ~= nil then
+      if obj.status.health ~= nil then
+        hs.status = obj.status.health.status
+        if obj.status.health.message ~= nil then
+          hs.message = obj.status.health.message
+        end
+      end
+    end
+    return hs
+  # Health check and actions for the BackupSchedule CRD. The scripts and their test
+  # fixtures live in examples/plugins/lua/ops.example.com/BackupSchedule; keep them
+  # identical (test/examples checks it).
+  resource.customizations.health.ops.example.com_BackupSchedule: |
+    -- Health of ops.example.com/BackupSchedule.
+    --   Progressing  no status yet, or the controller has not observed the latest generation
+    --   Suspended    spec.suspend is true
+    --   Degraded     Ready=False, or the last backup failed
+    --   Healthy      Ready=True
+    local hs = { status = "Progressing", message = "Waiting for the backup controller" }
+
+    if obj.status == nil then
+      return hs
+    end
+
+    local generation = obj.metadata.generation or 0
+    if obj.status.observedGeneration == nil or obj.status.observedGeneration < generation then
+      hs.message = "Waiting for the backup controller to observe the latest spec"
+      return hs
+    end
+
+    if obj.spec ~= nil and obj.spec.suspend == true then
+      return { status = "Suspended", message = "Backups are suspended" }
+    end
+
+    local ready = nil
+    if obj.status.conditions ~= nil then
+      for _, condition in ipairs(obj.status.conditions) do
+        if condition.type == "Ready" then
+          ready = condition
+        end
+      end
+    end
+
+    if ready ~= nil and ready.status == "False" then
+      return { status = "Degraded", message = ready.message or "Backup schedule is not ready" }
+    end
+
+    if obj.status.lastBackupResult == "Failed" then
+      return { status = "Degraded", message = "Last backup failed at " .. (obj.status.lastBackupTime or "an unknown time") }
+    end
+
+    if ready ~= nil and ready.status == "True" then
+      return { status = "Healthy", message = ready.message or "Backup schedule is ready" }
+    end
+
+    return hs
+  resource.customizations.actions.ops.example.com_BackupSchedule: |
+    discovery.lua: |
+      -- Actions offered for ops.example.com/BackupSchedule in the UI and API.
+      local actions = {}
+      local suspended = obj.spec ~= nil and obj.spec.suspend == true
+
+      actions["suspend"] = {
+        ["disabled"] = suspended,
+        ["iconClass"] = "fa fa-fw fa-pause-circle",
+      }
+      actions["resume"] = {
+        ["disabled"] = not suspended,
+        ["iconClass"] = "fa fa-fw fa-play-circle",
+      }
+      actions["set-retention"] = {
+        ["displayName"] = "Set retention",
+        ["params"] = { { ["name"] = "days" } },
+      }
+      return actions
+    definitions:
+      - name: suspend
+        action.lua: |
+          if obj.spec == nil then
+            obj.spec = {}
+          end
+          obj.spec.suspend = true
+          return obj
+      - name: resume
+        action.lua: |
+          if obj.spec == nil then
+            obj.spec = {}
+          end
+          obj.spec.suspend = false
+          return obj
+      - name: set-retention
+        action.lua: |
+          -- Parameters arrive as strings in actionParams.
+          local days = tonumber(actionParams["days"])
+          if days == nil or days ~= math.floor(days) or days < 1 or days > 3650 then
+            error("days must be an integer between 1 and 3650", 0)
+          end
+          obj.spec.retentionDays = days
+          return obj
+  # Diffing: ignore the CA bundle injected into webhook configurations by cert-manager, and
+  # fields that the HorizontalPodAutoscaler controller owns on any resource.
+  resource.customizations.ignoreDifferences.admissionregistration.k8s.io_MutatingWebhookConfiguration: |
+    jqPathExpressions:
+      - .webhooks[]?.clientConfig.caBundle
+  resource.customizations.ignoreDifferences.all: |
+    managedFieldsManagers:
+      - kube-controller-manager
+  resource.exclusions: |
+    - apiGroups: ["cilium.io"]
+      kinds: ["CiliumIdentity", "CiliumEndpoint"]
+      clusters: ["*"]
+  resource.compareoptions: |
+    ignoreAggregatedRoles: true
+    ignoreResourceStatusField: crd
+
+  # --- Deep links (UI) -----------------------------------------------------------------------
+  application.links: |
+    - url: https://grafana.example.com/d/patrol-app?var-app={{.app.metadata.name}}
+      title: Grafana dashboard
+    - url: https://wiki.example.com/teams/{{.app.spec.project}}/runbook
+      title: Runbook
+      if: app.spec.project != "default"
+  resource.links: |
+    - url: https://logs.example.com/search?namespace={{.resource.metadata.namespace}}&deployment={{.resource.metadata.name}}
+      title: Logs
+      if: resource.kind == "Deployment"
+  project.links: |
+    - url: https://wiki.example.com/teams/{{.project.metadata.name}}
+      title: Team wiki
+
+  # --- Banner (UI) ---------------------------------------------------------------------------
+  ui.bannercontent: "Maintenance: Saturday 02:00-04:00 UTC, syncs may be delayed."
+  ui.bannerurl: https://status.example.com
+  ui.bannerpermanent: "false"
+  ui.bannerposition: top
+
+  # --- Misc -------------------------------------------------------------------------------
+  statusbadge.enabled: "true"
+  exec.enabled: "false"
+  # Author of the commits written by the source hydrator.
+  commit.author.name: Patrol Hydrator
+  commit.author.email: hydrator@example.com

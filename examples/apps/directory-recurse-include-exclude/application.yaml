@@ -1,0 +1,29 @@
+# Directory source that recurses into sub-directories and filters files with glob patterns.
+# Patterns match the path relative to spec.source.path; '*' also matches '/', and '{a,b}'
+# is an alternation. exclude wins over include.
+#
+#   rendered:  base/configmap.yaml, base/deployment.yaml, networking/service.yml,
+#              networking/networkpolicy.json
+#   skipped:   drafts/canary.example.yaml (exclude '*.example.yaml'),
+#              test/debug-pod.yaml (exclude 'test/*'), README.md (not a manifest file)
+apiVersion: cd.patrol.example/v1alpha1
+kind: Application
+metadata:
+  name: guestbook-directory
+  namespace: patrol
+spec:
+  project: default
+  source:
+    repoURL: https://git.example.com/platform/patrol-examples.git
+    targetRevision: main
+    path: apps/directory-recurse-include-exclude/manifests
+    directory:
+      recurse: true
+      include: "{*.yaml,*.yml,*.json}"
+      exclude: "{*.example.yaml,test/*}"
+  destination:
+    server: https://kubernetes.default.svc
+    namespace: guestbook-directory
+  syncPolicy:
+    syncOptions:
+      - CreateNamespace=true

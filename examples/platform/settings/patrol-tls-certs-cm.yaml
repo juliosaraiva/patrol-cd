@@ -1,0 +1,27 @@
+# patrol-tls-certs-cm: CA certificates trusted for HTTPS repositories, keyed by server name
+# (Argo CD's argocd-tls-certs-cm). The certificate below is an example CA generated for
+# git.example.com (its private key was discarded); replace it with your CA bundle.
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: patrol-tls-certs-cm
+  namespace: patrol
+  labels:
+    app.kubernetes.io/name: patrol-tls-certs-cm
+    app.kubernetes.io/part-of: patrol-cd
+data:
+  git.example.com: |
+    -----BEGIN CERTIFICATE-----
+    MIICDTCCAbOgAwIBAgIUD16xqU+p8LNvz7TRSFR35tg63PswCgYIKoZIzj0EAwIw
+    TjEbMBkGA1UECgwSUGF0cm9sIENEIGV4YW1wbGVzMS8wLQYDVQQDDCZQYXRyb2wg
+    Q0QgZXhhbXBsZSBDQSAoZ2l0LmV4YW1wbGUuY29tKTAeFw0yNjEwMTYxNTAxMTVa
+    Fw0zNjEwMTMxNTAxMTVaME4xGzAZBgNVBAoMElBhdHJvbCBDRCBleGFtcGxlczEv
+    MC0GA1UEAwwmUGF0cm9sIENEIGV4YW1wbGUgQ0EgKGdpdC5leGFtcGxlLmNvbSkw
+    WTATBgcqhkjOPQIBBggqhkjOPQMBBwNCAAQJgxLGt4xn9sxLmoLIhR8ZKRSXMEVB
+    E3pBbzbK/A6JbZjTphHHS0MRT/UTs7VQJCFr1SOOxQenX/nMiOItfzCUo28wbTAd
+    BgNVHQ4EFgQUNubT0eqcO2QRhq3Qu+cmqAXx3LQwHwYDVR0jBBgwFoAUNubT0eqc
+    O2QRhq3Qu+cmqAXx3LQwGgYDVR0RBBMwEYIPZ2l0LmV4YW1wbGUuY29tMA8GA1Ud
+    EwEB/wQFMAMBAf8wCgYIKoZIzj0EAwIDSAAwRQIhAOWOLPf0tyUu38vBzN6AObkp
+    kK4/JEy8atE6IQXLra6OAiAbKklVbRaO18GStIroVEUVCGsYxhBH5+VtNXbLT7Fr
+    9g==
+    -----END CERTIFICATE-----

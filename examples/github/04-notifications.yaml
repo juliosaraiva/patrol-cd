@@ -1,0 +1,54 @@
+# GitHub notifications for preview environments: a commit status on the pull request head
+# commit and a pull request comment that is updated in place (commentTag) on every sync.
+# These keys extend patrol-notifications-cm (examples/platform/settings): merge them into
+# that ConfigMap, e.g. `kubectl patch configmap patrol-notifications-cm -n patrol
+# --type merge --patch-file 04-notifications.yaml`. A merge patch replaces whole values, so
+# this file only adds keys: the github service (key github-privateKey) and the template
+# context (.context.patrolUrl) are defined in patrol-notifications-cm (test/examples
+# checks that no key is redefined).
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: patrol-notifications-cm
+  namespace: patrol
+  labels:
+    app.kubernetes.io/name: patrol-notifications-cm
+    app.kubernetes.io/part-of: patrol-cd
+data:
+  template.github-preview-status: |
+    github:
+      repoURLPath: "{{.app.spec.source.repoURL}}"
+      revisionPath: "{{.app.status.operationState.syncResult.revision}}"
+      status:
+        state: '{{if eq .app.status.operationState.phase "Succeeded"}}success{{else}}failure{{end}}'
+        label: patrol-cd/preview
+        targetURL: "{{.context.patrolUrl}}/applications/{{.app.metadata.name}}"
+
+  template.github-preview-comment: |
+    github:
+      repoURLPath: "{{.app.spec.source.repoURL}}"
+      revisionPath: "{{.app.status.operationState.syncResult.revision}}"
+      pullRequestComment:
+        commentTag: patrol-preview
+        content: |
+          ### Preview environment `{{.app.spec.destination.namespace}}`
+
+          | | |
+          |---|---|
+          | Sync | {{.app.status.operationState.phase}} |
+          | Health | {{.app.status.health.status}} |
+          | Revision | `{{.app.status.operationState.syncResult.revision | trunc 7}}` |
+
+          [Open in Patrol CD]({{.context.patrolUrl}}/applications/{{.app.metadata.name}})
+
+  trigger.on-preview-deployed: |
+    - description: The preview environment is synced and healthy; once per commit.
+      when: app.status.operationState != nil and app.status.operationState.phase in ['Succeeded'] and app.status.health.status == 'Healthy'
+      oncePer: app.status.operationState.syncResult.revision
+      send: [github-preview-status, github-preview-comment]
+
+  trigger.on-preview-failed: |
+    - description: The preview environment failed to sync; once per commit.
+      when: app.status.operationState != nil and app.status.operationState.phase in ['Error', 'Failed']
+      oncePer: app.status.operationState.syncResult.revision
+      send: [github-preview-status, github-preview-comment]

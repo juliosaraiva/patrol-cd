@@ -1,0 +1,19 @@
+# Kustomize source whose kustomization.yaml inflates a Helm chart (helmCharts). Patrol CD
+# must run kustomize with --enable-helm (kustomize.buildOptions in patrol-cm).
+apiVersion: cd.patrol.example/v1alpha1
+kind: Application
+metadata:
+  name: echo-kustomize-helm
+  namespace: patrol
+spec:
+  project: default
+  source:
+    repoURL: https://git.example.com/platform/patrol-examples.git
+    targetRevision: main
+    path: apps/kustomize-helm-inflation
+  destination:
+    server: https://kubernetes.default.svc
+    namespace: echo
+  syncPolicy:
+    syncOptions:
+      - CreateNamespace=true

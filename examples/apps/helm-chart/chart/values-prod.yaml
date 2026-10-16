@@ -1,0 +1,19 @@
+# Production overrides: more replicas, autoscaling and larger requests.
+replicaCount: 3
+
+ui:
+  message: Hello from production
+  color: "#1f4e3d"
+
+resources:
+  requests:
+    cpu: 100m
+    memory: 64Mi
+  limits:
+    memory: 256Mi
+
+autoscaling:
+  enabled: true
+  minReplicas: 3
+  maxReplicas: 10
+  targetCPUUtilizationPercentage: 70

@@ -1,0 +1,42 @@
+discoveryTests:
+  - inputPath: testdata/active.yaml
+    result:
+      - name: suspend
+        disabled: false
+        iconClass: fa fa-fw fa-pause-circle
+      - name: resume
+        disabled: true
+        iconClass: fa fa-fw fa-play-circle
+      - name: set-retention
+        displayName: Set retention
+        params:
+          - name: days
+  - inputPath: testdata/suspended.yaml
+    result:
+      - name: suspend
+        disabled: true
+        iconClass: fa fa-fw fa-pause-circle
+      - name: resume
+        disabled: false
+        iconClass: fa fa-fw fa-play-circle
+      - name: set-retention
+        displayName: Set retention
+        params:
+          - name: days
+actionTests:
+  - action: suspend
+    inputPath: testdata/active.yaml
+    expectedOutputPath: testdata/suspended.yaml
+  - action: resume
+    inputPath: testdata/suspended.yaml
+    expectedOutputPath: testdata/active.yaml
+  - action: set-retention
+    inputPath: testdata/active.yaml
+    parameters:
+      days: "30"
+    expectedOutputPath: testdata/retention-30.yaml
+  - action: set-retention
+    inputPath: testdata/active.yaml
+    parameters:
+      days: "0"
+    expectedErrorMessage: days must be an integer between 1 and 3650

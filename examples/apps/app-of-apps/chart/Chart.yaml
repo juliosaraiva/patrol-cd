@@ -1,0 +1,5 @@
+apiVersion: v2
+name: platform-apps
+description: Parent chart of the app-of-apps example; renders one Application per entry.
+type: application
+version: 0.1.0

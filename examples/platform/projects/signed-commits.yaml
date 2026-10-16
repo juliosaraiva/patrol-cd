@@ -1,0 +1,25 @@
+# Source integrity: Applications of this project only sync commits whose HEAD commit is
+# signed by one of the listed GnuPG keys (keys registered in patrol-gpg-keys-cm, see
+# examples/platform/settings/patrol-gpg-keys-cm.yaml).
+apiVersion: cd.patrol.example/v1alpha1
+kind: AppProject
+metadata:
+  name: signed-commits
+  namespace: patrol
+spec:
+  description: Only signed commits from the platform repositories are deployed.
+  sourceRepos:
+    - https://git.example.com/platform/*
+  destinations:
+    - server: https://kubernetes.default.svc
+      namespace: platform-*
+  clusterResourceWhitelist: []
+  sourceIntegrity:
+    git:
+      policies:
+        - repos:
+            - url: https://git.example.com/platform/*
+          gpg:
+            mode: head
+            keys:
+              - ECAA5017BAAC22F6

@@ -1,0 +1,64 @@
+# GitHub App of the example-org organization: API access for the pull request generator,
+# webhook signature verification and commit check runs for sync results.
+# Required App permissions (least privilege, see docs/integrations/github-permissions.md):
+#   Metadata: Read, Contents: Read, Pull requests: Read and write (PR comments),
+#   Commit statuses: Read and write, Checks: Read and write.
+apiVersion: cd.patrol.example/v1alpha1
+kind: SCMProvider
+metadata:
+  name: example-org-github
+  namespace: patrol
+spec:
+  type: github
+  auth:
+    githubApp:
+      appID: 123456
+      privateKeySecretRef:
+        name: example-org-github-app
+        key: privateKey
+  webhook:
+    secretRef:
+      name: example-org-github-webhook
+      key: secret
+  statusReporting:
+    enabled: true
+    mode: checks
+    contextPrefix: patrol-cd
+---
+apiVersion: v1
+kind: Secret
+metadata:
+  name: example-org-github-app
+  namespace: patrol
+  labels:
+    cd.patrol.example/secret-type: scm-creds
+type: Opaque
+stringData:
+  # PEM private key downloaded from the GitHub App settings page.
+  privateKey: REPLACE_ME
+---
+apiVersion: v1
+kind: Secret
+metadata:
+  name: example-org-github-webhook
+  namespace: patrol
+  labels:
+    cd.patrol.example/secret-type: scm-creds
+type: Opaque
+stringData:
+  # The "Webhook secret" of the GitHub App (or of the repository webhook).
+  secret: REPLACE_ME
+---
+# Clone credentials for the guestbook repository from the same App. (The platform example
+# examples/platform/repositories/github-app.yaml covers the whole organization; the longest
+# matching urlPrefix wins.)
+apiVersion: cd.patrol.example/v1alpha1
+kind: RepositoryCredential
+metadata:
+  name: example-org-guestbook
+  namespace: patrol
+spec:
+  urlPrefix: https://github.com/example-org/guestbook
+  type: git
+  scmProviderRef:
+    name: example-org-github

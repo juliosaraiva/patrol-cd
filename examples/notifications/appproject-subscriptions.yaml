@@ -1,0 +1,16 @@
+# Subscriptions on an AppProject apply to every Application of the project.
+apiVersion: cd.patrol.example/v1alpha1
+kind: AppProject
+metadata:
+  name: notified-team
+  namespace: patrol
+  annotations:
+    notifications.cd.patrol.example/subscribe.on-sync-failed.slack: team-notified
+    notifications.cd.patrol.example/subscribe.on-health-degraded.email: team-notified@example.com
+spec:
+  description: Every Application of this project reports sync failures and degradations.
+  sourceRepos:
+    - https://git.example.com/platform/*
+  destinations:
+    - server: https://kubernetes.default.svc
+      namespace: notified-*

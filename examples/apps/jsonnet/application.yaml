@@ -1,0 +1,36 @@
+# Jsonnet in a directory source: external variables, top-level arguments and a library
+# search path. libs are relative to the repository root; extVars/TLAs with code: true are
+# Jsonnet expressions, the others are strings.
+apiVersion: cd.patrol.example/v1alpha1
+kind: Application
+metadata:
+  name: guestbook-jsonnet
+  namespace: patrol
+spec:
+  project: default
+  source:
+    repoURL: https://git.example.com/platform/patrol-examples.git
+    targetRevision: main
+    path: apps/jsonnet/app
+    directory:
+      jsonnet:
+        libs:
+          - apps/jsonnet/vendor
+        extVars:
+          - name: environment
+            value: staging
+          - name: replicas
+            value: "2"
+            code: true
+        tlas:
+          - name: imageTag
+            value: "6.7.1"
+          - name: features
+            value: "{ networkPolicy: true }"
+            code: true
+  destination:
+    server: https://kubernetes.default.svc
+    namespace: guestbook-jsonnet
+  syncPolicy:
+    syncOptions:
+      - CreateNamespace=true

@@ -1,0 +1,39 @@
+# Clusters generator: one Application per registered Cluster whose labels match. Parameters
+# are the Cluster's name, server and metadata (labels/annotations of the Cluster object).
+apiVersion: cd.patrol.example/v1alpha1
+kind: ApplicationSet
+metadata:
+  name: guestbook-per-cluster
+  namespace: patrol
+spec:
+  goTemplate: true
+  goTemplateOptions: ["missingkey=error"]
+  generators:
+    - clusters:
+        selector:
+          matchExpressions:
+            - key: env
+              operator: In
+              values: [staging, prod]
+  template:
+    metadata:
+      name: "guestbook-{{ .name }}"
+      labels:
+        env: '{{ index .metadata.labels "env" }}'
+    spec:
+      project: default
+      source:
+        repoURL: https://git.example.com/platform/patrol-examples.git
+        targetRevision: main
+        path: apps/helm-chart/chart
+        helm:
+          releaseName: guestbook
+          parameters:
+            - name: ui.message
+              value: 'Hello from {{ .name }} ({{ index .metadata.labels "region" }})'
+      destination:
+        name: "{{ .name }}"
+        namespace: guestbook
+      syncPolicy:
+        syncOptions:
+          - CreateNamespace=true

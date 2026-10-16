@@ -1,0 +1,42 @@
+# Matrix generator: the cartesian product of two generators. Every cluster labelled
+# team-a=enabled gets one Application per component of the list.
+apiVersion: cd.patrol.example/v1alpha1
+kind: ApplicationSet
+metadata:
+  name: team-a-components
+  namespace: patrol
+spec:
+  goTemplate: true
+  goTemplateOptions: ["missingkey=error"]
+  generators:
+    - matrix:
+        generators:
+          - clusters:
+              selector:
+                matchLabels:
+                  team-a: enabled
+          - list:
+              elements:
+                - component: frontend
+                  replicas: "2"
+                - component: backend
+                  replicas: "1"
+  template:
+    metadata:
+      name: "team-a-{{ .component }}-{{ .name }}"
+    spec:
+      project: team-a
+      source:
+        repoURL: https://git.example.com/platform/patrol-examples.git
+        targetRevision: main
+        path: apps/helm-chart/chart
+        helm:
+          releaseName: "{{ .component }}"
+          parameters:
+            - name: replicaCount
+              value: "{{ .replicas }}"
+            - name: ui.message
+              value: "team-a {{ .component }} on {{ .name }}"
+      destination:
+        name: "{{ .name }}"
+        namespace: "team-a-{{ .component }}"

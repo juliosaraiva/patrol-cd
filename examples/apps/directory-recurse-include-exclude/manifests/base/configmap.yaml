@@ -1,0 +1,10 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: guestbook-config
+  labels:
+    app.kubernetes.io/name: guestbook
+  annotations:
+    cd.patrol.example/sync-wave: "-1"
+data:
+  PODINFO_UI_MESSAGE: Rendered from a recursive directory source

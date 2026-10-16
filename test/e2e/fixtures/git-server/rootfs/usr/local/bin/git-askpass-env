@@ -1,0 +1,7 @@
+#!/bin/sh
+# GIT_ASKPASS helper: answers git's credential prompts from GIT_USERNAME / GIT_PASSWORD, so
+# credentials never appear in URLs or command lines.
+case "${1-}" in
+Username*) printf '%s\n' "${GIT_USERNAME:?GIT_USERNAME is not set}" ;;
+*) printf '%s\n' "${GIT_PASSWORD:?GIT_PASSWORD is not set}" ;;
+esac

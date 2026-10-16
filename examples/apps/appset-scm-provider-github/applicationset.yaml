@@ -1,0 +1,40 @@
+# SCM provider generator (GitHub): one Application per repository of the example-org
+# organization whose name starts with "guestbook" and that contains chart/Chart.yaml.
+# Credentials come from the SCMProvider github-app (examples/platform/scm/github-app.yaml).
+apiVersion: cd.patrol.example/v1alpha1
+kind: ApplicationSet
+metadata:
+  name: org-guestbooks
+  namespace: patrol
+spec:
+  goTemplate: true
+  goTemplateOptions: ["missingkey=error"]
+  generators:
+    - scmProvider:
+        github:
+          organization: example-org
+          providerRef:
+            name: github-app
+        cloneProtocol: https
+        filters:
+          - repositoryMatch: "^guestbook"
+            pathsExist:
+              - chart/Chart.yaml
+        requeueAfterSeconds: 1800
+  template:
+    metadata:
+      name: "{{ .repository }}-{{ .branchNormalized }}"
+    spec:
+      project: default
+      source:
+        repoURL: "{{ .url }}"
+        targetRevision: "{{ .branch }}"
+        path: chart
+        helm:
+          releaseName: "{{ .repository }}"
+      destination:
+        server: https://kubernetes.default.svc
+        namespace: "{{ .repository }}"
+      syncPolicy:
+        syncOptions:
+          - CreateNamespace=true

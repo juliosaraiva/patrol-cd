@@ -1,0 +1,20 @@
+replicaCount: 1
+
+image:
+  # Present offline on kind nodes (containerd sandbox image).
+  repository: registry.k8s.io/pause
+  tag: "3.10"
+  pullPolicy: IfNotPresent
+
+service:
+  type: ClusterIP
+  port: 80
+
+podAnnotations: {}
+
+resources:
+  requests:
+    cpu: 5m
+    memory: 8Mi
+  limits:
+    memory: 16Mi

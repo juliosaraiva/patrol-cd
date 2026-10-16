@@ -1,0 +1,34 @@
+# Plain YAML directory source with sync waves and PreSync/PostSync hooks.
+# Repository layout: push the examples/ directory as the root of a Git repository and
+# replace repoURL (see docs/guides/examples.md).
+apiVersion: cd.patrol.example/v1alpha1
+kind: Application
+metadata:
+  name: guestbook-plain
+  namespace: patrol
+  finalizers:
+    # Cascade deletion of the managed resources when the Application is deleted.
+    - resources-finalizer.cd.patrol.example
+spec:
+  project: default
+  source:
+    repoURL: https://git.example.com/platform/patrol-examples.git
+    targetRevision: main
+    path: apps/plain-yaml/manifests
+  destination:
+    server: https://kubernetes.default.svc
+    namespace: guestbook-plain
+  syncPolicy:
+    automated:
+      prune: true
+      selfHeal: true
+    syncOptions:
+      - CreateNamespace=true
+      - PruneLast=true
+    retry:
+      limit: 5
+      backoff:
+        duration: 10s
+        factor: 2
+        maxDuration: 3m
+  revisionHistoryLimit: 10

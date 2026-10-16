@@ -1,0 +1,44 @@
+# Subscriptions on an Application. Services and triggers are those of
+# patrol-notifications-cm (examples/platform/settings) plus the built-in catalog.
+#
+#   subscribe.<trigger>.<service>: <recipients separated by ";">
+#   subscribe.<service>: <recipients>        (the service's default triggers, defaultTriggers)
+#   subscriptions: YAML list of {trigger: [...], destinations: [{service, recipients: [...]}]}
+apiVersion: cd.patrol.example/v1alpha1
+kind: Application
+metadata:
+  name: guestbook-notified
+  namespace: patrol
+  labels:
+    env: prod
+  annotations:
+    # One trigger, two Slack channels.
+    notifications.cd.patrol.example/subscribe.on-sync-succeeded.slack: deployments;team-a
+    # Default triggers (on-sync-failed, on-sync-succeeded) by e-mail.
+    notifications.cd.patrol.example/subscribe.email: oncall@example.com
+    # Several triggers and services in one annotation.
+    notifications.cd.patrol.example/subscriptions: |
+      - trigger: [on-health-degraded, on-sync-failed]
+        destinations:
+          - service: slack
+            recipients: [incidents]
+          - service: email
+            recipients: [team-a@example.com]
+      - trigger: [on-deployed]
+        destinations:
+          - service: slack
+            recipients: [releases]
+spec:
+  project: default
+  source:
+    repoURL: https://git.example.com/platform/patrol-examples.git
+    targetRevision: main
+    path: apps/plain-yaml/manifests
+  destination:
+    server: https://kubernetes.default.svc
+    namespace: guestbook-notified
+  syncPolicy:
+    automated:
+      prune: true
+    syncOptions:
+      - CreateNamespace=true

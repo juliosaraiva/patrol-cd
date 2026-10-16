@@ -1,0 +1,91 @@
+# patrol-notifications-cm: notification services, templates, triggers and default
+# subscriptions (Argo CD's argocd-notifications-cm, same format). The built-in catalog
+# (on-created, on-deleted, on-deployed, on-health-degraded, on-sync-failed, on-sync-running,
+# on-sync-status-unknown, on-sync-succeeded and their app-* templates) is always available;
+# keys defined here override catalog entries of the same name.
+#
+# "$<key>" in a service reads that key of patrol-notifications-secret.
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: patrol-notifications-cm
+  namespace: patrol
+  labels:
+    app.kubernetes.io/name: patrol-notifications-cm
+    app.kubernetes.io/part-of: patrol-cd
+data:
+  # Values available to every template as .context.<key>.
+  context: |
+    patrolUrl: https://patrol.example.com
+    environment: production
+
+  # --- Services --------------------------------------------------------------------------
+  service.slack: |
+    token: $slack-token
+    username: Patrol CD
+    icon: ":rocket:"
+  # GitHub App used for commit statuses, deployments and pull request comments.
+  service.github: |
+    appID: 123456
+    installationID: 7654321
+    privateKey: $github-privateKey
+  # Generic webhook; the service name is "deploy-tracker" (service.webhook.<name>).
+  service.webhook.deploy-tracker: |
+    url: https://deploy-tracker.example.com/api/v1/events
+    headers:
+      - name: Content-Type
+        value: application/json
+      - name: Authorization
+        value: Bearer $deploy-tracker-token
+    retryMax: 3
+  service.email: |
+    host: smtp.example.com
+    port: 587
+    from: patrol@example.com
+    username: $email-username
+    password: $email-password
+
+  # --- Templates -------------------------------------------------------------------------
+  # Webhook payload for the deploy tracker (the catalog templates carry Slack, email and
+  # chat sections but no webhook body).
+  template.deploy-tracker-event: |
+    webhook:
+      deploy-tracker:
+        method: POST
+        body: |
+          {
+            "application": "{{.app.metadata.name}}",
+            "project": "{{.app.spec.project}}",
+            "revision": "{{.app.status.sync.revision}}",
+            "phase": "{{.app.status.operationState.phase}}",
+            "health": "{{.app.status.health.status}}",
+            "environment": "{{.context.environment}}"
+          }
+
+  # --- Triggers --------------------------------------------------------------------------
+  # Reports every finished sync operation to the deploy tracker, once per operation.
+  trigger.on-sync-finished: |
+    - description: Sync operation finished (succeeded, failed or errored).
+      when: app.status.operationState != nil and app.status.operationState.phase in ['Succeeded', 'Failed', 'Error']
+      oncePer: app.status.operationState.startedAt
+      send: [deploy-tracker-event]
+
+  # --- Default subscriptions -------------------------------------------------------------
+  # Applied to every Application whose labels match the selector, in addition to the
+  # notifications.cd.patrol.example/subscribe.* annotations (examples/notifications).
+  subscriptions: |
+    - recipients:
+        - slack:deployments
+      triggers:
+        - on-sync-failed
+        - on-health-degraded
+      selector: env=prod
+    - recipients:
+        - deploy-tracker
+      triggers:
+        - on-sync-finished
+  # Triggers used when an annotation subscribes to a service without naming a trigger
+  # (notifications.cd.patrol.example/subscribe.slack: <channel>).
+  defaultTriggers: |
+    - on-sync-failed
+    - on-sync-succeeded

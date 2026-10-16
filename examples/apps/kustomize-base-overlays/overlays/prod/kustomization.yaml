@@ -1,0 +1,32 @@
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+namespace: guestbook-prod
+resources:
+  - ../../base
+components:
+  - ../../components/monitoring
+  - ../../components/high-availability
+images:
+  - name: ghcr.io/stefanprodan/podinfo
+    newTag: 6.7.1
+replicas:
+  - name: guestbook
+    count: 3
+patches:
+  # Strategic merge patch from a file.
+  - path: patches/resources.yaml
+  # Inline JSON 6902 patch selected by target.
+  - target:
+      kind: Service
+      name: guestbook
+    patch: |-
+      - op: add
+        path: /metadata/annotations
+        value:
+          cd.patrol.example/sync-options: Prune=false
+configMapGenerator:
+  - name: guestbook-config
+    behavior: merge
+    literals:
+      - PODINFO_UI_MESSAGE=Hello from production
+      - PODINFO_UI_COLOR=#1f4e3d

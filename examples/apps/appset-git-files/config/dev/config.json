@@ -1,0 +1,9 @@
+{
+  "env": "dev",
+  "replicas": 1,
+  "message": "Configured by config/dev/config.json",
+  "cluster": {
+    "server": "https://kubernetes.default.svc",
+    "namespace": "guestbook-config-dev"
+  }
+}

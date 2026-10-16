@@ -1,0 +1,34 @@
+# Application rendered by the tmpl-render Config Management Plugin. plugin.name selects the
+# plugin explicitly ("<metadata.name>-<spec.version>"); env entries reach the plugin as
+# ARGOCD_ENV_<name>, parameters as PARAM_<NAME>[_<KEY>].
+apiVersion: cd.patrol.example/v1alpha1
+kind: Application
+metadata:
+  name: guestbook-cmp
+  namespace: patrol
+spec:
+  project: default
+  source:
+    repoURL: https://git.example.com/platform/patrol-examples.git
+    targetRevision: main
+    path: apps/cmp-plugin/app
+    plugin:
+      name: tmpl-render-v1.0
+      env:
+        - name: ENVIRONMENT
+          value: staging
+      parameters:
+        - name: image
+          string: ghcr.io/stefanprodan/podinfo:6.7.1
+        - name: replicas
+          string: "2"
+        - name: extra-labels
+          map:
+            team: team-a
+            cost-center: cc-1234
+  destination:
+    server: https://kubernetes.default.svc
+    namespace: guestbook-cmp
+  syncPolicy:
+    syncOptions:
+      - CreateNamespace=true

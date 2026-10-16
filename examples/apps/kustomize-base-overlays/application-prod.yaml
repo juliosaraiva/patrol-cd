@@ -1,0 +1,26 @@
+# Kustomize overlay rendered by Patrol CD. The ApplicationSet in
+# ../appset-git-directories generates one Application per overlay instead.
+apiVersion: cd.patrol.example/v1alpha1
+kind: Application
+metadata:
+  name: guestbook-kustomize-prod
+  namespace: patrol
+  annotations:
+    # Webhook-triggered refreshes only happen for commits that touch these paths
+    # (relative to spec.source.path).
+    cd.patrol.example/manifest-generate-paths: .;../../base;../../components
+spec:
+  project: default
+  source:
+    repoURL: https://git.example.com/platform/patrol-examples.git
+    targetRevision: main
+    path: apps/kustomize-base-overlays/overlays/prod
+  destination:
+    server: https://kubernetes.default.svc
+    namespace: guestbook-prod
+  syncPolicy:
+    automated:
+      prune: true
+    syncOptions:
+      - CreateNamespace=true
+      - ApplyOutOfSyncOnly=true
