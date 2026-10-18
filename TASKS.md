@@ -163,3 +163,9 @@ Next (NOT started, per STOP rule): the private GitHub repo + push (user instruct
 ## GitHub gate DONE (2026-10-17) — STOPPED at the Phase 3 boundary
 
 Private repository created and `main` pushed: https://github.com/juliosaraiva/patrol-cd (visibility PRIVATE; HEAD 5e64fa8 matched local; commits show Verified on GitHub). Pre-push: gitleaks tree+history 0 findings (V-0016 + `.gitleaks.toml`), tracked files reviewed. Per the STOP rule no Phase 4+ work has been started. Resume only when the user says so; start by reading this file, `docs/verification/log.md`, and the open decisions: Docker Desktop disk space (blocker for image build/kind), parity status audit/backfill, preserved Phase 5 scenario WIP (snapshot `20261016T214116Z`), finalizer rename, UI shuffle-order tests.
+
+## PHASE 4 STARTED (2026-10-18) — user instruction: "Start on Phase 4: Dockerfile, manifests and Helm chart"
+
+Scope authorized now: T4.1 Dockerfile/image tooling, T4.2 static manifests + Helm chart (+ the `patrolcd bootstrap` first-run step they require, found missing: nothing generated the admin password or `patrol-internal-token`). NOT in scope until told: CI pipelines, kind validation (Docker disk still full), e2e/security/perf phases, publishing anything.
+Workflow wf_71881e0f-20d: Build (boot, image, chart in parallel) → Assemble (static manifests, test/deploy harness incl. helm install/upgrade/uninstall + RBAC sufficiency against envtest) → independent reviews (chart-security, image-bootstrap) → fixes. Agents do not commit; the orchestrator commits (signed) and pushes after verification.
+Known limits recorded up front: `docker build` cannot be executed (Docker Desktop disk full) → image steps verified piecewise and labeled NOT EXECUTED; no kubelet/CNI in envtest → NetworkPolicy enforcement and live pods unverified.
