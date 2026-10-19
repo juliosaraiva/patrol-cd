@@ -1,0 +1,18 @@
+# Alpine packages of the patrol-cd runtime stage (Alpine 3.24 main + community, the repositories
+# enabled in the official alpine image). Versions float within the digest-pinned 3.24 branch so a
+# rebuild picks up Alpine security fixes; the installed versions are recorded by the image SBOM
+# (`make image-sbom`). `make image-verify-pins` checks every name against the x86_64 and aarch64
+# package indexes.
+#
+#   git              repository access (internal/git, commit-server, kustomize remote bases)
+#   openssh-client   SSH transport for git (virtual name provided by openssh-client-default)
+#   gpg              commit/tag signature verification (repo-server GnuPG keyring, git verify-*)
+#   ca-certificates  public CA bundle and update-ca-certificates for derived images
+#   tzdata           time zones (sync windows, cron schedules, git/gpg dates)
+#   tini             PID 1: signal forwarding and zombie reaping of tool subprocesses
+ca-certificates
+git
+gpg
+openssh-client
+tini
+tzdata

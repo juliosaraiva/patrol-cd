@@ -1,0 +1,15 @@
+# Executable names linked to /usr/local/bin/patrolcd in the patrol-cd image (OPS-145): the
+# multi-call binary selects its subcommand from the name it was started as. The list must equal
+# the keys of binaryAliases in internal/server/commands.go; hack/images/rootfs-check.sh fails
+# when they differ. Consumed by hack/images/link-aliases.sh (Dockerfile "build" stage).
+patrol-server
+patrol-controller
+patrol-application-controller
+patrol-repo-server
+patrol-applicationset-controller
+patrol-appset-controller
+patrol-notifications
+patrol-notifications-controller
+patrol-cmp-server
+patrol-commit-server
+patrol-k8s-auth

@@ -1,0 +1,21 @@
+# System git configuration of the patrol-cd image (installed as /etc/gitconfig by
+# hack/images/rootfs-setup.sh).
+#
+# internal/git already passes these settings on every command it runs (GIT_CONFIG_COUNT, with
+# HOME=/dev/null and GIT_CONFIG_GLOBAL=/dev/null), so this file only adds defense in depth for git
+# processes started by other tools, e.g. Kustomize remote bases. No credential helper is ever
+# used: credentials reach git per command through the askpass helper or per-call files.
+#
+# safe.directory is deliberately not set: every working copy is created by the uid that uses it
+# (patrol, 999), so git's ownership check passes; a repository owned by another uid is refused.
+[credential]
+	helper =
+[core]
+	hooksPath = /dev/null
+	fsmonitor = false
+[protocol "ext"]
+	allow = never
+[safe]
+	bareRepository = explicit
+[advice]
+	detachedHead = false

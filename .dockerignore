@@ -1,0 +1,55 @@
+# Build context of the patrol-cd image (Dockerfile). Allow-list: everything is excluded except
+# the inputs of the image stages, so local build output, caches, credentials and kubeconfigs can
+# never reach the build or a layer.
+*
+
+# Go module and the packages linked into cmd/patrolcd and cmd/patrol (go list -deps).
+!go.mod
+!go.sum
+!api/
+!cmd/
+!internal/
+!pkg/
+
+# Web UI sources (built in the "ui" stage).
+!ui/
+
+# Image tooling: pins, checksum file, setup scripts, git/ssh configuration.
+!hack/images/
+
+# Licenses shipped in the image.
+!LICENSE
+!NOTICE
+
+# Never needed by the build, even inside the allowed directories (kubeconfig-named Go sources
+# stay; tests are excluded after that exception). Together with the ui/ entries below this
+# excludes everything the repository's .gitignore files ignore inside the allowed directories,
+# except kubeconfig*.go, so every other file in the context is tracked or shows up as untracked
+# in git: hack/image.mk derives the image's tree state from that (keep both in sync).
+**/.DS_Store
+**/*.swp
+**/.env
+**/.env.*
+**/kubeconfig*
+!**/kubeconfig*.go
+**/*_test.go
+**/testdata/
+**/*.test
+**/*.out
+**/coverage.*
+
+# The image embeds the UI built in the "ui" stage, never a local copy.
+internal/ui/dist/*
+!internal/ui/dist/.keep
+!internal/ui/dist/.gitignore
+
+ui/**/node_modules/
+ui/dist/
+ui/**/test-results/
+ui/**/playwright-report/
+ui/**/coverage/
+ui/**/*.tsbuildinfo
+ui/e2e/
+ui/**/*.test.ts
+ui/**/*.test.tsx
+ui/**/*.test.mjs

@@ -1,0 +1,48 @@
+# Container image (Dockerfile, .dockerignore, hack/image.mk, hack/images/). Guide:
+# docs/guides/images.md; commands and results: docs/verification/runs/2026-10-17-image-static.md.
+# Evidence level: static only. `docker build` was NOT EXECUTED (Docker Desktop disk full, see
+# TASKS.md), so nothing here has run inside the image; statuses stay in-progress until an image
+# is built and exercised on kind.
+
+OPS-162:
+  status: in-progress
+  impl:
+    - Dockerfile
+    - hack/images/checksums.txt
+    - hack/images/fetch-tools.sh
+    - hack/images/apk-packages.txt
+    - hack/images/rootfs-setup.sh
+  tests:
+    - hack/images/verify-pins.sh
+    - hack/images/rootfs-check.sh
+  notes: >-
+    Single multi-call image on alpine:3.24.2 (index digest pinned), user patrol uid/gid 999,
+    entrypoint tini; Helm 4.2.1, Kustomize 5.8.1, git-lfs 3.7.1 (baseline versions) downloaded
+    from the official release URLs and checked against pinned SHA-256 sums (re-verified against
+    the publishers' checksum files; Helm and git-lfs PGP signatures checked once by hand); git,
+    openssh-client, gpg, tini, ca-certificates, tzdata from Alpine; connect-proxy compiled from a
+    pinned source. Upstream ships Ubuntu 26.04 (glibc); Patrol uses Alpine (musl), see the guide.
+    Missing for implemented: an executed image build and `helm version`/`kustomize version`
+    inside the running repo-server (the OPS-162 test); the static checks confirm the bundled
+    binaries' versions from their Go build information only.
+
+OPS-145:
+  status: in-progress
+  impl: [hack/images/aliases.txt, hack/images/link-aliases.sh, Dockerfile]
+  tests: [hack/images/rootfs-check.sh]
+  notes: >-
+    The image links every component name of binaryAliases (internal/server/commands.go) to
+    /usr/local/bin/patrolcd; rootfs-check.sh fails when the lists differ, and each link was run
+    with --help on a host build and dispatched to its subcommand. Not run inside an image.
+
+REPO-023:
+  status: in-progress
+  impl: [internal/git/creds.go, Dockerfile, hack/images/checksums.txt]
+  tests: [internal/git/creds_test.go]
+  notes: >-
+    internal/git writes the `connect-proxy -5 -S host:port` ProxyCommand wrapper (upstream
+    behavior); the image provides connect-proxy (ssh-connect 1.106, not packaged by Alpine) as a
+    static musl build of the pinned source. Only checked statically: connect.c compiled with
+    clang against Alpine's musl-dev headers, and the undefined symbols of the object file found
+    in musl's libc.a (nm); no link was executed and the Dockerfile's `gcc -static` command has
+    not run. No SSH-through-SOCKS5 connection has been made.

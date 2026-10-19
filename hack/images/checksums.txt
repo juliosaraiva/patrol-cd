@@ -1,0 +1,35 @@
+# Third-party files bundled in the patrol-cd image, pinned by SHA-256.
+#
+# Read by hack/images/fetch-tools.sh (Dockerfile "tools" stage, rootfs-check.sh) and checked by
+# hack/images/verify-pins.sh (`make image-verify-pins`). Versions follow the frozen Argo CD
+# v3.5.5 baseline (docs/parity/baseline.md, ADR-0007): Helm 4.2.1, Kustomize 5.8.1, git-lfs 3.7.1.
+#
+# Columns (whitespace separated, one file per line):
+#   1 name       tool name
+#   2 version    pinned version (must appear in the URL)
+#   3 platform   linux/amd64 | linux/arm64 | any
+#   4 sha256     SHA-256 of the downloaded file (lowercase hex)
+#   5 url        HTTPS download URL (official release location)
+#   6 install    comma-separated SRC:DEST:MODE; SRC is an archive member, or "." for the file
+#                itself; DEST is relative to the fetch-tools.sh --out directory
+#   7 sums       publisher's checksum file the sha256 was taken from and is re-checked against,
+#                or pinned-tag / pinned-commit for files fetched from an immutable source path
+#
+# Recorded 2026-10-18 (sums copied from the publisher checksum files in column 7 and re-verified
+# against the downloaded artifacts; helm archives and the git-lfs sums file also carry valid PGP
+# signatures, see docs/verification/runs/2026-10-17-image-static.md). To bump a tool: edit the
+# version, URL and sha256 on every line of that tool, then run `make image-verify-pins`.
+
+helm              4.2.1  linux/amd64  479dca836e5b45e8bd222400c5591b0e3a647378f03ff96597180db97c17fdae  https://get.helm.sh/helm-v4.2.1-linux-amd64.tar.gz  linux-amd64/helm:bin/helm:0755,linux-amd64/LICENSE:licenses/helm/LICENSE:0644  https://get.helm.sh/helm-v4.2.1-linux-amd64.tar.gz.sha256sum
+helm              4.2.1  linux/arm64  596b9a73d366c1e72ce67d595c22805480e30914593aafbc9f547694e72814db  https://get.helm.sh/helm-v4.2.1-linux-arm64.tar.gz  linux-arm64/helm:bin/helm:0755,linux-arm64/LICENSE:licenses/helm/LICENSE:0644  https://get.helm.sh/helm-v4.2.1-linux-arm64.tar.gz.sha256sum
+kustomize         5.8.1  linux/amd64  029a7f0f4e1932c52a0476cf02a0fd855c0bb85694b82c338fc648dcb53a819d  https://github.com/kubernetes-sigs/kustomize/releases/download/kustomize%2Fv5.8.1/kustomize_v5.8.1_linux_amd64.tar.gz  kustomize:bin/kustomize:0755  https://github.com/kubernetes-sigs/kustomize/releases/download/kustomize%2Fv5.8.1/checksums.txt
+kustomize         5.8.1  linux/arm64  0953ea3e476f66d6ddfcd911d750f5167b9365aa9491b2326398e289fef2c142  https://github.com/kubernetes-sigs/kustomize/releases/download/kustomize%2Fv5.8.1/kustomize_v5.8.1_linux_arm64.tar.gz  kustomize:bin/kustomize:0755  https://github.com/kubernetes-sigs/kustomize/releases/download/kustomize%2Fv5.8.1/checksums.txt
+kustomize-license 5.8.1  any          b40930bbcf80744c86c46a12bc9da056641d722716c378f5659b9e555ef833e1  https://raw.githubusercontent.com/kubernetes-sigs/kustomize/kustomize/v5.8.1/LICENSE  .:licenses/kustomize/LICENSE:0644  pinned-tag
+git-lfs           3.7.1  linux/amd64  1c0b6ee5200ca708c5cebebb18fdeb0e1c98f1af5c1a9cba205a4c0ab5a5ec08  https://github.com/git-lfs/git-lfs/releases/download/v3.7.1/git-lfs-linux-amd64-v3.7.1.tar.gz  git-lfs-3.7.1/git-lfs:bin/git-lfs:0755  https://github.com/git-lfs/git-lfs/releases/download/v3.7.1/sha256sums.asc
+git-lfs           3.7.1  linux/arm64  73a9c90eeb4312133a63c3eaee0c38c019ea7bfa0953d174809d25b18588dd8d  https://github.com/git-lfs/git-lfs/releases/download/v3.7.1/git-lfs-linux-arm64-v3.7.1.tar.gz  git-lfs-3.7.1/git-lfs:bin/git-lfs:0755  https://github.com/git-lfs/git-lfs/releases/download/v3.7.1/sha256sums.asc
+git-lfs-license   3.7.1  any          4fae9062ab5cdd5fb15486b728534d8aded8b4ae9d84b6d66a956f5162c366b6  https://raw.githubusercontent.com/git-lfs/git-lfs/v3.7.1/LICENSE.md  .:licenses/git-lfs/LICENSE.md:0644  pinned-tag
+# connect-proxy (SSH through a SOCKS5 repository proxy, internal/git) is not packaged by Alpine; the
+# image compiles this single source file (tag 1.106 = commit a7443d32e6bf). GPL-2.0-or-later: the
+# source ships as /usr/share/licenses/connect-proxy/connect.c, next to the GPL v2 text (COPYING)
+# and the build command (BUILD), both vendored in hack/images/licenses/ (Dockerfile).
+connect-proxy     1.106  any          96b54390603191150ba2e03b28c318afdf84610904927a825658d3b02617526a  https://raw.githubusercontent.com/gotoh/ssh-connect/a7443d32e6bf6f00698384b0519adc16fa7656fa/connect.c  .:src/connect-proxy/connect.c:0644,.:licenses/connect-proxy/connect.c:0644  pinned-commit

@@ -1,0 +1,18 @@
+How /usr/local/bin/connect-proxy in the patrol-cd image is built
+
+Source    connect.c in this directory: ssh-connect 1.106 (https://github.com/gotoh/ssh-connect),
+          commit a7443d32e6bf6f00698384b0519adc16fa7656fa, unmodified, SHA-256
+          96b54390603191150ba2e03b28c318afdf84610904927a825658d3b02617526a.
+License   GPL-2.0-or-later (see the header of connect.c). COPYING in this directory is the text
+          of the GNU General Public License, version 2.
+Builder   stage "connect" of the Dockerfile in https://github.com/juliosaraiva/patrol-cd: the
+          image's Alpine 3.24 base for the target architecture, with the Alpine packages gcc and
+          musl-dev (the versions current in that branch at build time).
+
+Command, run in that stage on a copy of connect.c at /src/connect.c; the output /out/connect-proxy
+is installed unchanged as /usr/local/bin/connect-proxy (mode 0755):
+
+gcc -std=gnu17 -O2 -Wall -fstack-protector-strong -DSOCKLEN_T=socklen_t -static -s -o /out/connect-proxy /src/connect.c
+
+-static links the C library from musl-dev into the binary; -s strips it. No other file, patch
+or build script is involved.

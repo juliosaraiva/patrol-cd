@@ -1,0 +1,20 @@
+# SSH client defaults of the patrol-cd image (installed as /etc/ssh/ssh_config by
+# hack/images/rootfs-setup.sh).
+#
+# internal/git passes its own options on the command line for every SSH repository
+# (-i <key> -o IdentitiesOnly=yes -o BatchMode=yes, StrictHostKeyChecking=yes with a per-call
+# known_hosts file, or the explicit insecure mode), and command-line options win over this file.
+# The defaults below cover ssh started without them (e.g. Kustomize remote bases): host keys are
+# checked against the mounted patrol-ssh-known-hosts-cm data, never prompted for and never written.
+Include /etc/ssh/ssh_config.d/*.conf
+
+Host *
+	GlobalKnownHostsFile /app/config/ssh/ssh_known_hosts
+	UserKnownHostsFile /dev/null
+	StrictHostKeyChecking yes
+	UpdateHostKeys no
+	HashKnownHosts no
+	BatchMode yes
+	ForwardAgent no
+	ForwardX11 no
+	PermitLocalCommand no

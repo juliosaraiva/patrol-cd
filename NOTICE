@@ -7,4 +7,25 @@ This product includes software developed as part of the Argo CD project
   - internal/lua/customizations/**  Lua health checks and resource actions derived from
     argo-cd v3.5.5 resource_customizations/ (commit a5038b0e2bbac1715754380ae0084df8e3d5b48c).
 
+The container image built from the Dockerfile additionally bundles the following third-party
+software, unmodified, each under its own license. Versions and SHA-256 pins are in
+hack/images/checksums.txt (in the image: /usr/share/patrol-cd/tools.lock).
+
+  - Helm 4.2.1 (https://github.com/helm/helm), Apache License 2.0. License text in the image:
+    /usr/share/licenses/helm/LICENSE.
+  - Kustomize 5.8.1 (https://github.com/kubernetes-sigs/kustomize), Apache License 2.0. License
+    text in the image: /usr/share/licenses/kustomize/LICENSE.
+  - git-lfs 3.7.1 (https://github.com/git-lfs/git-lfs), MIT License. License text in the image:
+    /usr/share/licenses/git-lfs/LICENSE.md.
+  - connect-proxy 1.106 (https://github.com/gotoh/ssh-connect), GPL-2.0-or-later, compiled from
+    its single source file. /usr/share/licenses/connect-proxy/ in the image holds that source
+    (connect.c), the text of the GNU General Public License version 2 (COPYING) and the compiler
+    command used (BUILD); the binary is /usr/local/bin/connect-proxy. It runs as a separate
+    process and Patrol CD does not link against it.
+  - Alpine Linux packages: those of the alpine:3.24.2 base image, git, openssh-client, gpg,
+    ca-certificates, tzdata, tini and their dependencies, each under the license its package
+    declares. The image build does not copy their license texts into the image. Each installed
+    package and its declared license are recorded in apk's package database, which stays in the
+    image (/lib/apk/db/installed); the image SBOM (make image-sbom) also lists the packages.
+
 Patrol CD is not affiliated with or endorsed by the Argo Project or the CNCF.

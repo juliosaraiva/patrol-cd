@@ -1,0 +1,71 @@
+# Expected layout of the patrol-cd runtime image, checked by hack/images/rootfs-check.sh against a
+# filesystem assembled from the same scripts and build outputs the Dockerfile uses. Written
+# independently of rootfs-setup.sh so a change to either one shows up as a difference.
+#
+# Columns: TYPE MODE OWNER PATH [TARGET]
+#   TYPE   d directory | f regular file | x executable regular file | l symbolic link | absent
+#   MODE   octal permission bits ("-" for links and absent paths)
+#   OWNER  uid:gid ("-" for absent paths)
+#   TARGET link target, exactly as stored
+
+# Non-root identity and its home.
+d 0755 0:0 /home
+d 0755 999:999 /home/patrol
+d 0755 999:999 /home/patrol/params
+d 0755 999:999 /home/patrol/cmp-server
+d 0755 999:999 /home/patrol/cmp-server/plugins
+d 0755 999:999 /home/patrol/cmp-server/config
+
+# Mount points of ConfigMaps/Secrets (docs/guides/images.md "Filesystem").
+d 0755 0:0 /app
+d 0755 0:0 /app/config
+d 0755 999:999 /app/config/ssh
+d 0755 999:999 /app/config/tls
+d 0755 0:0 /app/config/gpg
+d 0755 999:999 /app/config/gpg/source
+d 0700 999:999 /app/config/gpg/keys
+d 0755 0:0 /app/config/reposerver
+d 0700 999:999 /app/config/reposerver/tls
+d 0700 999:999 /app/config/reposerver/mtls
+d 0700 999:999 /app/config/internal-token
+d 0755 0:0 /app/config/dex
+d 0700 999:999 /app/config/dex/tls
+d 0755 0:0 /shared
+d 0755 0:0 /shared/app
+d 1777 0:0 /tmp
+
+# System configuration.
+f 0644 0:0 /etc/gitconfig
+f 0644 0:0 /etc/ssh/ssh_config
+l - 0:0 /usr/bin/tini /sbin/tini
+absent - - /sbin/apk
+
+# Binaries: multi-call control plane, CLI, pinned tools.
+x 0755 0:0 /usr/local/bin/patrolcd
+x 0755 0:0 /usr/local/bin/patrol
+x 0755 0:0 /usr/local/bin/helm
+x 0755 0:0 /usr/local/bin/kustomize
+x 0755 0:0 /usr/local/bin/git-lfs
+x 0755 0:0 /usr/local/bin/connect-proxy
+l - 0:0 /usr/local/bin/patrol-server patrolcd
+l - 0:0 /usr/local/bin/patrol-controller patrolcd
+l - 0:0 /usr/local/bin/patrol-application-controller patrolcd
+l - 0:0 /usr/local/bin/patrol-repo-server patrolcd
+l - 0:0 /usr/local/bin/patrol-applicationset-controller patrolcd
+l - 0:0 /usr/local/bin/patrol-appset-controller patrolcd
+l - 0:0 /usr/local/bin/patrol-notifications patrolcd
+l - 0:0 /usr/local/bin/patrol-notifications-controller patrolcd
+l - 0:0 /usr/local/bin/patrol-cmp-server patrolcd
+l - 0:0 /usr/local/bin/patrol-commit-server patrolcd
+l - 0:0 /usr/local/bin/patrol-k8s-auth patrolcd
+
+# Licenses and provenance of bundled third-party files.
+f 0644 0:0 /usr/share/licenses/patrol-cd/LICENSE
+f 0644 0:0 /usr/share/licenses/patrol-cd/NOTICE
+f 0644 0:0 /usr/share/licenses/helm/LICENSE
+f 0644 0:0 /usr/share/licenses/kustomize/LICENSE
+f 0644 0:0 /usr/share/licenses/git-lfs/LICENSE.md
+f 0644 0:0 /usr/share/licenses/connect-proxy/connect.c
+f 0644 0:0 /usr/share/licenses/connect-proxy/COPYING
+f 0644 0:0 /usr/share/licenses/connect-proxy/BUILD
+f 0644 0:0 /usr/share/patrol-cd/tools.lock
