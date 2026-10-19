@@ -1,0 +1,157 @@
+# Deployment validation harness (test/deploy): the Helm chart, the static manifests and the CRDs
+# checked against a real kube-apiserver 1.36 (envtest binaries) and the real patrolcd binary.
+# Commands and results: docs/verification/runs/2026-10-17-deploy-validation.md; findings:
+# docs/verification/phase4-findings.md (section "From the deployment validation task").
+# Evidence level: API server behavior is real (strict server-side dry runs, Pod Security
+# admission, RBAC authorizer, audit log, helm install/upgrade/rollback/uninstall, server-side
+# apply). Pods are emulated: envtest has no kubelet, scheduler, controllers or CNI, so the
+# harness runs each rendered patrolcd container as a local process with its service account's
+# token, rendered arguments and environment, and Secret/ConfigMap volumes copied from the API
+# server (deviations listed in the run record). Nothing ran on a cluster with nodes (image build
+# and kind blocked, TASKS.md), so every entry stays in-progress.
+# Second review round (2026-10-18), harness changes and targeted runs:
+# docs/verification/runs/2026-10-18-phase4-review-round2.md; final full-suite result:
+# docs/verification/log.md (V-0027).
+
+OPS-001:
+  status: in-progress
+  impl: [deploy/helm/patrol-cd, deploy/manifests/install.yaml]
+  tests:
+    - test/deploy/apivalidation_test.go:TestAPIServerDryRun
+    - test/deploy/helmlifecycle_test.go:TestHelmLifecycle
+    - test/deploy/manifests_test.go:TestStaticManifestsApply
+    - test/deploy/manifests_test.go:TestStaticManifestsMatchChart
+    - test/deploy/rbac_test.go:TestRBACSufficiency
+  evidence: docs/verification/runs/2026-10-17-deploy-validation.md
+  notes: >-
+    Default profile: every rendered object passes a strict server-side dry run without warnings;
+    helm install, no-op upgrade (none of the 60 rendered objects changed: resourceVersion
+    compared, or generation, labels and annotations for the CRDs and the admission policy, whose
+    status the API server writes; generated keys kept), upgrade with values, image tag, common
+    labels and a disabled component (selectors and Service clusterIPs unchanged), rollback,
+    uninstall (CRDs and admission policy kept) and re-install work against a kube-apiserver;
+    install.yaml server-side applies, re-applies without changes and deletes. The rendered
+    components run as their service accounts with exactly the rendered RBAC and sync an
+    Application to the local cluster without a denied request. No pod ran on a node.
+
+OPS-002:
+  status: in-progress
+  impl: [deploy/helm/patrol-cd/ci/namespaced.yaml, deploy/manifests/namespace-install.yaml]
+  tests:
+    - test/deploy/rbac_test.go:TestRBACSufficiency
+    - test/deploy/helmlifecycle_test.go:TestHelmLifecycle
+  evidence: docs/verification/runs/2026-10-17-deploy-validation.md
+  notes: >-
+    Namespaced profile installed next to a cluster-wide release (CRDs from the latter); with the
+    local cluster registered with explicit namespaces the controller syncs into the release
+    namespace with Roles only; SubjectAccessReviews confirm no access outside the release
+    namespace and rbac.managedNamespaces and no cluster-scoped reads. rbac.managedNamespaces must
+    exist before the install (finding DV-3).
+
+OPS-003:
+  status: in-progress
+  impl: [deploy/helm/patrol-cd/ci/core.yaml, deploy/manifests/core-install.yaml]
+  tests: [test/deploy/rbac_test.go:TestRBACSufficiency]
+  evidence: docs/verification/runs/2026-10-17-deploy-validation.md
+  notes: >-
+    Core profile: the bootstrap init container runs on the controller pod, the controller,
+    repo-server, ApplicationSet and notifications controllers run with their rendered RBAC and
+    sync an Application created with kubectl-equivalent calls. Nothing creates AppProject
+    "default" in a core installation (finding DV-2); the harness creates it.
+
+OPS-005:
+  status: in-progress
+  impl: [deploy/helm/patrol-cd/ci/hydrator.yaml, deploy/manifests/install-with-hydrator.yaml]
+  tests: [test/deploy/rbac_test.go:TestRBACSufficiency, test/deploy/wiring_test.go:TestWiring]
+  evidence: docs/verification/runs/2026-10-17-deploy-validation.md
+  notes: >-
+    Hydrator profile: the commit-server starts from its rendered arguments without a service
+    account token and answers its probes; the controller runs with hydrator.enabled. No
+    hydration was exercised (no write repository in the scenario).
+
+OPS-007:
+  status: in-progress
+  impl: [deploy/helm/patrol-cd/templates/rbac]
+  tests:
+    - test/deploy/rbac_test.go:TestRBACSufficiency
+    - test/deploy/rbac_test.go:TestRBACMissingRuleDetected
+  evidence: docs/verification/runs/2026-10-17-deploy-validation.md
+  notes: >-
+    Cluster-scoped rules exercised by the real binaries (default, core, hardened, minimal,
+    hydrator, ingress-nginx, apps-in-any-namespace runs): no request denied in the audit log, no
+    "forbidden" in component logs. SubjectAccessReviews: controller cluster-admin by default
+    (documented), limited by rbac.controller.rules in the hardened profile (an Application still
+    syncs; no RBAC, admission, node, namespace or subresource writes such as
+    serviceaccounts/token or pods/exec, while Secret writes in any namespace and get on
+    nodes/proxy remain, as documented), patrol-server may read but not create on the local
+    cluster, no access with rbac.server.localCluster=false. Unexercised verbs are listed in the
+    findings (informational).
+
+OPS-008:
+  status: in-progress
+  impl: [deploy/helm/patrol-cd/templates/rbac]
+  tests:
+    - test/deploy/rbac_test.go:TestRBACSufficiency
+    - test/deploy/rbac_test.go:TestRBACMissingRuleDetected
+  evidence: docs/verification/runs/2026-10-17-deploy-validation.md
+  notes: >-
+    Namespaced Roles bound to the components' service accounts are sufficient for bootstrap,
+    patrol-server (login, repositories, Applications, ApplicationSets, manual sync), the
+    controller (shard Lease, sync, Operations), the ApplicationSet controller (leader election,
+    list generator) and the notifications controller (leader election); the repo-server and
+    commit-server run without a token. Removing the notifications Lease rules or patrol-server's
+    AppProject rule is detected (audit 403 and "forbidden" log lines).
+
+OPS-009:
+  status: in-progress
+  impl: [deploy/helm/patrol-cd/templates]
+  tests: [test/deploy/wiring_test.go:TestWiring, test/deploy/rbac_test.go:TestRBACSufficiency]
+  evidence: docs/verification/runs/2026-10-17-deploy-validation.md
+  notes: >-
+    Every listener computed from the parsed arguments (wiring.md port table) is a declared
+    containerPort and vice versa; every Service selects one pod template and targets declared
+    ports; the headless controller Service carries 8090. The harness reaches every component
+    through its Service mapping and its readiness, liveness and startup probes answer 200.
+
+OPS-010:
+  status: in-progress
+  impl: [deploy/helm/patrol-cd/templates/networkpolicy]
+  tests: [test/deploy/apivalidation_test.go:TestAPIServerDryRun]
+  evidence: docs/verification/runs/2026-10-17-deploy-validation.md
+  notes: >-
+    NetworkPolicies of every profile pass strict server-side validation. Enforcement is NOT
+    EXECUTED (envtest has no CNI).
+
+OPS-016:
+  status: in-progress
+  impl: [deploy/helm/patrol-cd/Chart.yaml]
+  tests: [test/deploy/apivalidation_test.go:TestAPIServerDryRun, test/deploy/podsecurity_test.go:TestPodSecurityRestricted]
+  evidence: docs/verification/runs/2026-10-17-deploy-validation.md
+  notes: >-
+    Validated against kube-apiserver 1.36.0 only (envtest); 1.33-1.35 not run.
+
+OPS-030:
+  status: in-progress
+  impl: [deploy/helm/patrol-cd/templates/_bootstrap.tpl, deploy/helm/patrol-cd/templates/rbac/bootstrap.yaml]
+  tests: [test/deploy/rbac_test.go:TestRBACSufficiency, test/deploy/helmlifecycle_test.go:TestHelmLifecycle]
+  evidence: docs/verification/runs/2026-10-17-deploy-validation.md
+  notes: >-
+    The bootstrap init container runs with the primary pod's service account and the rendered
+    bootstrap Role (server pod, controller pod in core): Secrets created before the main
+    containers start; patrol-server reads the internal token through the API on the first start
+    (optional, still empty token volume). helm upgrade and rollback keep the generated keys;
+    helm uninstall removes patrol-secret (chart-managed) and keeps patrol-internal-token and
+    patrol-initial-admin-secret. A re-install's bootstrap keeps the internal token and replaces
+    the initial admin Secret, which predates the re-rendered patrol-secret (finding DV-6,
+    fixed): new password and Secret UID; the new password logs in through the server's login
+    path (internal/auth), the stale initial password and the password changed before the
+    uninstall do not.
+
+OPS-031:
+  status: in-progress
+  impl: [deploy/helm/patrol-cd/templates/_bootstrap.tpl]
+  tests: [test/deploy/rbac_test.go:TestRBACSufficiency]
+  evidence: docs/verification/runs/2026-10-17-deploy-validation.md
+  notes: >-
+    The password written by the bootstrap init container to patrol-initial-admin-secret logs in
+    to the emulated patrol-server pod (profiles with the admin account enabled).
