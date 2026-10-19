@@ -166,10 +166,12 @@ func TestTemplateLimitsAllowNormalTemplates(t *testing.T) {
 	}
 }
 
-// TestTemplateLimitsDefaultSteps: an unbounded loop stops at the default step limit.
+// TestTemplateLimitsDefaultSteps: an unbounded loop stops at the default step limit. The timeout
+// is raised so that a loaded machine (the full tree runs this under -race next to dozens of
+// other packages) cannot reach the default 10 s before the step limit and fail the test.
 func TestTemplateLimitsDefaultSteps(t *testing.T) {
 	t.Parallel()
-	_, err := renderMessage(t, `{{ range 100000000000 }}{{ end }}`)
+	_, err := renderMessage(t, `{{ range 100000000000 }}{{ end }}`, WithTemplateLimits(TemplateLimits{Timeout: 5 * time.Minute}))
 	if !errors.Is(err, ErrTemplateLimitExceeded) || !strings.Contains(err.Error(), fmt.Sprint(DefaultTemplateMaxSteps)) {
 		t.Fatalf("got %v", err)
 	}
