@@ -27,7 +27,8 @@ overlay: `docs/parity/status/wiring.yaml`.
 
 `patrolcd <component> [flags]` with the components `server`, `controller`, `repo-server`,
 `appset-controller`, `notifications-controller`, `cmp-server`, `commit-server`, plus
-`k8s-auth aws|gcp|azure` (ExecCredential plugin, `internal/clusters/k8sauth`) and `version
+`bootstrap` (first-run Secrets, the init container of the install manifests; see
+[bootstrap.md](bootstrap.md)), `k8s-auth aws|gcp|azure` (ExecCredential plugin, `internal/clusters/k8sauth`) and `version
 [--short] [-o json|wide]`. The image may link the binary under component names (OPS-145):
 `patrol-server`, `patrol-controller`/`patrol-application-controller`, `patrol-repo-server`,
 `patrol-applicationset-controller`/`patrol-appset-controller`,

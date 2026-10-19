@@ -54,7 +54,8 @@ OPS-030:
   notes: >-
     patrol-server calls settings.EnsureServerSecretKey at startup and waits for the signing
     key to reach the settings snapshot. The self-signed certificate is not persisted (see
-    OPS-096) and the initial admin password Secret is not generated here.
+    OPS-096). The initial admin password Secret is created by `patrolcd bootstrap` (see
+    bootstrap.yaml), not by the server.
 
 OPS-040:
   status: implemented

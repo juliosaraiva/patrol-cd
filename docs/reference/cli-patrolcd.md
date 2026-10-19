@@ -49,6 +49,7 @@ Usage:
 
 Available Commands:
   appset-controller        Run the ApplicationSet controller
+  bootstrap                Create the first-run Secrets and the default SSH known hosts when absent
   cmp-server               Run a config management plugin sidecar server
   commit-server            Run the commit-server (source hydrator writes; no Kubernetes access)
   controller               Run the application controller (reconcilers, sharding, tree API, source hydrator)
@@ -429,6 +430,43 @@ Flags:
       --tls-client-ca string          CA bundle requiring and verifying client certificates (mutual TLS)
       --tls-key string                TLS private key file of the listener
       --work-dir string               Directory of per-request clones (an ephemeral volume; default $TMPDIR)
+```
+
+## patrolcd bootstrap
+
+First-run initialisation: the init container of the install manifests and the Helm chart. See [bootstrap.md](../architecture/components/bootstrap.md).
+
+```text
+Creates, in the control-plane namespace, what a fresh installation needs, and keeps existing
+material (one exception: a stale initial admin Secret, below):
+  - patrol-internal-token (key token): the shared token of the internal APIs
+  - patrol-secret key server.secretkey: the session signing key
+  - patrol-secret keys admin.password and admin.passwordMtime, and patrol-initial-admin-secret
+    (key password): the initial admin password, unless patrol-cm sets admin.enabled to false
+    or patrol-secret already holds admin.password. An initial admin Secret older than patrol-secret
+    (left over from an earlier installation) is replaced by a new one
+  - patrol-ssh-known-hosts-cm key ssh_known_hosts: the published host keys of GitHub, Bitbucket Cloud,
+    GitLab.com and Azure DevOps, when the ConfigMap exists without that key (a present key is kept)
+
+Runs are idempotent (a converged namespace is not written to) and safe to run concurrently. The
+install manifests run it as an init container; it can also be run by hand with a kubeconfig.
+Nothing secret is printed: read the initial password with `patrol admin initial-password`.
+Exit status 0 when converged, 1 on failure.
+
+Usage:
+  patrolcd bootstrap [flags]
+
+Flags:
+      --context string         Kubeconfig context to use
+  -h, --help                   help for bootstrap
+      --kubeconfig string      Path to a kubeconfig file (default: in-cluster configuration, else $KUBECONFIG or ~/.kube/config)
+      --logformat string       Log format: json|text (default: json in a pod, text elsewhere)
+      --loglevel string        Log level: debug|info|warn|error (default "info")
+  -n, --namespace string       Control-plane namespace (default: $POD_NAMESPACE, else the pod's service account namespace)
+      --skip-admin             Do not create the initial admin password (admin.password, patrol-initial-admin-secret)
+      --skip-internal-token    Do not create Secret patrol-internal-token
+      --skip-ssh-known-hosts   Do not seed the default known hosts into ConfigMap patrol-ssh-known-hosts-cm
+      --timeout duration       Bound of the whole run, retries of transient failures included (default 1m0s)
 ```
 
 ## patrolcd k8s-auth

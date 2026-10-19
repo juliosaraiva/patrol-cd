@@ -1,0 +1,73 @@
+# patrolcd bootstrap (first-run Secrets: internal token, server.secretkey, initial admin
+# password). See docs/architecture/components/bootstrap.md.
+# Evidence level: unit tests, fake-clientset tests and envtest tests against a real
+# kube-apiserver 1.36 (RBAC authorizer, real Create/Update/Delete arbitration), the real
+# `patrol admin initial-password` command and the server's settings.Parse + auth.Authenticator
+# login path (run record docs/verification/runs/2026-10-18-bootstrap-dv6.md). The chart and
+# the static manifests run it as an init container; test/deploy checked the wiring, Pod
+# Security `restricted` admission of the rendered pods (init container included, dry run)
+# and a run of the init container's command as the pod's service account with the rendered
+# Role, against envtest (docs/verification/runs/2026-10-17-deploy-validation.md, before the
+# DV-6 change). Not run by a kubelet (no image built, no kind cluster: Docker disk full,
+# TASKS.md).
+
+OPS-030:
+  status: in-progress
+  impl: [internal/server/bootstrap_secrets.go, internal/server/bootstrap_cmd.go]
+  tests:
+    - internal/server/bootstrap_secrets_test.go:TestBootstrapFreshInstall
+    - internal/server/bootstrap_secrets_test.go:TestBootstrapConcurrent
+    - internal/server/bootstrap_secrets_test.go:TestBootstrapAdminDisabled
+    - internal/server/bootstrap_secrets_test.go:TestBootstrapKeepsOperatorMaterial
+    - internal/server/bootstrap_stale_test.go:TestBootstrapStaleInitialSecret
+  notes: >-
+    patrolcd bootstrap writes admin.password (bcrypt) and admin.passwordMtime when the admin
+    account is enabled and has no hash, and ensures server.secretkey through
+    settings.EnsureServerSecretKey; 8 concurrent runs converge on one password and one key.
+    After a re-install that re-creates patrol-secret without admin.password, the kept initial
+    password is not re-hashed (DV-6). Missing for the whole feature: the self-signed
+    certificate is not persisted in patrol-secret (generated in memory, see wiring and
+    OPS-096). A hash without mtime is left as is (upstream initializes the mtime), see
+    bootstrap.md "Differences from upstream".
+
+OPS-031:
+  status: implemented
+  impl: [internal/server/bootstrap_secrets.go, internal/cli/admin/password.go]
+  tests:
+    - internal/server/bootstrap_secrets_test.go:TestBootstrapFreshInstall
+    - internal/server/bootstrap_secrets_test.go:TestBootstrapCrashRecovery
+    - internal/server/bootstrap_secrets_test.go:TestBootstrapConcurrent
+    - internal/server/bootstrap_stale_test.go:TestBootstrapStaleInitialSecret
+    - internal/server/bootstrap_stale_test.go:TestBootstrapStaleInitialSecretConcurrent
+    - internal/server/bootstrap_stale_test.go:TestBootstrapStaleTimestamps
+  notes: >-
+    patrol-initial-admin-secret (key password) is created by patrolcd bootstrap with Create
+    (exactly one concurrent run wins); the envtest test runs the real
+    `patrol admin initial-password` command and gets the same password, which logs in as
+    admin. Differences: 24 characters of [A-Za-z0-9] (upstream 16 of [0-9A-Za-z-]); the Secret
+    is never updated in place: when the hash is missing an existing one is reused (crash
+    recovery) unless it was created in an earlier second than patrol-secret, in which case it
+    is deleted (UID precondition) and created again with a new password, as upstream
+    generates a new one (re-install, DV-6; relies on API-server creationTimestamps, see
+    bootstrap.md "Stale initial admin Secret"). Not exercised by a kubelet-run install yet.
+
+TEN-092:
+  status: implemented
+  impl: [internal/server/bootstrap_secrets.go, internal/server/bootstrap_cmd.go]
+  tests:
+    - internal/server/bootstrap_secrets_test.go:TestBootstrapFreshInstall
+    - internal/server/bootstrap_secrets_test.go:TestBootstrapAdminDisabled
+    - internal/server/bootstrap_secrets_test.go:TestBootstrapKeepsOperatorMaterial
+    - internal/server/bootstrap_secrets_test.go:TestBootstrapCrashRecovery
+    - internal/server/bootstrap_secrets_test.go:TestGenerateInitialAdminPassword
+    - internal/server/bootstrap_stale_test.go:TestBootstrapStaleInitialSecret
+  notes: >-
+    Generated when admin is enabled and has no hash (disabled admin, including a malformed
+    admin.enabled value, generates nothing); an existing hash is never regenerated and a
+    re-run writes nothing (resourceVersions unchanged); login verified through settings.Parse
+    and auth.Authenticator. Runs as the separate `patrolcd bootstrap` step (init container),
+    not inside patrol-server. A re-install that re-creates patrol-secret gets a new password
+    (the stale initial Secret is replaced; neither the old initial nor the previously changed
+    password logs in). Intentional differences (bootstrap.md): 24-character [A-Za-z0-9]
+    password, an initial Secret not older than patrol-secret reused instead of regenerated,
+    mtime of an existing hash not initialized.

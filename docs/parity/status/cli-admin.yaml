@@ -132,8 +132,9 @@ OPS-031:
   tests:
     - internal/cli/admin/misc_test.go:TestInitialPassword
   notes: >-
-    CLI part (admin initial-password) verified against envtest; creating
-    patrol-initial-admin-secret at first start belongs to patrol-server.
+    CLI part (admin initial-password) verified against envtest; patrol-initial-admin-secret is
+    created at first start by `patrolcd bootstrap` (see bootstrap.yaml), which the install
+    manifests and the Helm chart run as an init container.
 
 OPS-123:
   status: implemented

@@ -96,6 +96,7 @@ func TestHelpGolden(t *testing.T) {
 		"cmp-server":               {"cmp-server", "--help"},
 		"commit-server":            {"commit-server", "--help"},
 		"k8s-auth":                 {"k8s-auth", "--help"},
+		"bootstrap":                {"bootstrap", "--help"},
 		"version":                  {"version", "--help"},
 	}
 	for name, args := range cases {
@@ -112,6 +113,20 @@ func TestHelpGolden(t *testing.T) {
 			require.NoError(t, err, "run `go test ./cmd/patrolcd -run TestHelpGolden -update` to create the golden files")
 			assert.Equal(t, string(want), r.stdout)
 		})
+	}
+}
+
+// TestBootstrapRegistered checks that `patrolcd --help` lists the first-run bootstrap step
+// the install manifests run as an init container.
+func TestBootstrapRegistered(t *testing.T) {
+	requireBinary(t)
+	r := runBinary(t, binary, fixedEnv(), "", "--help")
+	require.Equal(t, 0, r.code, r.stderr)
+	assert.Contains(t, r.stdout, "\n  bootstrap ")
+	r = runBinary(t, binary, fixedEnv(), "", "bootstrap", "--help")
+	require.Equal(t, 0, r.code, r.stderr)
+	for _, flag := range []string{"--namespace", "--skip-admin", "--skip-internal-token", "--timeout", "--kubeconfig", "--context"} {
+		assert.Contains(t, r.stdout, flag)
 	}
 }
 

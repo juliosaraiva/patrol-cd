@@ -1,8 +1,8 @@
 // Command patrolcd is the Patrol CD control-plane multi-call binary: server, controller,
 // repo-server, appset-controller, notifications-controller, cmp-server, commit-server,
-// k8s-auth and version (docs/reference/cli-patrolcd.md). Libraries re-execute it in hidden
-// helper modes (sandbox rlimits, git askpass, Jsonnet evaluation), which are dispatched
-// before any argument is parsed.
+// k8s-auth, bootstrap (first-run Secrets) and version (docs/reference/cli-patrolcd.md).
+// Libraries re-execute it in hidden helper modes (sandbox rlimits, git askpass, Jsonnet
+// evaluation), which are dispatched before any argument is parsed.
 package main
 
 import (

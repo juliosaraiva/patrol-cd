@@ -10,6 +10,7 @@ Usage:
 
 Available Commands:
   appset-controller        Run the ApplicationSet controller
+  bootstrap                Create the first-run Secrets and the default SSH known hosts when absent
   cmp-server               Run a config management plugin sidecar server
   commit-server            Run the commit-server (source hydrator writes; no Kubernetes access)
   controller               Run the application controller (reconcilers, sharding, tree API, source hydrator)

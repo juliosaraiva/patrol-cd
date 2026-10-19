@@ -315,7 +315,9 @@ REPO-057:
     - internal/reposerver/config_test.go:TestServiceUsesTrustMaterialDefaults
   notes: >-
     Repo-server side only (mounted file re-read on change, passed to SSH credentials; default
-    /app/config/ssh/ssh_known_hosts).
+    /app/config/ssh/ssh_known_hosts). `patrolcd bootstrap` seeds the published host keys of
+    GitHub, Bitbucket Cloud, GitLab.com and Azure DevOps into patrol-ssh-known-hosts-cm when
+    the ConfigMap exists without the key (a present key is never changed).
 
 REPO-058:
   status: implemented

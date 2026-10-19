@@ -1575,8 +1575,8 @@ OPS-030:
     - internal/settings/envtest_test.go:TestEnvtestEnsureServerSecretKeyConcurrent
   notes: >-
     All patrol-secret keys are read; server.secretkey bootstrap with conflict tolerance is
-    implemented. Initial admin password generation and the self-signed certificate are not
-    implemented yet.
+    implemented. Initial admin password generation lives in `patrolcd bootstrap` (see
+    bootstrap.yaml); the self-signed certificate is not persisted (OPS-096).
 
 OPS-037:
   status: in-progress

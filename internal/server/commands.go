@@ -106,6 +106,7 @@ func NewRootCommand() *cobra.Command {
 		newCMPServerCommand(),
 		newCommitServerCommand(),
 		k8sauth.NewCommand(k8sauth.Config{}),
+		newBootstrapCommand(),
 		newVersionCommand(),
 	)
 	return root
