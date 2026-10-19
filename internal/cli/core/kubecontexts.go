@@ -86,5 +86,17 @@ func (d *destinationConfigs) RESTConfig(_ context.Context, c *v1alpha1.Cluster) 
 		}
 		return cfg, nil
 	}
-	return nil, fmt.Errorf("core mode: no kubeconfig context for destination cluster %s; core mode reads live resources with your own kubeconfig credentials", server)
+	return nil, &noContextError{server: server}
 }
+
+// noContextError reports that the caller's kubeconfig has no context for a destination cluster.
+// The in-process API server shows UserMessage to the caller (applications.userMessager) instead
+// of a bare "unavailable": the kubeconfig is the caller's own, so nothing about it is secret.
+type noContextError struct{ server string }
+
+func (e *noContextError) Error() string {
+	return fmt.Sprintf("core mode: no kubeconfig context for destination cluster %s; core mode reads live resources with your own kubeconfig credentials", e.server)
+}
+
+// UserMessage is the text for the caller.
+func (e *noContextError) UserMessage() string { return e.Error() }
