@@ -4,9 +4,12 @@ Status: implemented and tested against a real kube-apiserver (envtest 1.36). The
 and the static manifests run it as an init container of the primary workload; `test/deploy`
 checks that wiring, admits the rendered pods (init container included) under Pod Security
 `restricted`, and runs the init container's command as the pod's service account with the
-rendered Role, all against envtest (see Verification). It has not been run by a kubelet: no
-image was built and no kind cluster started (Docker is blocked on this machine, see
-`TASKS.md`). Decision records:
+rendered Role, all against envtest (see Verification). On 2026-10-19 it ran as the init
+container of patrol-server on a kubelet: the chart's default profile on a local kind cluster
+([run record](../../verification/runs/2026-10-19-kind-validation.md)), where
+`hack/kind/verify-install.sh` asserts its convergence, the initial admin Secret and a login with
+its password, and with `--lifecycle` the DV-6 replacement on a real re-install. The core
+profile (bootstrap on the controller pod) has not run on a kubelet. Decision records:
 [ADR-0006](../adr/0006-internal-apis.md) (internal token),
 [ADR-0009](../adr/0009-authn-authz.md) (local accounts, signing key). Parity IDs: OPS-030
 (admin and signing-key part), OPS-031, TEN-092; status overlay:
@@ -464,8 +467,18 @@ DV-6 change; `test/deploy` was not run for it):
 - `TestHelmLifecycle` runs `patrolcd bootstrap` with the admin kubeconfig after the install
   and after uninstall + re-install.
 
-Not verified: a run by a kubelet (the image builds and its repo-server runs in `docker run`, but
-no kind cluster was started), hence the kubelet's late population of the optional token volume and the
-runtime effect of `readOnlyRootFilesystem` and non-root settings; the stale-Secret
-replacement with the chart's Role during a real re-install; the HA clock-skew case (reasoned
-above, not tested).
+On a kubelet (kind, 2026-10-19, chart default profile, one replica;
+[run record](../../verification/runs/2026-10-19-kind-validation.md)): `hack/kind/verify-install.sh`
+asserts that the init container logged `converged`, that
+`patrol-initial-admin-secret` exists and that its password logs in to the running patrol-server;
+with `--lifecycle`, after a password change through the API, `helm uninstall` and `helm install`,
+that the Secret has a new UID, that the changed and the old initial password are refused and
+that the new one logs in (the stale-Secret replacement with the chart's Role during a real
+re-install). The init container's log of that re-install shows the replacement and 14 default
+known-host entries.
+
+Not verified: the core profile on a kubelet (bootstrap on the controller pod, optional token
+mount); the kubelet's late population of patrol-server's optional token volume (the server
+started normally on kind, but nothing checks the order of events); the runtime effect of
+`readOnlyRootFilesystem` and the non-root settings on the init container itself (the kind checks
+inspect the main containers); the HA clock-skew case (reasoned above, not tested).

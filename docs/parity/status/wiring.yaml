@@ -2,10 +2,12 @@
 # and cmd/patrolcd (multi-call binary). See docs/architecture/components/wiring.md; commands
 # and results in docs/verification/runs/2026-10-16-wiring.txt.
 # Evidence levels: the smoke tests run every entry point against a real kube-apiserver
-# (envtest 1.36, generated CRDs, real Leases) with real HTTP; nothing here was run in a
-# kind cluster (Docker blocked, see TASKS.md), so pod-level behavior (probes, mounts,
-# Services, RBAC) is not verified. A status here can only lower a feature's merged status
-# where another workstream claims more.
+# (envtest 1.36, generated CRDs, real Leases) with real HTTP. The kind validation of
+# 2026-10-19 (docs/verification/runs/2026-10-19-kind-validation.md) ran these entry points as
+# the pods of the chart's default profile (probes, mounts, Services and RBAC in effect;
+# hack/kind/verify-install.sh, see chart.yaml and deploy-validation.yaml); this overlay cites
+# only the envtest smoke tests and raises nothing on that run. A status here can only lower a
+# feature's merged status where another workstream claims more.
 
 OPS-009:
   status: implemented

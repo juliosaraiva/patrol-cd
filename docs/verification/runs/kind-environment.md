@@ -6,8 +6,14 @@ Date: 2026-10-16 (UTC 15:19–15:43; review follow-up 15:57–16:06). Workstream
 ## Result
 
 **Update 2026-10-19:** the disk was freed (build cache and dangling images pruned, 152 GB free
-in the VM, `docs/verification/runs/2026-10-19-image-build.md`). The live kind validation has not
-been re-run since; it is a separate step. The text below is the 2026-10-16 record.
+in the VM, `docs/verification/runs/2026-10-19-image-build.md`) and the validation ran:
+[`2026-10-19-kind-validation.md`](2026-10-19-kind-validation.md). K-01 (clusters, registry, nodes
+Ready) and K-02 (cross-cluster access) passed in `up.sh` and in the smoke run; K-03 (git over
+HTTP and SSH), K-04 (chart repository) and K-05 (OCI chart and bundle) passed in
+`test/e2e/fixtures/smoke.sh --with-registry-image` after two script fixes (KV-4, KV-5); K-06
+(teardown) ran as the first step of the clean-room run. K-07 (`docker build --check` of the
+fixture Dockerfiles) was not run, but the three images built. The statuses in the table below and
+the text after it are the 2026-10-16 record and were not rewritten.
 
 **The live kind validation is blocked.** The Docker Desktop VM's disk is full, so Docker cannot
 create any container or build any image (`no space left on device`). No kind cluster, registry

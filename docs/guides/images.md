@@ -5,9 +5,10 @@ the repo-server runs (ADR-0007). It is built from the repository's `Dockerfile`;
 helper scripts live in `hack/images/`, the make targets in `hack/image.mk`.
 
 Status: built and checked locally for `linux/arm64` on 2026-10-19 (`make image`, then
-`make image-layout-check image-smoke`; see [Verification](#verification)). Not yet done:
-`linux/amd64` and multi-arch builds, the SBOM, vulnerability and license scans, a push, and a run
-on a cluster (kind validation).
+`make image-layout-check image-smoke`; see [Verification](#verification)). The same day it ran
+the five components of the chart's default profile on a local kind cluster
+([run record](../verification/runs/2026-10-19-kind-validation.md)). Not yet done: `linux/amd64`
+and multi-arch builds, the SBOM, vulnerability and license scans, and a push.
 
 ## Contents
 
@@ -231,7 +232,7 @@ notifications-controller metrics. Health is checked by Kubernetes probes; the im
 | `/shared/app` | optional ConfigMap/volume of extra static assets (`--staticassets`) | server |
 
 Other mount paths a chart chooses (e.g. `/app/config/server/tls`, `/var/run/patrol/...`,
-`/var/lib/patrol/repo`) need no directory in the image; the container runtime creates mount points.
+`/var/lib/patrol/repo`) need no directory in the image; the container runtime creates mount points. A volume mount root belongs to root (a Kubernetes emptyDir is world-writable, mode 0777 with the setgid bit for the `fsGroup`, no sticky bit; on kind it showed `drwxrwsrwx root:patrol`), so the repo-server works in a subdirectory `_patrol-repo` it creates there (it refuses a root dir owned by anyone but root or itself, and a `_patrol-repo` that it did not create). The `work` volume must be mounted only into the repo-server container: with a world-writable root, another container mounting it could replace the private directory.
 
 Git and SSH configuration: internal/git runs every git command with `HOME=/dev/null`,
 `GIT_CONFIG_GLOBAL=/dev/null`, no credential helper, hooks disabled and `protocol.ext` refused;
@@ -344,9 +345,10 @@ image (`dexidp/dex`) too when SSO through the bundled Dex is used, and any CMP p
 - GnuPG, SSH and git were exercised in the arm64 image on a read-only root filesystem: the
   repo-server's key import (`gpg --batch --no-autostart --import` into a fresh home) works with
   the image's GnuPG 2.4.9, which ships without `gpg-agent` (import and verification only, no key
-  generation or signing); `ssh -V` and the system gitconfig hardening were checked. Cloning,
-  signature verification of a real signed commit, and SSH to a host are not exercised until the
-  kind e2e run.
+  generation or signing); `ssh -V` and the system gitconfig hardening were checked. On kind
+  (2026-10-19) the repo-server in this image cloned over HTTP with basic auth and over SSH with
+  strict host-key checking (the syncs asserted by `hack/kind/verify-install.sh`). Signature
+  verification of a real signed commit is not exercised.
 - The prebuilt Kustomize 5.8.1 and git-lfs 3.7.1 release binaries were built with Go 1.24.0 and
   1.25.3; scanners may report Go standard library CVEs for them. Rebuilding them from source would
   diverge from the baseline's binaries.

@@ -1312,7 +1312,9 @@ networkPolicy:
       - 443
       - 6443
   # -- Egress of the repo-server to Git, Helm and OCI hosts (narrow cidrs/ports to tighten);
-  # excludeMetadataEndpoints is added to except.
+  # excludeMetadataEndpoints is added to except. Ports are the destination pod's ports after
+  # Service translation: a Git server that listens on 8080 behind a Service on port 80 needs 8080
+  # here (the repo-server's requests to it hang otherwise).
   repoServerEgress:
     cidrs:
       - 0.0.0.0/0

@@ -2,9 +2,11 @@
 # See docs/architecture/components/appset.md. Controller features are exercised with the
 # controller-runtime fake client and, through the real Run entry point, against an envtest
 # kube-apiserver 1.36 (no garbage collector, application controller simulated by writing
-# Application status). The controller is not yet wired into cmd/patrolcd, the API server or the
-# webhook handler, so nothing is marked verified. SCM provider behavior itself is tested in
-# pkg/scm; here only the generator wiring is tested, against pkg/scm/fake.
+# Application status). The controller is wired into cmd/patrolcd (`patrolcd appset-controller`,
+# internal/server/appset.go) and its pod ran on kind (2026-10-19,
+# docs/verification/runs/2026-10-19-kind-validation.md), but no ApplicationSet was created there,
+# so no row here is exercised by that run and nothing is marked verified. SCM provider behavior
+# itself is tested in pkg/scm; here only the generator wiring is tested, against pkg/scm/fake.
 
 ASET-002:
   status: implemented

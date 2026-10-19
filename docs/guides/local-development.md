@@ -45,9 +45,7 @@ The scripts are written for bash 3.2 (macOS `/bin/bash`) and POSIX `sh` (in-cont
 ## Create the clusters
 
 ```bash
-hack/kind/up.sh
-# or, until the root Makefile includes hack/kind/kind.mk:
-make -f Makefile -f hack/kind/kind.mk kind-up
+make kind-up        # = hack/kind/up.sh
 ```
 
 `up.sh` is idempotent. It:
@@ -66,7 +64,63 @@ make -f Makefile -f hack/kind/kind.mk kind-up
 
 Override the node or registry image with `PATROL_KIND_NODE_IMAGE` / `PATROL_REGISTRY_IMAGE`.
 
-Other targets in `hack/kind/kind.mk`: `kind-down`, `kind-load`, `kind-status`, `kind-fixtures`.
+Other targets in `hack/kind/kind.mk`: `kind-down`, `kind-load`, `kind-status`, `kind-fixtures`,
+`kind-install`, `kind-smoke` and `kind-verify`.
+
+## Install Patrol CD and verify it
+
+The full sequence from nothing:
+
+```bash
+make image                    # builds patrol-cd/patrol-cd:dev (kind-install needs it)
+make kind-up kind-fixtures    # clusters, registry, git server, chart repository, OCI artifacts
+make kind-install             # load the image, helm install, register patrol-target and the fixtures
+make kind-verify              # 42 checks against the live clusters
+make kind-verify VERIFY_FLAGS=--lifecycle   # 58 checks: also rollback, password change, uninstall, re-install
+```
+
+`hack/kind/install.sh` loads the image into `patrol-control`, runs
+`helm upgrade --install patrol deploy/helm/patrol-cd` with `hack/kind/values.yaml` (the local
+image, the UI and API on NodePort 30443 = `https://127.0.0.1:8443`, and the extra repo-server
+egress ports below), waits for the workloads, then runs `hack/kind/register-target.sh` and
+`test/e2e/fixtures/patrol/register.sh --with-applications`. The initial admin password is in
+Secret `patrol-initial-admin-secret`. The Applications are synced manually.
+
+The image tag is always `dev`, so after a `make image` the pod templates do not change and helm
+alone would keep the old pods: when the release already exists and an image was loaded,
+`install.sh` restarts the Patrol CD workloads. It also waits until the repo-server sees the
+fixture git server's host key in its mounted known-hosts file (the kubelet refreshes a mounted
+ConfigMap with a delay of about a minute; until then the sync of `e2e-guestbook-ssh` is refused with
+412 `No ED25519 host key is known … strict checking`, KV-12).
+
+`hack/kind/verify-install.sh` is the check list: pods ready without restarts; the user, the
+capability bounding set, `no_new_privs` and the read-only root file system of every component; the bootstrap; the API
+(health, anonymous refusal, login, default project); the repo-server's NetworkPolicy; metrics;
+a sync of every fixture Application through the API with the workloads checked on
+`patrol-target`; and drift detection. With `--lifecycle` it also rolls the release back to
+revision 1 and upgrades it again, changes the admin password through the API, uninstalls and
+re-installs (the CRDs, the Applications and the workloads must survive, the changed and the old
+initial password must be refused and a new initial password must work), and finally registers
+the fixtures again, because the re-install drops the fixture git server's host key, and waits
+until e2e-guestbook-ssh has been compared again. The sync, drift and lifecycle sections change
+state on the clusters; each runs only when every earlier check passed, and a failed lifecycle
+step stops the run with the commands that restore the installation. It prints PASS or FAIL per
+check and exits 1 on any failure.
+
+**NetworkPolicy ports are pod ports.** The chart's policies match the destination pod's port after
+Service translation. The fixtures listen on 8080 (git over HTTP, chart repository) and 2222 (git
+over SSH) behind Services on 80 and 22, and `patrol-registry` listens on 5000, so
+`hack/kind/values.yaml` sets `networkPolicy.repoServerEgress.ports` to
+`[22, 80, 443, 2222, 5000, 8080]`. With the chart's default ports (22, 80, 443) every git and OCI
+request of the repo-server hangs until its timeout. The same applies to any in-cluster Git server,
+registry or chart repository you point Patrol CD at.
+
+The `patrol` CLI in core mode (`patrol --core --kube-context kind-patrol-control app list`)
+works against `patrol-control`. Its commands that read a destination cluster's resources (logs,
+live resources) need a kubeconfig context whose server URL equals the Cluster's `spec.server`;
+the kind Cluster uses the container-network name `https://patrol-target-control-plane:6443`, which
+the host cannot reach, so those commands answer `core mode: no kubeconfig context for destination
+cluster ...` from the host.
 
 ## Kubeconfigs and the context guard
 
@@ -138,7 +192,8 @@ hack/kind/register-target.sh --namespace <patrol-namespace> [--install-crds]
 
 creates, in `patrol-target`, ServiceAccount `kube-system/patrol-manager` bound to
 `cluster-admin` and a TokenRequest token for it (default validity 8760h, `--token-duration`),
-and, in `patrol-control`, Secret `cluster-patrol-target` (keys `bearerToken`, `caData`) plus:
+and, in `patrol-control`, Secret `cluster-patrol-target` (keys `bearerToken`, `caData`, label
+`cd.patrol.example/secret-type=cluster`) plus:
 
 ```yaml
 apiVersion: cd.patrol.example/v1alpha1
@@ -153,9 +208,14 @@ spec:
       name: cluster-patrol-target
 ```
 
-(`hack/kind/manifests/cluster-patrol-target.yaml`). `--install-crds` applies `deploy/crds`
-server-side only when they are not installed yet; otherwise the existing CRDs are left to their
-owner. Applications then target it with `destination.name: patrol-target`.
+(`hack/kind/manifests/cluster-patrol-target.yaml`). Patrol CD reads only Secrets that carry the
+label `cd.patrol.example/secret-type` with the value of the kind that references them (`cluster`
+for a Cluster, `repo-creds` for a RepositoryCredential, `repository` for a Repository; the write
+credential types are in the [CRD reference](../reference/crds.md)). An unlabeled Secret counts
+as missing: before the scripts set the label, every Application reported `ComparisonError:
+credentials secret … not found` (finding KV-2 in `docs/verification/phase4-findings.md`). Label
+Secrets you create by hand the same way. `--install-crds` applies `deploy/crds` server-side only
+when they are not installed yet; otherwise the existing CRDs are left to their owner. Applications then target it with `destination.name: patrol-target`.
 
 ## Local registry
 
@@ -231,15 +291,16 @@ kubectl --kubeconfig "$PATROL_CONTROL_KUBECONFIG" --context "$PATROL_CONTROL_CON
 test/e2e/fixtures/patrol/register.sh --namespace <patrol-namespace> [--with-applications]
 ```
 
-copies the fixture credentials into Secrets `e2e-git-http-creds`, `e2e-git-ssh-creds` and
-`e2e-chart-repo-creds` in the Patrol namespace and applies `patrol/repositories.yaml`
+copies the fixture credentials into Secrets `e2e-git-http-creds`, `e2e-git-ssh-creds` (label
+`cd.patrol.example/secret-type=repo-creds`) and `e2e-chart-repo-creds` (label
+`cd.patrol.example/secret-type=repository`) in the Patrol namespace and applies `patrol/repositories.yaml`
 (credential templates for `/git/` over HTTP and SSH, the Helm repositories and the two OCI
 repositories). `--with-applications` also applies `patrol/applications.yaml`: one manually
 synced Application per source type (plain directory over HTTP and SSH, Helm from git, Kustomize
 overlay, multi-source chart + `$values`, OCI chart, OCI manifests), all with
-`destination.name: patrol-target`. For SSH, add the lines of
-`test/e2e/fixtures/git-server/known_hosts` to the `ssh_known_hosts` key of
-`patrol-ssh-known-hosts-cm`.
+`destination.name: patrol-target`. For SSH, the script appends the lines of
+`test/e2e/fixtures/git-server/known_hosts` (the TEST-ONLY host key) to the `ssh_known_hosts` key
+of `patrol-ssh-known-hosts-cm` when they are missing, keeping the other entries.
 
 ### Webhooks
 
@@ -277,7 +338,7 @@ needs Docker or network access.
 ## Tear down
 
 ```bash
-hack/kind/down.sh        # or: make -f Makefile -f hack/kind/kind.mk kind-down
+make kind-down           # = hack/kind/down.sh
 ```
 
 deletes every kind cluster named `patrol-*`, the `patrol-registry` container (only if it carries

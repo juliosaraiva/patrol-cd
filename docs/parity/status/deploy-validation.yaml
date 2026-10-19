@@ -7,11 +7,17 @@
 # apply). Pods are emulated: envtest has no kubelet, scheduler, controllers or CNI, so the
 # harness runs each rendered patrolcd container as a local process with its service account's
 # token, rendered arguments and environment, and Secret/ConfigMap volumes copied from the API
-# server (deviations listed in the run record). Nothing ran on a cluster with nodes (image build
-# and kind blocked, TASKS.md), so every entry stays in-progress.
+# server (deviations listed in the run record).
 # Second review round (2026-10-18), harness changes and targeted runs:
 # docs/verification/runs/2026-10-18-phase4-review-round2.md; final full-suite result:
 # docs/verification/log.md (V-0027).
+# Kind validation (2026-10-19, docs/verification/runs/2026-10-19-kind-validation.md): the chart's
+# default profile ran on a cluster with nodes and was checked by hack/kind/verify-install.sh
+# (clean-room run 55 of 55 with --lifecycle and the script as it was then, docs/verification/log.md
+# V-0031; closing clean-room run after the review fixes, 58 of 58 checks, V-0032; the other
+# profiles and the static manifests had no committed check on kind (cluster-install was applied
+# once by hand). An entry is raised only where a kind check asserts its whole claim; the others
+# stay in-progress. Limits: kindnet, linux/arm64, one replica per component, Kubernetes v1.36.4.
 
 OPS-001:
   status: in-progress
@@ -32,7 +38,13 @@ OPS-001:
     uninstall (CRDs and admission policy kept) and re-install work against a kube-apiserver;
     install.yaml server-side applies, re-applies without changes and deletes. The rendered
     components run as their service accounts with exactly the rendered RBAC and sync an
-    Application to the local cluster without a denied request. No pod ran on a node.
+    Application to the local cluster without a denied request. In this harness no pod ran on a
+    node. On kind (2026-10-19) the chart's default profile ran with real pods and passed
+    hack/kind/verify-install.sh (see chart.yaml OPS-001); install.yaml (the cluster-install
+    overlay with the local image) was applied to patrol-target only by hand (61 objects, five
+    pods Running, admin login 200 through a port-forward; the controllers waited about a minute
+    for patrol-internal-token with FailedMount events until the server's bootstrap created it),
+    which is not a test, so this entry stays in-progress.
 
 OPS-002:
   status: in-progress
@@ -111,7 +123,14 @@ OPS-009:
     Every listener computed from the parsed arguments (wiring.md port table) is a declared
     containerPort and vice versa; every Service selects one pod template and targets declared
     ports; the headless controller Service carries 8090. The harness reaches every component
-    through its Service mapping and its readiness, liveness and startup probes answer 200.
+    through its Service mapping and its readiness, liveness and startup probes answer 200
+    (emulated pods, no kube-proxy). On kind (2026-10-19, default profile)
+    hack/kind/verify-install.sh reaches patrol-server's https port through NodePort 30443 and
+    the metrics Services patrol-controller-metrics:8082, patrol-server-metrics:8083,
+    patrol-repo-server:8084 and patrol-notifications-controller-metrics:9001 from another
+    namespace; the repo-server's 8081 is used by the syncs but not checked on its own, and the
+    ApplicationSet controller's Service, the HTTP-to-HTTPS redirect and the commit-server and
+    Dex Services were not exercised on kind, so the entry stays in-progress.
 
 OPS-010:
   status: in-progress
@@ -119,8 +138,9 @@ OPS-010:
   tests: [test/deploy/apivalidation_test.go:TestAPIServerDryRun]
   evidence: docs/verification/runs/2026-10-17-deploy-validation.md
   notes: >-
-    NetworkPolicies of every profile pass strict server-side validation. Enforcement is NOT
-    EXECUTED (envtest has no CNI).
+    NetworkPolicies of every profile pass strict server-side validation. This harness does not
+    exercise enforcement (envtest has no CNI); the kind validation of 2026-10-19 exercised the
+    default profile's policies on kindnet, partially (see chart.yaml OPS-010).
 
 OPS-016:
   status: in-progress
@@ -128,7 +148,8 @@ OPS-016:
   tests: [test/deploy/apivalidation_test.go:TestAPIServerDryRun, test/deploy/podsecurity_test.go:TestPodSecurityRestricted]
   evidence: docs/verification/runs/2026-10-17-deploy-validation.md
   notes: >-
-    Validated against kube-apiserver 1.36.0 only (envtest); 1.33-1.35 not run.
+    Validated against kube-apiserver 1.36.0 (envtest); the kind validation of 2026-10-19 used
+    v1.36.4 nodes. 1.33-1.35 not run.
 
 OPS-030:
   status: in-progress
@@ -145,13 +166,29 @@ OPS-030:
     the initial admin Secret, which predates the re-rendered patrol-secret (finding DV-6,
     fixed): new password and Secret UID; the new password logs in through the server's login
     path (internal/auth), the stale initial password and the password changed before the
-    uninstall do not.
+    uninstall do not. On kind (2026-10-19, default profile, server pod only)
+    hack/kind/verify-install.sh asserts that the init container converged and created
+    patrol-initial-admin-secret, and with --lifecycle the DV-6 behavior through the running
+    server: after a password change through the API, helm uninstall and install, the Secret has a
+    new UID, the changed and the old initial passwords get 401 and the new one 200. The internal
+    token surviving the uninstall was observed by hand only, and the core profile (bootstrap on
+    the controller pod, optional token mount) never ran on a kubelet, so the entry stays
+    in-progress.
 
 OPS-031:
-  status: in-progress
+  status: verified
   impl: [deploy/helm/patrol-cd/templates/_bootstrap.tpl]
-  tests: [test/deploy/rbac_test.go:TestRBACSufficiency]
-  evidence: docs/verification/runs/2026-10-17-deploy-validation.md
+  tests:
+    - test/deploy/rbac_test.go:TestRBACSufficiency
+    - hack/kind/verify-install.sh:bootstrap (the init container converged; patrol-initial-admin-secret exists)
+    - hack/kind/verify-install.sh:api (admin login with the Secret's password returns 200 from the running patrol-server through NodePort 30443)
+    - hack/kind/verify-install.sh --lifecycle (after helm uninstall and install the regenerated Secret's password logs in; the old initial and the changed password get 401)
+  evidence: docs/verification/runs/2026-10-19-kind-validation.md; docs/verification/runs/2026-10-17-deploy-validation.md
   notes: >-
     The password written by the bootstrap init container to patrol-initial-admin-secret logs in
-    to the emulated patrol-server pod (profiles with the admin account enabled).
+    to the emulated patrol-server pod (profiles with the admin account enabled, envtest) and,
+    on kind (2026-10-19), to the real patrol-server pod of the chart's default profile, read
+    from the Secret with kubectl and sent only through pipes. Limits: default profile only (the
+    other admin-enabled profiles ran emulated), one replica, kindnet, linux/arm64. The
+    `patrol admin initial-password` command was not run on kind (envtest only, bootstrap.yaml
+    and cli-admin.yaml).

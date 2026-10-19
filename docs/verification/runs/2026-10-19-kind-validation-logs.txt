@@ -1,0 +1,1106 @@
+Verbatim excerpts of the session logs of the 2026-10-19 kind validation
+(docs/verification/runs/2026-10-19-kind-validation.md). The raw logs were written to the
+session scratchpad (kind/*.log, kind/*.start) and are not committed; the lines below are copied
+unchanged from them. Lines that only print local kubeconfig paths are omitted and marked.
+No password, token or key value appears in any of these logs (passwords travel through files
+and pipes only). Times are UTC unless a line says otherwise (helm prints local time, UTC-3).
+
+====================================================================================================
+1. Start/end stamps written around the session commands (`date -u` before and after)
+up.start = hack/kind/up.sh; fix.start = test/e2e/fixtures/deploy.sh (second run, after KV-4);
+smoke.start = smoke.sh (first run); install.start = the first `helm install ... --wait` (section 8;
+the second stamp was written when that command returned).
+----------------------------------------------------------------------------------------------------
+up.start: 2026-10-19T12:56:36Z
+up.start: 2026-10-19T12:58:11Z
+fix.start: 2026-10-19T12:59:48Z
+fix.start: 2026-10-19T13:00:34Z
+smoke.start: 2026-10-19T13:00:46Z
+smoke.start: 2026-10-19T13:00:55Z
+install.start: 2026-10-19T13:01:49Z
+install.start: 2026-10-19T13:07:39Z
+
+====================================================================================================
+2. hack/kind/up.sh (kind/up.log, last lines)
+
+----------------------------------------------------------------------------------------------------
+[patrol-kind] waiting for patrol-control nodes and CoreDNS
+[patrol-kind] waiting for patrol-target nodes and CoreDNS
+[patrol-kind] cross-cluster check passed: patrol-control-control-plane -> https://patrol-target-control-plane:6443 (TLS verified)
+[patrol-kind] ready
+
+  registry        host localhost:5001, kind network patrol-registry:5000
+
+  eval "$(hack/kind/env.sh)"   # exports PATROL_CONTROL_KUBECONFIG, PATROL_TARGET_KUBECONFIG, ...
+exit=0
+[3 line(s) with local file paths omitted]
+
+====================================================================================================
+3. test/e2e/fixtures/deploy.sh, second run (kind/fixtures.log, last lines)
+The first run (stopped after 1 s, finding KV-4) was not logged.
+----------------------------------------------------------------------------------------------------
+e2e fixtures ready in patrol-control, namespace patrol-e2e:
+  git (basic auth)   http://git-server.patrol-e2e.svc.cluster.local/git/<repo>.git
+  git (anonymous)    http://git-server.patrol-e2e.svc.cluster.local/public/<repo>.git
+  git (ssh)          ssh://git@git-server.patrol-e2e.svc.cluster.local/git/<repo>.git
+  helm repo          http://chart-repo.patrol-e2e.svc.cluster.local  (and /private with basic auth)
+  OCI (pods)         oci://patrol-registry:5000/patrol-e2e/charts/helm-guestbook
+                     oci://patrol-registry:5000/patrol-e2e/manifests/guestbook
+  smoke test         test/e2e/fixtures/smoke.sh
+exit=0
+
+====================================================================================================
+4. test/e2e/fixtures/smoke.sh --with-registry-image, first run (kind/smoke.log)
+
+----------------------------------------------------------------------------------------------------
+PASS  cross-cluster    patrol-target API reachable from a patrol-control pod: node/patrol-target-control-plane
+PASS  git-http-auth    clone, ls-remote and push with basic auth OK; anonymous refused
+PASS  git-http-public  anonymous clone OK; anonymous push refused
+PASS  git-ssh          clone over SSH with strict host key checking OK
+FAIL  helm-repo
+      Error: open /tmp/tmp.cpAMDO/charts/helm-guestbook-0.1.0.tgz2106702741: no such file or directory
+      command terminated with exit code 1
+FAIL  oci
+      Pulled: patrol-registry:5000/patrol-e2e/charts/helm-guestbook:0.1.0
+      Digest: sha256:2fe4514b0797c02c885d89cca74f1944c6c633bb36fe6d021584c29edadc593d
+      Error: open charts/helm-guestbook-0.1.0.tgz1275101502: no such file or directory
+      command terminated with exit code 1
+[patrol-kind] pushing localhost:5001/patrol-cd/e2e-toolbox:dev
+PASS  registry-image   patrol-control pulled and ran localhost:5001/patrol-cd/e2e-toolbox:dev
+PASS  registry-image   patrol-target pulled and ran localhost:5001/patrol-cd/e2e-toolbox:dev
+smoke: 6 passed, 2 failed (helm-repo oci)
+exit=1
+
+====================================================================================================
+5. smoke.sh after the KV-5 fix (kind/smoke2.log)
+
+----------------------------------------------------------------------------------------------------
+PASS  cross-cluster    patrol-target API reachable from a patrol-control pod: node/patrol-target-control-plane
+PASS  git-http-auth    clone, ls-remote and push with basic auth OK; anonymous refused
+PASS  git-http-public  anonymous clone OK; anonymous push refused
+PASS  git-ssh          clone over SSH with strict host key checking OK
+PASS  helm-repo        helm repo add/pull OK (anonymous and basic auth)
+PASS  oci              OCI chart and manifest bundle pulled from patrol-registry:5000
+[patrol-kind] pushing localhost:5001/patrol-cd/e2e-toolbox:dev
+PASS  registry-image   patrol-control pulled and ran localhost:5001/patrol-cd/e2e-toolbox:dev
+PASS  registry-image   patrol-target pulled and ran localhost:5001/patrol-cd/e2e-toolbox:dev
+smoke: 8 passed, 0 failed
+
+====================================================================================================
+6. test/e2e/fixtures/test-scripts.sh against the scripts before the KV-2 fix, with the new assertions (kind/test-scripts-old.log, FAIL and summary lines)
+
+----------------------------------------------------------------------------------------------------
+FAIL  Secret is labeled cd.patrol.example/secret-type=cluster        want ok got fail
+FAIL  Secret e2e-git-http-creds is labeled secret-type=repo-creds    want ok got fail
+FAIL  Secret e2e-git-ssh-creds is labeled secret-type=repo-creds     want ok got fail
+FAIL  Secret e2e-chart-repo-creds is labeled secret-type=repository  want ok got fail
+test-scripts: 34 passed, 4 failed
+
+====================================================================================================
+7. test-scripts.sh after the KV-2 fix (kind/test-scripts.log, summary) and after the KV-6 change (kind/test-scripts2.log, host-key assertion and summary)
+
+----------------------------------------------------------------------------------------------------
+test-scripts: 38 passed, 0 failed
+PASS  known hosts hold the fixture host key (4 names, once each)     (ok) 
+test-scripts: 39 passed, 0 failed
+
+====================================================================================================
+8. First helm install, by hand (kind/install.log, head and exit status)
+
+----------------------------------------------------------------------------------------------------
+NAME: patrol
+LAST DEPLOYED: Mon Oct 19 10:01:49 2026
+NAMESPACE: patrol
+STATUS: deployed
+REVISION: 1
+DESCRIPTION: Install complete
+TEST SUITE: None
+helm-exit=0
+
+====================================================================================================
+9. Re-install of step 13, by hand (kind/reinstall.log, head)
+
+----------------------------------------------------------------------------------------------------
+NAME: patrol
+LAST DEPLOYED: Mon Oct 19 10:29:39 2026
+NAMESPACE: patrol
+STATUS: deployed
+REVISION: 1
+DESCRIPTION: Install complete
+TEST SUITE: None
+
+====================================================================================================
+10. make kind-install on the environment of steps 1-15 (kind/kind-install.log)
+register.sh printed no 'added the fixture git server's host key' line: the key was already present.
+----------------------------------------------------------------------------------------------------
+hack/kind/install.sh
+[patrol-kind] loading patrol-cd/patrol-cd:dev into patrol-control
+Image: "patrol-cd/patrol-cd:dev" with ID "sha256:3854fe0e9d450db36b3396ccb9b7c6fa480a15c5488215f33b18343beec9714a" not yet present on node "patrol-control-worker", loading...
+Image: "patrol-cd/patrol-cd:dev" with ID "sha256:3854fe0e9d450db36b3396ccb9b7c6fa480a15c5488215f33b18343beec9714a" not yet present on node "patrol-control-control-plane", loading...
+[patrol-kind] helm upgrade --install patrol into patrol-control/patrol (values: hack/kind/values.yaml)
+[patrol-kind] creating ServiceAccount kube-system/patrol-manager in patrol-target
+[patrol-kind] writing Secret patrol/cluster-patrol-target and Cluster patrol/patrol-target in patrol-control
+[patrol-kind] registered: Cluster patrol/patrol-target -> https://patrol-target-control-plane:6443 (token valid for 8760h)
+[patrol-kind] wrote Secret patrol/e2e-git-http-creds
+[patrol-kind] wrote Secret patrol/e2e-git-ssh-creds
+[patrol-kind] wrote Secret patrol/e2e-chart-repo-creds
+repositorycredential.cd.patrol.example/e2e-git-http serverside-applied
+repositorycredential.cd.patrol.example/e2e-git-ssh serverside-applied
+repository.cd.patrol.example/e2e-git-public-guestbook serverside-applied
+repository.cd.patrol.example/e2e-helm serverside-applied
+repository.cd.patrol.example/e2e-helm-private serverside-applied
+repository.cd.patrol.example/e2e-oci-chart serverside-applied
+repository.cd.patrol.example/e2e-oci-manifests serverside-applied
+application.cd.patrol.example/e2e-guestbook serverside-applied
+application.cd.patrol.example/e2e-guestbook-ssh serverside-applied
+application.cd.patrol.example/e2e-helm-git serverside-applied
+application.cd.patrol.example/e2e-kustomize-staging serverside-applied
+application.cd.patrol.example/e2e-multi-source serverside-applied
+application.cd.patrol.example/e2e-oci-chart serverside-applied
+application.cd.patrol.example/e2e-oci-manifests serverside-applied
+[patrol-kind] registered e2e fixtures in namespace patrol
+
+Patrol CD is installed in patrol-control/patrol.
+  UI / API   https://127.0.0.1:8443   (self-signed certificate; user: admin)
+  Applications are synced manually: POST /api/v1/applications/NAME/sync, or the UI.
+[1 line(s) with local file paths omitted]
+
+====================================================================================================
+11. First run of hack/kind/verify-install.sh, no --lifecycle (kind/verify1.log)
+
+----------------------------------------------------------------------------------------------------
+== pods
+PASS  pods     number of Patrol pods
+PASS  pods     all Running, ready, 0 restarts
+== security (effective, inside each pod)
+PASS  security patrol-server: uid, capabilities, no_new_privs, root fs
+PASS  security patrol-repo-server: uid, capabilities, no_new_privs, root fs
+PASS  security patrol-applicationset-controller: uid, capabilities, no_new_privs, root fs
+PASS  security patrol-notifications-controller: uid, capabilities, no_new_privs, root fs
+PASS  security patrol-controller: uid, capabilities, no_new_privs, root fs
+== bootstrap
+PASS  bootstrap init container converged
+PASS  bootstrap initial admin Secret exists
+== api (https://127.0.0.1:8443)
+PASS  api      /healthz
+PASS  api      anonymous project list is refused
+PASS  api      admin login with the initial password
+PASS  api      default AppProject exists
+== netpol (repo-server egress)
+PASS  netpol   git-server Service port 80 (pod port 8080) is allowed
+PASS  netpol   git-server Service port 22 (pod port 2222) is allowed
+PASS  netpol   patrol-registry:5000 is allowed
+PASS  netpol   the Kubernetes API is refused
+PASS  netpol   the controller (port 8090) is refused
+== metrics (scraped from namespace patrol-e2e)
+PASS  metrics  patrol-controller-metrics:8082
+PASS  metrics  patrol-server-metrics:8083
+PASS  metrics  patrol-repo-server:8084
+PASS  metrics  patrol-notifications-controller-metrics:9001
+== sync (through the API)
+PASS  sync     fixture Applications registered
+PASS  sync     e2e-guestbook: sync request accepted
+PASS  sync     e2e-guestbook-ssh: sync request accepted
+PASS  sync     e2e-helm-git: sync request accepted
+PASS  sync     e2e-kustomize-staging: sync request accepted
+PASS  sync     e2e-multi-source: sync request accepted
+PASS  sync     e2e-oci-chart: sync request accepted
+PASS  sync     e2e-oci-manifests: sync request accepted
+PASS  sync     e2e-guestbook: Synced/Healthy/Succeeded
+PASS  sync     e2e-guestbook-ssh: Synced/Healthy/Succeeded
+PASS  sync     e2e-helm-git: Synced/Healthy/Succeeded
+PASS  sync     e2e-kustomize-staging: Synced/Healthy/Succeeded
+PASS  sync     e2e-multi-source: Synced/Healthy/Succeeded
+PASS  sync     e2e-oci-chart: Synced/Healthy/Succeeded
+PASS  sync     e2e-oci-manifests: Synced/Healthy/Succeeded
+PASS  sync     workloads on patrol-target are fully available
+== drift
+PASS  drift    scaling a Deployment on patrol-target is reported OutOfSync
+PASS  drift    a resync restores Synced/Healthy
+PASS  drift    and the replica count of 1
+
+verify-install: 41 passed, 0 failed
+
+====================================================================================================
+12. Clean-room run (kind/cleanroom.log): step stamps of the wrapper, then the verify-install output
+Wrapper: for each of make kind-down, make image, make kind-up, make kind-fixtures, make kind-install,
+make kind-verify VERIFY_FLAGS=--lifecycle: print a UTC stamp, run it, print its duration; stop on the
+first failure; print the exit status.
+----------------------------------------------------------------------------------------------------
+##### 2026-10-19T13:59:26Z  make kind-down
+##### 2026-10-19T13:59:31Z  done: make kind-down in 5s
+##### 2026-10-19T13:59:31Z  make image
+##### 2026-10-19T13:59:51Z  done: make image in 20s
+##### 2026-10-19T13:59:51Z  make kind-up
+##### 2026-10-19T14:01:03Z  done: make kind-up in 72s
+##### 2026-10-19T14:01:03Z  make kind-fixtures
+##### 2026-10-19T14:01:38Z  done: make kind-fixtures in 35s
+##### 2026-10-19T14:01:38Z  make kind-install
+[patrol-kind] added the fixture git server's host key to ConfigMap patrol/patrol-ssh-known-hosts-cm
+##### 2026-10-19T14:02:03Z  done: make kind-install in 25s
+##### 2026-10-19T14:02:03Z  make kind-verify VERIFY_FLAGS=--lifecycle
+== pods
+PASS  pods     number of Patrol pods
+PASS  pods     all Running, ready, 0 restarts
+== security (effective, inside each pod)
+PASS  security patrol-server: uid, capabilities, no_new_privs, root fs
+PASS  security patrol-repo-server: uid, capabilities, no_new_privs, root fs
+PASS  security patrol-applicationset-controller: uid, capabilities, no_new_privs, root fs
+PASS  security patrol-notifications-controller: uid, capabilities, no_new_privs, root fs
+PASS  security patrol-controller: uid, capabilities, no_new_privs, root fs
+== bootstrap
+PASS  bootstrap init container converged
+PASS  bootstrap initial admin Secret exists
+== api (https://127.0.0.1:8443)
+PASS  api      /healthz
+PASS  api      anonymous project list is refused
+PASS  api      admin login with the initial password
+PASS  api      default AppProject exists
+== netpol (repo-server egress)
+PASS  netpol   git-server Service port 80 (pod port 8080) is allowed
+PASS  netpol   git-server Service port 22 (pod port 2222) is allowed
+PASS  netpol   patrol-registry:5000 is allowed
+PASS  netpol   the Kubernetes API is refused
+PASS  netpol   the controller (port 8090) is refused
+== metrics (scraped from namespace patrol-e2e)
+PASS  metrics  patrol-controller-metrics:8082
+PASS  metrics  patrol-server-metrics:8083
+PASS  metrics  patrol-repo-server:8084
+PASS  metrics  patrol-notifications-controller-metrics:9001
+== sync (through the API)
+PASS  sync     fixture Applications registered
+PASS  sync     e2e-guestbook: sync request accepted
+PASS  sync     e2e-guestbook-ssh: sync request accepted
+PASS  sync     e2e-helm-git: sync request accepted
+PASS  sync     e2e-kustomize-staging: sync request accepted
+PASS  sync     e2e-multi-source: sync request accepted
+PASS  sync     e2e-oci-chart: sync request accepted
+PASS  sync     e2e-oci-manifests: sync request accepted
+PASS  sync     e2e-guestbook: Synced/Healthy/Succeeded
+PASS  sync     e2e-guestbook-ssh: Synced/Healthy/Succeeded
+PASS  sync     e2e-helm-git: Synced/Healthy/Succeeded
+PASS  sync     e2e-kustomize-staging: Synced/Healthy/Succeeded
+PASS  sync     e2e-multi-source: Synced/Healthy/Succeeded
+PASS  sync     e2e-oci-chart: Synced/Healthy/Succeeded
+PASS  sync     e2e-oci-manifests: Synced/Healthy/Succeeded
+PASS  sync     workloads on patrol-target are fully available
+== drift
+PASS  drift    scaling a Deployment on patrol-target is reported OutOfSync
+PASS  drift    a new sync operation restores Synced/Healthy
+PASS  drift    and the replica count of 1
+== lifecycle (helm rollback, password change, uninstall, re-install)
+PASS  lifecycle helm rollback to revision 1
+PASS  lifecycle helm upgrade back to the kind values
+PASS  lifecycle admin password changed through the API
+PASS  lifecycle login with the changed password
+PASS  lifecycle login with the old initial password is refused
+PASS  lifecycle helm uninstall
+PASS  lifecycle CRDs survive the uninstall
+PASS  lifecycle Applications survive the uninstall
+PASS  lifecycle helm install again
+PASS  lifecycle a new initial admin Secret was generated (new UID)
+PASS  lifecycle login with the changed password is refused
+PASS  lifecycle login with the old initial password is refused
+PASS  lifecycle login with the new initial password
+PASS  lifecycle workloads on patrol-target keep running
+
+verify-install: 55 passed, 0 failed
+
+##### 2026-10-19T14:05:05Z  done: make kind-verify VERIFY_FLAGS=--lifecycle in 182s
+
+##### 2026-10-19T14:05:05Z  cleanroom exit=0
+exit=0
+
+====================================================================================================
+13. make kind-verify (no --lifecycle) after the clean room, with the script edited in between (kind/verify-final.log; file time 2026-10-19T14:16:12Z)
+
+----------------------------------------------------------------------------------------------------
+hack/kind/verify-install.sh 
+== pods
+PASS  pods     number of Patrol pods
+PASS  pods     all Running, ready, 0 restarts
+== security (effective, inside each pod)
+PASS  security patrol-server: uid, capabilities, no_new_privs, root fs
+PASS  security patrol-repo-server: uid, capabilities, no_new_privs, root fs
+PASS  security patrol-applicationset-controller: uid, capabilities, no_new_privs, root fs
+PASS  security patrol-notifications-controller: uid, capabilities, no_new_privs, root fs
+PASS  security patrol-controller: uid, capabilities, no_new_privs, root fs
+== bootstrap
+PASS  bootstrap init container converged
+PASS  bootstrap initial admin Secret exists
+== api (https://127.0.0.1:8443)
+PASS  api      /healthz
+PASS  api      anonymous project list is refused
+PASS  api      admin login with the initial password
+PASS  api      default AppProject exists
+== netpol (repo-server egress)
+PASS  netpol   git-server Service port 80 (pod port 8080) is allowed
+PASS  netpol   git-server Service port 22 (pod port 2222) is allowed
+PASS  netpol   patrol-registry:5000 is allowed
+PASS  netpol   the Kubernetes API is refused
+PASS  netpol   the controller (port 8090) is refused
+== metrics (scraped from namespace patrol-e2e)
+PASS  metrics  patrol-controller-metrics:8082
+PASS  metrics  patrol-server-metrics:8083
+PASS  metrics  patrol-repo-server:8084
+PASS  metrics  patrol-notifications-controller-metrics:9001
+== sync (through the API)
+PASS  sync     fixture Applications registered
+FAIL  sync     e2e-guestbook-ssh: no comparison result (status Unknown/Healthy)
+PASS  sync     e2e-guestbook: sync request accepted
+FAIL  sync     e2e-guestbook-ssh: sync request accepted: got '412', want '200'
+PASS  sync     e2e-helm-git: sync request accepted
+PASS  sync     e2e-kustomize-staging: sync request accepted
+PASS  sync     e2e-multi-source: sync request accepted
+PASS  sync     e2e-oci-chart: sync request accepted
+PASS  sync     e2e-oci-manifests: sync request accepted
+PASS  sync     e2e-guestbook: Synced/Healthy/Succeeded
+FAIL  sync     e2e-guestbook-ssh: Synced/Healthy/Succeeded: got 'Unknown/Healthy/Succeeded', want 'Synced/Healthy/Succeeded'
+PASS  sync     e2e-helm-git: Synced/Healthy/Succeeded
+PASS  sync     e2e-kustomize-staging: Synced/Healthy/Succeeded
+PASS  sync     e2e-multi-source: Synced/Healthy/Succeeded
+PASS  sync     e2e-oci-chart: Synced/Healthy/Succeeded
+PASS  sync     e2e-oci-manifests: Synced/Healthy/Succeeded
+PASS  sync     workloads on patrol-target are fully available
+== drift
+PASS  drift    scaling a Deployment on patrol-target is reported OutOfSync
+PASS  drift    a new sync operation restores Synced/Healthy
+PASS  drift    and the replica count of 1
+
+verify-install: 39 passed, 3 failed
+make: *** [hack/kind/kind.mk:39: kind-verify] Error 1
+
+====================================================================================================
+14. Read-only observations of the live patrol-control cluster, 2026-10-19 about 15:00Z
+Commands as listed, run from the repository root with KUBECONFIG=.cache/kind/patrol-control.kubeconfig.
+The bootstrap log is printed through jq with only its time, level, msg, entries and duration fields.
+----------------------------------------------------------------------------------------------------
+$ date -u
+Mon Oct 19 15:04:55 UTC 2026
+$ helm version --short
+v4.3.1+gc0d08d0
+$ kubectl -n patrol get cm patrol-ssh-known-hosts-cm --show-managed-fields -o jsonpath='{.metadata.creationTimestamp}{"\n"}{range .metadata.managedFields[*]}{.manager}{" "}{.operation}{" "}{.time}{"\n"}{end}'
+2026-10-19T14:04:50Z
+helm Apply 2026-10-19T14:04:50Z
+patrol-e2e Apply 2026-10-19T14:16:35Z
+patrolcd-bootstrap Update 2026-10-19T14:04:52Z
+$ helm --kubeconfig .cache/kind/patrol-control.kubeconfig -n patrol history patrol
+REVISION	UPDATED                 	STATUS  	CHART          	APP VERSION	DESCRIPTION     
+1       	Mon Oct 19 11:04:49 2026	deployed	patrol-cd-0.1.0	0.1.0      	Install complete
+$ kubectl get applications.cd.patrol.example -A -o 'custom-columns=NAME:.metadata.name,SYNC:.status.sync.status,HEALTH:.status.health.status,OP:.status.operationState.phase'
+NAME                    SYNC     HEALTH    OP
+e2e-guestbook           Synced   Healthy   Succeeded
+e2e-guestbook-ssh       Synced   Healthy   Succeeded
+e2e-helm-git            Synced   Healthy   Succeeded
+e2e-kustomize-staging   Synced   Healthy   Succeeded
+e2e-multi-source        Synced   Healthy   Succeeded
+e2e-oci-chart           Synced   Healthy   Succeeded
+e2e-oci-manifests       Synced   Healthy   Succeeded
+$ kubectl -n patrol logs deploy/patrol-server -c bootstrap | jq -c '{time, level, msg, entries, duration}'
+{"time":"2026-10-19T14:04:52.337647676Z","level":"INFO","msg":"starting","entries":null,"duration":null}
+{"time":"2026-10-19T14:04:52.347909551Z","level":"INFO","msg":"internal token present; unchanged","entries":null,"duration":null}
+{"time":"2026-10-19T14:04:52.354514634Z","level":"INFO","msg":"initialized server signature","entries":null,"duration":null}
+{"time":"2026-10-19T14:04:52.362562093Z","level":"INFO","msg":"seeded the default known hosts","entries":14,"duration":null}
+{"time":"2026-10-19T14:04:52.368118051Z","level":"WARN","msg":"initial admin password Secret predates patrol-secret (re-created without admin.password, e.g. by a re-install); deleted it, generating a new initial admin password","entries":null,"duration":null}
+{"time":"2026-10-19T14:04:52.370056009Z","level":"INFO","msg":"generated the initial admin password","entries":null,"duration":null}
+{"time":"2026-10-19T14:04:52.456658218Z","level":"INFO","msg":"stored the initial admin password hash","entries":null,"duration":null}
+{"time":"2026-10-19T14:04:52.456698843Z","level":"INFO","msg":"converged","entries":null,"duration":119000000}
+$ kubectl -n patrol get pods -o 'custom-columns=NAME:.metadata.name,STARTED:.status.startTime,RESTARTS:.status.containerStatuses[0].restartCount'
+NAME                                               STARTED                RESTARTS
+patrol-applicationset-controller-8fbcf756c-lkfbv   2026-10-19T14:04:51Z   1
+patrol-controller-0                                2026-10-19T14:04:51Z   0
+patrol-notifications-controller-6787cb5d55-q24j7   2026-10-19T14:04:51Z   1
+patrol-repo-server-6fbb64678-tjqcz                 2026-10-19T14:04:51Z   0
+patrol-server-56d6db448b-8vnr8                     2026-10-19T14:04:51Z   0
+$ kubectl -n patrol logs deploy/patrol-applicationset-controller --previous | tail -n 1
+Error: applicationset-controller: running applicationset controller: leader election lost
+$ kubectl -n patrol logs deploy/patrol-notifications-controller --previous | grep -E 'leader|lease' | tail -n 3
+E1019 14:39:23.194698      11 leaderelection.go:323] "error retrieving resource lock" err="Get \"https://10.96.0.1:443/apis/coordination.k8s.io/v1/namespaces/patrol/leases/patrol-notifications-controller?timeout=5s\": context deadline exceeded (Client.Timeout exceeded while awaiting headers)" lock="patrol/patrol-notifications-controller"
+{"time":"2026-10-19T14:39:23.195785843Z","level":"ERROR","msg":"component task failed; shutting down","component":"notifications-controller","task":"notifications-controller","error":"running notifications controller: leader election lost"}
+Error: notifications-controller: running notifications controller: leader election lost
+$ grep -c '^kind:' deploy/manifests/install.yaml
+61
+$ grep -c '^kind: Repository$' test/e2e/fixtures/patrol/repositories.yaml
+5
+$ grep -c '^kind: RepositoryCredential$' test/e2e/fixtures/patrol/repositories.yaml
+2
+$ grep -c '^kind: Application$' test/e2e/fixtures/patrol/applications.yaml
+7
+
+====================================================================================================
+15. After the second review: make kind-install on the existing release (kind/install-rerun.log, tail)
+The workloads were restarted for the loaded image and the run waited for the repo-server to see the host key.
+----------------------------------------------------------------------------------------------------
+Image: "patrol-cd/patrol-cd:dev" with ID "sha256:e125557cb020d1fdfccdac918f070f2bba913179761db6f582ce2b8400ccc099" not yet present on node "patrol-control-worker", loading...
+[patrol-kind] helm upgrade --install patrol into patrol-control/patrol (values: hack/kind/values.yaml)
+[patrol-kind] restarting the Patrol CD workloads to pick up the loaded image
+[patrol-kind] creating ServiceAccount kube-system/patrol-manager in patrol-target
+[patrol-kind] writing Secret patrol/cluster-patrol-target and Cluster patrol/patrol-target in patrol-control
+[patrol-kind] registered: Cluster patrol/patrol-target -> https://patrol-target-control-plane:6443 (token valid for 8760h)
+[patrol-kind] wrote Secret patrol/e2e-git-http-creds
+[patrol-kind] wrote Secret patrol/e2e-git-ssh-creds
+[patrol-kind] wrote Secret patrol/e2e-chart-repo-creds
+[patrol-kind] registered e2e fixtures in namespace patrol
+[patrol-kind] waiting for the repo-server to see the fixture git server's host key (the kubelet refreshes mounted ConfigMaps with a delay)
+
+Patrol CD is installed in patrol-control/patrol.
+  UI / API   https://127.0.0.1:8443   (self-signed certificate; user: admin)
+  Applications are synced manually: POST /api/v1/applications/NAME/sync, or the UI.
+make kind-install  6.45s user 3.63s system 38% cpu 25.916 total
+exit=0
+[1 line(s) with local file paths omitted]
+
+====================================================================================================
+16. verify-install.sh on the live installation, default sections, after the review fixes (kind/verify-rerun2.log)
+The installation had been synced before: every Application showed Synced/Healthy/Succeeded from an earlier
+operation, and the check still required a new operation per Application.
+----------------------------------------------------------------------------------------------------
+== pods
+PASS  pods     number of Patrol pods
+PASS  pods     all Running, ready, 0 restarts
+== security (effective, inside each pod)
+PASS  security patrol-server: uid, capability bounding set, no_new_privs, root fs
+PASS  security patrol-repo-server: uid, capability bounding set, no_new_privs, root fs
+PASS  security patrol-applicationset-controller: uid, capability bounding set, no_new_privs, root fs
+PASS  security patrol-notifications-controller: uid, capability bounding set, no_new_privs, root fs
+PASS  security patrol-controller: uid, capability bounding set, no_new_privs, root fs
+== bootstrap
+PASS  bootstrap init container converged
+PASS  bootstrap initial admin Secret exists
+== api (https://127.0.0.1:8443)
+PASS  api      /healthz
+PASS  api      anonymous project list is refused
+PASS  api      admin login with the initial password
+PASS  api      default AppProject exists
+== netpol (repo-server egress)
+PASS  netpol   git-server Service port 80 (pod port 8080) is allowed
+PASS  netpol   git-server Service port 22 (pod port 2222) is allowed
+PASS  netpol   patrol-registry:5000 is allowed
+PASS  netpol   the Kubernetes API is refused
+PASS  netpol   the controller (port 8090) is refused
+== metrics (scraped from namespace patrol-e2e)
+PASS  metrics  patrol-controller-metrics:8082
+PASS  metrics  patrol-server-metrics:8083
+PASS  metrics  patrol-repo-server:8084
+PASS  metrics  patrol-notifications-controller-metrics:9001
+== sync (through the API)
+PASS  sync     fixture Applications registered
+PASS  sync     e2e-guestbook: sync request accepted
+PASS  sync     e2e-guestbook-ssh: sync request accepted
+PASS  sync     e2e-helm-git: sync request accepted
+PASS  sync     e2e-kustomize-staging: sync request accepted
+PASS  sync     e2e-multi-source: sync request accepted
+PASS  sync     e2e-oci-chart: sync request accepted
+PASS  sync     e2e-oci-manifests: sync request accepted
+PASS  sync     e2e-guestbook: new operation e2e-guestbook-sync-wk7mk ended Synced/Healthy/Succeeded
+PASS  sync     e2e-guestbook-ssh: new operation e2e-guestbook-ssh-sync-xsshb ended Synced/Healthy/Succeeded
+PASS  sync     e2e-helm-git: new operation e2e-helm-git-sync-mp9mv ended Synced/Healthy/Succeeded
+PASS  sync     e2e-kustomize-staging: new operation e2e-kustomize-staging-sync-mnk5q ended Synced/Healthy/Succeeded
+PASS  sync     e2e-multi-source: new operation e2e-multi-source-sync-lppnn ended Synced/Healthy/Succeeded
+PASS  sync     e2e-oci-chart: new operation e2e-oci-chart-sync-9lbx2 ended Synced/Healthy/Succeeded
+PASS  sync     e2e-oci-manifests: new operation e2e-oci-manifests-sync-bjbh7 ended Synced/Healthy/Succeeded
+PASS  sync     e2e workloads present on patrol-target
+PASS  sync     e2e workloads on patrol-target are fully available
+== drift
+PASS  drift    scaling a Deployment on patrol-target is reported OutOfSync
+PASS  drift    a new sync operation restores Synced/Healthy
+PASS  drift    and the replica count of 1
+
+verify-install: 42 passed, 0 failed
+hack/kind/verify-install.sh  5.83s user 3.88s system 40% cpu 24.178 total
+exit=0
+
+====================================================================================================
+17. verify-install.sh --lifecycle right after a re-registration (kind/verify-rerun3-lifecycle.log): KV-12
+The SSH Application's sync request was refused with 412 because the repo-server's mounted known-hosts file
+did not have the host key yet; the run stopped before the drift section (gate).
+----------------------------------------------------------------------------------------------------
+== pods
+PASS  pods     number of Patrol pods
+PASS  pods     all Running, ready, 0 restarts
+== security (effective, inside each pod)
+PASS  security patrol-server: uid, capability bounding set, no_new_privs, root fs
+PASS  security patrol-repo-server: uid, capability bounding set, no_new_privs, root fs
+PASS  security patrol-applicationset-controller: uid, capability bounding set, no_new_privs, root fs
+PASS  security patrol-notifications-controller: uid, capability bounding set, no_new_privs, root fs
+PASS  security patrol-controller: uid, capability bounding set, no_new_privs, root fs
+== bootstrap
+PASS  bootstrap init container converged
+PASS  bootstrap initial admin Secret exists
+== api (https://127.0.0.1:8443)
+PASS  api      /healthz
+PASS  api      anonymous project list is refused
+PASS  api      admin login with the initial password
+PASS  api      default AppProject exists
+== netpol (repo-server egress)
+PASS  netpol   git-server Service port 80 (pod port 8080) is allowed
+PASS  netpol   git-server Service port 22 (pod port 2222) is allowed
+PASS  netpol   patrol-registry:5000 is allowed
+PASS  netpol   the Kubernetes API is refused
+PASS  netpol   the controller (port 8090) is refused
+== metrics (scraped from namespace patrol-e2e)
+PASS  metrics  patrol-controller-metrics:8082
+PASS  metrics  patrol-server-metrics:8083
+PASS  metrics  patrol-repo-server:8084
+PASS  metrics  patrol-notifications-controller-metrics:9001
+== sync (through the API)
+PASS  sync     fixture Applications registered
+PASS  sync     e2e-guestbook: sync request accepted
+FAIL  sync     e2e-guestbook-ssh: sync request accepted: got '412', want '200'
+PASS  sync     e2e-helm-git: sync request accepted
+PASS  sync     e2e-kustomize-staging: sync request accepted
+PASS  sync     e2e-multi-source: sync request accepted
+PASS  sync     e2e-oci-chart: sync request accepted
+PASS  sync     e2e-oci-manifests: sync request accepted
+PASS  sync     e2e-guestbook: new operation e2e-guestbook-sync-sw59j ended Synced/Healthy/Succeeded
+FAIL  sync     e2e-guestbook-ssh: no new operation ended Synced/Healthy/Succeeded (operation 'e2e-guestbook-ssh-sync-tx8sl', before: 'e2e-guestbook-ssh-sync-tx8sl', result Synced/Healthy/Succeeded)
+PASS  sync     e2e-helm-git: new operation e2e-helm-git-sync-89z86 ended Synced/Healthy/Succeeded
+PASS  sync     e2e-kustomize-staging: new operation e2e-kustomize-staging-sync-dtl9k ended Synced/Healthy/Succeeded
+PASS  sync     e2e-multi-source: new operation e2e-multi-source-sync-2ktj8 ended Synced/Healthy/Succeeded
+PASS  sync     e2e-oci-chart: new operation e2e-oci-chart-sync-zz766 ended Synced/Healthy/Succeeded
+PASS  sync     e2e-oci-manifests: new operation e2e-oci-manifests-sync-wsgmr ended Synced/Healthy/Succeeded
+PASS  sync     e2e workloads present on patrol-target
+PASS  sync     e2e workloads on patrol-target are fully available
+
+verify-install: earlier checks failed; not running the drift section (state-changing)
+verify-install: 37 passed, 2 failed
+hack/kind/verify-install.sh --lifecycle  9.62s user 6.81s system 8% cpu 3:20.29 total
+exit=1
+
+====================================================================================================
+18. The 412 reproduced and explained (kind/hostkey-repro.log)
+The fixture lines were removed from patrol-ssh-known-hosts-cm; the sync API answered with the refusal's detail.
+----------------------------------------------------------------------------------------------------
+entries before: 18, without the fixture: 14
+mounted file lost the key after 61 s
+{"type":"urn:patrol-cd:problem:failed_precondition","title":"Precondition Failed","status":412,"detail":"error resolving repo revision: failed to list refs: git ls-remote: No ED25519 host key is known for git-server.patrol-e2e.svc.cluster.local and you have requested strict checking.\r\nHost key verification failed.\r\nfatal: Could not read from remote repository.\n\nPlease make sure you have the correct access rights\nand the repository exists. (exit status 128)","instance":"/api/v1/applications/e2e-guestbook-ssh/sync","code":"failed_precondition","requestId":"a409fba4-4a9b-4ad7-bf1e-56a8b2581e4d"}
+
+HTTP 412
+key visible again after 66 s
+
+====================================================================================================
+19. verify-install.sh --lifecycle after the fixes (kind/verify-rerun4-lifecycle.log)
+
+----------------------------------------------------------------------------------------------------
+== pods
+PASS  pods     number of Patrol pods
+PASS  pods     all Running, ready, 0 restarts
+== security (effective, inside each pod)
+PASS  security patrol-server: uid, capability bounding set, no_new_privs, root fs
+PASS  security patrol-repo-server: uid, capability bounding set, no_new_privs, root fs
+PASS  security patrol-applicationset-controller: uid, capability bounding set, no_new_privs, root fs
+PASS  security patrol-notifications-controller: uid, capability bounding set, no_new_privs, root fs
+PASS  security patrol-controller: uid, capability bounding set, no_new_privs, root fs
+== bootstrap
+PASS  bootstrap init container converged
+PASS  bootstrap initial admin Secret exists
+== api (https://127.0.0.1:8443)
+PASS  api      /healthz
+PASS  api      anonymous project list is refused
+PASS  api      admin login with the initial password
+PASS  api      default AppProject exists
+== netpol (repo-server egress)
+PASS  netpol   git-server Service port 80 (pod port 8080) is allowed
+PASS  netpol   git-server Service port 22 (pod port 2222) is allowed
+PASS  netpol   patrol-registry:5000 is allowed
+PASS  netpol   the Kubernetes API is refused
+PASS  netpol   the controller (port 8090) is refused
+== metrics (scraped from namespace patrol-e2e)
+PASS  metrics  patrol-controller-metrics:8082
+PASS  metrics  patrol-server-metrics:8083
+PASS  metrics  patrol-repo-server:8084
+PASS  metrics  patrol-notifications-controller-metrics:9001
+== sync (through the API)
+PASS  sync     fixture Applications registered
+PASS  sync     e2e-guestbook: sync request accepted
+PASS  sync     e2e-guestbook-ssh: sync request accepted
+PASS  sync     e2e-helm-git: sync request accepted
+PASS  sync     e2e-kustomize-staging: sync request accepted
+PASS  sync     e2e-multi-source: sync request accepted
+PASS  sync     e2e-oci-chart: sync request accepted
+PASS  sync     e2e-oci-manifests: sync request accepted
+PASS  sync     e2e-guestbook: new operation e2e-guestbook-sync-8l2vz ended Synced/Healthy/Succeeded
+PASS  sync     e2e-guestbook-ssh: new operation e2e-guestbook-ssh-sync-7gnp4 ended Synced/Healthy/Succeeded
+PASS  sync     e2e-helm-git: new operation e2e-helm-git-sync-wg2dl ended Synced/Healthy/Succeeded
+PASS  sync     e2e-kustomize-staging: new operation e2e-kustomize-staging-sync-ljmz2 ended Synced/Healthy/Succeeded
+PASS  sync     e2e-multi-source: new operation e2e-multi-source-sync-mdsdw ended Synced/Healthy/Succeeded
+PASS  sync     e2e-oci-chart: new operation e2e-oci-chart-sync-qtfl7 ended Synced/Healthy/Succeeded
+PASS  sync     e2e-oci-manifests: new operation e2e-oci-manifests-sync-n9tqj ended Synced/Healthy/Succeeded
+PASS  sync     e2e workloads present on patrol-target
+PASS  sync     e2e workloads on patrol-target are fully available
+== drift
+PASS  drift    scaling a Deployment on patrol-target is reported OutOfSync
+PASS  drift    a new sync operation restores Synced/Healthy
+PASS  drift    and the replica count of 1
+== lifecycle (helm rollback, password change, uninstall, re-install)
+PASS  lifecycle helm rollback to revision 1
+PASS  lifecycle helm upgrade back to the kind values
+PASS  lifecycle admin password changed through the API
+PASS  lifecycle login with the changed password
+PASS  lifecycle login with the old initial password is refused
+PASS  lifecycle helm uninstall
+PASS  lifecycle CRDs survive the uninstall
+PASS  lifecycle Applications survive the uninstall
+PASS  lifecycle helm install again
+PASS  lifecycle a new initial admin Secret was generated (new UID)
+PASS  lifecycle login with the changed password is refused
+PASS  lifecycle login with the old initial password is refused
+PASS  lifecycle login with the new initial password
+PASS  lifecycle workloads on patrol-target keep running
+PASS  lifecycle fixtures registered again (host key, repositories, Applications)
+PASS  lifecycle e2e-guestbook-ssh is compared again (reconciledAt 2026-10-19T15:20:09Z -> 2026-10-19T15:21:55Z) and Synced/Healthy with the restored host key
+
+verify-install: 58 passed, 0 failed
+hack/kind/verify-install.sh --lifecycle  17.86s user 8.51s system 18% cpu 2:22.98 total
+exit=0
+
+====================================================================================================
+20. Negative control: the API is unreachable (kind/negctl-gate.log)
+The api checks fail; the sync, drift and lifecycle sections must not start.
+----------------------------------------------------------------------------------------------------
+== pods
+PASS  pods     number of Patrol pods
+PASS  pods     all Running, ready, 0 restarts
+== security (effective, inside each pod)
+PASS  security patrol-server: uid, capability bounding set, no_new_privs, root fs
+PASS  security patrol-repo-server: uid, capability bounding set, no_new_privs, root fs
+PASS  security patrol-applicationset-controller: uid, capability bounding set, no_new_privs, root fs
+PASS  security patrol-notifications-controller: uid, capability bounding set, no_new_privs, root fs
+PASS  security patrol-controller: uid, capability bounding set, no_new_privs, root fs
+== bootstrap
+PASS  bootstrap init container converged
+PASS  bootstrap initial admin Secret exists
+== api (https://127.0.0.1:9)
+FAIL  api      /healthz: got '000', want '200'
+FAIL  api      anonymous project list is refused: got '000', want '401'
+FAIL  api      admin login with the initial password: got '000', want '200'
+sed: can't read /var/folders/m0/b8lb399j7rv07mbdqx_zw0gc0000gn/T/tmp.JRkxD8Otyy/session.json: No such file or directory
+FAIL  api      default AppProject exists
+== netpol (repo-server egress)
+PASS  netpol   git-server Service port 80 (pod port 8080) is allowed
+PASS  netpol   git-server Service port 22 (pod port 2222) is allowed
+PASS  netpol   patrol-registry:5000 is allowed
+PASS  netpol   the Kubernetes API is refused
+PASS  netpol   the controller (port 8090) is refused
+== metrics (scraped from namespace patrol-e2e)
+PASS  metrics  patrol-controller-metrics:8082
+PASS  metrics  patrol-server-metrics:8083
+PASS  metrics  patrol-repo-server:8084
+PASS  metrics  patrol-notifications-controller-metrics:9001
+
+verify-install: earlier checks failed; not running the sync, drift and lifecycle sections (state-changing)
+verify-install: 18 passed, 4 failed
+exit=1
+
+====================================================================================================
+21. Negative control: PATROL_API names another host (kind/negctl-api-host.log)
+Refused before anything is sent.
+----------------------------------------------------------------------------------------------------
+[patrol-kind] error: PATROL_API must be an https address on 127.0.0.1, localhost or [::1] (got 'https://evil.example.com')
+exit=1
+
+====================================================================================================
+22. Negative control: sync requests are accepted but no operation follows (kind/negctl-sync.log)
+A mutant of the script (request_sync only prints 200, a 6 s wait) on an installation whose Applications already show Synced/Healthy/Succeeded: every Application must fail.
+----------------------------------------------------------------------------------------------------
+== pods
+PASS  pods     number of Patrol pods
+PASS  pods     all Running, ready, 0 restarts
+== security (effective, inside each pod)
+PASS  security patrol-server: uid, capability bounding set, no_new_privs, root fs
+PASS  security patrol-repo-server: uid, capability bounding set, no_new_privs, root fs
+PASS  security patrol-applicationset-controller: uid, capability bounding set, no_new_privs, root fs
+PASS  security patrol-notifications-controller: uid, capability bounding set, no_new_privs, root fs
+PASS  security patrol-controller: uid, capability bounding set, no_new_privs, root fs
+== bootstrap
+PASS  bootstrap init container converged
+PASS  bootstrap initial admin Secret exists
+== api (https://127.0.0.1:8443)
+PASS  api      /healthz
+PASS  api      anonymous project list is refused
+PASS  api      admin login with the initial password
+PASS  api      default AppProject exists
+== netpol (repo-server egress)
+PASS  netpol   git-server Service port 80 (pod port 8080) is allowed
+PASS  netpol   git-server Service port 22 (pod port 2222) is allowed
+PASS  netpol   patrol-registry:5000 is allowed
+PASS  netpol   the Kubernetes API is refused
+PASS  netpol   the controller (port 8090) is refused
+== metrics (scraped from namespace patrol-e2e)
+PASS  metrics  patrol-controller-metrics:8082
+PASS  metrics  patrol-server-metrics:8083
+PASS  metrics  patrol-repo-server:8084
+PASS  metrics  patrol-notifications-controller-metrics:9001
+== sync (through the API)
+PASS  sync     fixture Applications registered
+PASS  sync     e2e-guestbook: sync request accepted
+PASS  sync     e2e-guestbook-ssh: sync request accepted
+PASS  sync     e2e-helm-git: sync request accepted
+PASS  sync     e2e-kustomize-staging: sync request accepted
+PASS  sync     e2e-multi-source: sync request accepted
+PASS  sync     e2e-oci-chart: sync request accepted
+PASS  sync     e2e-oci-manifests: sync request accepted
+FAIL  sync     e2e-guestbook: no new operation ended Synced/Healthy/Succeeded (operation 'e2e-guestbook-sync-xrbvl', before: 'e2e-guestbook-sync-xrbvl', result Synced/Healthy/Succeeded)
+FAIL  sync     e2e-guestbook-ssh: no new operation ended Synced/Healthy/Succeeded (operation 'e2e-guestbook-ssh-sync-7gnp4', before: 'e2e-guestbook-ssh-sync-7gnp4', result Synced/Healthy/Succeeded)
+FAIL  sync     e2e-helm-git: no new operation ended Synced/Healthy/Succeeded (operation 'e2e-helm-git-sync-wg2dl', before: 'e2e-helm-git-sync-wg2dl', result Synced/Healthy/Succeeded)
+FAIL  sync     e2e-kustomize-staging: no new operation ended Synced/Healthy/Succeeded (operation 'e2e-kustomize-staging-sync-ljmz2', before: 'e2e-kustomize-staging-sync-ljmz2', result Synced/Healthy/Succeeded)
+FAIL  sync     e2e-multi-source: no new operation ended Synced/Healthy/Succeeded (operation 'e2e-multi-source-sync-mdsdw', before: 'e2e-multi-source-sync-mdsdw', result Synced/Healthy/Succeeded)
+FAIL  sync     e2e-oci-chart: no new operation ended Synced/Healthy/Succeeded (operation 'e2e-oci-chart-sync-qtfl7', before: 'e2e-oci-chart-sync-qtfl7', result Synced/Healthy/Succeeded)
+FAIL  sync     e2e-oci-manifests: no new operation ended Synced/Healthy/Succeeded (operation 'e2e-oci-manifests-sync-n9tqj', before: 'e2e-oci-manifests-sync-n9tqj', result Synced/Healthy/Succeeded)
+PASS  sync     e2e workloads present on patrol-target
+PASS  sync     e2e workloads on patrol-target are fully available
+
+verify-install: earlier checks failed; not running the drift section (state-changing)
+verify-install: 32 passed, 7 failed
+exit=1
+
+====================================================================================================
+23. Negative control: helm uninstall fails during --lifecycle (kind/verify-mutant-lifecycle.log)
+A mutant whose uninstall step is `false`: the run stops with the commands that restore the installation, and the exit trap warns that the admin password was changed.
+----------------------------------------------------------------------------------------------------
+== pods
+PASS  pods     number of Patrol pods
+PASS  pods     all Running, ready, 0 restarts
+== security (effective, inside each pod)
+PASS  security patrol-server: uid, capability bounding set, no_new_privs, root fs
+PASS  security patrol-repo-server: uid, capability bounding set, no_new_privs, root fs
+PASS  security patrol-applicationset-controller: uid, capability bounding set, no_new_privs, root fs
+PASS  security patrol-notifications-controller: uid, capability bounding set, no_new_privs, root fs
+PASS  security patrol-controller: uid, capability bounding set, no_new_privs, root fs
+== bootstrap
+PASS  bootstrap init container converged
+PASS  bootstrap initial admin Secret exists
+== api (https://127.0.0.1:8443)
+PASS  api      /healthz
+PASS  api      anonymous project list is refused
+PASS  api      admin login with the initial password
+PASS  api      default AppProject exists
+== netpol (repo-server egress)
+PASS  netpol   git-server Service port 80 (pod port 8080) is allowed
+PASS  netpol   git-server Service port 22 (pod port 2222) is allowed
+PASS  netpol   patrol-registry:5000 is allowed
+PASS  netpol   the Kubernetes API is refused
+PASS  netpol   the controller (port 8090) is refused
+== metrics (scraped from namespace patrol-e2e)
+PASS  metrics  patrol-controller-metrics:8082
+PASS  metrics  patrol-server-metrics:8083
+PASS  metrics  patrol-repo-server:8084
+PASS  metrics  patrol-notifications-controller-metrics:9001
+== sync (through the API)
+PASS  sync     fixture Applications registered
+PASS  sync     e2e-guestbook: sync request accepted
+PASS  sync     e2e-guestbook-ssh: sync request accepted
+PASS  sync     e2e-helm-git: sync request accepted
+PASS  sync     e2e-kustomize-staging: sync request accepted
+PASS  sync     e2e-multi-source: sync request accepted
+PASS  sync     e2e-oci-chart: sync request accepted
+PASS  sync     e2e-oci-manifests: sync request accepted
+PASS  sync     e2e-guestbook: new operation e2e-guestbook-sync-ccjdq ended Synced/Healthy/Succeeded
+PASS  sync     e2e-guestbook-ssh: new operation e2e-guestbook-ssh-sync-tx8sl ended Synced/Healthy/Succeeded
+PASS  sync     e2e-helm-git: new operation e2e-helm-git-sync-wzdz5 ended Synced/Healthy/Succeeded
+PASS  sync     e2e-kustomize-staging: new operation e2e-kustomize-staging-sync-gt2j5 ended Synced/Healthy/Succeeded
+PASS  sync     e2e-multi-source: new operation e2e-multi-source-sync-qbtb9 ended Synced/Healthy/Succeeded
+PASS  sync     e2e-oci-chart: new operation e2e-oci-chart-sync-x9w27 ended Synced/Healthy/Succeeded
+PASS  sync     e2e-oci-manifests: new operation e2e-oci-manifests-sync-m72qj ended Synced/Healthy/Succeeded
+PASS  sync     e2e workloads present on patrol-target
+PASS  sync     e2e workloads on patrol-target are fully available
+== drift
+PASS  drift    scaling a Deployment on patrol-target is reported OutOfSync
+PASS  drift    a new sync operation restores Synced/Healthy
+PASS  drift    and the replica count of 1
+== lifecycle (helm rollback, password change, uninstall, re-install)
+PASS  lifecycle helm rollback to revision 1
+PASS  lifecycle helm upgrade back to the kind values
+PASS  lifecycle admin password changed through the API
+PASS  lifecycle login with the changed password
+PASS  lifecycle login with the old initial password is refused
+FAIL  lifecycle helm uninstall
+
+verify-install: 47 passed, 1 failed
+exit=1
+[2 line(s) with local file paths omitted]
+
+====================================================================================================
+24. Recovery with exactly the printed command (kind/recover-after-mutant.log, tail)
+
+----------------------------------------------------------------------------------------------------
+[patrol-kind] creating ServiceAccount kube-system/patrol-manager in patrol-target
+[patrol-kind] writing Secret patrol/cluster-patrol-target and Cluster patrol/patrol-target in patrol-control
+[patrol-kind] registered: Cluster patrol/patrol-target -> https://patrol-target-control-plane:6443 (token valid for 8760h)
+[patrol-kind] wrote Secret patrol/e2e-git-http-creds
+[patrol-kind] wrote Secret patrol/e2e-git-ssh-creds
+[patrol-kind] wrote Secret patrol/e2e-chart-repo-creds
+[patrol-kind] added the fixture git server's host key to ConfigMap patrol/patrol-ssh-known-hosts-cm
+[patrol-kind] registered e2e fixtures in namespace patrol
+
+Patrol CD is installed in patrol-control/patrol.
+  UI / API   https://127.0.0.1:8443   (self-signed certificate; user: admin)
+  Applications are synced manually: POST /api/v1/applications/NAME/sync, or the UI.
+exit=0
+[1 line(s) with local file paths omitted]
+
+====================================================================================================
+25. Closing clean-room run after the review fixes (kind/cleanroom2.log): step stamps, then the verify-install output
+Same wrapper as section 12.
+----------------------------------------------------------------------------------------------------
+##### 2026-10-19T16:11:02Z  make kind-down
+##### 2026-10-19T16:11:07Z  done: make kind-down in 5s
+##### 2026-10-19T16:11:07Z  make image
+##### 2026-10-19T16:11:28Z  done: make image in 21s
+##### 2026-10-19T16:11:28Z  make kind-up
+##### 2026-10-19T16:12:34Z  done: make kind-up in 66s
+##### 2026-10-19T16:12:34Z  make kind-fixtures
+##### 2026-10-19T16:13:06Z  done: make kind-fixtures in 32s
+##### 2026-10-19T16:13:06Z  make kind-install
+[patrol-kind] added the fixture git server's host key to ConfigMap patrol/patrol-ssh-known-hosts-cm
+[patrol-kind] waiting for the repo-server to see the fixture git server's host key (the kubelet refreshes mounted ConfigMaps with a delay)
+##### 2026-10-19T16:14:48Z  done: make kind-install in 102s
+##### 2026-10-19T16:14:48Z  make kind-verify VERIFY_FLAGS=--lifecycle
+== pods
+PASS  pods     number of Patrol pods
+PASS  pods     all Running, ready, 0 restarts
+== security (effective, inside each pod)
+PASS  security patrol-server: uid, capability bounding set, no_new_privs, root fs
+PASS  security patrol-repo-server: uid, capability bounding set, no_new_privs, root fs
+PASS  security patrol-applicationset-controller: uid, capability bounding set, no_new_privs, root fs
+PASS  security patrol-notifications-controller: uid, capability bounding set, no_new_privs, root fs
+PASS  security patrol-controller: uid, capability bounding set, no_new_privs, root fs
+== bootstrap
+PASS  bootstrap init container converged
+PASS  bootstrap initial admin Secret exists
+== api (https://127.0.0.1:8443)
+PASS  api      /healthz
+PASS  api      anonymous project list is refused
+PASS  api      admin login with the initial password
+PASS  api      default AppProject exists
+== netpol (repo-server egress)
+PASS  netpol   git-server Service port 80 (pod port 8080) is allowed
+PASS  netpol   git-server Service port 22 (pod port 2222) is allowed
+PASS  netpol   patrol-registry:5000 is allowed
+PASS  netpol   the Kubernetes API is refused
+PASS  netpol   the controller (port 8090) is refused
+== metrics (scraped from namespace patrol-e2e)
+PASS  metrics  patrol-controller-metrics:8082
+PASS  metrics  patrol-server-metrics:8083
+PASS  metrics  patrol-repo-server:8084
+PASS  metrics  patrol-notifications-controller-metrics:9001
+== sync (through the API)
+PASS  sync     fixture Applications registered
+PASS  sync     e2e-guestbook: sync request accepted
+PASS  sync     e2e-guestbook-ssh: sync request accepted
+PASS  sync     e2e-helm-git: sync request accepted
+PASS  sync     e2e-kustomize-staging: sync request accepted
+PASS  sync     e2e-multi-source: sync request accepted
+PASS  sync     e2e-oci-chart: sync request accepted
+PASS  sync     e2e-oci-manifests: sync request accepted
+PASS  sync     e2e-guestbook: new operation e2e-guestbook-sync-f4ql4 ended Synced/Healthy/Succeeded
+PASS  sync     e2e-guestbook-ssh: new operation e2e-guestbook-ssh-sync-hpbhq ended Synced/Healthy/Succeeded
+PASS  sync     e2e-helm-git: new operation e2e-helm-git-sync-8ndhr ended Synced/Healthy/Succeeded
+PASS  sync     e2e-kustomize-staging: new operation e2e-kustomize-staging-sync-cbdr9 ended Synced/Healthy/Succeeded
+PASS  sync     e2e-multi-source: new operation e2e-multi-source-sync-8w5qm ended Synced/Healthy/Succeeded
+PASS  sync     e2e-oci-chart: new operation e2e-oci-chart-sync-m5md7 ended Synced/Healthy/Succeeded
+PASS  sync     e2e-oci-manifests: new operation e2e-oci-manifests-sync-wrd6j ended Synced/Healthy/Succeeded
+PASS  sync     e2e workloads present on patrol-target
+PASS  sync     e2e workloads on patrol-target are fully available
+== drift
+PASS  drift    scaling a Deployment on patrol-target is reported OutOfSync
+PASS  drift    a new sync operation restores Synced/Healthy
+PASS  drift    and the replica count of 1
+== lifecycle (helm rollback, password change, uninstall, re-install)
+PASS  lifecycle helm rollback to revision 1
+PASS  lifecycle helm upgrade back to the kind values
+PASS  lifecycle admin password changed through the API
+PASS  lifecycle login with the changed password
+PASS  lifecycle login with the old initial password is refused
+PASS  lifecycle helm uninstall
+PASS  lifecycle CRDs survive the uninstall
+PASS  lifecycle Applications survive the uninstall
+PASS  lifecycle helm install again
+PASS  lifecycle a new initial admin Secret was generated (new UID)
+PASS  lifecycle login with the changed password is refused
+PASS  lifecycle login with the old initial password is refused
+PASS  lifecycle login with the new initial password
+PASS  lifecycle workloads on patrol-target keep running
+PASS  lifecycle fixtures registered again (host key, repositories, Applications)
+PASS  lifecycle e2e-guestbook-ssh is compared again (reconciledAt 2026-10-19T16:16:12Z -> 2026-10-19T16:17:43Z) and Synced/Healthy with the restored host key
+
+verify-install: 58 passed, 0 failed
+
+##### 2026-10-19T16:17:47Z  done: make kind-verify VERIFY_FLAGS=--lifecycle in 179s
+
+##### 2026-10-19T16:17:47Z  cleanroom exit=0
+wrapper exit=0
+
+====================================================================================================
+26. Offline script suite after the review fixes (kind/test-scripts-final.log, summary) and against the old known-hosts read (kind/test-scripts-mut.log)
+test/e2e/fixtures/test-scripts.sh; envtest API servers stand in for the kind clusters (simulated).
+----------------------------------------------------------------------------------------------------
+test-scripts: 43 passed, 0 failed
+exit=0
+-- with register.sh's old known-hosts read restored:
+FAIL  a ConfigMap without the key gets exactly the fixture lines     want ok got fail
+test-scripts: 42 passed, 1 failed
+
+====================================================================================================
+27. Go gates, first full-tree run after the fixes (gates-go.log): gofmt, build, vet, golangci-lint, then `go test -race -count=1` over 99 packages without the deploy suite
+Three failures, none in code changed by the kind validation (the bootstrap tests are from Phase 4): a data race in the bootstrap command tests of internal/server
+(a bytes.Buffer shared with the process-wide default logger; fixed with a synchronized buffer),
+internal/notifications TestTemplateLimitsDefaultSteps (a 10 s budget exceeded under the load of 99 packages; 2.7 s alone),
+and test/integration (the default 10 minute timeout; the suite needs -timeout 60m, V-0010/V-0015).
+----------------------------------------------------------------------------------------------------
+### gofmt
+### gofmt exit=0
+### build
+### build exit=0
+### vet
+### vet exit=0
+### golangci-lint
+0 issues.
+### golangci-lint exit=0
+packages:       99
+### go-test-race
+--- FAIL: TestTemplateLimitsDefaultSteps (10.01s)
+FAIL
+FAIL	github.com/juliosaraiva/patrol-cd/internal/notifications	12.292s
+--- FAIL: TestParamValidation (0.00s)
+--- FAIL: TestDexConnection (0.00s)
+--- FAIL: TestParamPrecedence (0.00s)
+--- FAIL: TestBootstrapCommand (1.94s)
+--- FAIL: TestBootstrapStaleDeleteConflict (3.96s)
+--- FAIL: TestBootstrapKeepsOperatorMaterial (3.73s)
+--- FAIL: TestBootstrapDeadlineCutsRequest (2.01s)
+--- FAIL: TestBootstrapRetries (3.83s)
+--- FAIL: TestRunGroup (0.00s)
+--- FAIL: TestBootstrapSkipFlags (0.02s)
+--- FAIL: TestBootstrapAdminDisabled (0.06s)
+--- FAIL: TestBootstrapStaleTimestamps (0.00s)
+--- FAIL: TestBootstrapKnownHostsRBAC (5.09s)
+--- FAIL: TestBootstrapStaleInitialSecretConcurrent (9.19s)
+--- FAIL: TestBootstrapFreshInstall (11.73s)
+--- FAIL: TestBootstrapConcurrent (0.00s)
+--- FAIL: TestBootstrapCrashRecovery (0.03s)
+--- FAIL: TestBootstrapSeedsKnownHosts (0.00s)
+--- FAIL: TestBootstrapStaleInitialSecret (17.63s)
+--- FAIL: TestBootstrapRBACContract (0.00s)
+FAIL
+FAIL	github.com/juliosaraiva/patrol-cd/internal/server	44.794s
+FAIL	github.com/juliosaraiva/patrol-cd/test/integration	601.310s
+FAIL
+### go-test-race exit=1
+
+====================================================================================================
+28. The suites run on their own: test/integration (PATROL_INTEGRATION=1 -timeout 60m) and test/deploy (-timeout 40m)
+gates-integration2.log and gates-deploy.log.
+----------------------------------------------------------------------------------------------------
+ok  	github.com/juliosaraiva/patrol-cd/test/integration	635.838s
+go test -race -count=1 -timeout 60m ./test/integration/...  191.39s user 87.34s system 43% cpu 10:45.70 total
+ok  	github.com/juliosaraiva/patrol-cd/test/deploy	302.379s
+go test -race -count=1 -timeout 40m ./test/deploy/...  351.42s user 72.37s system 135% cpu 5:12.55 total
+
+====================================================================================================
+29. Final full-tree run (gates-fulltree.log): `go test -race -count=1 -timeout 60m` over 99 packages with PATROL_INTEGRATION=1, without the deploy suite
+One failure: internal/notifications TestTemplateLimitsDefaultSteps hit its default 10 s template timeout under the load of the tree.
+The test was changed afterwards to raise the timeout to 5 minutes; the package then passed on its own (-race -count=1; -count=3 for TestTemplateLimits*).
+----------------------------------------------------------------------------------------------------
+ok  	github.com/juliosaraiva/patrol-cd/api/v1alpha1	26.390s
+ok  	github.com/juliosaraiva/patrol-cd/cmd/patrol	3.285s
+ok  	github.com/juliosaraiva/patrol-cd/cmd/patrolcd	89.256s
+ok  	github.com/juliosaraiva/patrol-cd/hack/genmanifests	119.777s
+ok  	github.com/juliosaraiva/patrol-cd/hack/helmdocs	78.713s
+ok  	github.com/juliosaraiva/patrol-cd/hack/imagelayout	1.346s
+?   	github.com/juliosaraiva/patrol-cd/hack/parity	[no test files]
+ok  	github.com/juliosaraiva/patrol-cd/internal/apiserver	37.565s
+?   	github.com/juliosaraiva/patrol-cd/internal/apiserver/cmd/genopenapi	[no test files]
+ok  	github.com/juliosaraiva/patrol-cd/internal/apiserver/core	116.622s
+ok  	github.com/juliosaraiva/patrol-cd/internal/apiserver/openapi	28.641s
+ok  	github.com/juliosaraiva/patrol-cd/internal/apiserver/rest	19.092s
+ok  	github.com/juliosaraiva/patrol-cd/internal/apiserver/services/applications	119.313s
+ok  	github.com/juliosaraiva/patrol-cd/internal/apiserver/services/applicationsets	68.024s
+ok  	github.com/juliosaraiva/patrol-cd/internal/apiserver/services/badge	29.158s
+ok  	github.com/juliosaraiva/patrol-cd/internal/apiserver/services/clusters	41.554s
+ok  	github.com/juliosaraiva/patrol-cd/internal/apiserver/services/extensions	36.812s
+?   	github.com/juliosaraiva/patrol-cd/internal/apiserver/services/internal/miscapitest	[no test files]
+ok  	github.com/juliosaraiva/patrol-cd/internal/apiserver/services/links	2.164s
+ok  	github.com/juliosaraiva/patrol-cd/internal/apiserver/services/notifications	3.450s
+ok  	github.com/juliosaraiva/patrol-cd/internal/apiserver/services/projects	42.947s
+ok  	github.com/juliosaraiva/patrol-cd/internal/apiserver/services/repositories	34.323s
+ok  	github.com/juliosaraiva/patrol-cd/internal/apiserver/services/webhooks	8.853s
+ok  	github.com/juliosaraiva/patrol-cd/internal/appset	36.946s
+ok  	github.com/juliosaraiva/patrol-cd/internal/appset/generators	8.787s
+ok  	github.com/juliosaraiva/patrol-cd/internal/appset/template	33.364s
+ok  	github.com/juliosaraiva/patrol-cd/internal/auth	20.821s
+ok  	github.com/juliosaraiva/patrol-cd/internal/auth/oidc	4.987s
+ok  	github.com/juliosaraiva/patrol-cd/internal/auth/revocation	7.070s
+ok  	github.com/juliosaraiva/patrol-cd/internal/cache	19.224s
+ok  	github.com/juliosaraiva/patrol-cd/internal/cli	115.104s
+ok  	github.com/juliosaraiva/patrol-cd/internal/cli/admin	72.776s
+ok  	github.com/juliosaraiva/patrol-cd/internal/cli/app	138.163s
+?   	github.com/juliosaraiva/patrol-cd/internal/cli/clitest	[no test files]
+ok  	github.com/juliosaraiva/patrol-cd/internal/cli/cmdutil	1.664s
+ok  	github.com/juliosaraiva/patrol-cd/internal/cli/config	1.402s
+ok  	github.com/juliosaraiva/patrol-cd/internal/cli/core	52.436s
+ok  	github.com/juliosaraiva/patrol-cd/internal/cli/output	1.321s
+ok  	github.com/juliosaraiva/patrol-cd/internal/cli/sso	3.792s
+ok  	github.com/juliosaraiva/patrol-cd/internal/cli/transport	3.937s
+ok  	github.com/juliosaraiva/patrol-cd/internal/clusters	26.083s
+?   	github.com/juliosaraiva/patrol-cd/internal/clusters/internal/fakecloud	[no test files]
+ok  	github.com/juliosaraiva/patrol-cd/internal/clusters/k8sauth	1.770s
+ok  	github.com/juliosaraiva/patrol-cd/internal/cmp	45.275s
+ok  	github.com/juliosaraiva/patrol-cd/internal/commitserver	15.990s
+ok  	github.com/juliosaraiva/patrol-cd/internal/compare	21.013s
+?   	github.com/juliosaraiva/patrol-cd/internal/controller	[no test files]
+ok  	github.com/juliosaraiva/patrol-cd/internal/controller/app	7.416s
+ok  	github.com/juliosaraiva/patrol-cd/internal/controller/core	7.036s
+ok  	github.com/juliosaraiva/patrol-cd/internal/controller/integration	101.200s
+ok  	github.com/juliosaraiva/patrol-cd/internal/controller/operation	6.730s
+ok  	github.com/juliosaraiva/patrol-cd/internal/controller/retention	5.630s
+ok  	github.com/juliosaraiva/patrol-cd/internal/controller/sharding	81.978s
+ok  	github.com/juliosaraiva/patrol-cd/internal/controller/treeapi	2.049s
+ok  	github.com/juliosaraiva/patrol-cd/internal/diff	62.259s
+?   	github.com/juliosaraiva/patrol-cd/internal/diff/internal/gen/knowntypes	[no test files]
+?   	github.com/juliosaraiva/patrol-cd/internal/diff/internal/gen/openapifixture	[no test files]
+ok  	github.com/juliosaraiva/patrol-cd/internal/git	37.666s
+ok  	github.com/juliosaraiva/patrol-cd/internal/health	2.029s
+ok  	github.com/juliosaraiva/patrol-cd/internal/helm	6.081s
+ok  	github.com/juliosaraiva/patrol-cd/internal/hydrator	66.707s
+ok  	github.com/juliosaraiva/patrol-cd/internal/lua	32.908s
+--- FAIL: TestTemplateLimitsDefaultSteps (10.00s)
+FAIL
+FAIL	github.com/juliosaraiva/patrol-cd/internal/notifications	13.831s
+?   	github.com/juliosaraiva/patrol-cd/internal/notifications/catalog	[no test files]
+ok  	github.com/juliosaraiva/patrol-cd/internal/notifications/controller	81.423s
+ok  	github.com/juliosaraiva/patrol-cd/internal/notifications/services	4.082s
+ok  	github.com/juliosaraiva/patrol-cd/internal/oci	2.789s
+?   	github.com/juliosaraiva/patrol-cd/internal/oci/ocitest	[no test files]
+ok  	github.com/juliosaraiva/patrol-cd/internal/project	36.262s
+ok  	github.com/juliosaraiva/patrol-cd/internal/rbac	25.959s
+ok  	github.com/juliosaraiva/patrol-cd/internal/render	19.740s
+ok  	github.com/juliosaraiva/patrol-cd/internal/render/cmpwire	2.993s
+ok  	github.com/juliosaraiva/patrol-cd/internal/render/jsonnet	5.678s
+ok  	github.com/juliosaraiva/patrol-cd/internal/reposerver	18.043s
+ok  	github.com/juliosaraiva/patrol-cd/internal/reposerver/apiclient	1.469s
+ok  	github.com/juliosaraiva/patrol-cd/internal/repository	12.380s
+ok  	github.com/juliosaraiva/patrol-cd/internal/sandbox	8.506s
+ok  	github.com/juliosaraiva/patrol-cd/internal/server	45.926s
+ok  	github.com/juliosaraiva/patrol-cd/internal/settings	10.077s
+ok  	github.com/juliosaraiva/patrol-cd/internal/sync	9.897s
+ok  	github.com/juliosaraiva/patrol-cd/internal/tracking	5.938s
+ok  	github.com/juliosaraiva/patrol-cd/internal/ui	1.461s
+ok  	github.com/juliosaraiva/patrol-cd/internal/webhook	19.155s
+ok  	github.com/juliosaraiva/patrol-cd/pkg/apiclient	2.293s
+ok  	github.com/juliosaraiva/patrol-cd/pkg/scm	2.032s
+ok  	github.com/juliosaraiva/patrol-cd/pkg/scm/awscodecommit	1.865s
+ok  	github.com/juliosaraiva/patrol-cd/pkg/scm/azuredevops	1.861s
+ok  	github.com/juliosaraiva/patrol-cd/pkg/scm/bitbucketcloud	1.665s
+ok  	github.com/juliosaraiva/patrol-cd/pkg/scm/bitbucketserver	2.281s
+?   	github.com/juliosaraiva/patrol-cd/pkg/scm/conformance	[no test files]
+ok  	github.com/juliosaraiva/patrol-cd/pkg/scm/fake	2.717s
+ok  	github.com/juliosaraiva/patrol-cd/pkg/scm/gitea	2.084s
+ok  	github.com/juliosaraiva/patrol-cd/pkg/scm/github	2.989s
+?   	github.com/juliosaraiva/patrol-cd/pkg/scm/github/internal/fakegithub	[no test files]
+ok  	github.com/juliosaraiva/patrol-cd/pkg/scm/gitlab	1.981s
+ok  	github.com/juliosaraiva/patrol-cd/pkg/scm/gogs	1.411s
+ok  	github.com/juliosaraiva/patrol-cd/test/examples	16.052s
+ok  	github.com/juliosaraiva/patrol-cd/test/integration	653.514s
+?   	github.com/juliosaraiva/patrol-cd/test/integration/stack	[no test files]
+FAIL

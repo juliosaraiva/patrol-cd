@@ -7,6 +7,9 @@
 # (real repo-server HTTP handler over a fake service) and the controller tree API (real
 # handler over a stand-in state) are reached through the Endpoints override on loopback,
 # and a controller stand-in executes Operations, so the status stays below verified.
+# Kind validation (2026-10-19, docs/verification/runs/2026-10-19-kind-validation.md step 15):
+# `patrol --core --kube-context kind-patrol-control` was run by hand against the live
+# installation; no committed script or test runs core mode against kind, so it raises nothing.
 
 API-054:
   status: in-progress
@@ -22,8 +25,10 @@ API-054:
     WebSocket stream per connection, in-memory net.Conn). Pod selection, controller pod
     verification (label or StatefulSet owner, Running and Ready), caching, reselection after a
     failed dial and 403 handling are tested with a fake clientset and a fake Kubernetes API
-    speaking the WebSocket protocol. Live verification against kubelet-backed port-forwards on a
-    kind cluster is pending (no kind cluster has been created yet, TASKS.md).
+    speaking the WebSocket protocol. A manual run on kind (2026-10-19, run record step 15)
+    reached the live repo-server through a kubelet-backed port-forward (`app manifests` rendered
+    by it), and `app list`, `app get`, `app diff` and `app history` worked against the live
+    cluster; no committed script or test repeats it, so the entry stays in-progress.
 
 API-055:
   status: implemented
@@ -52,6 +57,8 @@ API-055:
     - internal/cli/core/memtransport_test.go:TestHandlerTransportStreams
     - internal/cli/core/memtransport_test.go:TestHandlerTransportWebSocket
     - internal/cli/core/endpoints_internal_test.go:TestNamespaceAndDestinations
+    - internal/cli/core/endpoints_internal_test.go:TestNoContextErrorIsUserFacing
+    - internal/apiserver/services/applications/clusterconfig_error_test.go:TestClusterConfigUnavailable
     - internal/server/core_test.go:TestCoreHandlerEnvtest
     - internal/server/core_test.go:TestCoreHandlerDegrades
     - internal/server/core_test.go:TestCoreRoutesMatchTheServer
@@ -70,4 +77,9 @@ API-055:
     update-password/generate-token/delete-token/session-token) and admin dashboard --core are
     refused with explicit messages (dashboard: different by design, no unauthenticated
     in-process UI). --core with --server/--port-forward and core mode with --auth-token are
-    refused. No Redis (ADR-0004). Live repo-server/controller access depends on API-054.
+    refused. No Redis (ADR-0004). Live repo-server/controller access depends on API-054. A
+    destination cluster without a matching kubeconfig context (e.g. `app logs` for the kind
+    Cluster https://patrol-target-control-plane:6443, a container-network name the host's
+    kubeconfig does not have) answers with the explanation instead of a bare 503 (finding KV-7:
+    noContextError opts in through UserMessage; other provider errors stay hidden). Core mode
+    ran against kind only by hand (2026-10-19, run record step 15), not in a committed test.

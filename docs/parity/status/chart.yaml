@@ -1,17 +1,33 @@
 # Helm chart (deploy/helm/patrol-cd, hack/helmdocs, hack/deploy.mk). Guide:
 # docs/guides/installation.md; commands and results:
 # docs/verification/runs/2026-10-17-chart-static.md.
-# Evidence level: static only (helm lint --strict and helm template of every profile,
-# deterministic renders, schema/validation negative tests, strict typed decoding of the rendered
-# objects, flag names checked against the help goldens). Nothing has been installed on a cluster
-# from this chart yet (image build and kind blocked, TASKS.md), so statuses stay in-progress
-# until the deployment validation harness and kind exercise them.
+# Evidence level: static (helm lint --strict and helm template of every profile, deterministic
+# renders, schema/validation negative tests, strict typed decoding of the rendered objects, flag
+# names checked against the help goldens); the deployment validation harness against envtest
+# (deploy-validation.yaml); and, for the default profile only, the kind validation of
+# 2026-10-19 (docs/verification/runs/2026-10-19-kind-validation.md): `make kind-install`
+# (hack/kind/install.sh, the chart with hack/kind/values.yaml: local image, NodePort 30443, extra
+# repo-server egress ports) and `make kind-verify VERIFY_FLAGS=--lifecycle`
+# (hack/kind/verify-install.sh): clean-room run 55 of 55 checks with the script as it was then
+# (docs/verification/log.md V-0031); closing clean-room run after the review fixes, 58 of 58
+# checks (V-0032). Limits of that run: one CNI (kindnet), linux/arm64 only, one replica per
+# component, Kubernetes v1.36.4 nodes; no SSO, no ingress, no ApplicationSets, no hydrator, no
+# CMP, no browser. The other profiles were not installed on a cluster with nodes. A row is
+# raised to verified only where kind checks cover every test the parity area requires for it
+# (docs/parity/areas/10-operations.md); none of the rows below is.
 
 OPS-001:
-  status: in-progress
+  status: implemented
   impl: [deploy/helm/patrol-cd/templates, deploy/helm/patrol-cd/values.yaml]
-  tests: [deploy/helm/patrol-cd/ci/default.yaml (make helm-lint, make helm-template)]
-  evidence: docs/verification/runs/2026-10-17-chart-static.md
+  tests:
+    - deploy/helm/patrol-cd/ci/default.yaml (make helm-lint, make helm-template)
+    - hack/kind/verify-install.sh:pods (exactly 5 Patrol pods, all Running and ready, 0 restarts)
+    - hack/kind/verify-install.sh:security (per component uid 999, an empty capability bounding set, no_new_privs, root file system mounted read-only; until the review it checked the effective capabilities and a failing write instead)
+    - hack/kind/verify-install.sh:bootstrap and api (init container converged; /healthz 200 through NodePort 30443; anonymous project list 401; admin login 200; AppProject default exists)
+    - hack/kind/verify-install.sh:sync (7 fixture Applications of seven source types synced through the API, ending Synced/Healthy/Succeeded; their workloads fully available on patrol-target)
+    - hack/kind/verify-install.sh:drift (a Deployment scaled on patrol-target reported OutOfSync; a new sync restores 1 replica)
+    - hack/kind/verify-install.sh --lifecycle (helm rollback to revision 1, upgrade, uninstall keeps the 8 CRDs and 7 Applications, install again, workloads on patrol-target keep running)
+  evidence: docs/verification/runs/2026-10-19-kind-validation.md; docs/verification/runs/2026-10-17-chart-static.md
   notes: >-
     The default chart values render the cluster-scoped install: 8 CRDs plus the Operation
     ValidatingAdmissionPolicy and binding, the settings ConfigMaps (patrol-cm with the shipped
@@ -20,7 +36,28 @@ OPS-001:
     ServiceAccounts, Roles and ClusterRoles, NetworkPolicies, PDBs. No Redis (ADR-0004); Dex off
     by default. Cluster-scoped objects are named <namespace>-<prefix>-<component> and bind
     ServiceAccounts of the release namespace, so no ClusterRoleBinding patch is needed for
-    another namespace (upstream edge case). Not installed on a cluster yet.
+    another namespace (upstream edge case). Installed on kind (2026-10-19) into namespace patrol
+    of patrol-control with hack/kind/values.yaml, which differs from the defaults only in the
+    image (patrol-cd/patrol-cd:dev, loaded into the nodes), the server Service type (NodePort
+    30443) and the repo-server egress ports (22, 80, 443, 2222, 5000, 8080; finding KV-3): the
+    checks listed in tests passed in a clean-room run (make kind-down image kind-up
+    kind-fixtures kind-install, then make kind-verify VERIFY_FLAGS=--lifecycle; V-0031, with the
+    script as it was before the review; the closing run with the current script is V-0032). The only
+    destination was the registered external cluster patrol-target; an Application targeting
+    https://kubernetes.default.svc ran only in the envtest harness (deploy-validation.yaml).
+    helm uninstall removes chart-managed ConfigMaps, so host keys added to
+    patrol-ssh-known-hosts-cm after the install are lost on a re-install (KV-10). Limits: one
+    CNI (kindnet), linux/arm64, one replica per component, Kubernetes v1.36.4; seccomp and the
+    repo-server's missing service account token were observed by hand only. Status
+    implemented, not verified (review of 2026-10-19, finding F7): the area requires, besides all
+    pods Ready, an Application targeting https://kubernetes.default.svc that syncs, a golden
+    inventory of the installed objects, and recovery (delete a component's pod: recreated and
+    functional; re-apply is idempotent). On a cluster with nodes the in-cluster destination and
+    the pod-deletion recovery were not exercised (the in-cluster sync and the idempotent no-op
+    upgrade ran only against envtest with emulated pods, deploy-validation.yaml, and no harness
+    deletes a pod), so the kind checks listed in tests cover part of the feature.
+    hack/kind/install.sh (make kind-install) installs the chart for these checks but asserts
+    nothing beyond helm's --wait.
 
 OPS-002:
   status: in-progress
@@ -31,7 +68,9 @@ OPS-002:
     rbac.scope=namespaced with crds.install=false and crds.admissionPolicy=false renders no CRD,
     no admission policy, no ClusterRole or ClusterRoleBinding; the controller and server get
     Roles in the release namespace and rbac.managedNamespaces. Combining it with
-    applicationNamespaces is refused. Not installed on a cluster yet.
+    applicationNamespaces is refused. Installed only against envtest (deploy-validation.yaml);
+    not on a cluster with nodes (the kind validation of 2026-10-19 installed the default
+    profile only).
 
 OPS-003:
   status: in-progress
@@ -42,7 +81,8 @@ OPS-003:
     server.enabled=false: no patrol-server, Ingress, Dex or server ClusterRole; the bootstrap
     init container moves to the controller (optional internal token mount, bootstrap Role bound
     to the controller ServiceAccount). Differs from upstream core-install in keeping the
-    notifications controller (switchable) and having no Redis. Not installed on a cluster yet.
+    notifications controller (switchable) and having no Redis. Run only in the envtest harness
+    with emulated pods (deploy-validation.yaml); not installed on a cluster with nodes.
 
 OPS-004:
   status: in-progress
@@ -52,8 +92,9 @@ OPS-004:
   notes: >-
     HA profile: three controller shards (Lease-coordinated, ADR-0008), HPAs for server and
     repo-server, two leader-elected ApplicationSet and notifications replicas, required pod
-    anti-affinity per node and zone spread, PDBs. No Redis HA (ADR-0004). Not run on a
-    multi-node cluster.
+    anti-affinity per node and zone spread, PDBs. No Redis HA (ADR-0004). Only server-side dry
+    runs against envtest (TestAPIServerDryRun); not installed on a cluster (the kind validation
+    of 2026-10-19 ran the default profile, one replica per component, on one worker node).
 
 OPS-005:
   status: in-progress
@@ -64,7 +105,8 @@ OPS-005:
     hydrator.enabled sets hydrator.enabled and commit.server in patrol-cmd-params-cm and deploys
     the commit-server (no token, NetworkPolicy admitting only the controller). One switch
     instead of separate *-with-hydrator bundles; the HA quirk (commit-server without
-    hydrator.enabled) is not reproduced. Not installed on a cluster yet.
+    hydrator.enabled) is not reproduced. Run only in the envtest harness with emulated pods
+    (deploy-validation.yaml); not installed on a cluster with nodes.
 
 OPS-006:
   status: in-progress
@@ -76,8 +118,12 @@ OPS-006:
   notes: >-
     The CRDs are templates generated from deploy/crds (byte-identical bodies, checked by
     `make helm-verify`), so `helm upgrade` upgrades them, with helm.sh/resource-policy: keep.
-    Server-side apply instructions for non-Helm installs in the guide. Not applied to an API
-    server by this task (the validate task does).
+    Server-side apply instructions for non-Helm installs in the guide. Installed by helm against
+    envtest (test/deploy TestHelmLifecycle) and on kind (2026-10-19): hack/kind/verify-install.sh
+    --lifecycle asserts that the 8 CRDs survive helm uninstall and that helm install succeeds
+    again over them. Not exercised: an upgrade that changes a CRD (every upgrade on kind used
+    the same chart) and the self-managed upgrade with ServerSideApply=true, so the row stays
+    in-progress.
 
 OPS-007:
   status: in-progress
@@ -92,8 +138,12 @@ OPS-007:
     ClusterRole get/patch/delete any resource, list events, get pods and pods/log, create Jobs,
     optional pods/exec and serviceaccounts impersonate. The ApplicationSet
     controller has no ClusterRole unless applicationSetNamespaces needs one (upstream grants it
-    unconditionally). Rules derived from the components' API calls; RBAC sufficiency is
-    unverified until the validate task runs them against an API server.
+    unconditionally). Rules derived from the components' API calls; their sufficiency was
+    exercised against envtest with the real binaries and the RBAC authorizer
+    (deploy-validation.yaml OPS-007). On kind (2026-10-19) the default ClusterRoles were in
+    effect while the components worked, but no check there asserts a cluster-scoped rule, and
+    every Application targeted the external cluster patrol-target (reached with the registered
+    Cluster's ServiceAccount token, not these ClusterRoles), so the row stays in-progress.
 
 OPS-008:
   status: in-progress
@@ -110,8 +160,13 @@ OPS-008:
     patrol-cm) bound to the primary workload. With serviceAccount.create=false the render fails
     unless serviceAccount.name is set (never the namespace's default ServiceAccount;
     hack/helmdocs TestServiceAccountNameRequired, ci/invalid/serviceaccount-without-name.yaml).
-    Operations creators get the impersonate verb the admission policy checks. Not exercised
-    against an API server here.
+    Operations creators get the impersonate verb the admission policy checks. Sufficiency
+    exercised against envtest (deploy-validation.yaml OPS-008, audit log). On kind (2026-10-19,
+    default profile) the components ran with these Roles while hack/kind/verify-install.sh
+    passed (bootstrap, login, default AppProject, Operations created by API syncs, a re-install
+    replacing the stale initial admin Secret with the bootstrap Role's delete rule), but no
+    kind check asserts a rule or the absence of forbidden requests; the repo-server running
+    without a token was observed by hand only. The row stays in-progress.
 
 OPS-010:
   status: in-progress
@@ -121,14 +176,33 @@ OPS-010:
     - deploy/helm/patrol-cd/ci/ingress-nginx.yaml
     - hack/helmdocs/behavior_test.go:TestNetworkPolicyExcept
     - hack/helmdocs/render_test.go:TestRenderedProfiles
-  evidence: docs/verification/runs/2026-10-17-chart-static.md
+    - hack/kind/verify-install.sh:netpol (repo-server egress allowed on the configured ports, refused to kubernetes.default.svc:443 and controller 8090)
+    - hack/kind/verify-install.sh:metrics (four metrics endpoints answer from another namespace)
+  evidence: docs/verification/runs/2026-10-19-kind-validation.md; docs/verification/runs/2026-10-17-chart-static.md
   notes: >-
     Stricter than upstream (ingress-only, server open): every component restricts ingress and
     egress (DNS, API server, peer components, configurable external CIDR/port sets, metrics
     scrapers). except entries are attached only to the CIDRs that strictly contain them (render
     check of every profile), and the repo-server and commit-server egress excludes the cloud
-    metadata endpoints by default (networkPolicy.excludeMetadataEndpoints). Enforcement untested
-    (no CNI available here).
+    metadata endpoints by default (networkPolicy.excludeMetadataEndpoints). Enforcement was
+    exercised on kind (2026-10-19, kindnet enforces NetworkPolicy; default profile with
+    hack/kind/values.yaml, which adds repo-server egress ports 2222, 5000 and 8080).
+    hack/kind/verify-install.sh asserts from the repo-server pod: the git server's Services on
+    80 and 22 (pods on 8080 and 2222) and patrol-registry:5000 are reachable;
+    kubernetes.default.svc:443 and the controller's port 8090 are not; and the four metrics
+    endpoints (8082, 8083, 8084, 9001) answer from namespace patrol-e2e; everything else in the
+    run (bootstrap, API, 7 syncs, drift) worked with the policies enforced. Observed (KV-3):
+    NetworkPolicy ports are the destination pod's ports after Service translation, so the
+    default repo-server egress ports (22, 80, 443) block in-cluster servers whose pods listen on
+    other ports (the fixtures until the extra ports were set); kindnet matches pod IPs with an
+    ipBlock of 0.0.0.0/0 (temporary manual policies, other CNIs may not). Both refusals are
+    explained by the repo-server's egress ports alone (the kind API server endpoint listens on
+    6443; 8090 is not listed), so they show neither a rule that excludes those peers nor the
+    controller's ingress policy at work; an API server endpoint on 443 would match the default
+    repo-server egress (inferred from the policy, not tested; the repo-server has no token).
+    Not tested: any ingress refusal (e.g. an unlisted pod reaching repo-server
+    8081 or controller 8090), the egress limits of the other components, the metadata-endpoint
+    exclusion, other CNIs. The row stays in-progress.
 
 OPS-015:
   status: in-progress
@@ -147,8 +221,8 @@ OPS-016:
   evidence: docs/verification/runs/2026-10-17-chart-static.md
   notes: >-
     kubeVersion >=1.30.0-0 (ValidatingAdmissionPolicy GA); the baseline is tested on 1.33-1.36.
-    Lint and template run with --kube-version 1.36.0. Only envtest 1.36.0 binaries are
-    available locally.
+    Lint and template run with --kube-version 1.36.0. Installed on API servers 1.36.0 (envtest)
+    and v1.36.4 (kind nodes, 2026-10-19); 1.33-1.35 not run.
 
 OPS-113:
   status: in-progress
@@ -191,5 +265,6 @@ OPS-155:
   notes: >-
     patrol-cm ships resource.exclusions and the ignoreResourceUpdates rules of
     internal/settings (DefaultResourceExclusionsYAML, DefaultIgnoreResourceUpdates); the
-    generator's check fails when values.yaml and the code differ. The rendered patrol-cm has
-    not been read by a running settings manager in this task.
+    generator's check fails when values.yaml and the code differ. On kind (2026-10-19) the
+    components ran with this patrol-cm, but no check asserts that the shipped exclusions
+    or ignoreResourceUpdates rules take effect.
