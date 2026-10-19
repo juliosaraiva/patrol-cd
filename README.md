@@ -10,9 +10,9 @@ API, CLI and web UI) with functional parity as the goal against a frozen
 > **Status: work in progress, not released.** Phases 0–3 (research, architecture, libraries,
 > controllers, API, CLI, web UI, server wiring) are implemented and tested locally. Phase 4
 > packaging (Dockerfile, Helm chart, static install manifests, first-run bootstrap) is written
-> and validated statically and against envtest API servers, but **no image has been built and
-> nothing has been installed on a real cluster** (the Docker disk is full on the development
-> machine). Cluster-level end-to-end tests, security and performance verification, CI and most
+> and validated statically and against envtest API servers, and the `linux/arm64` image builds
+> and passes a runtime smoke test locally, but **nothing has been installed on a real cluster**
+> and no image has been published. Cluster-level end-to-end tests, security and performance verification, CI and most
 > documentation are **not done yet**. Nothing here has been verified against a live GitHub, a
 > real kubelet or a real multi-node cluster. The API group `cd.patrol.example` is a development
 > placeholder (see ADR-0002).
@@ -32,7 +32,7 @@ API, CLI and web UI) with functional parity as the goal against a frozen
 | Web UI (React + TypeScript) | [`ui/`](ui) | implemented; tested against mocked APIs, Playwright specs not yet run |
 | Integration harness (real API servers via envtest, real git/helm/kustomize) | [`test/integration`](test/integration) | lifecycle + recovery scenarios passing |
 | Examples | [`examples/`](examples) | validated against the CRDs and real renderers |
-| Container image (Alpine, non-root, pinned helm/kustomize/git-lfs) | [`Dockerfile`](Dockerfile), [`hack/images`](hack/images), [`docs/guides/images.md`](docs/guides/images.md) | written; pins, root filesystem and Dockerfile checks verified without Docker; **`docker build` not executed** |
+| Container image (Alpine, non-root, pinned helm/kustomize/git-lfs) | [`Dockerfile`](Dockerfile), [`hack/images`](hack/images), [`docs/guides/images.md`](docs/guides/images.md) | built for linux/arm64 and checked (layout, runtime smoke test under the chart's restricted settings); amd64, SBOM, scans and a cluster run are not done |
 | Helm chart | [`deploy/helm/patrol-cd`](deploy/helm/patrol-cd), [`docs/guides/installation.md`](docs/guides/installation.md) | value profiles lint and render deterministically; install/upgrade/rollback/uninstall and RBAC sufficiency run against envtest API servers; not run on a cluster with a kubelet |
 | Static install manifests (`install`, `namespace-install`, `core-install`, hydrator variants, `crds`) | [`deploy/manifests`](deploy/manifests), [`docs/guides/manifests.md`](docs/guides/manifests.md) | generated from the chart, verified equal to it and server-side applied to envtest |
 | First-run bootstrap (`patrolcd bootstrap`: internal token, session key, initial admin password, default SSH known hosts) | [`internal/server`](internal/server), [`bootstrap.md`](docs/architecture/components/bootstrap.md) | unit + envtest tested (including a new initial admin password after uninstall and re-install); run as an init container by the chart and manifests |
@@ -69,7 +69,7 @@ and current limitations.
 
 ## Known limitations (high level)
 
-- No container image has been built or published (Docker Desktop disk full) and nothing has
+- The container image has been built for linux/arm64 only and not published, and nothing has
   been installed on a real cluster; NetworkPolicy enforcement and live pods are unverified.
   There is no CI pipeline yet.
 - Pod/Deployment health is simulated in tests (envtest has no kubelet); port-forward, pod logs

@@ -8,7 +8,7 @@
 # Security `restricted` admission of the rendered pods (init container included, dry run)
 # and a run of the init container's command as the pod's service account with the rendered
 # Role, against envtest (docs/verification/runs/2026-10-17-deploy-validation.md, before the
-# DV-6 change). Not run by a kubelet (no image built, no kind cluster: Docker disk full,
+# DV-6 change). Not run by a kubelet (the image builds, but no kind cluster has been started;
 # TASKS.md).
 
 OPS-030:

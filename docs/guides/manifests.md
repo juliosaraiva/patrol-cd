@@ -10,9 +10,9 @@ Status: the files are generated, checked against the chart renders and applied t
 kube-apiserver 1.36 (server-side apply, strict field validation, Pod Security `restricted`
 warnings, idempotent re-apply), recorded in
 [`docs/verification/runs/2026-10-17-manifests-static.md`](../verification/runs/2026-10-17-manifests-static.md).
-They have not run on a cluster with nodes yet: no Patrol image is published and the kind clusters
-are blocked (Docker Desktop disk, see `TASKS.md`), so pods, probes, NetworkPolicy enforcement and
-HA scheduling are unverified.
+They have not run on a cluster with nodes yet: no Patrol image is published (`make image` builds
+`patrol-cd/patrol-cd:dev` locally) and no kind cluster has been created, so pods, probes,
+NetworkPolicy enforcement and HA scheduling are unverified.
 
 ## Contents
 

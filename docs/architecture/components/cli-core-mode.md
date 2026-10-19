@@ -210,8 +210,8 @@ with `--auth-token` / `PATROL_AUTH_TOKEN`; invalid `PATROL_CORE` values.
 
 ## Gaps
 
-- Live verification of the port-forward path on a kind cluster is pending (Docker Desktop
-  disk full, see `TASKS.md` blockers): kubelet-backed `pods/portforward` and controller pods
+- Live verification of the port-forward path on a kind cluster is pending (no kind cluster has
+  been created yet, see `TASKS.md`): kubelet-backed `pods/portforward` and controller pods
   of a real StatefulSet have not been exercised; tests use a fake Kubernetes API serving the
   same WebSocket protocol.
 - The tree API is reached in plain HTTP; controllers serving it with `--tls-cert` are not

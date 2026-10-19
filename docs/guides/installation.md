@@ -7,8 +7,8 @@ them. Installations without Helm render the same chart (see [Without Helm](#with
 
 Status: the chart renders, lints and validates statically (`make helm-lint helm-template`,
 recorded in `docs/verification/runs/2026-10-17-chart-static.md`). It has not yet been installed
-on a running cluster from this repository (the image build and kind clusters are blocked on
-Docker Desktop disk space, see `TASKS.md`).
+on a running cluster from this repository: the image builds and passes its smoke test
+(`docs/verification/runs/2026-10-19-image-build.md`), but no kind cluster has been created yet.
 
 ## Prerequisites
 
@@ -570,8 +570,8 @@ the same keys).
 
 ## Known limitations
 
-- Not yet installed on a live cluster from this repository; image build and kind validation are
-  blocked (Docker Desktop disk). NetworkPolicy enforcement and probes are unverified.
+- Not yet installed on a live cluster from this repository (the image builds, kind validation has
+  not been run). NetworkPolicy enforcement and probes are unverified.
 - Dex: no configuration launcher (OPS-152); the `patrol` client secret is a manual step; memory
   storage, one replica.
 - The controller tree API does not support client certificates (no mTLS for that hop).
