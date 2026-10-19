@@ -1,0 +1,4 @@
+# Negative test: mTLS needs certificates from Secrets.
+# expect: internalTLS.mtls needs internalTLS.mode certManager or existingSecret
+internalTLS:
+  mtls: true

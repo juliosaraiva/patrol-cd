@@ -1,0 +1,4 @@
+# Negative test: the controller needs at least one replica.
+# expect: minimum: got 0, want 1
+controller:
+  replicas: 0

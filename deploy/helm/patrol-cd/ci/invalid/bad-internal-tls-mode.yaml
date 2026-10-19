@@ -1,0 +1,4 @@
+# Negative test: internalTLS.mode is an enumeration.
+# expect: value must be one of 'disabled', 'selfSigned', 'certManager', 'existingSecret'
+internalTLS:
+  mode: auto

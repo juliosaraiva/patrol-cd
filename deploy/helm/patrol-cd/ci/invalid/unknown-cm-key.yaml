@@ -1,0 +1,5 @@
+# Negative test: patrol-cm keys are a closed set (typo).
+# expect: additional properties 'timeout.reconcilation' not allowed
+configs:
+  cm:
+    timeout.reconcilation: 300s

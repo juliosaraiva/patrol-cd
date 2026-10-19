@@ -1,0 +1,15 @@
+{{- if .Values.configs.create.sshKnownHosts }}
+{{- /*
+Without configs.sshKnownHosts the ConfigMap is rendered without data: Helm owns only its
+metadata, the bootstrap seeds the default known hosts, and the certificate API manages the key
+(an applied key would conflict with the API's updates on the next upgrade).
+*/}}
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  {{- include "patrol.metadata" (list . "patrol-ssh-known-hosts-cm" "config" dict dict) | nindent 2 }}
+{{- with .Values.configs.sshKnownHosts }}
+data:
+  ssh_known_hosts: {{ . | quote }}
+{{- end }}
+{{- end }}

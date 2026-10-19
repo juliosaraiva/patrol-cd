@@ -1,0 +1,5 @@
+# Negative test: ApplicationSets in other namespaces with SCM providers enabled need an allow-list
+# (the ApplicationSet controller exits at startup otherwise).
+# expect: applicationSetNamespaces needs configs.params applicationsetcontroller.allowed.scm.providers
+applicationSetNamespaces:
+  - team-a

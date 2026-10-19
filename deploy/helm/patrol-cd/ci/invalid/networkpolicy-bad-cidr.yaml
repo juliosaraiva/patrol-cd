@@ -1,0 +1,10 @@
+# Negative test: NetworkPolicy CIDRs are validated (address/prefix, no leading zeros).
+# expect: at '/networkPolicy/repoServerEgress/except/0'
+networkPolicy:
+  repoServerEgress:
+    cidrs:
+      - 0.0.0.0/0
+    except:
+      - 010.0.0.0/8
+    ports:
+      - 443

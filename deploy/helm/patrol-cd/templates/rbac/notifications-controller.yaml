@@ -1,0 +1,8 @@
+{{- if and .Values.rbac.create .Values.notificationsController.enabled }}
+{{- $sa := include "patrol.serviceAccountName" (list . .Values.notificationsController "notifications-controller") }}
+{{ include "patrol.roleBinding" (list . (include "patrol.notificationsName" .) .Release.Namespace "notifications-controller" (include "patrol.rules.notifications.controlPlane" .) $sa) }}
+{{- with include "patrol.extraNamespaceRBAC" (list . .Values.applicationNamespaces "notifications-controller-applications" "notifications-controller" (include "patrol.rules.notifications.applications" .) $sa) }}
+---
+{{ . }}
+{{- end }}
+{{- end }}

@@ -1,0 +1,39 @@
+{{- if .Values.server.enabled }}
+{{- $s := .Values.server.service }}
+apiVersion: v1
+kind: Service
+metadata:
+  {{- include "patrol.metadata" (list . (include "patrol.serverName" .) "server" $s.labels $s.annotations) | nindent 2 }}
+spec:
+  type: {{ $s.type }}
+  {{- with $s.loadBalancerClass }}
+  loadBalancerClass: {{ . }}
+  {{- end }}
+  {{- with $s.loadBalancerSourceRanges }}
+  loadBalancerSourceRanges:
+    {{- toYaml . | nindent 4 }}
+  {{- end }}
+  {{- with $s.externalTrafficPolicy }}
+  externalTrafficPolicy: {{ . }}
+  {{- end }}
+  {{- with $s.sessionAffinity }}
+  sessionAffinity: {{ . }}
+  {{- end }}
+  selector:
+    {{- include "patrol.selectorLabels" (list . "server") | nindent 4 }}
+  ports:
+    - name: http
+      port: {{ $s.httpPort }}
+      targetPort: http
+      protocol: TCP
+      {{- if and (ne $s.type "ClusterIP") $s.nodePortHttp }}
+      nodePort: {{ $s.nodePortHttp }}
+      {{- end }}
+    - name: https
+      port: {{ $s.httpsPort }}
+      targetPort: http
+      protocol: TCP
+      {{- if and (ne $s.type "ClusterIP") $s.nodePortHttps }}
+      nodePort: {{ $s.nodePortHttps }}
+      {{- end }}
+{{- end }}

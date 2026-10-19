@@ -1,0 +1,118 @@
+{{- if .Values.networkPolicy.enabled }}
+{{- $np := .Values.networkPolicy }}
+{{- $v := .Values }}
+{{- $docs := list }}
+
+{{- /* patrol-server: API from anyone (or serverFrom); calls repo-server, controller tree API, Dex,
+the Kubernetes API, destination clusters, external IdPs/extension backends and the OTLP
+collector. */}}
+{{- if $v.server.enabled }}
+{{- $in := list }}
+{{- if $np.serverFrom }}
+{{- $in = append $in (printf "- from:\n%s\n  ports:\n%s" ($np.serverFrom | toYaml | indent 4) (include "patrol.np.ports" (list 8080) | indent 4)) }}
+{{- else }}
+{{- $in = append $in (printf "- ports:\n%s" (include "patrol.np.ports" (list 8080) | indent 4)) }}
+{{- end }}
+{{- with include "patrol.np.metrics" (list . 8083) }}{{ $in = append $in . }}{{ end }}
+{{- $out := list (include "patrol.np.dns" .) }}
+{{- if $v.repoServer.enabled }}{{ $out = append $out (printf "- to:\n%s\n  ports:\n%s" (include "patrol.np.peer" (list . "repo-server") | indent 4) (include "patrol.np.ports" (list 8081) | indent 4)) }}{{ end }}
+{{- if $v.controller.enabled }}{{ $out = append $out (printf "- to:\n%s\n  ports:\n%s" (include "patrol.np.peer" (list . "controller") | indent 4) (include "patrol.np.ports" (list 8090) | indent 4)) }}{{ end }}
+{{- if $v.dex.enabled }}{{ $out = append $out (printf "- to:\n%s\n  ports:\n%s" (include "patrol.np.peer" (list . "dex-server") | indent 4) (include "patrol.np.ports" (list 5556 5557) | indent 4)) }}{{ end }}
+{{- with include "patrol.np.kubeAPI" . }}{{ $out = append $out . }}{{ end }}
+{{- with include "patrol.np.cidrs" $np.serverEgress }}{{ $out = append $out . }}{{ end }}
+{{- with include "patrol.np.tracing" . }}{{ $out = append $out . }}{{ end }}
+{{- with include "patrol.np.extra" (list . "server") }}{{ $out = append $out . }}{{ end }}
+{{- $docs = append $docs (include "patrol.np.policy" (list . "server" (join "\n" $in) (join "\n" $out))) }}
+{{- end }}
+
+{{- /* Controller: tree API from patrol-server; calls repo-server, commit-server, the Kubernetes
+API, destination clusters and the OTLP collector. */}}
+{{- if $v.controller.enabled }}
+{{- $in := list }}
+{{- if $v.server.enabled }}{{ $in = append $in (printf "- from:\n%s\n  ports:\n%s" (include "patrol.np.peer" (list . "server") | indent 4) (include "patrol.np.ports" (list 8090) | indent 4)) }}{{ end }}
+{{- with include "patrol.np.metrics" (list . 8082) }}{{ $in = append $in . }}{{ end }}
+{{- $out := list (include "patrol.np.dns" .) }}
+{{- if $v.repoServer.enabled }}{{ $out = append $out (printf "- to:\n%s\n  ports:\n%s" (include "patrol.np.peer" (list . "repo-server") | indent 4) (include "patrol.np.ports" (list 8081) | indent 4)) }}{{ end }}
+{{- if include "patrol.commitServerEnabled" . }}{{ $out = append $out (printf "- to:\n%s\n  ports:\n%s" (include "patrol.np.peer" (list . "commit-server") | indent 4) (include "patrol.np.ports" (list 8086) | indent 4)) }}{{ end }}
+{{- with include "patrol.np.kubeAPI" . }}{{ $out = append $out . }}{{ end }}
+{{- with include "patrol.np.cidrs" $np.controllerEgress }}{{ $out = append $out . }}{{ end }}
+{{- with include "patrol.np.tracing" . }}{{ $out = append $out . }}{{ end }}
+{{- with include "patrol.np.extra" (list . "controller") }}{{ $out = append $out . }}{{ end }}
+{{- $docs = append $docs (include "patrol.np.policy" (list . "controller" (join "\n" $in) (join "\n" $out))) }}
+{{- end }}
+
+{{- /* Repo-server: API from server, controller, ApplicationSet and notifications controllers;
+calls Git/Helm/OCI hosts and the OTLP collector (no Kubernetes API). CMP sidecars talk over a
+pod-local socket. It fetches tenant-supplied URLs, so networkPolicy.excludeMetadataEndpoints
+(cloud instance metadata) is removed from its external egress. */}}
+{{- if $v.repoServer.enabled }}
+{{- $peers := list }}
+{{- if $v.server.enabled }}{{ $peers = append $peers (include "patrol.np.peer" (list . "server")) }}{{ end }}
+{{- if $v.controller.enabled }}{{ $peers = append $peers (include "patrol.np.peer" (list . "controller")) }}{{ end }}
+{{- if $v.appsetController.enabled }}{{ $peers = append $peers (include "patrol.np.peer" (list . "applicationset-controller")) }}{{ end }}
+{{- if $v.notificationsController.enabled }}{{ $peers = append $peers (include "patrol.np.peer" (list . "notifications-controller")) }}{{ end }}
+{{- $in := list }}
+{{- if $peers }}{{ $in = append $in (printf "- from:\n%s\n  ports:\n%s" (join "\n" $peers | indent 4) (include "patrol.np.ports" (list 8081) | indent 4)) }}{{ end }}
+{{- with include "patrol.np.metrics" (list . 8084) }}{{ $in = append $in . }}{{ end }}
+{{- $out := list (include "patrol.np.dns" .) }}
+{{- with include "patrol.np.cidrs" (dict "cidrs" $np.repoServerEgress.cidrs "except" (concat ($np.repoServerEgress.except | default list) ($np.excludeMetadataEndpoints | default list)) "ports" $np.repoServerEgress.ports) }}{{ $out = append $out . }}{{ end }}
+{{- with include "patrol.np.tracing" . }}{{ $out = append $out . }}{{ end }}
+{{- with include "patrol.np.extra" (list . "repoServer") }}{{ $out = append $out . }}{{ end }}
+{{- $docs = append $docs (include "patrol.np.policy" (list . "repo-server" (join "\n" $in) (join "\n" $out))) }}
+{{- end }}
+
+{{- /* ApplicationSet controller: metrics (and the optional webhook); calls repo-server, the
+Kubernetes API and SCM provider APIs. */}}
+{{- if $v.appsetController.enabled }}
+{{- $in := list }}
+{{- with include "patrol.np.metrics" (list . 8080) }}{{ $in = append $in . }}{{ end }}
+{{- if $v.appsetController.webhook.enabled }}
+{{- if $np.appsetWebhookFrom }}
+{{- $in = append $in (printf "- from:\n%s\n  ports:\n%s" ($np.appsetWebhookFrom | toYaml | indent 4) (include "patrol.np.ports" (list $v.appsetController.webhook.port) | indent 4)) }}
+{{- else }}
+{{- $in = append $in (printf "- ports:\n%s" (include "patrol.np.ports" (list $v.appsetController.webhook.port) | indent 4)) }}
+{{- end }}
+{{- end }}
+{{- $out := list (include "patrol.np.dns" .) }}
+{{- if $v.repoServer.enabled }}{{ $out = append $out (printf "- to:\n%s\n  ports:\n%s" (include "patrol.np.peer" (list . "repo-server") | indent 4) (include "patrol.np.ports" (list 8081) | indent 4)) }}{{ end }}
+{{- with include "patrol.np.kubeAPI" . }}{{ $out = append $out . }}{{ end }}
+{{- with include "patrol.np.cidrs" $np.appsetControllerEgress }}{{ $out = append $out . }}{{ end }}
+{{- with include "patrol.np.extra" (list . "appsetController") }}{{ $out = append $out . }}{{ end }}
+{{- $docs = append $docs (include "patrol.np.policy" (list . "applicationset-controller" (join "\n" $in) (join "\n" $out))) }}
+{{- end }}
+
+{{- /* Notifications controller: metrics; calls repo-server, the Kubernetes API and notification
+services. */}}
+{{- if $v.notificationsController.enabled }}
+{{- $in := list }}
+{{- with include "patrol.np.metrics" (list . 9001) }}{{ $in = append $in . }}{{ end }}
+{{- $out := list (include "patrol.np.dns" .) }}
+{{- if $v.repoServer.enabled }}{{ $out = append $out (printf "- to:\n%s\n  ports:\n%s" (include "patrol.np.peer" (list . "repo-server") | indent 4) (include "patrol.np.ports" (list 8081) | indent 4)) }}{{ end }}
+{{- with include "patrol.np.kubeAPI" . }}{{ $out = append $out . }}{{ end }}
+{{- with include "patrol.np.cidrs" $np.notificationsEgress }}{{ $out = append $out . }}{{ end }}
+{{- with include "patrol.np.extra" (list . "notificationsController") }}{{ $out = append $out . }}{{ end }}
+{{- $docs = append $docs (include "patrol.np.policy" (list . "notifications-controller" (join "\n" $in) (join "\n" $out))) }}
+{{- end }}
+
+{{- /* Commit-server: API from the controller only; calls Git hosts (no Kubernetes API), minus
+networkPolicy.excludeMetadataEndpoints like the repo-server. */}}
+{{- if include "patrol.commitServerEnabled" . }}
+{{- $in := list (printf "- from:\n%s\n  ports:\n%s" (include "patrol.np.peer" (list . "controller") | indent 4) (include "patrol.np.ports" (list 8086) | indent 4)) }}
+{{- with include "patrol.np.metrics" (list . 8087) }}{{ $in = append $in . }}{{ end }}
+{{- $out := list (include "patrol.np.dns" .) }}
+{{- with include "patrol.np.cidrs" (dict "cidrs" $np.commitServerEgress.cidrs "except" (concat ($np.commitServerEgress.except | default list) ($np.excludeMetadataEndpoints | default list)) "ports" $np.commitServerEgress.ports) }}{{ $out = append $out . }}{{ end }}
+{{- with include "patrol.np.extra" (list . "commitServer") }}{{ $out = append $out . }}{{ end }}
+{{- $docs = append $docs (include "patrol.np.policy" (list . "commit-server" (join "\n" $in) (join "\n" $out))) }}
+{{- end }}
+
+{{- /* Dex: HTTP and gRPC from patrol-server only; calls identity providers. */}}
+{{- if $v.dex.enabled }}
+{{- $in := list (printf "- from:\n%s\n  ports:\n%s" (include "patrol.np.peer" (list . "server") | indent 4) (include "patrol.np.ports" (list 5556 5557) | indent 4)) }}
+{{- with include "patrol.np.metrics" (list . 5558) }}{{ $in = append $in . }}{{ end }}
+{{- $out := list (include "patrol.np.dns" .) }}
+{{- with include "patrol.np.cidrs" $np.dexEgress }}{{ $out = append $out . }}{{ end }}
+{{- with include "patrol.np.extra" (list . "dex") }}{{ $out = append $out . }}{{ end }}
+{{- $docs = append $docs (include "patrol.np.policy" (list . "dex-server" (join "\n" $in) (join "\n" $out))) }}
+{{- end }}
+{{- join "\n---\n" $docs }}
+{{- end }}

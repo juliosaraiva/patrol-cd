@@ -1,0 +1,71 @@
+Patrol CD {{ .Chart.AppVersion }} is installed in namespace {{ .Release.Namespace }}.
+{{- if .Values.server.enabled }}
+
+1. Wait for the components:
+     kubectl -n {{ .Release.Namespace }} rollout status deployment/{{ include "patrol.serverName" . }}
+     kubectl -n {{ .Release.Namespace }} rollout status statefulset/{{ include "patrol.controllerName" . }}
+
+2. Reach the UI and API:
+{{- if .Values.server.ingress.enabled }}
+{{- range .Values.server.ingress.hosts }}
+     https://{{ . }}
+{{- end }}
+{{- else if .Values.server.httproute.enabled }}
+{{- range .Values.server.httproute.hostnames }}
+     https://{{ . }}
+{{- end }}
+{{- else }}
+     kubectl -n {{ .Release.Namespace }} port-forward service/{{ include "patrol.serverName" . }} 8080:{{ ternary .Values.server.service.httpPort .Values.server.service.httpsPort .Values.server.insecure }}
+     then open {{ ternary "http" "https" .Values.server.insecure }}://localhost:8080
+{{- end }}
+{{- if not (index .Values.configs.cm "url") }}
+   Set configs.cm.url to the external URL (needed for SSO, links and notifications).
+{{- end }}
+
+3. Log in:
+{{- if not (include "patrol.adminEnabled" .) }}
+     the admin account is disabled in patrol-cm (configs.cm admin.enabled or
+     accounts.admin.enabled); log in through SSO.
+{{- else if .Values.configs.secret.adminPasswordHash }}
+     as admin, with the password whose bcrypt hash is configs.secret.adminPasswordHash.
+{{- else if not .Values.configs.secret.createAdmin }}
+     no admin password is generated (configs.secret.createAdmin=false): the admin account stays
+     enabled but cannot log in until patrol-secret has admin.password. Log in through SSO, and
+     disable the account with configs.cm."admin.enabled": "false".
+{{- else if not .Values.bootstrap.enabled }}
+     nothing generates the admin password (bootstrap.enabled=false): set
+     configs.secret.adminPasswordHash (or admin.password, a bcrypt hash, in patrol-secret), or log
+     in through SSO.
+{{- else }}
+     patrol admin initial-password -n {{ .Release.Namespace }}
+   (Secret patrol-initial-admin-secret, created by the bootstrap init container; delete it after
+   changing the password.)
+{{- end }}
+{{- else }}
+
+Core install: no API server or UI. Manage Applications with kubectl, or with the CLI in core mode:
+     patrol app list --core -n {{ .Release.Namespace }}
+{{- end }}
+{{- if not .Values.bootstrap.enabled }}
+{{- if not .Values.configs.internalToken.existingSecret }}
+
+WARNING: bootstrap.enabled=false and no configs.internalToken.existingSecret: create Secret
+patrol-internal-token (key token) in {{ .Release.Namespace }} or the components will not start.
+{{- end }}
+{{- end }}
+{{- if eq .Values.internalTLS.mode "selfSigned" }}
+
+Internal TLS: the repo-server uses a self-signed certificate that clients do not verify (the
+shared internal token authenticates them); the commit-server and the controller tree API are
+plaintext. Use internalTLS.mode=certManager (or existingSecret) for verified, encrypted internal
+traffic.
+{{- else if eq .Values.internalTLS.mode "disabled" }}
+
+Internal TLS is disabled: internal APIs are plaintext inside the cluster.
+{{- end }}
+{{- if and (eq .Values.rbac.scope "cluster") .Values.rbac.controller.clusterAdmin .Values.controller.enabled }}
+
+The controller has cluster-admin-equivalent rights on this cluster (rbac.controller.clusterAdmin).
+Restrict which projects may use the in-cluster destination, or set rbac.controller.clusterAdmin=false
+with rbac.controller.rules.
+{{- end }}

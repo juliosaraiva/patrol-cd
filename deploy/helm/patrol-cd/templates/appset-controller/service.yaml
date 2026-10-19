@@ -1,0 +1,22 @@
+{{- if .Values.appsetController.enabled }}
+{{- $v := .Values.appsetController }}
+apiVersion: v1
+kind: Service
+metadata:
+  {{- include "patrol.metadata" (list . (include "patrol.appsetName" .) "applicationset-controller" $v.service.labels $v.service.annotations) | nindent 2 }}
+spec:
+  type: ClusterIP
+  selector:
+    {{- include "patrol.selectorLabels" (list . "applicationset-controller") | nindent 4 }}
+  ports:
+    - name: metrics
+      port: 8080
+      targetPort: metrics
+      protocol: TCP
+    {{- if $v.webhook.enabled }}
+    - name: webhook
+      port: {{ $v.webhook.port }}
+      targetPort: webhook
+      protocol: TCP
+    {{- end }}
+{{- end }}

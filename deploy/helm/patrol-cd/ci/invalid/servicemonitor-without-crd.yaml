@@ -1,0 +1,5 @@
+# Negative test: ServiceMonitors need the Prometheus Operator CRDs.
+# expect: need the Prometheus Operator CRDs (monitoring.coreos.com/v1)
+metrics:
+  serviceMonitor:
+    enabled: true

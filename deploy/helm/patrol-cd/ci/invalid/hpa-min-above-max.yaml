@@ -1,0 +1,7 @@
+# Negative test: minReplicas above maxReplicas (refused by the API server).
+# expect: repoServer.autoscaling.minReplicas (5) must not exceed repoServer.autoscaling.maxReplicas (2)
+repoServer:
+  autoscaling:
+    enabled: true
+    minReplicas: 5
+    maxReplicas: 2

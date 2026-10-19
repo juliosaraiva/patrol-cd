@@ -1,0 +1,9 @@
+# Negative test: a CMP plugin needs plugin.yaml.
+# expect: configMap or pluginConfig is required
+repoServer:
+  cmp:
+    plugins:
+      - name: broken
+        image:
+          repository: busybox
+          tag: "1.37.0"

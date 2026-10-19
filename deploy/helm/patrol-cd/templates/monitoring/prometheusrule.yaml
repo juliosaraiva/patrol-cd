@@ -1,0 +1,81 @@
+{{- if .Values.metrics.prometheusRule.enabled }}
+{{- $pr := .Values.metrics.prometheusRule }}
+{{- $labels := $pr.alertLabels | default dict }}
+{{- /*
+Alerts use metrics the components register (internal/reposerver/metrics.go,
+internal/compare/metrics.go, internal/controller/core/metrics.go,
+internal/controller/sharding/metrics.go, internal/notifications/metrics.go).
+*/}}
+apiVersion: monitoring.coreos.com/v1
+kind: PrometheusRule
+metadata:
+  name: {{ include "patrol.name" (list . "alerts") }}
+  namespace: {{ $pr.namespace | default .Release.Namespace }}
+  labels:
+    {{- include "patrol.labelsWith" (list . "alerts" $pr.labels) | nindent 4 }}
+  {{- with include "patrol.annotations" (list . $pr.annotations) }}
+  {{- . | nindent 2 }}
+  {{- end }}
+spec:
+  groups:
+    - name: patrol-cd
+      rules:
+        {{- if .Values.repoServer.enabled }}
+        - alert: PatrolRepoServerErrors
+          expr: |
+            sum by (namespace) (rate(patrol_reposerver_requests_total{code=~"internal|unavailable|deadline_exceeded|resource_exhausted"}[10m]))
+              / sum by (namespace) (rate(patrol_reposerver_requests_total[10m])) > {{ $pr.repoServerErrorRatio }}
+          for: 15m
+          labels:
+            {{- toYaml $labels | nindent 12 }}
+          annotations:
+            summary: Repo-server requests are failing
+            description: More than {{ mulf $pr.repoServerErrorRatio 100 }}% of repo-server requests in {{ "{{" }} $labels.namespace {{ "}}" }} failed over 10 minutes (manifest generation, Git or registry errors).
+        - alert: PatrolRepoServerUnauthenticated
+          expr: sum by (namespace) (increase(patrol_reposerver_requests_total{code="unauthenticated"}[10m])) > 0
+          for: 10m
+          labels:
+            {{- toYaml $labels | nindent 12 }}
+          annotations:
+            summary: Repo-server rejects internal tokens
+            description: Callers of the repo-server in {{ "{{" }} $labels.namespace {{ "}}" }} present an invalid internal token (patrol-internal-token rotated without restarting every component?).
+        {{- end }}
+        {{- if .Values.controller.enabled }}
+        - alert: PatrolComparisonFailures
+          expr: sum by (namespace, kind) (increase(patrol_compare_failures_total[15m])) > {{ $pr.comparisonFailuresPer15m }}
+          for: 15m
+          labels:
+            {{- toYaml $labels | nindent 12 }}
+          annotations:
+            summary: Application comparisons are failing
+            description: '{{ "{{" }} $value {{ "}}" }} comparisons failed in the {{ "{{" }} $labels.kind {{ "}}" }} phase in 15 minutes ({{ "{{" }} $labels.namespace {{ "}}" }}).'
+        - alert: PatrolSyncFailed
+          expr: sum by (namespace, name, project) (increase(patrol_app_sync_total{phase=~"Failed|Error", dry_run="false"}[30m])) > 0
+          labels:
+            {{- toYaml $labels | nindent 12 }}
+          annotations:
+            summary: Sync operations failed
+            description: Application {{ "{{" }} $labels.namespace {{ "}}" }}/{{ "{{" }} $labels.name {{ "}}" }} (project {{ "{{" }} $labels.project {{ "}}" }}) had a failed sync in the last 30 minutes.
+        - alert: PatrolControllerShardUnowned
+          expr: max by (shard) (patrol_controller_shard_owned) == 0
+          for: 5m
+          labels:
+            {{- toYaml $labels | nindent 12 }}
+          annotations:
+            summary: A controller shard has no owner
+            description: No controller replica holds the Lease of shard {{ "{{" }} $labels.shard {{ "}}" }}; its clusters are not reconciled.
+        {{- end }}
+        {{- if .Values.notificationsController.enabled }}
+        - alert: PatrolNotificationDeliveryFailures
+          expr: sum by (service, trigger) (increase(patrol_notifications_deliveries_total{succeeded="false"}[15m])) > 0
+          for: 15m
+          labels:
+            {{- toYaml $labels | nindent 12 }}
+          annotations:
+            summary: Notifications are not delivered
+            description: Deliveries through {{ "{{" }} $labels.service {{ "}}" }} (trigger {{ "{{" }} $labels.trigger {{ "}}" }}) failed in the last 15 minutes.
+        {{- end }}
+        {{- with $pr.additionalRules }}
+        {{- toYaml . | nindent 8 }}
+        {{- end }}
+{{- end }}

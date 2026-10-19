@@ -1,0 +1,71 @@
+# Air-gapped installation: every image (Patrol, Dex, CMP plugins) is pulled from a mirror, the
+# Patrol image is pinned by digest, and the repo-server reaches only the internal Git network.
+# The digest below is a placeholder: REPLACE_ME with the digest of your mirrored image.
+global:
+  imageRegistry: registry.internal.example
+  imagePullSecrets:
+    - registry-credentials
+image:
+  tag: 0.1.0
+  digest: sha256:0000000000000000000000000000000000000000000000000000000000000000
+configs:
+  cm:
+    url: https://patrol.internal.example
+    dex.config: |
+      connectors:
+        - type: ldap
+          id: ldap
+          name: LDAP
+  sshKnownHosts: |
+    git.internal.example ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIOMqqnkVzrm0SdG6UOoqKLsabgH5C9okWi0dh2l9GKJl
+dex:
+  enabled: true
+  clientSecretRef:
+    name: patrol-dex-client
+  config:
+    connectors:
+      - type: ldap
+        id: ldap
+        name: LDAP
+        config:
+          host: ldap.internal.example:636
+          bindDN: cn=patrol,ou=services,dc=internal,dc=example
+          bindPW: $LDAP_BIND_PASSWORD
+          userSearch:
+            baseDN: ou=people,dc=internal,dc=example
+            username: uid
+            idAttr: uid
+            emailAttr: mail
+            nameAttr: cn
+  env:
+    - name: LDAP_BIND_PASSWORD
+      valueFrom:
+        secretKeyRef:
+          name: patrol-dex-ldap
+          key: bindPassword
+repoServer:
+  cmp:
+    plugins:
+      - name: tmpl-render
+        image:
+          registry: docker.io
+          repository: library/busybox
+          tag: "1.37.0"
+        configMap: patrol-cmp-tmpl-render
+networkPolicy:
+  repoServerEgress:
+    cidrs:
+      - 10.20.0.0/16
+    ports:
+      - 22
+      - 443
+  serverEgress:
+    cidrs:
+      - 10.20.0.0/16
+    ports:
+      - 443
+  dexEgress:
+    cidrs:
+      - 10.20.0.0/16
+    ports:
+      - 636

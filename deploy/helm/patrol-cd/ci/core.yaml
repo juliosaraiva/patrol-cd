@@ -1,0 +1,7 @@
+# Core (headless) install: controller, repo-server, ApplicationSet and notifications
+# controllers; no API server, UI or Dex. The bootstrap init container runs on the controller.
+# Use kubectl or `patrol --core`.
+server:
+  enabled: false
+dex:
+  enabled: false

@@ -1,0 +1,5 @@
+# Negative test: gpgKeys keys must be 16-hex-digit key IDs.
+# expect: invalid propertyName 'not-a-key-id'
+configs:
+  gpgKeys:
+    not-a-key-id: x

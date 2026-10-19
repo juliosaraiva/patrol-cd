@@ -1,0 +1,3 @@
+# Negative test: top-level values are a closed set.
+# expect: additional properties 'replicaCount' not allowed
+replicaCount: 2

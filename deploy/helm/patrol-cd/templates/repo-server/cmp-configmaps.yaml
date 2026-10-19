@@ -1,0 +1,14 @@
+{{- if .Values.repoServer.enabled }}
+{{- range .Values.repoServer.cmp.plugins }}
+{{- if .pluginConfig }}
+---
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  {{- include "patrol.metadata" (list $ (printf "%s-cmp-%s" (include "patrol.repoServerName" $) .name) "repo-server" dict dict) | nindent 2 }}
+data:
+  plugin.yaml: |
+    {{- toYaml .pluginConfig | nindent 4 }}
+{{- end }}
+{{- end }}
+{{- end }}

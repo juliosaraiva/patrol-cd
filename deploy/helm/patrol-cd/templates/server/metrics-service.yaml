@@ -1,0 +1,16 @@
+{{- if .Values.server.enabled }}
+{{- $s := .Values.server.metrics.service }}
+apiVersion: v1
+kind: Service
+metadata:
+  {{- include "patrol.metadata" (list . (include "patrol.suffixedName" (list (include "patrol.serverName" .) "metrics")) "server" $s.labels $s.annotations) | nindent 2 }}
+spec:
+  type: ClusterIP
+  selector:
+    {{- include "patrol.selectorLabels" (list . "server") | nindent 4 }}
+  ports:
+    - name: metrics
+      port: {{ $s.port }}
+      targetPort: metrics
+      protocol: TCP
+{{- end }}

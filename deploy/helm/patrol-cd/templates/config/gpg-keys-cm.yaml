@@ -1,0 +1,12 @@
+{{- if .Values.configs.create.gpgKeys }}
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  {{- include "patrol.metadata" (list . "patrol-gpg-keys-cm" "config" dict dict) | nindent 2 }}
+{{- with .Values.configs.gpgKeys }}
+data:
+  {{- range $k, $v := . }}
+  {{ $k }}: {{ $v | quote }}
+  {{- end }}
+{{- end }}
+{{- end }}

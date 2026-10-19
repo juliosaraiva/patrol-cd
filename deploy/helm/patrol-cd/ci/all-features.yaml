@@ -1,0 +1,178 @@
+# Exercises every optional template path (not a recommended configuration): Dex, a CMP plugin
+# with inline plugin.yaml, Gateway API route, an Ingress to the https port (TLS at
+# patrol-server: server.insecure stays false), cert-manager server certificate, ApplicationSet
+# webhook, literal application namespaces (namespaced Roles), dynamic cluster distribution,
+# tracing, extra objects and custom names.
+fullnameOverride: pcd
+capabilities:
+  extraAPIVersions:
+    - cert-manager.io/v1
+    - gateway.networking.k8s.io/v1
+    - monitoring.coreos.com/v1
+applicationNamespaces:
+  - team-a
+  - team-b
+applicationSetNamespaces:
+  - team-a
+global:
+  logLevel: debug
+  logFormat: json
+  commonLabels:
+    example.com/owner: platform
+  imagePullSecrets:
+    - name: regcred
+configs:
+  cm:
+    url: https://patrol.example.com
+    exec.enabled: "true"
+    application.sync.impersonation.enabled: "true"
+    accounts.ci: apiKey
+    help.download.linux-amd64: https://downloads.example.com/patrol-linux-amd64
+  params:
+    controller.status.processors: 30
+    controller.k8s.client.qps: 75.5
+    notificationscontroller.selfservice.enabled: true
+    # Required with applicationSetNamespaces while SCM providers are enabled.
+    applicationsetcontroller.allowed.scm.providers: https://api.github.com/
+  rbac:
+    policy.csv: |
+      g, platform-admins, role:admin
+    policy.team-a.csv: |
+      p, role:team-a, applications, *, team-a/*, allow
+    scopes: "[groups, email]"
+  gpgKeys:
+    4AEE18F83AFDEB23: |
+      -----BEGIN PGP PUBLIC KEY BLOCK-----
+      (example placeholder)
+      -----END PGP PUBLIC KEY BLOCK-----
+  tlsCerts:
+    git.example.com: |
+      -----BEGIN CERTIFICATE-----
+      (example placeholder)
+      -----END CERTIFICATE-----
+  secret:
+    adminPasswordHash: $2a$10$abcdefghijklmnopqrstuuG3Jx2uRKyBOkjAWz0ysScPCzHmb6tKy
+    adminPasswordMtime: "2026-10-18T00:00:00Z"
+    extra:
+      webhook.github.secret: $patrol-webhooks:github
+  internalToken:
+    existingSecret: patrol-internal-token-ext
+    existingSecretKey: value
+internalTLS:
+  mode: certManager
+  mtls: true
+server:
+  certificate:
+    enabled: true
+    dnsNames:
+      - patrol.example.com
+    issuerRef:
+      name: letsencrypt
+      kind: ClusterIssuer
+  ingress:
+    enabled: true
+    className: nginx
+    annotations:
+      nginx.ingress.kubernetes.io/backend-protocol: HTTPS
+    hosts:
+      - patrol.example.com
+    tls:
+      - secretName: patrol-server-tls
+        hosts:
+          - patrol.example.com
+  httproute:
+    enabled: true
+    parentRefs:
+      - name: public
+        namespace: gateway-system
+    hostnames:
+      - patrol.example.com
+  service:
+    type: LoadBalancer
+    loadBalancerSourceRanges:
+      - 203.0.113.0/24
+  extraArgs:
+    - --trusted-proxies=10.0.0.0/8
+controller:
+  replicas: 2
+  sharding:
+    dynamicClusterDistribution: true
+    heartbeatSeconds: 15
+rbac:
+  server:
+    exec: true
+    impersonation: true
+  appsetControllerExtraRules:
+    - apiGroups: ["example.com"]
+      resources: ["placements"]
+      verbs: ["get", "list", "watch"]
+appsetController:
+  webhook:
+    enabled: true
+notificationsController:
+  egressAllowedCIDRs:
+    - 10.96.0.0/12
+  tenantEgressAllowedCIDRs:
+    - 10.100.0.0/16
+commitServer:
+  maxConcurrentRequests: 2
+hydrator:
+  enabled: true
+dex:
+  enabled: true
+  clientSecretRef:
+    name: patrol-dex-client
+  config:
+    connectors:
+      - type: github
+        id: github
+        name: GitHub
+        config:
+          clientID: $GITHUB_CLIENT_ID
+          clientSecret: $GITHUB_CLIENT_SECRET
+  envFrom:
+    - secretRef:
+        name: patrol-dex-github
+repoServer:
+  cmp:
+    plugins:
+      - name: inline
+        image:
+          repository: busybox
+          tag: "1.37.0"
+        pluginConfig:
+          apiVersion: cd.patrol.example/v1alpha1
+          kind: ConfigManagementPlugin
+          metadata:
+            name: inline
+          spec:
+            generate:
+              command: ["sh", "-c", "cat *.yaml"]
+            discover:
+              fileName: "*.inline"
+        env:
+          - name: PATROL_CMP_PASS_ENV
+            value: HTTPS_PROXY,NO_PROXY
+tracing:
+  otlpAddress: otel-collector.observability:4317
+  attrs:
+    - deployment.environment:production
+  headersSecret:
+    name: otlp-headers
+networkPolicy:
+  extraEgress:
+    controller:
+      - to:
+          - ipBlock:
+              cidr: 198.51.100.0/24
+        ports:
+          - port: 8443
+            protocol: TCP
+extraObjects:
+  - apiVersion: v1
+    kind: ConfigMap
+    metadata:
+      name: '{{ include "patrol.prefix" . }}-extra'
+      namespace: '{{ .Release.Namespace }}'
+    data:
+      note: rendered with the release

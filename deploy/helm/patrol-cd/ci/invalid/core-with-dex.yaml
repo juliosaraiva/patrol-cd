@@ -1,0 +1,11 @@
+# Negative test: Dex is proxied by patrol-server.
+# expect: dex.enabled requires server.enabled
+server:
+  enabled: false
+dex:
+  enabled: true
+  clientSecretRef:
+    name: x
+configs:
+  cm:
+    url: https://patrol.example.com

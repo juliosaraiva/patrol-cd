@@ -1,0 +1,20 @@
+{{- if include "patrol.commitServerEnabled" . }}
+{{- $s := .Values.commitServer.service }}
+apiVersion: v1
+kind: Service
+metadata:
+  {{- include "patrol.metadata" (list . (include "patrol.commitServerName" .) "commit-server" $s.labels $s.annotations) | nindent 2 }}
+spec:
+  type: ClusterIP
+  selector:
+    {{- include "patrol.selectorLabels" (list . "commit-server") | nindent 4 }}
+  ports:
+    - name: server
+      port: 8086
+      targetPort: server
+      protocol: TCP
+    - name: metrics
+      port: 8087
+      targetPort: metrics
+      protocol: TCP
+{{- end }}

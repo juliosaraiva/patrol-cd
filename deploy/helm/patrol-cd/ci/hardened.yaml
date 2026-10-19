@@ -1,0 +1,130 @@
+# Hardened installation: verified and mutually authenticated internal TLS with certificates you
+# provide (Secrets patrol-repo-server-tls, patrol-controller-tls, patrol-internal-client-tls,
+# each with ca.crt), no in-cluster live-resource access for patrol-server, a controller whose
+# local-cluster writes are limited to the kinds listed below, narrow metrics scraping and
+# egress, SSO only.
+#
+# The write rules name resources instead of "*", so the controller cannot write subresources
+# (create serviceaccounts/token, pods/exec, pods/attach or nodes/proxy, patch
+# pods/ephemeralcontainers), nodes, namespaces, RBAC or admission objects. They do not contain
+# the controller: the read rule the live-state cache needs covers every Secret of the cluster
+# and every subresource readable with get (nodes/proxy included), and writing Pods, workloads,
+# Secrets or ConfigMaps in any namespace (kube-system included) remains a path to cluster-admin
+# (a Pod or Deployment runs as any ServiceAccount of its namespace; a service-account-token
+# Secret receives a token for the ServiceAccount it names). Restrict destinations with
+# AppProjects, or use rbac.scope=namespaced to confine the controller to listed namespaces.
+internalTLS:
+  mode: existingSecret
+  verify: true
+  mtls: true
+configs:
+  cm:
+    url: https://patrol.example.com
+    admin.enabled: "false"
+    users.anonymous.enabled: "false"
+    exec.enabled: "false"
+    resource.respectRBAC: normal
+  params:
+    reposerver.parallelism.limit: 10
+    applicationsetcontroller.allowed.scm.providers: https://api.github.com/
+  rbac:
+    policy.default: ""
+  secret:
+    createAdmin: false
+rbac:
+  server:
+    localCluster: false
+  controller:
+    clusterAdmin: false
+    rules:
+      - apiGroups: ["*"]
+        resources: ["*"]
+        verbs: ["get", "list", "watch"]
+      - nonResourceURLs: ["*"]
+        verbs: ["get"]
+      # Writes for the kinds Applications deploy; add yours.
+      - apiGroups: [""]
+        resources: ["configmaps", "secrets", "services", "serviceaccounts", "persistentvolumeclaims", "pods"]
+        verbs: ["create", "update", "patch", "delete"]
+      - apiGroups: ["apps"]
+        resources: ["deployments", "statefulsets", "daemonsets"]
+        verbs: ["create", "update", "patch", "delete"]
+      - apiGroups: ["batch"]
+        resources: ["jobs", "cronjobs"]
+        verbs: ["create", "update", "patch", "delete"]
+      - apiGroups: ["networking.k8s.io"]
+        resources: ["ingresses", "networkpolicies"]
+        verbs: ["create", "update", "patch", "delete"]
+      - apiGroups: ["autoscaling"]
+        resources: ["horizontalpodautoscalers"]
+        verbs: ["create", "update", "patch", "delete"]
+      - apiGroups: ["policy"]
+        resources: ["poddisruptionbudgets"]
+        verbs: ["create", "update", "patch", "delete"]
+global:
+  topologySpread: soft
+networkPolicy:
+  # Endpoint IPs of the Kubernetes API server (`kubectl get endpointslices -n default
+  # -l kubernetes.io/service-name=kubernetes`). 192.0.2.10 is a documentation address:
+  # REPLACE_ME.
+  kubeAPIServer:
+    cidrs:
+      - 192.0.2.10/32
+    ports:
+      - 6443
+  metricsFrom:
+    - namespaceSelector:
+        matchLabels:
+          kubernetes.io/metadata.name: monitoring
+      podSelector:
+        matchLabels:
+          app.kubernetes.io/name: prometheus
+  serverEgress:
+    cidrs:
+      - 0.0.0.0/0
+    except:
+      - 10.0.0.0/8
+      - 172.16.0.0/12
+      - 192.168.0.0/16
+      - 169.254.0.0/16
+    ports:
+      - 443
+  controllerEgress:
+    cidrs:
+      - 0.0.0.0/0
+    except:
+      - 169.254.0.0/16
+    ports:
+      - 443
+      - 6443
+  repoServerEgress:
+    cidrs:
+      - 0.0.0.0/0
+    except:
+      - 10.0.0.0/8
+      - 172.16.0.0/12
+      - 192.168.0.0/16
+      - 169.254.0.0/16
+    ports:
+      - 22
+      - 443
+  appsetControllerEgress:
+    cidrs:
+      - 0.0.0.0/0
+    except:
+      - 10.0.0.0/8
+      - 172.16.0.0/12
+      - 192.168.0.0/16
+      - 169.254.0.0/16
+    ports:
+      - 443
+  notificationsEgress:
+    cidrs:
+      - 0.0.0.0/0
+    except:
+      - 10.0.0.0/8
+      - 172.16.0.0/12
+      - 192.168.0.0/16
+      - 169.254.0.0/16
+    ports:
+      - 443

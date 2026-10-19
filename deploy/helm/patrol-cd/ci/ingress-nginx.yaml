@@ -1,0 +1,28 @@
+# ingress-nginx terminating TLS: patrol-server serves plain HTTP (--insecure) behind the
+# controller, which is the only peer allowed to reach the API port.
+configs:
+  cm:
+    url: https://patrol.example.com
+server:
+  insecure: true
+  ingress:
+    enabled: true
+    className: nginx
+    annotations:
+      nginx.ingress.kubernetes.io/backend-protocol: HTTP
+      nginx.ingress.kubernetes.io/force-ssl-redirect: "true"
+      nginx.ingress.kubernetes.io/proxy-read-timeout: "3600"
+    hosts:
+      - patrol.example.com
+    tls:
+      - secretName: patrol-ingress-tls
+        hosts:
+          - patrol.example.com
+networkPolicy:
+  serverFrom:
+    - namespaceSelector:
+        matchLabels:
+          kubernetes.io/metadata.name: ingress-nginx
+      podSelector:
+        matchLabels:
+          app.kubernetes.io/name: ingress-nginx

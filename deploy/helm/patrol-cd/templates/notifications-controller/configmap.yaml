@@ -1,0 +1,12 @@
+{{- if and .Values.notificationsController.enabled .Values.notificationsController.createConfigMap }}
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  {{- include "patrol.metadata" (list . "patrol-notifications-cm" "config" dict dict) | nindent 2 }}
+{{- with .Values.notificationsController.cm }}
+data:
+  {{- range $k, $v := . }}
+  {{ $k }}: {{ $v | quote }}
+  {{- end }}
+{{- end }}
+{{- end }}

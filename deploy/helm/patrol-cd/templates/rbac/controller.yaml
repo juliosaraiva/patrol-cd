@@ -1,0 +1,31 @@
+{{- if and .Values.rbac.create .Values.controller.enabled }}
+{{- $sa := include "patrol.serviceAccountName" (list . .Values.controller "controller") }}
+{{- $name := include "patrol.controllerName" . }}
+{{ include "patrol.roleBinding" (list . $name .Release.Namespace "controller" (include "patrol.rules.controller.controlPlane" .) $sa) }}
+{{- /* The controller caches Applications and Operations of all namespaces as soon as any
+application namespace is configured (internal/server/controller.go), so its rules are cluster-wide
+even for literal names. */}}
+{{- with include "patrol.extraNamespaceRBAC" (list . .Values.applicationNamespaces "controller-applications" "controller" (include "patrol.rules.controller.applications" .) $sa true) }}
+---
+{{ . }}
+{{- end }}
+{{- if eq .Values.rbac.scope "cluster" }}
+{{- /*
+The controller manages the local (in-cluster) destination with its own identity. Argo CD's
+default grants cluster-admin-equivalent rights; anyone allowed to create Applications in a
+project that permits the in-cluster destination can deploy any resource to this cluster.
+*/}}
+{{- $rules := .Values.rbac.controller.rules | toYaml }}
+{{- if .Values.rbac.controller.clusterAdmin }}
+{{- $rules = "- apiGroups: [\"*\"]\n  resources: [\"*\"]\n  verbs: [\"*\"]\n- nonResourceURLs: [\"*\"]\n  verbs: [\"*\"]" }}
+{{- end }}
+---
+{{ include "patrol.clusterRoleBinding" (list . (include "patrol.clusterName" (list . "controller")) "controller" $rules $sa) }}
+{{- else }}
+{{- /* namespace-install semantics: full control of the release namespace and managedNamespaces only. */}}
+{{- range (prepend .Values.rbac.managedNamespaces .Release.Namespace | uniq) }}
+---
+{{ include "patrol.roleBinding" (list $ (include "patrol.name" (list $ "controller-local")) . "controller" "- apiGroups: [\"*\"]\n  resources: [\"*\"]\n  verbs: [\"*\"]" $sa) }}
+{{- end }}
+{{- end }}
+{{- end }}

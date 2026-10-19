@@ -1,0 +1,46 @@
+{{- if .Values.metrics.serviceMonitor.enabled }}
+{{- $sm := .Values.metrics.serviceMonitor }}
+{{- $targets := list }}
+{{- if .Values.server.enabled }}{{ $targets = append $targets (dict "component" "server" "port" "metrics") }}{{ end }}
+{{- if .Values.controller.enabled }}{{ $targets = append $targets (dict "component" "controller" "port" "metrics" "serviceSuffix" "-metrics") }}{{ end }}
+{{- if .Values.repoServer.enabled }}{{ $targets = append $targets (dict "component" "repo-server" "port" "metrics") }}{{ end }}
+{{- if .Values.appsetController.enabled }}{{ $targets = append $targets (dict "component" "applicationset-controller" "port" "metrics") }}{{ end }}
+{{- if .Values.notificationsController.enabled }}{{ $targets = append $targets (dict "component" "notifications-controller" "port" "metrics") }}{{ end }}
+{{- if include "patrol.commitServerEnabled" . }}{{ $targets = append $targets (dict "component" "commit-server" "port" "metrics") }}{{ end }}
+{{- if .Values.dex.enabled }}{{ $targets = append $targets (dict "component" "dex-server" "port" "metrics") }}{{ end }}
+{{- range $i, $t := $targets }}
+{{- if $i }}
+---
+{{- end }}
+apiVersion: monitoring.coreos.com/v1
+kind: ServiceMonitor
+metadata:
+  name: {{ include "patrol.name" (list $ $t.component) }}
+  namespace: {{ $sm.namespace | default $.Release.Namespace }}
+  labels:
+    {{- include "patrol.labelsWith" (list $ $t.component $sm.labels) | nindent 4 }}
+  {{- with include "patrol.annotations" (list $ $sm.annotations) }}
+  {{- . | nindent 2 }}
+  {{- end }}
+spec:
+  namespaceSelector:
+    matchNames:
+      - {{ $.Release.Namespace }}
+  selector:
+    matchLabels:
+      {{- include "patrol.selectorLabels" (list $ $t.component) | nindent 6 }}
+  endpoints:
+    - port: {{ $t.port }}
+      path: /metrics
+      interval: {{ $sm.interval }}
+      scrapeTimeout: {{ $sm.scrapeTimeout }}
+      {{- with $sm.relabelings }}
+      relabelings:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      {{- with $sm.metricRelabelings }}
+      metricRelabelings:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+{{- end }}
+{{- end }}

@@ -1,0 +1,26 @@
+{{- if and .Values.server.enabled .Values.server.certificate.enabled }}
+{{- $c := .Values.server.certificate }}
+apiVersion: cert-manager.io/v1
+kind: Certificate
+metadata:
+  {{- include "patrol.metadata" (list . (include "patrol.serverName" .) "server" dict dict) | nindent 2 }}
+spec:
+  secretName: patrol-server-tls
+  secretTemplate:
+    labels:
+      app.kubernetes.io/part-of: patrol-cd
+  dnsNames:
+    {{- toYaml $c.dnsNames | nindent 4 }}
+  duration: {{ $c.duration }}
+  renewBefore: {{ $c.renewBefore }}
+  privateKey:
+    {{- toYaml $c.privateKey | nindent 4 }}
+  usages:
+    - server auth
+    - digital signature
+    - key encipherment
+  issuerRef:
+    name: {{ $c.issuerRef.name }}
+    kind: {{ $c.issuerRef.kind | default "ClusterIssuer" }}
+    group: {{ $c.issuerRef.group | default "cert-manager.io" }}
+{{- end }}

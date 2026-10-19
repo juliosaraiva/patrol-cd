@@ -1,0 +1,5 @@
+# Negative test: parameters driven by structured values are rejected.
+# expect: configs.params.hydrator.enabled is managed by the chart
+configs:
+  params:
+    hydrator.enabled: "true"

@@ -1,0 +1,6 @@
+# Negative test: runtime-generated patrol-secret keys cannot be templated.
+# expect: invalid propertyName 'server.secretkey'
+configs:
+  secret:
+    extra:
+      server.secretkey: REPLACE_ME

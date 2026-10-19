@@ -1,0 +1,5 @@
+# Negative test: patrol-rbac-cm keys are a closed set (typo).
+# expect: additional properties 'policy.defaults' not allowed
+configs:
+  rbac:
+    policy.defaults: role:readonly

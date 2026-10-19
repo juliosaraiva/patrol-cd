@@ -1,0 +1,4 @@
+# Negative test: certManager mode needs cert-manager.io/v1.
+# expect: internalTLS.mode=certManager needs cert-manager
+internalTLS:
+  mode: certManager

@@ -1,0 +1,195 @@
+# Helm chart (deploy/helm/patrol-cd, hack/helmdocs, hack/deploy.mk). Guide:
+# docs/guides/installation.md; commands and results:
+# docs/verification/runs/2026-10-17-chart-static.md.
+# Evidence level: static only (helm lint --strict and helm template of every profile,
+# deterministic renders, schema/validation negative tests, strict typed decoding of the rendered
+# objects, flag names checked against the help goldens). Nothing has been installed on a cluster
+# from this chart yet (image build and kind blocked, TASKS.md), so statuses stay in-progress
+# until the deployment validation harness and kind exercise them.
+
+OPS-001:
+  status: in-progress
+  impl: [deploy/helm/patrol-cd/templates, deploy/helm/patrol-cd/values.yaml]
+  tests: [deploy/helm/patrol-cd/ci/default.yaml (make helm-lint, make helm-template)]
+  evidence: docs/verification/runs/2026-10-17-chart-static.md
+  notes: >-
+    The default chart values render the cluster-scoped install: 8 CRDs plus the Operation
+    ValidatingAdmissionPolicy and binding, the settings ConfigMaps (patrol-cm with the shipped
+    defaults), an empty patrol-secret, patrol-notifications-cm/-secret, server Deployment,
+    controller StatefulSet, repo-server, ApplicationSet and notifications controllers, Services,
+    ServiceAccounts, Roles and ClusterRoles, NetworkPolicies, PDBs. No Redis (ADR-0004); Dex off
+    by default. Cluster-scoped objects are named <namespace>-<prefix>-<component> and bind
+    ServiceAccounts of the release namespace, so no ClusterRoleBinding patch is needed for
+    another namespace (upstream edge case). Not installed on a cluster yet.
+
+OPS-002:
+  status: in-progress
+  impl: [deploy/helm/patrol-cd/templates/rbac, deploy/helm/patrol-cd/ci/namespaced.yaml]
+  tests: [deploy/helm/patrol-cd/ci/namespaced.yaml (make helm-lint), deploy/helm/patrol-cd/ci/invalid/namespaced-with-app-namespaces.yaml]
+  evidence: docs/verification/runs/2026-10-17-chart-static.md
+  notes: >-
+    rbac.scope=namespaced with crds.install=false and crds.admissionPolicy=false renders no CRD,
+    no admission policy, no ClusterRole or ClusterRoleBinding; the controller and server get
+    Roles in the release namespace and rbac.managedNamespaces. Combining it with
+    applicationNamespaces is refused. Not installed on a cluster yet.
+
+OPS-003:
+  status: in-progress
+  impl: [deploy/helm/patrol-cd/ci/core.yaml, deploy/helm/patrol-cd/templates/_bootstrap.tpl]
+  tests: [deploy/helm/patrol-cd/ci/core.yaml (make helm-lint, make helm-template)]
+  evidence: docs/verification/runs/2026-10-17-chart-static.md
+  notes: >-
+    server.enabled=false: no patrol-server, Ingress, Dex or server ClusterRole; the bootstrap
+    init container moves to the controller (optional internal token mount, bootstrap Role bound
+    to the controller ServiceAccount). Differs from upstream core-install in keeping the
+    notifications controller (switchable) and having no Redis. Not installed on a cluster yet.
+
+OPS-004:
+  status: in-progress
+  impl: [deploy/helm/patrol-cd/ci/ha.yaml, deploy/helm/patrol-cd/templates/_helpers.tpl]
+  tests: [deploy/helm/patrol-cd/ci/ha.yaml (make helm-lint, make helm-template)]
+  evidence: docs/verification/runs/2026-10-17-chart-static.md
+  notes: >-
+    HA profile: three controller shards (Lease-coordinated, ADR-0008), HPAs for server and
+    repo-server, two leader-elected ApplicationSet and notifications replicas, required pod
+    anti-affinity per node and zone spread, PDBs. No Redis HA (ADR-0004). Not run on a
+    multi-node cluster.
+
+OPS-005:
+  status: in-progress
+  impl: [deploy/helm/patrol-cd/templates/commit-server, deploy/helm/patrol-cd/templates/_config.tpl]
+  tests: [deploy/helm/patrol-cd/ci/hydrator.yaml (make helm-lint, make helm-template)]
+  evidence: docs/verification/runs/2026-10-17-chart-static.md
+  notes: >-
+    hydrator.enabled sets hydrator.enabled and commit.server in patrol-cmd-params-cm and deploys
+    the commit-server (no token, NetworkPolicy admitting only the controller). One switch
+    instead of separate *-with-hydrator bundles; the HA quirk (commit-server without
+    hydrator.enabled) is not reproduced. Not installed on a cluster yet.
+
+OPS-006:
+  status: in-progress
+  impl: [hack/helmdocs/crds.go, deploy/helm/patrol-cd/templates/crds]
+  tests:
+    - hack/helmdocs/main_test.go:TestChartIsCurrent
+    - hack/helmdocs/main_test.go:TestTemplateCRDRejectsUnexpectedLayout
+  evidence: docs/verification/runs/2026-10-17-chart-static.md
+  notes: >-
+    The CRDs are templates generated from deploy/crds (byte-identical bodies, checked by
+    `make helm-verify`), so `helm upgrade` upgrades them, with helm.sh/resource-policy: keep.
+    Server-side apply instructions for non-Helm installs in the guide. Not applied to an API
+    server by this task (the validate task does).
+
+OPS-007:
+  status: in-progress
+  impl: [deploy/helm/patrol-cd/templates/rbac]
+  tests: [deploy/helm/patrol-cd/ci/default.yaml, deploy/helm/patrol-cd/ci/hardened.yaml]
+  evidence: docs/verification/runs/2026-10-17-chart-static.md
+  notes: >-
+    Controller ClusterRole cluster-admin-equivalent by default (rbac.controller.clusterAdmin) or
+    a rules list (ci/hardened.yaml names the writable resources, so no subresource, node,
+    namespace or RBAC writes, but its read-everything rule and workload/Secret writes still
+    allow escalation; documented in installation.md "Hardened installation"); server
+    ClusterRole get/patch/delete any resource, list events, get pods and pods/log, create Jobs,
+    optional pods/exec and serviceaccounts impersonate. The ApplicationSet
+    controller has no ClusterRole unless applicationSetNamespaces needs one (upstream grants it
+    unconditionally). Rules derived from the components' API calls; RBAC sufficiency is
+    unverified until the validate task runs them against an API server.
+
+OPS-008:
+  status: in-progress
+  impl: [deploy/helm/patrol-cd/templates/rbac/_rules.tpl]
+  tests: [deploy/helm/patrol-cd/ci/all-features.yaml (make helm-lint)]
+  evidence: docs/verification/runs/2026-10-17-chart-static.md
+  notes: >-
+    Per-component Roles in the release namespace and in literal application/ApplicationSet
+    namespaces; repo-server, commit-server and Dex have ServiceAccounts without RBAC and no
+    mounted token; the notifications controller lists and watches every ConfigMap and Secret of
+    the release namespace (settings informers, repository lister; as upstream) and gets its
+    named ConfigMaps and Secret; a separate bootstrap Role (create Secrets; get the three
+    bootstrap Secrets; update patrol-secret; delete patrol-initial-admin-secret only; get
+    patrol-cm) bound to the primary workload. With serviceAccount.create=false the render fails
+    unless serviceAccount.name is set (never the namespace's default ServiceAccount;
+    hack/helmdocs TestServiceAccountNameRequired, ci/invalid/serviceaccount-without-name.yaml).
+    Operations creators get the impersonate verb the admission policy checks. Not exercised
+    against an API server here.
+
+OPS-010:
+  status: in-progress
+  impl: [deploy/helm/patrol-cd/templates/networkpolicy]
+  tests:
+    - deploy/helm/patrol-cd/ci/hardened.yaml (make helm-lint)
+    - deploy/helm/patrol-cd/ci/ingress-nginx.yaml
+    - hack/helmdocs/behavior_test.go:TestNetworkPolicyExcept
+    - hack/helmdocs/render_test.go:TestRenderedProfiles
+  evidence: docs/verification/runs/2026-10-17-chart-static.md
+  notes: >-
+    Stricter than upstream (ingress-only, server open): every component restricts ingress and
+    egress (DNS, API server, peer components, configurable external CIDR/port sets, metrics
+    scrapers). except entries are attached only to the CIDRs that strictly contain them (render
+    check of every profile), and the repo-server and commit-server egress excludes the cloud
+    metadata endpoints by default (networkPolicy.excludeMetadataEndpoints). Enforcement untested
+    (no CNI available here).
+
+OPS-015:
+  status: in-progress
+  impl: [deploy/helm/patrol-cd/ci/airgap.yaml, deploy/helm/patrol-cd/templates/_helpers.tpl]
+  tests: [deploy/helm/patrol-cd/ci/airgap.yaml (make helm-lint, make helm-template)]
+  evidence: docs/verification/runs/2026-10-17-chart-static.md
+  notes: >-
+    global.imageRegistry rewrites the registry of every image (Patrol, Dex, CMP plugins), image
+    digests pin them; the Dex image is pinned to the v2.45.1 index digest (resolved from
+    ghcr.io and hashed locally). Not run in an isolated network.
+
+OPS-016:
+  status: in-progress
+  impl: [deploy/helm/patrol-cd/Chart.yaml]
+  tests: [helm template --kube-version 1.29.9 (refused) and 1.30.0/1.33.0/1.36.0 (rendered)]
+  evidence: docs/verification/runs/2026-10-17-chart-static.md
+  notes: >-
+    kubeVersion >=1.30.0-0 (ValidatingAdmissionPolicy GA); the baseline is tested on 1.33-1.36.
+    Lint and template run with --kube-version 1.36.0. Only envtest 1.36.0 binaries are
+    available locally.
+
+OPS-113:
+  status: in-progress
+  impl: [deploy/helm/patrol-cd/templates/server/ingress.yaml]
+  tests:
+    - hack/helmdocs/behavior_test.go:TestIngressBackendPort
+    - deploy/helm/patrol-cd/ci/all-features.yaml (make helm-lint, make helm-template)
+  evidence: docs/verification/runs/2026-10-17-chart-static.md
+  notes: >-
+    With server.insecure=false the Ingress backend uses the https Service port: ci/all-features.yaml
+    renders such an Ingress and TestIngressBackendPort asserts its backend port (static render
+    only). Passthrough and re-encryption annotations are documented. Not run behind a
+    controller.
+
+OPS-114:
+  status: in-progress
+  impl: [deploy/helm/patrol-cd/templates/server/ingress.yaml, deploy/helm/patrol-cd/ci/ingress-nginx.yaml]
+  tests:
+    - deploy/helm/patrol-cd/ci/ingress-nginx.yaml (make helm-lint, make helm-template)
+    - hack/helmdocs/behavior_test.go:TestIngressBackendPort
+  evidence: docs/verification/runs/2026-10-17-chart-static.md
+  notes: >-
+    TLS terminated by ingress-nginx with server.insecure (--insecure) and the http backend port;
+    no separate gRPC host because the API is JSON over HTTP. Not run behind a controller.
+
+OPS-121:
+  status: in-progress
+  impl: [deploy/helm/patrol-cd/templates/server/httproute.yaml]
+  tests: [deploy/helm/patrol-cd/ci/all-features.yaml (make helm-lint, make helm-template)]
+  evidence: docs/verification/runs/2026-10-17-chart-static.md
+  notes: >-
+    HTTPRoute only (no GRPCRoute needed); BackendTLSPolicy for TLS at the server is documented,
+    not rendered. Not run behind a Gateway.
+
+OPS-155:
+  status: implemented
+  impl: [deploy/helm/patrol-cd/values.yaml, hack/helmdocs/defaults.go]
+  tests: [hack/helmdocs/main_test.go:TestChartIsCurrent]
+  evidence: docs/verification/runs/2026-10-17-chart-static.md
+  notes: >-
+    patrol-cm ships resource.exclusions and the ignoreResourceUpdates rules of
+    internal/settings (DefaultResourceExclusionsYAML, DefaultIgnoreResourceUpdates); the
+    generator's check fails when values.yaml and the code differ. The rendered patrol-cm has
+    not been read by a running settings manager in this task.

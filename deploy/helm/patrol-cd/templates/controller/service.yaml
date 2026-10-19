@@ -1,0 +1,22 @@
+{{- if .Values.controller.enabled }}
+{{- $s := .Values.controller.treeAPI.service }}
+{{- /*
+Headless Service of the StatefulSet: patrol-server reaches the replica holding an Application's
+shard as <pod>.<this service>.<namespace>.svc:8090 (tree API). Not-ready pods are published so
+the owner of a shard stays reachable while it is not ready (the tree API answers 503 itself).
+*/}}
+apiVersion: v1
+kind: Service
+metadata:
+  {{- include "patrol.metadata" (list . (include "patrol.controllerName" .) "controller" $s.labels $s.annotations) | nindent 2 }}
+spec:
+  clusterIP: None
+  publishNotReadyAddresses: true
+  selector:
+    {{- include "patrol.selectorLabels" (list . "controller") | nindent 4 }}
+  ports:
+    - name: tree-api
+      port: 8090
+      targetPort: tree-api
+      protocol: TCP
+{{- end }}

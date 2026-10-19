@@ -1,0 +1,43 @@
+# Smallest footprint for a laptop or CI cluster: one replica each, no NetworkPolicies, no PDBs,
+# no notifications controller, plaintext internal APIs. Not for production.
+internalTLS:
+  mode: disabled
+global:
+  podAntiAffinity: ""
+networkPolicy:
+  enabled: false
+server:
+  pdb:
+    enabled: false
+  resources:
+    requests:
+      cpu: 50m
+      memory: 128Mi
+    limits:
+      cpu: "1"
+      memory: 512Mi
+controller:
+  pdb:
+    enabled: false
+  resources:
+    requests:
+      cpu: 100m
+      memory: 256Mi
+    limits:
+      cpu: "1"
+      memory: 1Gi
+repoServer:
+  pdb:
+    enabled: false
+  resources:
+    requests:
+      cpu: 100m
+      memory: 256Mi
+    limits:
+      cpu: "1"
+      memory: 1Gi
+appsetController:
+  pdb:
+    enabled: false
+notificationsController:
+  enabled: false

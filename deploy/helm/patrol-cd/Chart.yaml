@@ -1,0 +1,25 @@
+apiVersion: v2
+name: patrol-cd
+description: >-
+  Patrol CD, a Kubernetes-native continuous delivery platform: API server and web UI,
+  application controller, repo-server, ApplicationSet and notifications controllers,
+  commit-server (source hydrator) and optional Dex.
+type: application
+version: 0.1.0
+appVersion: "0.1.0"
+# Kubernetes >= 1.30: ValidatingAdmissionPolicy (shipped with the CRDs) is GA from 1.30. The
+# Argo CD v3.5.5 baseline is tested on 1.33-1.36.
+kubeVersion: ">=1.30.0-0"
+keywords:
+  - gitops
+  - continuous-delivery
+  - kubernetes
+home: https://github.com/juliosaraiva/patrol-cd
+sources:
+  - https://github.com/juliosaraiva/patrol-cd
+maintainers:
+  - name: Julio Saraiva
+    url: https://github.com/juliosaraiva
+annotations:
+  category: Infrastructure
+  licenses: Apache-2.0

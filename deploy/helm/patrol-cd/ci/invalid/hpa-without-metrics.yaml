@@ -1,0 +1,7 @@
+# Negative test: an HPA with both targets at 0 has no metric (Kubernetes would scale on 80% CPU).
+# expect: server.autoscaling needs targetCPUUtilizationPercentage or targetMemoryUtilizationPercentage above 0
+server:
+  autoscaling:
+    enabled: true
+    targetCPUUtilizationPercentage: 0
+    targetMemoryUtilizationPercentage: 0

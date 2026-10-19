@@ -1,0 +1,5 @@
+# Negative test: OTLP headers never go to a ConfigMap.
+# expect: configs.params.otlp.headers would put OTLP headers into a ConfigMap
+configs:
+  params:
+    otlp.headers: authorization=REPLACE_ME

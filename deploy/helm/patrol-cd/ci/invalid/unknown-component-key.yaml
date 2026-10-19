@@ -1,0 +1,4 @@
+# Negative test: component values are a closed set (typo).
+# expect: additional properties 'replica' not allowed
+repoServer:
+  replica: 2

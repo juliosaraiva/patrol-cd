@@ -1,0 +1,113 @@
+{{- if .Values.notificationsController.enabled }}
+{{- $v := .Values.notificationsController }}
+{{- $clients := dict "repo" true }}
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  {{- include "patrol.metadata" (list . (include "patrol.notificationsName" .) "notifications-controller" $v.labels $v.annotations) | nindent 2 }}
+spec:
+  replicas: {{ $v.replicas }}
+  revisionHistoryLimit: {{ .Values.global.revisionHistoryLimit }}
+  selector:
+    matchLabels:
+      {{- include "patrol.selectorLabels" (list . "notifications-controller") | nindent 6 }}
+  strategy:
+    {{- toYaml $v.updateStrategy | nindent 4 }}
+  template:
+    metadata:
+      labels:
+        {{- include "patrol.podLabels" (list . $v "notifications-controller") | nindent 8 }}
+      annotations:
+        {{- include "patrol.podAnnotations" (list . $v (dict "checksum/cmd-params" (include "patrol.paramsChecksum" .))) | nindent 8 }}
+    spec:
+      serviceAccountName: {{ include "patrol.serviceAccountName" (list . $v "notifications-controller") }}
+      automountServiceAccountToken: true
+      enableServiceLinks: false
+      {{- with include "patrol.imagePullSecrets" . }}
+      {{- . | nindent 6 }}
+      {{- end }}
+      securityContext:
+        {{- include "patrol.podSecurityContext" (list . $v) | nindent 8 }}
+      {{- with include "patrol.scheduling" (list . $v "notifications-controller") }}
+      {{- . | nindent 6 }}
+      {{- end }}
+      terminationGracePeriodSeconds: {{ $v.terminationGracePeriodSeconds }}
+      {{- with $v.initContainers }}
+      initContainers:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      containers:
+        - name: notifications-controller
+          image: {{ include "patrol.patrolImage" . }}
+          imagePullPolicy: {{ .Values.image.pullPolicy }}
+          # The image entrypoint (tini) stays PID 1: it forwards SIGTERM and reaps tool processes.
+          args:
+            - /usr/local/bin/patrolcd
+            - notifications-controller
+            {{- include "patrol.shutdownArg" . | nindent 12 }}
+            - --metrics-addr=:9001
+            {{- /* The notifications controller has no repo.server parameter: pass the address (an
+            external repo-server from configs.params when the chart's is disabled). */}}
+            - --repo-server={{ index .Values.configs.params "repo.server" | default (include "patrol.repoServerAddress" .) }}
+            {{- if $v.leaderElection }}
+            - --enable-leader-election
+            {{- end }}
+            {{- if $v.allowPrivateEgress }}
+            - --allow-private-egress
+            {{- end }}
+            {{- with $v.egressAllowedCIDRs }}
+            - --egress-allowed-cidrs={{ join "," . }}
+            {{- end }}
+            {{- with $v.tenantEgressAllowedCIDRs }}
+            - --tenant-egress-allowed-cidrs={{ join "," . }}
+            {{- end }}
+            {{- with include "patrol.repoClientArgs" . }}
+            {{- . | nindent 12 }}
+            {{- end }}
+            {{- with $v.extraArgs }}
+            {{- toYaml . | nindent 12 }}
+            {{- end }}
+          env:
+            {{- include "patrol.commonEnv" (list . $v) | nindent 12 }}
+          {{- with include "patrol.envFrom" (list . $v) }}
+          {{- . | nindent 10 }}
+          {{- end }}
+          ports:
+            - name: metrics
+              containerPort: 9001
+              protocol: TCP
+          readinessProbe:
+            {{- include "patrol.probe" (list $v.probes.readiness "/readyz" "metrics" "HTTP") | nindent 12 }}
+          livenessProbe:
+            {{- include "patrol.probe" (list $v.probes.liveness "/livez" "metrics" "HTTP") | nindent 12 }}
+          resources:
+            {{- toYaml $v.resources | nindent 12 }}
+          securityContext:
+            {{- include "patrol.containerSecurityContext" (list . $v) | nindent 12 }}
+          {{- with $v.lifecycle }}
+          lifecycle:
+            {{- toYaml . | nindent 12 }}
+          {{- end }}
+          volumeMounts:
+            - name: tmp
+              mountPath: /tmp
+            {{- include "patrol.internalTokenMount" . | nindent 12 }}
+            {{- with include "patrol.internalClientMounts" (list . $clients) }}
+            {{- . | nindent 12 }}
+            {{- end }}
+            {{- with $v.volumeMounts }}
+            {{- toYaml . | nindent 12 }}
+            {{- end }}
+        {{- with $v.extraContainers }}
+        {{- toYaml . | nindent 8 }}
+        {{- end }}
+      volumes:
+        {{- include "patrol.tmpVolume" "256Mi" | nindent 8 }}
+        {{- include "patrol.internalTokenVolume" (list . false) | nindent 8 }}
+        {{- with include "patrol.internalClientVolumes" (list . $clients) }}
+        {{- . | nindent 8 }}
+        {{- end }}
+        {{- with $v.volumes }}
+        {{- toYaml . | nindent 8 }}
+        {{- end }}
+{{- end }}

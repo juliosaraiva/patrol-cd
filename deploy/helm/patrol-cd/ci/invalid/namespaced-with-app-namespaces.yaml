@@ -1,0 +1,6 @@
+# Negative test: namespace-install semantics exclude apps in other namespaces.
+# expect: rbac.scope=namespaced cannot be combined with applicationNamespaces
+rbac:
+  scope: namespaced
+applicationNamespaces:
+  - team-a

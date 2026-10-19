@@ -1,0 +1,104 @@
+{{- if .Values.dex.enabled }}
+{{- $v := .Values.dex }}
+{{- $configSecret := default (printf "%s-config" (include "patrol.dexName" .)) $v.existingConfigSecret }}
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  {{- include "patrol.metadata" (list . (include "patrol.dexName" .) "dex-server" dict dict) | nindent 2 }}
+spec:
+  replicas: 1
+  revisionHistoryLimit: {{ .Values.global.revisionHistoryLimit }}
+  selector:
+    matchLabels:
+      {{- include "patrol.selectorLabels" (list . "dex-server") | nindent 6 }}
+  template:
+    metadata:
+      labels:
+        {{- include "patrol.podLabels" (list . $v "dex-server") | nindent 8 }}
+      annotations:
+        {{- $sums := dict }}
+        {{- if not $v.existingConfigSecret }}
+        {{- $_ := set $sums "checksum/config" (include "patrol.dexConfig" . | sha256sum) }}
+        {{- end }}
+        {{- with include "patrol.podAnnotations" (list . $v $sums) }}
+        {{- . | nindent 8 }}
+        {{- end }}
+    spec:
+      serviceAccountName: {{ include "patrol.serviceAccountName" (list . $v "dex-server") }}
+      automountServiceAccountToken: false
+      enableServiceLinks: false
+      {{- with include "patrol.imagePullSecrets" . }}
+      {{- . | nindent 6 }}
+      {{- end }}
+      securityContext:
+        {{- include "patrol.podSecurityContext" (list . $v) | nindent 8 }}
+      {{- with include "patrol.scheduling" (list . $v "dex-server") }}
+      {{- . | nindent 6 }}
+      {{- end }}
+      terminationGracePeriodSeconds: {{ $v.terminationGracePeriodSeconds }}
+      containers:
+        - name: dex
+          image: {{ include "patrol.image" (list . $v.image "") }}
+          imagePullPolicy: {{ $v.image.pullPolicy }}
+          command:
+            - /usr/local/bin/dex
+            - serve
+            - /etc/dex/cfg/config.yaml
+          env:
+            {{- if $v.clientSecretRef.name }}
+            - name: PATROL_DEX_CLIENT_SECRET
+              valueFrom:
+                secretKeyRef:
+                  name: {{ $v.clientSecretRef.name }}
+                  key: {{ $v.clientSecretRef.key }}
+            {{- end }}
+            {{- with $v.env }}
+            {{- toYaml . | nindent 12 }}
+            {{- end }}
+          {{- with $v.envFrom }}
+          envFrom:
+            {{- toYaml . | nindent 12 }}
+          {{- end }}
+          ports:
+            - name: http
+              containerPort: 5556
+              protocol: TCP
+            - name: grpc
+              containerPort: 5557
+              protocol: TCP
+            - name: metrics
+              containerPort: 5558
+              protocol: TCP
+          readinessProbe:
+            httpGet:
+              path: /healthz/ready
+              port: metrics
+            periodSeconds: 10
+            timeoutSeconds: 5
+          livenessProbe:
+            httpGet:
+              path: /healthz/live
+              port: metrics
+            initialDelaySeconds: 10
+            periodSeconds: 30
+            timeoutSeconds: 5
+          resources:
+            {{- toYaml $v.resources | nindent 12 }}
+          securityContext:
+            {{- include "patrol.containerSecurityContext" (list . $v) | nindent 12 }}
+          volumeMounts:
+            - name: tmp
+              mountPath: /tmp
+            - name: config
+              mountPath: /etc/dex/cfg
+              readOnly: true
+      volumes:
+        {{- include "patrol.tmpVolume" "64Mi" | nindent 8 }}
+        - name: config
+          secret:
+            secretName: {{ $configSecret }}
+            defaultMode: 0440
+            items:
+              - key: config.yaml
+                path: config.yaml
+{{- end }}

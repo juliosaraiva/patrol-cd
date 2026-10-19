@@ -1,0 +1,21 @@
+{{- if and .Values.server.enabled .Values.server.httproute.enabled }}
+{{- $r := .Values.server.httproute }}
+{{- $rule := dict "backendRefs" (list (dict "name" (include "patrol.serverName" .) "port" (ternary .Values.server.service.httpPort .Values.server.service.httpsPort .Values.server.insecure))) }}
+{{- with $r.matches }}{{ $_ := set $rule "matches" . }}{{ end }}
+{{- with $r.filters }}{{ $_ := set $rule "filters" . }}{{ end }}
+apiVersion: gateway.networking.k8s.io/v1
+kind: HTTPRoute
+metadata:
+  {{- include "patrol.metadata" (list . (include "patrol.serverName" .) "server" $r.labels $r.annotations) | nindent 2 }}
+spec:
+  {{- with $r.parentRefs }}
+  parentRefs:
+    {{- toYaml . | nindent 4 }}
+  {{- end }}
+  {{- with $r.hostnames }}
+  hostnames:
+    {{- toYaml . | nindent 4 }}
+  {{- end }}
+  rules:
+    {{- toYaml (list $rule) | nindent 4 }}
+{{- end }}

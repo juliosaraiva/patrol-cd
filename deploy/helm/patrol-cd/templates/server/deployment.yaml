@@ -1,0 +1,150 @@
+{{- if .Values.server.enabled }}
+{{- $v := .Values.server }}
+{{- $tlsSecret := ternary "patrol-server-tls" $v.tls.existingSecret $v.certificate.enabled }}
+{{- $clients := dict "repo" true "controller" true }}
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  {{- include "patrol.metadata" (list . (include "patrol.serverName" .) "server" $v.labels $v.annotations) | nindent 2 }}
+spec:
+  {{- if not $v.autoscaling.enabled }}
+  replicas: {{ $v.replicas }}
+  {{- end }}
+  revisionHistoryLimit: {{ .Values.global.revisionHistoryLimit }}
+  selector:
+    matchLabels:
+      {{- include "patrol.selectorLabels" (list . "server") | nindent 6 }}
+  strategy:
+    {{- toYaml $v.updateStrategy | nindent 4 }}
+  template:
+    metadata:
+      labels:
+        {{- include "patrol.podLabels" (list . $v "server") | nindent 8 }}
+      annotations:
+        {{- include "patrol.podAnnotations" (list . $v (dict "checksum/cmd-params" (include "patrol.paramsChecksum" .))) | nindent 8 }}
+    spec:
+      serviceAccountName: {{ include "patrol.serviceAccountName" (list . $v "server") }}
+      automountServiceAccountToken: true
+      enableServiceLinks: false
+      {{- with include "patrol.imagePullSecrets" . }}
+      {{- . | nindent 6 }}
+      {{- end }}
+      securityContext:
+        {{- include "patrol.podSecurityContext" (list . $v) | nindent 8 }}
+      {{- with include "patrol.scheduling" (list . $v "server") }}
+      {{- . | nindent 6 }}
+      {{- end }}
+      terminationGracePeriodSeconds: {{ $v.terminationGracePeriodSeconds }}
+      {{- with include "patrol.initContainers" (list . $v "server") }}
+      {{- . | nindent 6 }}
+      {{- end }}
+      containers:
+        - name: server
+          image: {{ include "patrol.patrolImage" . }}
+          imagePullPolicy: {{ .Values.image.pullPolicy }}
+          # The image entrypoint (tini) stays PID 1: it forwards SIGTERM and reaps tool processes.
+          args:
+            - /usr/local/bin/patrolcd
+            - server
+            {{- include "patrol.shutdownArg" . | nindent 12 }}
+            - --controller-statefulset={{ include "patrol.controllerName" . }}
+            - --controller-service={{ include "patrol.controllerName" . }}
+            {{- if include "patrol.tls.managed" . }}
+            - --controller-tree-api-tls
+            {{- if include "patrol.tls.verify" . }}
+            - --controller-tree-api-ca-cert-path=/app/config/internal-tls/controller/ca.crt
+            {{- end }}
+            {{- end }}
+            {{- with include "patrol.repoClientArgs" . }}
+            {{- . | nindent 12 }}
+            {{- end }}
+            {{- if $v.insecure }}
+            - --insecure
+            {{- end }}
+            {{- if $tlsSecret }}
+            - --tls-cert=/app/config/server/tls/tls.crt
+            - --tls-key=/app/config/server/tls/tls.key
+            {{- end }}
+            {{- with $v.extraArgs }}
+            {{- toYaml . | nindent 12 }}
+            {{- end }}
+          env:
+            {{- include "patrol.commonEnv" (list . $v) | nindent 12 }}
+            - name: PATROL_APPLICATIONSET_CONTROLLER_NAMESPACES
+              valueFrom:
+                configMapKeyRef:
+                  name: patrol-cmd-params-cm
+                  key: applicationsetcontroller.namespaces
+                  optional: true
+            {{- with include "patrol.otlpHeadersEnv" (list . "PATROL_SERVER_OTLP_HEADERS") }}
+            {{- . | nindent 12 }}
+            {{- end }}
+          {{- with include "patrol.envFrom" (list . $v) }}
+          {{- . | nindent 10 }}
+          {{- end }}
+          ports:
+            - name: http
+              containerPort: 8080
+              protocol: TCP
+            - name: metrics
+              containerPort: 8083
+              protocol: TCP
+          readinessProbe:
+            {{- include "patrol.probe" (list $v.probes.readiness "/readyz" "metrics" "HTTP") | nindent 12 }}
+          livenessProbe:
+            {{- include "patrol.probe" (list $v.probes.liveness "/livez" "metrics" "HTTP") | nindent 12 }}
+          startupProbe:
+            {{- include "patrol.probe" (list $v.probes.startup "/livez" "metrics" "HTTP") | nindent 12 }}
+          resources:
+            {{- toYaml $v.resources | nindent 12 }}
+          securityContext:
+            {{- include "patrol.containerSecurityContext" (list . $v) | nindent 12 }}
+          {{- with $v.lifecycle }}
+          lifecycle:
+            {{- toYaml . | nindent 12 }}
+          {{- end }}
+          volumeMounts:
+            - name: tmp
+              mountPath: /tmp
+            {{- include "patrol.internalTokenMount" . | nindent 12 }}
+            {{- with include "patrol.profileMount" (list . "server") }}
+            {{- . | nindent 12 }}
+            {{- end }}
+            {{- if $tlsSecret }}
+            - name: server-tls
+              mountPath: /app/config/server/tls
+              readOnly: true
+            {{- end }}
+            {{- with include "patrol.internalClientMounts" (list . $clients) }}
+            {{- . | nindent 12 }}
+            {{- end }}
+            {{- with $v.volumeMounts }}
+            {{- toYaml . | nindent 12 }}
+            {{- end }}
+        {{- with $v.extraContainers }}
+        {{- toYaml . | nindent 8 }}
+        {{- end }}
+      volumes:
+        {{- include "patrol.tmpVolume" "1Gi" | nindent 8 }}
+        {{- include "patrol.internalTokenVolume" (list . (eq (include "patrol.primary" .) "server")) | nindent 8 }}
+        {{- with include "patrol.profileVolume" (list . "server") }}
+        {{- . | nindent 8 }}
+        {{- end }}
+        {{- if $tlsSecret }}
+        - name: server-tls
+          secret:
+            secretName: {{ $tlsSecret }}
+            defaultMode: 0440
+            items:
+              - key: tls.crt
+                path: tls.crt
+              - key: tls.key
+                path: tls.key
+        {{- end }}
+        {{- with include "patrol.internalClientVolumes" (list . $clients) }}
+        {{- . | nindent 8 }}
+        {{- end }}
+        {{- with $v.volumes }}
+        {{- toYaml . | nindent 8 }}
+        {{- end }}
+{{- end }}

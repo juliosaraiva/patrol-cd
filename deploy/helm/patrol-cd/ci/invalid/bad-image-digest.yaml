@@ -1,0 +1,4 @@
+# Negative test: image.digest must be sha256:<64 hex>.
+# expect: 'sha256:abc' does not match pattern
+image:
+  digest: sha256:abc

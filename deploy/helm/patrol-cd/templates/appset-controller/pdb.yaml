@@ -1,0 +1,11 @@
+{{- if and .Values.appsetController.enabled .Values.appsetController.pdb.enabled }}
+apiVersion: policy/v1
+kind: PodDisruptionBudget
+metadata:
+  {{- include "patrol.metadata" (list . (include "patrol.appsetName" .) "applicationset-controller" dict dict) | nindent 2 }}
+spec:
+  {{- include "patrol.pdbSpec" .Values.appsetController.pdb | nindent 2 }}
+  selector:
+    matchLabels:
+      {{- include "patrol.selectorLabels" (list . "applicationset-controller") | nindent 6 }}
+{{- end }}

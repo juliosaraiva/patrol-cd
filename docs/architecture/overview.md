@@ -48,7 +48,7 @@ All control-plane components ship in one image (`patrol-cd`) as subcommands of t
 | patrol-repo-server | Deployment, scalable | **none** (`automountServiceAccountToken: false`) | only credentials passed per request, kept in memory / tmpfs for one operation |
 | cmp sidecar | container in repo-server pod | none | none (receives source tree only) |
 | patrol-appset-controller | Deployment, leader-elected | read/write Applications/ApplicationSets; read SCM provider Secrets | SCM tokens / GitHub App keys |
-| patrol-notifications-controller | Deployment, leader-elected | read Applications/AppProjects; read notification ConfigMap/Secret; write delivery-state annotations | notification service credentials |
+| patrol-notifications-controller | Deployment, leader-elected | read Applications/AppProjects; list/watch every ConfigMap and Secret of the control-plane namespace (whole objects, so it can read all of its Secrets); write delivery-state annotations | notification service credentials |
 | patrol-commit-server | Deployment | none | write credentials passed per request |
 
 ## State ownership

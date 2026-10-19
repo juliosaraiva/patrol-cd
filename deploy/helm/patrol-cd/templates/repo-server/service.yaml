@@ -1,0 +1,20 @@
+{{- if .Values.repoServer.enabled }}
+{{- $s := .Values.repoServer.service }}
+apiVersion: v1
+kind: Service
+metadata:
+  {{- include "patrol.metadata" (list . (include "patrol.repoServerName" .) "repo-server" $s.labels $s.annotations) | nindent 2 }}
+spec:
+  type: ClusterIP
+  selector:
+    {{- include "patrol.selectorLabels" (list . "repo-server") | nindent 4 }}
+  ports:
+    - name: server
+      port: 8081
+      targetPort: server
+      protocol: TCP
+    - name: metrics
+      port: 8084
+      targetPort: metrics
+      protocol: TCP
+{{- end }}

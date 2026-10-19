@@ -1,0 +1,10 @@
+# Namespace-install semantics: no CRDs, no admission policy, no ClusterRoles. Install the CRDs and
+# the admission policy separately (kubectl apply --server-side -f deploy/crds). On the local
+# cluster the controller and server act only in the release namespace and team-a.
+crds:
+  install: false
+  admissionPolicy: false
+rbac:
+  scope: namespaced
+  managedNamespaces:
+    - team-a

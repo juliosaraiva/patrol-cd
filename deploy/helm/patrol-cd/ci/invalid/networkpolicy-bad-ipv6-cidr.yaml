@@ -1,0 +1,10 @@
+# Negative test: an IPv6 CIDR needs 8 groups, or fewer with one "::".
+# expect: networkPolicy: "fd00:1:2:3:4:5:6:7:8/64" is not an IPv6 CIDR
+networkPolicy:
+  controllerEgress:
+    cidrs:
+      - ::/0
+    except:
+      - fd00:1:2:3:4:5:6:7:8/64
+    ports:
+      - 443

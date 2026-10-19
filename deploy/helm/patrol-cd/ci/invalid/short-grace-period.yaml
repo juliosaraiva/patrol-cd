@@ -1,0 +1,4 @@
+# Negative test: grace period must exceed the drain bound.
+# expect: server.terminationGracePeriodSeconds (30) must exceed global.shutdownTimeoutSeconds + 5 (35)
+server:
+  terminationGracePeriodSeconds: 30

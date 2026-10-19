@@ -1,0 +1,158 @@
+{{- if .Values.controller.enabled }}
+{{- $v := .Values.controller }}
+{{- $name := include "patrol.controllerName" . }}
+{{- $clients := dict "repo" true "commit" (include "patrol.commitServerEnabled" .) }}
+{{- $primary := eq (include "patrol.primary" .) "controller" }}
+apiVersion: apps/v1
+kind: StatefulSet
+metadata:
+  {{- include "patrol.metadata" (list . $name "controller" $v.labels $v.annotations) | nindent 2 }}
+spec:
+  replicas: {{ $v.replicas }}
+  revisionHistoryLimit: {{ .Values.global.revisionHistoryLimit }}
+  serviceName: {{ $name }}
+  podManagementPolicy: {{ $v.podManagementPolicy }}
+  selector:
+    matchLabels:
+      {{- include "patrol.selectorLabels" (list . "controller") | nindent 6 }}
+  updateStrategy:
+    {{- toYaml $v.updateStrategy | nindent 4 }}
+  template:
+    metadata:
+      labels:
+        {{- include "patrol.podLabels" (list . $v "controller") | nindent 8 }}
+      annotations:
+        {{- include "patrol.podAnnotations" (list . $v (dict "checksum/cmd-params" (include "patrol.paramsChecksum" .))) | nindent 8 }}
+    spec:
+      serviceAccountName: {{ include "patrol.serviceAccountName" (list . $v "controller") }}
+      automountServiceAccountToken: true
+      enableServiceLinks: false
+      {{- with include "patrol.imagePullSecrets" . }}
+      {{- . | nindent 6 }}
+      {{- end }}
+      securityContext:
+        {{- include "patrol.podSecurityContext" (list . $v) | nindent 8 }}
+      {{- with include "patrol.scheduling" (list . $v "controller") }}
+      {{- . | nindent 6 }}
+      {{- end }}
+      terminationGracePeriodSeconds: {{ $v.terminationGracePeriodSeconds }}
+      {{- with include "patrol.initContainers" (list . $v "controller") }}
+      {{- . | nindent 6 }}
+      {{- end }}
+      containers:
+        - name: controller
+          image: {{ include "patrol.patrolImage" . }}
+          imagePullPolicy: {{ .Values.image.pullPolicy }}
+          # The image entrypoint (tini) stays PID 1: it forwards SIGTERM and reaps tool processes.
+          args:
+            - /usr/local/bin/patrolcd
+            - controller
+            {{- include "patrol.shutdownArg" . | nindent 12 }}
+            {{- with include "patrol.repoClientArgs" . }}
+            {{- . | nindent 12 }}
+            {{- end }}
+            {{- if include "patrol.tls.managed" . }}
+            - --tls-cert=/app/config/controller/tls/tls.crt
+            - --tls-key=/app/config/controller/tls/tls.key
+            {{- end }}
+            {{- if include "patrol.commitServerEnabled" . }}
+            {{- if include "patrol.tls.verify" . }}
+            - --commit-server-ca-cert-path=/app/config/internal-tls/commit-server/ca.crt
+            {{- end }}
+            {{- if include "patrol.tls.mtls" . }}
+            - --commit-server-client-cert-path=/app/config/reposerver/mtls/client.crt
+            - --commit-server-client-cert-key-path=/app/config/reposerver/mtls/client.key
+            {{- end }}
+            {{- end }}
+            {{- with $v.extraArgs }}
+            {{- toYaml . | nindent 12 }}
+            {{- end }}
+          env:
+            {{- include "patrol.commonEnv" (list . $v) | nindent 12 }}
+            - name: PATROL_APPLICATION_CONTROLLER_NAME
+              value: {{ $name }}
+            {{- if $v.sharding.dynamicClusterDistribution }}
+            {{- /* The replicas read spec.replicas live; without the count in the pod template, a
+            change of controller.replicas rebalances the shards without restarting them. */}}
+            - name: PATROL_ENABLE_DYNAMIC_CLUSTER_DISTRIBUTION
+              value: "true"
+            {{- else }}
+            - name: PATROL_CONTROLLER_REPLICAS
+              value: {{ $v.replicas | quote }}
+            {{- end }}
+            {{- with $v.sharding.heartbeatSeconds }}
+            - name: PATROL_CONTROLLER_HEARTBEAT_TIME
+              value: {{ . | quote }}
+            {{- end }}
+            {{- with include "patrol.otlpHeadersEnv" (list . "PATROL_APPLICATION_CONTROLLER_OTLP_HEADERS") }}
+            {{- . | nindent 12 }}
+            {{- end }}
+          {{- with include "patrol.envFrom" (list . $v) }}
+          {{- . | nindent 10 }}
+          {{- end }}
+          ports:
+            - name: metrics
+              containerPort: 8082
+              protocol: TCP
+            - name: tree-api
+              containerPort: 8090
+              protocol: TCP
+          readinessProbe:
+            {{- include "patrol.probe" (list $v.probes.readiness "/readyz" "metrics" "HTTP") | nindent 12 }}
+          livenessProbe:
+            {{- include "patrol.probe" (list $v.probes.liveness "/livez" "metrics" "HTTP") | nindent 12 }}
+          startupProbe:
+            {{- include "patrol.probe" (list $v.probes.startup "/livez" "metrics" "HTTP") | nindent 12 }}
+          resources:
+            {{- toYaml $v.resources | nindent 12 }}
+          securityContext:
+            {{- include "patrol.containerSecurityContext" (list . $v) | nindent 12 }}
+          {{- with $v.lifecycle }}
+          lifecycle:
+            {{- toYaml . | nindent 12 }}
+          {{- end }}
+          volumeMounts:
+            - name: tmp
+              mountPath: /tmp
+            {{- include "patrol.internalTokenMount" . | nindent 12 }}
+            {{- with include "patrol.profileMount" (list . "controller") }}
+            {{- . | nindent 12 }}
+            {{- end }}
+            {{- if include "patrol.tls.managed" . }}
+            - name: tree-api-tls
+              mountPath: /app/config/controller/tls
+              readOnly: true
+            {{- end }}
+            {{- with include "patrol.internalClientMounts" (list . $clients) }}
+            {{- . | nindent 12 }}
+            {{- end }}
+            {{- with $v.volumeMounts }}
+            {{- toYaml . | nindent 12 }}
+            {{- end }}
+        {{- with $v.extraContainers }}
+        {{- toYaml . | nindent 8 }}
+        {{- end }}
+      volumes:
+        {{- include "patrol.tmpVolume" "1Gi" | nindent 8 }}
+        {{- include "patrol.internalTokenVolume" (list . $primary) | nindent 8 }}
+        {{- with include "patrol.profileVolume" (list . "controller") }}
+        {{- . | nindent 8 }}
+        {{- end }}
+        {{- if include "patrol.tls.managed" . }}
+        - name: tree-api-tls
+          secret:
+            secretName: patrol-controller-tls
+            defaultMode: 0440
+            items:
+              - key: tls.crt
+                path: tls.crt
+              - key: tls.key
+                path: tls.key
+        {{- end }}
+        {{- with include "patrol.internalClientVolumes" (list . $clients) }}
+        {{- . | nindent 8 }}
+        {{- end }}
+        {{- with $v.volumes }}
+        {{- toYaml . | nindent 8 }}
+        {{- end }}
+{{- end }}

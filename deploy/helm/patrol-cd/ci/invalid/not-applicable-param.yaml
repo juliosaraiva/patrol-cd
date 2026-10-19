@@ -1,0 +1,5 @@
+# Negative test: parameters without effect in Patrol (Redis) are rejected.
+# expect: invalid propertyName 'redis.server'
+configs:
+  params:
+    redis.server: redis:6379

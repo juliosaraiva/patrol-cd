@@ -1,0 +1,11 @@
+{{- if and .Values.rbac.create .Values.bootstrap.enabled }}
+{{- $primary := include "patrol.primary" . }}
+{{- $v := ternary .Values.server .Values.controller (eq $primary "server") }}
+{{- /*
+The bootstrap init container runs with the primary workload's ServiceAccount (a pod has one
+identity). This Role holds exactly what `patrolcd bootstrap` needs, separately from the
+workload's own Role, so it can be dropped (bootstrap.enabled=false) once the Secrets exist or
+when they are provided.
+*/}}
+{{ include "patrol.roleBinding" (list . (include "patrol.name" (list . "bootstrap")) .Release.Namespace "bootstrap" (include "patrol.rules.bootstrap" .) (include "patrol.serviceAccountName" (list . $v $primary))) }}
+{{- end }}

@@ -1,0 +1,97 @@
+{{- if eq .Values.internalTLS.mode "certManager" }}
+{{- $cm := .Values.internalTLS.certManager }}
+{{- $ns := .Release.Namespace }}
+{{- $issuer := $cm.issuerRef }}
+{{- if not $issuer.name }}
+{{- $issuer = dict "name" (include "patrol.name" (list . "internal-ca")) "kind" "Issuer" "group" "cert-manager.io" }}
+{{- /* Chart-managed CA: a self-signed root issues one CA certificate, which signs every internal
+leaf certificate. The CA Secret (patrol-internal-ca) holds the CA private key and is never mounted
+by a workload; clients trust the ca.crt cert-manager copies into each leaf Secret. */}}
+apiVersion: cert-manager.io/v1
+kind: Issuer
+metadata:
+  {{- include "patrol.metadata" (list . (include "patrol.name" (list . "selfsigned")) "internal-tls" dict dict) | nindent 2 }}
+spec:
+  selfSigned: {}
+---
+apiVersion: cert-manager.io/v1
+kind: Certificate
+metadata:
+  {{- include "patrol.metadata" (list . (include "patrol.name" (list . "internal-ca")) "internal-tls" dict dict) | nindent 2 }}
+spec:
+  isCA: true
+  commonName: {{ include "patrol.prefix" . }}-internal-ca
+  secretName: patrol-internal-ca
+  secretTemplate:
+    labels:
+      app.kubernetes.io/part-of: patrol-cd
+  duration: {{ $cm.caDuration }}
+  privateKey:
+    algorithm: ECDSA
+    size: 256
+    rotationPolicy: Never
+  issuerRef:
+    name: {{ include "patrol.name" (list . "selfsigned") }}
+    kind: Issuer
+    group: cert-manager.io
+---
+apiVersion: cert-manager.io/v1
+kind: Issuer
+metadata:
+  {{- include "patrol.metadata" (list . (include "patrol.name" (list . "internal-ca")) "internal-tls" dict dict) | nindent 2 }}
+spec:
+  ca:
+    secretName: patrol-internal-ca
+---
+{{- end }}
+{{- $certs := list }}
+{{- if .Values.repoServer.enabled }}
+{{- $svc := include "patrol.repoServerName" . }}
+{{- $certs = append $certs (dict "secret" "patrol-repo-server-tls" "name" $svc "dns" (list $svc (printf "%s.%s" $svc $ns) (printf "%s.%s.svc" $svc $ns) (printf "%s.%s.svc.cluster.local" $svc $ns)) "usages" (list "server auth")) }}
+{{- end }}
+{{- if include "patrol.commitServerEnabled" . }}
+{{- $svc := include "patrol.commitServerName" . }}
+{{- $certs = append $certs (dict "secret" "patrol-commit-server-tls" "name" $svc "dns" (list $svc (printf "%s.%s" $svc $ns) (printf "%s.%s.svc" $svc $ns) (printf "%s.%s.svc.cluster.local" $svc $ns)) "usages" (list "server auth")) }}
+{{- end }}
+{{- if .Values.controller.enabled }}
+{{- /* Tree API: patrol-server dials <pod>.<headless service>.<namespace>.svc. */}}
+{{- $svc := include "patrol.controllerName" . }}
+{{- $certs = append $certs (dict "secret" "patrol-controller-tls" "name" $svc "dns" (list (printf "*.%s.%s.svc" $svc $ns) (printf "*.%s.%s.svc.cluster.local" $svc $ns) $svc (printf "%s.%s.svc" $svc $ns)) "usages" (list "server auth")) }}
+{{- end }}
+{{- if .Values.internalTLS.mtls }}
+{{- $certs = append $certs (dict "secret" "patrol-internal-client-tls" "name" (include "patrol.name" (list . "internal-client")) "cn" (printf "%s-internal-client" (include "patrol.prefix" .)) "usages" (list "client auth")) }}
+{{- end }}
+{{- range $i, $c := $certs }}
+{{- if $i }}
+---
+{{- end }}
+apiVersion: cert-manager.io/v1
+kind: Certificate
+metadata:
+  {{- include "patrol.metadata" (list $ $c.name "internal-tls" dict dict) | nindent 2 }}
+spec:
+  secretName: {{ $c.secret }}
+  secretTemplate:
+    labels:
+      app.kubernetes.io/part-of: patrol-cd
+  {{- with $c.cn }}
+  commonName: {{ . }}
+  {{- end }}
+  {{- with $c.dns }}
+  dnsNames:
+    {{- toYaml . | nindent 4 }}
+  {{- end }}
+  duration: {{ $cm.duration }}
+  renewBefore: {{ $cm.renewBefore }}
+  privateKey:
+    {{- toYaml $cm.privateKey | nindent 4 }}
+  usages:
+    - digital signature
+    - key encipherment
+    {{- toYaml $c.usages | nindent 4 }}
+  issuerRef:
+    name: {{ $issuer.name }}
+    kind: {{ $issuer.kind | default "Issuer" }}
+    group: {{ $issuer.group | default "cert-manager.io" }}
+{{- end }}
+{{- end }}

@@ -1,0 +1,24 @@
+{{- if and .Values.rbac.create .Values.server.enabled }}
+{{- $sa := include "patrol.serviceAccountName" (list . .Values.server "server") }}
+{{- $name := include "patrol.serverName" . }}
+{{ include "patrol.roleBinding" (list . $name .Release.Namespace "server" (include "patrol.rules.server.controlPlane" .) $sa) }}
+{{- with include "patrol.extraNamespaceRBAC" (list . .Values.applicationNamespaces "server-applications" "server" (include "patrol.rules.server.applications" .) $sa) }}
+---
+{{ . }}
+{{- end }}
+{{- with include "patrol.extraNamespaceRBAC" (list . .Values.applicationSetNamespaces "server-applicationsets" "server" (include "patrol.rules.server.applicationSets" .) $sa) }}
+---
+{{ . }}
+{{- end }}
+{{- if eq .Values.rbac.scope "cluster" }}
+{{- if .Values.rbac.server.localCluster }}
+---
+{{ include "patrol.clusterRoleBinding" (list . (include "patrol.clusterName" (list . "server")) "server" (include "patrol.rules.server.localCluster" .) $sa) }}
+{{- end }}
+{{- else }}
+{{- range (prepend .Values.rbac.managedNamespaces .Release.Namespace | uniq) }}
+---
+{{ include "patrol.roleBinding" (list $ (include "patrol.name" (list $ "server-local")) . "server" (include "patrol.rules.server.localCluster" $) $sa) }}
+{{- end }}
+{{- end }}
+{{- end }}

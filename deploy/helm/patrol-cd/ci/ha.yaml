@@ -1,0 +1,62 @@
+# High availability: replicated components spread over nodes (hard anti-affinity: at least three
+# schedulable nodes) and zones, autoscaled server and repo-server, three controller shards,
+# internal TLS and mTLS issued by cert-manager, Prometheus Operator monitoring, and Applications
+# in team namespaces matched by a pattern (cluster-wide Application RBAC).
+capabilities:
+  # Rendering offline (helm template): assume cert-manager and the Prometheus Operator.
+  extraAPIVersions:
+    - cert-manager.io/v1
+    - monitoring.coreos.com/v1
+applicationNamespaces:
+  - team-*
+global:
+  podAntiAffinity: hard
+  topologySpread: soft
+internalTLS:
+  mode: certManager
+  verify: true
+  mtls: true
+server:
+  autoscaling:
+    enabled: true
+    minReplicas: 3
+    maxReplicas: 6
+  resources:
+    requests:
+      cpu: 250m
+      memory: 512Mi
+    limits:
+      cpu: "2"
+      memory: 2Gi
+controller:
+  replicas: 3
+  sharding:
+    algorithm: consistent-hashing
+  resources:
+    requests:
+      cpu: "1"
+      memory: 2Gi
+    limits:
+      cpu: "4"
+      memory: 8Gi
+repoServer:
+  autoscaling:
+    enabled: true
+    minReplicas: 3
+    maxReplicas: 10
+  resources:
+    requests:
+      cpu: "1"
+      memory: 1Gi
+    limits:
+      cpu: "4"
+      memory: 4Gi
+appsetController:
+  replicas: 2
+notificationsController:
+  replicas: 2
+metrics:
+  serviceMonitor:
+    enabled: true
+  prometheusRule:
+    enabled: true

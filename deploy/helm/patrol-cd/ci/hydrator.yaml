@@ -1,0 +1,10 @@
+# Source hydrator: hydrator.enabled and the commit-server (no Kubernetes token; write
+# credentials arrive with each request).
+hydrator:
+  enabled: true
+configs:
+  cm:
+    commit.author.name: Patrol CD
+    commit.author.email: patrol@example.com
+commitServer:
+  maxConcurrentRequests: 4

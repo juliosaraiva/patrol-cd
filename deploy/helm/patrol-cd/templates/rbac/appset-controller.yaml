@@ -1,0 +1,8 @@
+{{- if and .Values.rbac.create .Values.appsetController.enabled }}
+{{- $sa := include "patrol.serviceAccountName" (list . .Values.appsetController "applicationset-controller") }}
+{{ include "patrol.roleBinding" (list . (include "patrol.appsetName" .) .Release.Namespace "applicationset-controller" (include "patrol.rules.appset.controlPlane" .) $sa) }}
+{{- with include "patrol.extraNamespaceRBAC" (list . .Values.applicationSetNamespaces "applicationset-controller-applicationsets" "applicationset-controller" (include "patrol.rules.appset.applicationSets" .) $sa) }}
+---
+{{ . }}
+{{- end }}
+{{- end }}

@@ -1,0 +1,5 @@
+# Negative test: patrol-cmd-params-cm keys are a closed set (typo).
+# expect: invalid propertyName 'controller.status.processor'
+configs:
+  params:
+    controller.status.processor: 30

@@ -1,0 +1,1431 @@
+# Patrol CD Helm chart values.
+#
+# Documented keys carry a "# --" comment; `go run ./hack/helmdocs` turns them into the values
+# table of README.md. values.schema.json validates every key (unknown keys are rejected).
+#
+# Object names: the settings objects keep the fixed names the binaries read (patrol-cm,
+# patrol-rbac-cm, patrol-cmd-params-cm, patrol-secret, patrol-internal-token, ...). They are
+# namespaced, so one installation per namespace. fullnameOverride only changes the prefix of
+# workloads, Services and ServiceAccounts ("patrol" by default).
+
+# -- Prefix of workload, Service and ServiceAccount names (default "patrol": patrol-server,
+# patrol-controller, ...). The settings objects keep their fixed names.
+fullnameOverride: ""
+# -- Base of the app.kubernetes.io/name label (default: the name prefix).
+nameOverride: ""
+
+global:
+  # -- Registry that replaces the registry of every image (Patrol, Dex, CMP plugins), for
+  # air-gapped mirrors. Empty keeps each image's own registry.
+  imageRegistry: ""
+  # -- Image pull secrets (names) added to every pod.
+  imagePullSecrets: []
+  # -- Labels added to every object.
+  commonLabels: {}
+  # -- Annotations added to every object (pods use podAnnotations).
+  commonAnnotations: {}
+  # -- Annotations added to every pod.
+  podAnnotations: {}
+  # -- Labels added to every pod.
+  podLabels: {}
+  # -- Priority class of every pod unless the component sets its own.
+  priorityClassName: ""
+  # -- Node selector of every pod unless the component sets its own.
+  nodeSelector: {}
+  # -- Tolerations of every pod unless the component sets its own.
+  tolerations: []
+  # -- Pod anti-affinity preset of replicated components when they set no affinity: "" (none),
+  # "soft" (preferred) or "hard" (required; needs as many nodes as replicas).
+  podAntiAffinity: soft
+  # -- Topology key of the pod anti-affinity preset.
+  podAntiAffinityTopologyKey: kubernetes.io/hostname
+  # -- Zone spread preset of replicated components when they set no topologySpreadConstraints:
+  # "" (none), "soft" (ScheduleAnyway) or "hard" (DoNotSchedule).
+  topologySpread: ""
+  # -- Topology key of the zone spread preset.
+  topologySpreadTopologyKey: topology.kubernetes.io/zone
+  # -- Pod security context of every Patrol pod (merged with the component's). Compatible with
+  # the Pod Security "restricted" profile.
+  podSecurityContext:
+    runAsNonRoot: true
+    runAsUser: 999
+    runAsGroup: 999
+    fsGroup: 999
+    fsGroupChangePolicy: OnRootMismatch
+    seccompProfile:
+      type: RuntimeDefault
+  # -- Security context of every Patrol container (merged with the component's).
+  containerSecurityContext:
+    runAsNonRoot: true
+    readOnlyRootFilesystem: true
+    allowPrivilegeEscalation: false
+    capabilities:
+      drop:
+        - ALL
+    seccompProfile:
+      type: RuntimeDefault
+  # -- Log level of every component ("" keeps the binary default, info). Sets the
+  # <component>.log.level parameters unless configs.params sets them.
+  logLevel: ""
+  # -- Log format of every component: "" (binary default: json in a pod), json or text.
+  logFormat: ""
+  # -- Bound of the graceful drain after SIGTERM (--shutdown-timeout), in seconds. Each
+  # component's terminationGracePeriodSeconds must exceed it by at least 5 s.
+  shutdownTimeoutSeconds: 30
+  # -- Set GOMEMLIMIT from the container memory limit (soft limit for the Go garbage collector).
+  goMemLimitFromResources: true
+  # -- Extra environment variables of every Patrol container (for example HTTPS_PROXY, NO_PROXY).
+  env: []
+  # -- Extra envFrom sources of every Patrol container.
+  envFrom: []
+  # -- revisionHistoryLimit of Deployments and the StatefulSet.
+  revisionHistoryLimit: 5
+
+image:
+  # -- Registry of the Patrol image (replaced by global.imageRegistry when set).
+  registry: ""
+  # -- Repository of the Patrol image (one image runs every component).
+  repository: patrol-cd/patrol-cd
+  # -- Tag of the Patrol image (default: the chart appVersion).
+  tag: ""
+  # -- Digest of the Patrol image (sha256:...); pins the image in addition to the tag.
+  digest: ""
+  # -- Pull policy of the Patrol image.
+  pullPolicy: IfNotPresent
+
+capabilities:
+  # -- API versions treated as available in addition to the cluster's (.Capabilities). Use it
+  # when rendering offline (helm template, GitOps) with optional integrations enabled, e.g.
+  # ["cert-manager.io/v1", "monitoring.coreos.com/v1", "gateway.networking.k8s.io/v1"].
+  extraAPIVersions: []
+
+crds:
+  # -- Install and upgrade the Patrol CRDs with the release (templated, so `helm upgrade`
+  # updates them; Helm's crds/ directory would never be upgraded).
+  install: true
+  # -- Keep the CRDs on `helm uninstall` (helm.sh/resource-policy: keep). Deleting a CRD deletes
+  # every object of that kind.
+  keep: true
+  # -- Extra annotations of the CRDs.
+  annotations: {}
+  # -- Install the ValidatingAdmissionPolicy guarding Operation authorship
+  # (operations.cd.patrol.example). Cluster-wide: one per cluster, like the CRDs.
+  admissionPolicy: true
+
+# -- Additional namespaces (names, globs or /regexp/) whose Applications Patrol manages
+# (apps in any namespace). Literal names get namespaced Roles; any pattern makes the
+# Application RBAC cluster-wide. Sets the application.namespaces parameter.
+applicationNamespaces: []
+# -- Additional namespaces (names, globs or /regexp/) whose ApplicationSets and SCMProviders
+# Patrol manages. Sets the applicationsetcontroller.namespaces parameter.
+applicationSetNamespaces: []
+
+configs:
+  # -- Create each settings ConfigMap. Set an entry to false when another tool owns the object
+  # (its name is fixed).
+  create:
+    cm: true
+    rbac: true
+    params: true
+    tlsCerts: true
+    sshKnownHosts: true
+    gpgKeys: true
+  # -- patrol-cm data (general settings). Keys are validated against the Patrol settings
+  # register; values are strings.
+  # @default -- shipped resource exclusions and ignoreResourceUpdates rules (see values.yaml)
+  cm:
+    # Settings shipped by default (Argo CD v3.5.5 parity, OPS-155). Kept identical to
+    # internal/settings (DefaultResourceExclusionsYAML, DefaultIgnoreResourceUpdates):
+    # `go run ./hack/helmdocs -check` fails when they drift.
+    resource.exclusions: |
+      ### Network resources created by the Kubernetes control plane and excluded to reduce the number of watched events and UI clutter
+      - apiGroups:
+        - ''
+        - discovery.k8s.io
+        kinds:
+        - Endpoints
+        - EndpointSlice
+      ### Internal Kubernetes resources excluded reduce the number of watched events
+      - apiGroups:
+        - coordination.k8s.io
+        kinds:
+        - Lease
+      ### Internal Kubernetes Authz/Authn resources excluded reduce the number of watched events
+      - apiGroups:
+        - authentication.k8s.io
+        - authorization.k8s.io
+        kinds:
+        - SelfSubjectReview
+        - TokenReview
+        - LocalSubjectAccessReview
+        - SelfSubjectAccessReview
+        - SelfSubjectRulesReview
+        - SubjectAccessReview
+      ### Intermediate Certificate Request excluded reduce the number of watched events
+      - apiGroups:
+        - certificates.k8s.io
+        kinds:
+        - CertificateSigningRequest
+      - apiGroups:
+        - cert-manager.io
+        kinds:
+        - CertificateRequest
+      ### Cilium internal resources excluded reduce the number of watched events and UI Clutter
+      - apiGroups:
+        - cilium.io
+        kinds:
+        - CiliumIdentity
+        - CiliumEndpoint
+        - CiliumEndpointSlice
+      ### Kyverno intermediate and reporting resources excluded reduce the number of watched events and improve performance
+      - apiGroups:
+        - kyverno.io
+        - reports.kyverno.io
+        - wgpolicyk8s.io
+        kinds:
+        - PolicyReport
+        - ClusterPolicyReport
+        - EphemeralReport
+        - ClusterEphemeralReport
+        - AdmissionReport
+        - ClusterAdmissionReport
+        - BackgroundScanReport
+        - ClusterBackgroundScanReport
+        - UpdateRequest
+    resource.customizations.ignoreResourceUpdates.all: |
+      jsonPointers:
+        - /status
+    resource.customizations.ignoreResourceUpdates.cd.patrol.example_Application: |
+      jqPathExpressions:
+        - '.metadata.annotations."notified.notifications.cd.patrol.example"'
+        - '.metadata.annotations."cd.patrol.example/refresh"'
+        - '.metadata.annotations."cd.patrol.example/hydrate"'
+    resource.customizations.ignoreResourceUpdates.argoproj.io_Rollout: |
+      jqPathExpressions:
+        - '.metadata.annotations."notified.notifications.argoproj.io"'
+    resource.customizations.ignoreResourceUpdates.autoscaling_HorizontalPodAutoscaler: |
+      jqPathExpressions:
+        - '.metadata.annotations."autoscaling.alpha.kubernetes.io/behavior"'
+        - '.metadata.annotations."autoscaling.alpha.kubernetes.io/conditions"'
+        - '.metadata.annotations."autoscaling.alpha.kubernetes.io/metrics"'
+        - '.metadata.annotations."autoscaling.alpha.kubernetes.io/current-metrics"'
+    resource.customizations.ignoreResourceUpdates.ConfigMap: |
+      jqPathExpressions:
+        - '.metadata.annotations."cluster-autoscaler.kubernetes.io/last-updated"'
+        - '.metadata.annotations."control-plane.alpha.kubernetes.io/leader"'
+    resource.customizations.ignoreResourceUpdates.apps_ReplicaSet: |
+      jqPathExpressions:
+        - '.metadata.annotations."deployment.kubernetes.io/desired-replicas"'
+        - '.metadata.annotations."deployment.kubernetes.io/max-replicas"'
+        - '.metadata.annotations."rollout.argoproj.io/desired-replicas"'
+    resource.customizations.ignoreResourceUpdates.discovery.k8s.io_EndpointSlice: |
+      jsonPointers:
+        - /metadata
+        - /endpoints
+        - /ports
+    resource.customizations.ignoreResourceUpdates.Endpoints: |
+      jsonPointers:
+        - /metadata
+        - /subsets
+  # -- patrol-cmd-params-cm data (component parameters; read at startup, so changes roll the
+  # pods). Keys are validated against the parameter register; values may be strings, booleans
+  # or numbers. Keys driven by structured values (application.namespaces,
+  # applicationsetcontroller.namespaces, hydrator.enabled, commit.server and the internal TLS
+  # keys) are rejected here.
+  params: {}
+  # -- patrol-rbac-cm data (policy.csv, policy.<name>.csv, policy.default, policy.matchMode,
+  # scopes).
+  rbac: {}
+  # -- patrol-tls-certs-cm data: PEM certificates trusted per repository server host name.
+  # Entries set here are owned by Helm: change them here, not through the API (an API change
+  # to the same host name makes the next upgrade conflict). Entries added through the API
+  # under other host names are kept by upgrades.
+  tlsCerts: {}
+  # -- patrol-ssh-known-hosts-cm ssh_known_hosts: known_hosts entries for SSH repositories.
+  # Empty (default): the chart renders the ConfigMap without the key, the bootstrap seeds the
+  # published host keys of GitHub, Bitbucket Cloud, GitLab.com and Azure DevOps once, and the
+  # certificate API (`patrol cert add-ssh`/`rm`, UI) manages them from then on; upgrades keep
+  # those changes. Set: Helm owns the key, so API changes to known hosts make the next upgrade
+  # fail with a field conflict (--force-conflicts reverts them to this value); use one or the
+  # other. Switching an installation to this value needs one `helm upgrade --force-conflicts`.
+  sshKnownHosts: ""
+  # -- patrol-gpg-keys-cm data: ASCII-armored GnuPG public keys keyed by their 16-hex-digit
+  # key ID (source verification). Ownership as for tlsCerts: keys set here are owned by Helm;
+  # keys added through the API (`patrol gpg add`) are kept by upgrades.
+  gpgKeys: {}
+  secret:
+    # -- Create patrol-secret. The bootstrap step and patrol-server add the generated keys
+    # (server.secretkey, admin.password) at runtime; Helm never renders random values. Set
+    # false when another tool owns patrol-secret.
+    create: true
+    # -- Let the bootstrap step generate the initial admin password (Secret
+    # patrol-initial-admin-secret, read with `patrol admin initial-password`). Ignored when
+    # adminPasswordHash is set. false only skips the password (--skip-admin): the admin account
+    # stays enabled, without a password, unless configs.cm."admin.enabled" is "false".
+    createAdmin: true
+    # -- bcrypt hash of the admin password (instead of a generated one), e.g. from
+    # `patrol account bcrypt` (prompts for the password). A hash, never a password. Helm then
+    # owns admin.password: a password changed in the UI or CLI is reverted by the next upgrade.
+    adminPasswordHash: ""
+    # -- RFC 3339 time of the admin password change that goes with adminPasswordHash (sessions
+    # issued before it stop verifying). Empty leaves it unset.
+    adminPasswordMtime: ""
+    # -- Extra patrol-secret keys (webhook secrets, OIDC client secrets referenced as $<key>,
+    # ...). Prefer "$<secret>:<key>" references to Secrets labelled
+    # app.kubernetes.io/part-of=patrol-cd over literal values.
+    extra: {}
+    # -- Extra labels of patrol-secret.
+    labels: {}
+    # -- Extra annotations of patrol-secret.
+    annotations: {}
+  internalToken:
+    # -- Existing Secret holding the shared token of the internal APIs (default: the bootstrap
+    # step creates patrol-internal-token).
+    existingSecret: ""
+    # -- Key of existingSecret holding the token.
+    existingSecretKey: token
+
+bootstrap:
+  # -- Run `patrolcd bootstrap` as an init container of the primary workload (patrol-server, or
+  # the controller when the server is disabled). It creates patrol-internal-token, the signing
+  # key and the initial admin password when absent and never changes existing material.
+  enabled: true
+  # -- Bound of one bootstrap run (--timeout), in seconds.
+  timeoutSeconds: 60
+  # -- Resources of the bootstrap init container (one run: ~0.1 s CPU, ~53 MB RSS, one bcrypt
+  # hash; see docs/architecture/components/bootstrap.md).
+  resources:
+    requests:
+      cpu: 10m
+      memory: 32Mi
+    limits:
+      cpu: 500m
+      memory: 128Mi
+
+internalTLS:
+  # -- Transport security of the internal APIs (repo-server, commit-server, controller tree API):
+  # "disabled" (plaintext), "selfSigned" (binary default: the repo-server generates a
+  # certificate in memory and clients do not verify it; commit-server and tree API stay
+  # plaintext), "certManager" (cert-manager issues every certificate) or "existingSecret"
+  # (Secrets patrol-repo-server-tls, patrol-commit-server-tls, patrol-controller-tls and, with
+  # mtls, patrol-internal-client-tls, created by you). The shared internal token authenticates
+  # callers in every mode.
+  mode: selfSigned
+  # -- certManager/existingSecret: clients verify the server certificate (chain from the
+  # Secret's ca.crt and host name).
+  verify: true
+  # -- certManager/existingSecret: the repo-server and commit-server require client
+  # certificates (mutual TLS). The controller tree API has no client certificate support, so it
+  # never requires one.
+  mtls: false
+  certManager:
+    # -- Issuer of the internal certificates ({name, kind, group}). Empty: the chart creates a
+    # self-signed root and a CA Issuer in the release namespace.
+    issuerRef: {}
+    # -- Lifetime of the leaf certificates.
+    duration: 2160h
+    # -- Renewal window of the leaf certificates.
+    renewBefore: 360h
+    # -- Lifetime of the chart-created CA certificate.
+    caDuration: 87600h
+    # -- Private key settings of the leaf certificates.
+    privateKey:
+      algorithm: ECDSA
+      size: 256
+      rotationPolicy: Always
+
+server:
+  # -- Deploy patrol-server (API, web UI, webhooks). Disable for a core (headless) install.
+  enabled: true
+  # -- Replicas (ignored when autoscaling is enabled).
+  replicas: 1
+  # -- Serve plain HTTP (--insecure), for TLS terminated at an Ingress or Gateway.
+  insecure: false
+  tls:
+    # -- Existing kubernetes.io/tls Secret with the public certificate (mounted, --tls-cert and
+    # --tls-key; reloaded on rotation). Empty: patrol-secret tls.crt/tls.key when present, else
+    # a self-signed certificate generated in memory.
+    existingSecret: ""
+  certificate:
+    # -- Issue the public certificate with cert-manager into Secret patrol-server-tls (needs
+    # cert-manager.io/v1).
+    enabled: false
+    # -- DNS names of the certificate.
+    dnsNames: []
+    # -- Issuer of the certificate ({name, kind, group}); required when enabled.
+    issuerRef: {}
+    # -- Lifetime of the certificate.
+    duration: 2160h
+    # -- Renewal window of the certificate.
+    renewBefore: 360h
+    # -- Private key settings.
+    privateKey:
+      algorithm: ECDSA
+      size: 256
+      rotationPolicy: Always
+  autoscaling:
+    # -- Create a HorizontalPodAutoscaler.
+    enabled: false
+    # -- Minimum replicas (at most maxReplicas).
+    minReplicas: 2
+    # -- Maximum replicas.
+    maxReplicas: 5
+    # -- Target average CPU utilization (percent of requests); 0 disables the metric. At least
+    # one of the two targets must be above 0.
+    targetCPUUtilizationPercentage: 70
+    # -- Target average memory utilization (percent of requests); 0 disables the metric.
+    targetMemoryUtilizationPercentage: 0
+    # -- HPA scaling behavior.
+    behavior: {}
+  # -- Resources. Sizing basis: ~100 Applications and a handful of concurrent UI users per
+  # replica; the server holds informer caches of Patrol objects and streams logs/events.
+  resources:
+    requests:
+      cpu: 100m
+      memory: 256Mi
+    limits:
+      cpu: "2"
+      memory: 1Gi
+  # -- Extra arguments of the server container.
+  extraArgs: []
+  # -- Extra environment variables (e.g. PATROL_SESSION_FAILURE_MAX_FAIL_COUNT).
+  env: []
+  # -- Extra envFrom sources.
+  envFrom: []
+  # -- Extra volumes.
+  volumes: []
+  # -- Extra volume mounts of the server container.
+  volumeMounts: []
+  # -- Extra init containers.
+  initContainers: []
+  # -- Extra sidecar containers.
+  extraContainers: []
+  # -- Annotations of the Deployment.
+  annotations: {}
+  # -- Labels of the Deployment.
+  labels: {}
+  # -- Pod annotations.
+  podAnnotations: {}
+  # -- Pod labels.
+  podLabels: {}
+  # -- Pod security context (merged over global.podSecurityContext).
+  podSecurityContext: {}
+  # -- Container security context (merged over global.containerSecurityContext).
+  containerSecurityContext: {}
+  # -- Node selector (default global.nodeSelector).
+  nodeSelector: {}
+  # -- Tolerations (default global.tolerations).
+  tolerations: []
+  # -- Affinity (replaces the global anti-affinity preset).
+  affinity: {}
+  # -- Topology spread constraints (replace the global spread preset).
+  topologySpreadConstraints: []
+  # -- Priority class (default global.priorityClassName).
+  priorityClassName: ""
+  # -- Termination grace period, seconds (> global.shutdownTimeoutSeconds + 5).
+  terminationGracePeriodSeconds: 45
+  # -- Container lifecycle hooks (e.g. preStop sleep for load balancer draining).
+  lifecycle: {}
+  # -- Deployment update strategy.
+  updateStrategy:
+    type: RollingUpdate
+    rollingUpdate:
+      maxUnavailable: 0
+      maxSurge: 25%
+  probes:
+    # -- Readiness probe (GET /readyz on the metrics port: settings loaded, caches synced).
+    readiness:
+      initialDelaySeconds: 3
+      periodSeconds: 10
+      timeoutSeconds: 5
+      failureThreshold: 3
+    # -- Liveness probe (GET /livez on the metrics port).
+    liveness:
+      initialDelaySeconds: 10
+      periodSeconds: 30
+      timeoutSeconds: 5
+      failureThreshold: 3
+    # -- Startup probe (GET /livez on the metrics port).
+    startup:
+      periodSeconds: 5
+      timeoutSeconds: 5
+      failureThreshold: 36
+  pdb:
+    # -- Create a PodDisruptionBudget.
+    enabled: true
+    # -- minAvailable (takes precedence over maxUnavailable when set).
+    minAvailable: ""
+    # -- maxUnavailable (when minAvailable is empty). 0 blocks every voluntary eviction: node
+    # drains wait until it is changed.
+    maxUnavailable: 1
+  serviceAccount:
+    # -- Create the ServiceAccount.
+    create: true
+    # -- Name (default <prefix>-server). Required when create is false: the chart then uses this
+    # existing ServiceAccount and never falls back to the namespace's default one.
+    name: ""
+    # -- Annotations (e.g. workload identity).
+    annotations: {}
+  service:
+    # -- Service type.
+    type: ClusterIP
+    # -- Port of the plain HTTP Service port (http).
+    httpPort: 80
+    # -- Port of the HTTPS Service port (https).
+    httpsPort: 443
+    # -- nodePort of the http port (NodePort/LoadBalancer).
+    nodePortHttp: null
+    # -- nodePort of the https port (NodePort/LoadBalancer).
+    nodePortHttps: null
+    # -- Annotations.
+    annotations: {}
+    # -- Labels.
+    labels: {}
+    # -- loadBalancerClass (LoadBalancer).
+    loadBalancerClass: ""
+    # -- loadBalancerSourceRanges (LoadBalancer).
+    loadBalancerSourceRanges: []
+    # -- externalTrafficPolicy (NodePort/LoadBalancer).
+    externalTrafficPolicy: ""
+    # -- sessionAffinity.
+    sessionAffinity: ""
+  ingress:
+    # -- Create an Ingress for the UI, API and webhooks. The backend port is https unless
+    # server.insecure (then http); set the controller's backend protocol annotation to match.
+    enabled: false
+    # -- ingressClassName.
+    className: ""
+    # -- Annotations.
+    annotations: {}
+    # -- Labels.
+    labels: {}
+    # -- Host names (one rule each).
+    hosts: []
+    # -- Path of each rule.
+    path: /
+    # -- pathType of each rule.
+    pathType: Prefix
+    # -- TLS entries ({secretName, hosts}).
+    tls: []
+    # -- Extra paths prepended to each rule (raw HTTPIngressPath objects).
+    extraPaths: []
+    # -- Extra rules (raw IngressRule objects).
+    extraRules: []
+  httproute:
+    # -- Create a Gateway API HTTPRoute (needs gateway.networking.k8s.io/v1). With TLS at the
+    # server, the Gateway also needs a BackendTLSPolicy; use server.insecure for TLS at the
+    # Gateway.
+    enabled: false
+    # -- Annotations.
+    annotations: {}
+    # -- Labels.
+    labels: {}
+    # -- parentRefs (Gateways).
+    parentRefs: []
+    # -- Host names.
+    hostnames: []
+    # -- Match of the single rule.
+    matches:
+      - path:
+          type: PathPrefix
+          value: /
+    # -- Filters of the single rule.
+    filters: []
+  metrics:
+    service:
+      # -- Annotations of the metrics Service.
+      annotations: {}
+      # -- Labels of the metrics Service.
+      labels: {}
+      # -- Port of the metrics Service.
+      port: 8083
+
+controller:
+  # -- Deploy the application controller (StatefulSet).
+  enabled: true
+  # -- Replicas: shards distributed over shard Leases (PATROL_CONTROLLER_REPLICAS). Each replica
+  # serves the tree API for the shards it owns. Change the shard count here, not with
+  # `kubectl scale`: Helm owns spec.replicas, so a scaled StatefulSet makes the next upgrade
+  # fail with a field conflict (--force-conflicts resets it to this value).
+  replicas: 1
+  sharding:
+    # -- Cluster to shard algorithm (legacy, round-robin, consistent-hashing); "" keeps the
+    # default (legacy) unless configs.params sets controller.sharding.algorithm.
+    algorithm: ""
+    # -- Read the replica count from the StatefulSet and rebalance on changes
+    # (PATROL_ENABLE_DYNAMIC_CLUSTER_DISTRIBUTION; grants get on the StatefulSet). The pod
+    # template then omits PATROL_CONTROLLER_REPLICAS, so changing controller.replicas resizes
+    # the StatefulSet without restarting the running shards.
+    dynamicClusterDistribution: false
+    # -- Shard Lease renewal period in seconds (10-60); 0 keeps the default (10).
+    heartbeatSeconds: 0
+  # -- Resources. Sizing basis: ~100 Applications on a few clusters per shard; memory grows with
+  # the number of live objects cached per destination cluster.
+  resources:
+    requests:
+      cpu: 250m
+      memory: 512Mi
+    limits:
+      cpu: "2"
+      memory: 2Gi
+  # -- Extra arguments.
+  extraArgs: []
+  # -- Extra environment variables.
+  env: []
+  # -- Extra envFrom sources.
+  envFrom: []
+  # -- Extra volumes.
+  volumes: []
+  # -- Extra volume mounts.
+  volumeMounts: []
+  # -- Extra init containers.
+  initContainers: []
+  # -- Extra sidecar containers.
+  extraContainers: []
+  # -- Annotations of the StatefulSet.
+  annotations: {}
+  # -- Labels of the StatefulSet.
+  labels: {}
+  # -- Pod annotations.
+  podAnnotations: {}
+  # -- Pod labels.
+  podLabels: {}
+  # -- Pod security context (merged over global.podSecurityContext).
+  podSecurityContext: {}
+  # -- Container security context (merged over global.containerSecurityContext).
+  containerSecurityContext: {}
+  # -- Node selector.
+  nodeSelector: {}
+  # -- Tolerations.
+  tolerations: []
+  # -- Affinity (replaces the anti-affinity preset).
+  affinity: {}
+  # -- Topology spread constraints (replace the spread preset).
+  topologySpreadConstraints: []
+  # -- Priority class.
+  priorityClassName: ""
+  # -- Termination grace period, seconds (> global.shutdownTimeoutSeconds + 5; Leases are
+  # released during the drain).
+  terminationGracePeriodSeconds: 60
+  # -- Container lifecycle hooks.
+  lifecycle: {}
+  # -- Pod management policy (Parallel: shard Leases arbitrate ownership). Install-time only:
+  # the field is immutable on a StatefulSet, so changing it makes `helm upgrade` fail until the
+  # StatefulSet is deleted (`kubectl delete statefulset --cascade=orphan`) and re-created.
+  podManagementPolicy: Parallel
+  # -- StatefulSet update strategy.
+  updateStrategy:
+    type: RollingUpdate
+  probes:
+    # -- Readiness probe (GET /readyz on the metrics port: caches synced, preferred shard Lease
+    # held).
+    readiness:
+      initialDelaySeconds: 5
+      periodSeconds: 10
+      timeoutSeconds: 5
+      failureThreshold: 3
+    # -- Liveness probe (GET /livez).
+    liveness:
+      initialDelaySeconds: 10
+      periodSeconds: 30
+      timeoutSeconds: 5
+      failureThreshold: 3
+    # -- Startup probe (GET /livez).
+    startup:
+      periodSeconds: 5
+      timeoutSeconds: 5
+      failureThreshold: 60
+  pdb:
+    # -- Create a PodDisruptionBudget.
+    enabled: true
+    # -- minAvailable (takes precedence over maxUnavailable when set).
+    minAvailable: ""
+    # -- maxUnavailable (when minAvailable is empty). 0 blocks every voluntary eviction: node
+    # drains wait until it is changed.
+    maxUnavailable: 1
+  serviceAccount:
+    # -- Create the ServiceAccount.
+    create: true
+    # -- Name (default <prefix>-controller). Required when create is false: the chart then uses this
+    # existing ServiceAccount and never falls back to the namespace's default one.
+    name: ""
+    # -- Annotations.
+    annotations: {}
+  treeAPI:
+    service:
+      # -- Annotations of the headless tree API Service (<prefix>-controller).
+      annotations: {}
+      # -- Labels of the headless tree API Service.
+      labels: {}
+  metrics:
+    service:
+      # -- Annotations of the metrics Service.
+      annotations: {}
+      # -- Labels of the metrics Service.
+      labels: {}
+      # -- Port of the metrics Service.
+      port: 8082
+
+repoServer:
+  # -- Deploy the repo-server. When disabled, set configs.params."repo.server" to an external
+  # repo-server.
+  enabled: true
+  # -- Replicas (ignored when autoscaling is enabled).
+  replicas: 1
+  autoscaling:
+    # -- Create a HorizontalPodAutoscaler.
+    enabled: false
+    # -- Minimum replicas (at most maxReplicas).
+    minReplicas: 2
+    # -- Maximum replicas.
+    maxReplicas: 5
+    # -- Target average CPU utilization (percent of requests); 0 disables the metric. At least
+    # one of the two targets must be above 0.
+    targetCPUUtilizationPercentage: 70
+    # -- Target average memory utilization (percent of requests); 0 disables the metric.
+    targetMemoryUtilizationPercentage: 0
+    # -- HPA scaling behavior.
+    behavior: {}
+  # -- Resources. Sizing basis: rendering runs git, helm, kustomize and the Jsonnet evaluator
+  # as child processes; CPU and memory scale with concurrent renders
+  # (reposerver.parallelism.limit) and chart sizes.
+  resources:
+    requests:
+      cpu: 250m
+      memory: 512Mi
+    limits:
+      cpu: "2"
+      memory: 2Gi
+  emptyDirs:
+    # -- sizeLimit of /tmp (tool scratch directories and isolated tool homes).
+    tmpSizeLimit: 2Gi
+    # -- sizeLimit of the working directory (clones, extracted charts and artifacts; --root-dir).
+    workSizeLimit: 10Gi
+    # -- sizeLimit of the in-memory credentials directory (--credentials-dir).
+    credentialsSizeLimit: 16Mi
+    # -- sizeLimit of the in-memory GnuPG home parent (--gnupg-home-parent).
+    gnupgSizeLimit: 64Mi
+  cmp:
+    # -- Config Management Plugin sidecars. Each item: name (required), image {registry,
+    # repository, tag, digest, pullPolicy}, command/args overrides (default:
+    # /var/run/patrol/patrolcd cmp-server), configMap (existing ConfigMap with plugin.yaml) or
+    # pluginConfig (inline plugin.yaml as a map), env, envFrom, resources,
+    # containerSecurityContext, tmpSizeLimit, volumeMounts. See docs/guides/installation.md.
+    plugins: []
+    copyutil:
+      # -- Command of the init container copying patrolcd into the shared /var/run/patrol
+      # volume (runs in the Patrol image).
+      command:
+        - cp
+        - /usr/local/bin/patrolcd
+        - /var/run/patrol/patrolcd
+      # -- Resources of the copy init container.
+      resources:
+        requests:
+          cpu: 10m
+          memory: 16Mi
+        limits:
+          cpu: 100m
+          memory: 64Mi
+  # -- Extra arguments.
+  extraArgs: []
+  # -- Extra environment variables (e.g. PATROL_EXEC_TIMEOUT, PATROL_GIT_ATTEMPTS_COUNT).
+  env: []
+  # -- Extra envFrom sources.
+  envFrom: []
+  # -- Extra volumes.
+  volumes: []
+  # -- Extra volume mounts.
+  volumeMounts: []
+  # -- Extra init containers.
+  initContainers: []
+  # -- Extra sidecar containers.
+  extraContainers: []
+  # -- Annotations of the Deployment.
+  annotations: {}
+  # -- Labels of the Deployment.
+  labels: {}
+  # -- Pod annotations.
+  podAnnotations: {}
+  # -- Pod labels.
+  podLabels: {}
+  # -- Pod security context (merged over global.podSecurityContext).
+  podSecurityContext: {}
+  # -- Container security context (merged over global.containerSecurityContext).
+  containerSecurityContext: {}
+  # -- Node selector.
+  nodeSelector: {}
+  # -- Tolerations.
+  tolerations: []
+  # -- Affinity.
+  affinity: {}
+  # -- Topology spread constraints.
+  topologySpreadConstraints: []
+  # -- Priority class.
+  priorityClassName: ""
+  # -- Termination grace period, seconds.
+  terminationGracePeriodSeconds: 45
+  # -- Container lifecycle hooks.
+  lifecycle: {}
+  # -- Deployment update strategy.
+  updateStrategy:
+    type: RollingUpdate
+    rollingUpdate:
+      maxUnavailable: 0
+      maxSurge: 25%
+  probes:
+    # -- Readiness probe (GET /readyz on the probe port).
+    readiness:
+      initialDelaySeconds: 5
+      periodSeconds: 10
+      timeoutSeconds: 5
+      failureThreshold: 3
+    # -- Liveness probe (GET /healthz?full=true: dials the API listener).
+    liveness:
+      initialDelaySeconds: 30
+      periodSeconds: 30
+      timeoutSeconds: 15
+      failureThreshold: 3
+  pdb:
+    # -- Create a PodDisruptionBudget.
+    enabled: true
+    # -- minAvailable (takes precedence over maxUnavailable when set).
+    minAvailable: ""
+    # -- maxUnavailable (when minAvailable is empty). 0 blocks every voluntary eviction: node
+    # drains wait until it is changed.
+    maxUnavailable: 1
+  serviceAccount:
+    # -- Create the ServiceAccount (no RBAC; the pod mounts no token).
+    create: true
+    # -- Name (default <prefix>-repo-server). Required when create is false: the chart then uses this
+    # existing ServiceAccount and never falls back to the namespace's default one.
+    name: ""
+    # -- Annotations (e.g. workload identity for registries).
+    annotations: {}
+  service:
+    # -- Annotations of the Service.
+    annotations: {}
+    # -- Labels of the Service.
+    labels: {}
+
+appsetController:
+  # -- Deploy the ApplicationSet controller.
+  enabled: true
+  # -- Replicas (leader election keeps one active).
+  replicas: 1
+  # -- Leader election (controller-runtime Lease); keeps a single writer during rolling updates.
+  leaderElection: true
+  webhook:
+    # -- Serve SCM webhooks on the controller (--webhook-addr). patrol-server's /api/webhook
+    # refreshes ApplicationSets too, so this is rarely needed.
+    enabled: false
+    # -- Port of the webhook listener.
+    port: 7000
+  # -- Resources.
+  resources:
+    requests:
+      cpu: 50m
+      memory: 128Mi
+    limits:
+      cpu: "1"
+      memory: 512Mi
+  # -- Extra arguments.
+  extraArgs: []
+  # -- Extra environment variables.
+  env: []
+  # -- Extra envFrom sources.
+  envFrom: []
+  # -- Extra volumes.
+  volumes: []
+  # -- Extra volume mounts.
+  volumeMounts: []
+  # -- Extra init containers.
+  initContainers: []
+  # -- Extra sidecar containers.
+  extraContainers: []
+  # -- Annotations of the Deployment.
+  annotations: {}
+  # -- Labels of the Deployment.
+  labels: {}
+  # -- Pod annotations.
+  podAnnotations: {}
+  # -- Pod labels.
+  podLabels: {}
+  # -- Pod security context.
+  podSecurityContext: {}
+  # -- Container security context.
+  containerSecurityContext: {}
+  # -- Node selector.
+  nodeSelector: {}
+  # -- Tolerations.
+  tolerations: []
+  # -- Affinity.
+  affinity: {}
+  # -- Topology spread constraints.
+  topologySpreadConstraints: []
+  # -- Priority class.
+  priorityClassName: ""
+  # -- Termination grace period, seconds.
+  terminationGracePeriodSeconds: 45
+  # -- Container lifecycle hooks.
+  lifecycle: {}
+  # -- Deployment update strategy.
+  updateStrategy:
+    type: RollingUpdate
+  probes:
+    # -- Readiness probe (GET /readyz on the probe port).
+    readiness:
+      initialDelaySeconds: 5
+      periodSeconds: 10
+      timeoutSeconds: 5
+      failureThreshold: 3
+    # -- Liveness probe (GET /livez on the probe port).
+    liveness:
+      initialDelaySeconds: 10
+      periodSeconds: 30
+      timeoutSeconds: 5
+      failureThreshold: 3
+  pdb:
+    # -- Create a PodDisruptionBudget.
+    enabled: true
+    # -- minAvailable (takes precedence over maxUnavailable when set).
+    minAvailable: ""
+    # -- maxUnavailable (when minAvailable is empty). 0 blocks every voluntary eviction: node
+    # drains wait until it is changed.
+    maxUnavailable: 1
+  serviceAccount:
+    # -- Create the ServiceAccount.
+    create: true
+    # -- Name (default <prefix>-applicationset-controller). Required when create is false: the chart then uses this
+    # existing ServiceAccount and never falls back to the namespace's default one.
+    name: ""
+    # -- Annotations.
+    annotations: {}
+  service:
+    # -- Annotations of the Service (metrics and webhook ports).
+    annotations: {}
+    # -- Labels of the Service.
+    labels: {}
+
+notificationsController:
+  # -- Deploy the notifications controller.
+  enabled: true
+  # -- Replicas (leader election keeps one active).
+  replicas: 1
+  # -- Leader election (Lease patrol-notifications-controller); avoids duplicate deliveries
+  # during rolling updates.
+  leaderElection: true
+  # -- Let control-plane notification services reach private, loopback and link-local
+  # addresses (--allow-private-egress).
+  allowPrivateEgress: false
+  # -- Non-public CIDRs control-plane notification services may reach (--egress-allowed-cidrs),
+  # e.g. an in-cluster Alertmanager.
+  egressAllowedCIDRs: []
+  # -- Non-public CIDRs namespace (self-service) configurations may reach.
+  tenantEgressAllowedCIDRs: []
+  # -- patrol-notifications-cm data (service.*, template.*, trigger.*, subscriptions, context,
+  # defaultTriggers). Credentials go to the Secret and are referenced as $<key>.
+  cm: {}
+  # -- Create patrol-notifications-cm (false when another tool owns it).
+  createConfigMap: true
+  secret:
+    # -- Create patrol-notifications-secret (empty unless items is set; false when another tool
+    # owns it, e.g. an external secrets operator).
+    create: true
+    # -- Explicit Secret items (stringData). Prefer managing the Secret outside Helm.
+    items: {}
+    # -- Labels.
+    labels: {}
+    # -- Annotations.
+    annotations: {}
+  # -- Resources.
+  resources:
+    requests:
+      cpu: 50m
+      memory: 128Mi
+    limits:
+      cpu: "1"
+      memory: 512Mi
+  # -- Extra arguments.
+  extraArgs: []
+  # -- Extra environment variables.
+  env: []
+  # -- Extra envFrom sources.
+  envFrom: []
+  # -- Extra volumes.
+  volumes: []
+  # -- Extra volume mounts.
+  volumeMounts: []
+  # -- Extra init containers.
+  initContainers: []
+  # -- Extra sidecar containers.
+  extraContainers: []
+  # -- Annotations of the Deployment.
+  annotations: {}
+  # -- Labels of the Deployment.
+  labels: {}
+  # -- Pod annotations.
+  podAnnotations: {}
+  # -- Pod labels.
+  podLabels: {}
+  # -- Pod security context.
+  podSecurityContext: {}
+  # -- Container security context.
+  containerSecurityContext: {}
+  # -- Node selector.
+  nodeSelector: {}
+  # -- Tolerations.
+  tolerations: []
+  # -- Affinity.
+  affinity: {}
+  # -- Topology spread constraints.
+  topologySpreadConstraints: []
+  # -- Priority class.
+  priorityClassName: ""
+  # -- Termination grace period, seconds.
+  terminationGracePeriodSeconds: 45
+  # -- Container lifecycle hooks.
+  lifecycle: {}
+  # -- Deployment update strategy.
+  updateStrategy:
+    type: RollingUpdate
+  probes:
+    # -- Readiness probe (GET /readyz on the metrics port).
+    readiness:
+      initialDelaySeconds: 5
+      periodSeconds: 10
+      timeoutSeconds: 5
+      failureThreshold: 3
+    # -- Liveness probe (GET /livez on the metrics port).
+    liveness:
+      initialDelaySeconds: 10
+      periodSeconds: 30
+      timeoutSeconds: 5
+      failureThreshold: 3
+  pdb:
+    # -- Create a PodDisruptionBudget.
+    enabled: true
+    # -- minAvailable (takes precedence over maxUnavailable when set).
+    minAvailable: ""
+    # -- maxUnavailable (when minAvailable is empty). 0 blocks every voluntary eviction: node
+    # drains wait until it is changed.
+    maxUnavailable: 1
+  serviceAccount:
+    # -- Create the ServiceAccount.
+    create: true
+    # -- Name (default <prefix>-notifications-controller). Required when create is false: the chart then uses this
+    # existing ServiceAccount and never falls back to the namespace's default one.
+    name: ""
+    # -- Annotations.
+    annotations: {}
+  metrics:
+    service:
+      # -- Annotations of the metrics Service.
+      annotations: {}
+      # -- Labels of the metrics Service.
+      labels: {}
+      # -- Port of the metrics Service.
+      port: 9001
+
+hydrator:
+  # -- Enable the source hydrator: sets hydrator.enabled and deploys the commit-server.
+  enabled: false
+
+commitServer:
+  # -- Replicas of the commit-server (deployed only with hydrator.enabled).
+  replicas: 1
+  # -- Resources. Sizing basis: one clone + write + push per hydration request.
+  resources:
+    requests:
+      cpu: 50m
+      memory: 128Mi
+    limits:
+      cpu: "1"
+      memory: 512Mi
+  emptyDirs:
+    # -- sizeLimit of /tmp.
+    tmpSizeLimit: 1Gi
+    # -- sizeLimit of the per-request clone directory (--work-dir).
+    workSizeLimit: 5Gi
+    # -- sizeLimit of the in-memory credentials directory.
+    credentialsSizeLimit: 16Mi
+  # -- Requests processed at once (--max-concurrent-requests; 0 unlimited).
+  maxConcurrentRequests: 0
+  # -- Extra arguments.
+  extraArgs: []
+  # -- Extra environment variables.
+  env: []
+  # -- Extra envFrom sources.
+  envFrom: []
+  # -- Extra volumes.
+  volumes: []
+  # -- Extra volume mounts.
+  volumeMounts: []
+  # -- Extra init containers.
+  initContainers: []
+  # -- Extra sidecar containers.
+  extraContainers: []
+  # -- Annotations of the Deployment.
+  annotations: {}
+  # -- Labels of the Deployment.
+  labels: {}
+  # -- Pod annotations.
+  podAnnotations: {}
+  # -- Pod labels.
+  podLabels: {}
+  # -- Pod security context.
+  podSecurityContext: {}
+  # -- Container security context.
+  containerSecurityContext: {}
+  # -- Node selector.
+  nodeSelector: {}
+  # -- Tolerations.
+  tolerations: []
+  # -- Affinity.
+  affinity: {}
+  # -- Topology spread constraints.
+  topologySpreadConstraints: []
+  # -- Priority class.
+  priorityClassName: ""
+  # -- Termination grace period, seconds.
+  terminationGracePeriodSeconds: 45
+  # -- Container lifecycle hooks.
+  lifecycle: {}
+  # -- Deployment update strategy.
+  updateStrategy:
+    type: RollingUpdate
+  probes:
+    # -- Readiness probe (GET /readyz on the metrics port).
+    readiness:
+      initialDelaySeconds: 5
+      periodSeconds: 10
+      timeoutSeconds: 5
+      failureThreshold: 3
+    # -- Liveness probe (GET /livez on the metrics port).
+    liveness:
+      initialDelaySeconds: 10
+      periodSeconds: 30
+      timeoutSeconds: 5
+      failureThreshold: 3
+  pdb:
+    # -- Create a PodDisruptionBudget.
+    enabled: true
+    # -- minAvailable (takes precedence over maxUnavailable when set).
+    minAvailable: ""
+    # -- maxUnavailable (when minAvailable is empty). 0 blocks every voluntary eviction: node
+    # drains wait until it is changed.
+    maxUnavailable: 1
+  serviceAccount:
+    # -- Create the ServiceAccount (no RBAC; the pod mounts no token).
+    create: true
+    # -- Name (default <prefix>-commit-server). Required when create is false: the chart then uses this
+    # existing ServiceAccount and never falls back to the namespace's default one.
+    name: ""
+    # -- Annotations.
+    annotations: {}
+  service:
+    # -- Annotations of the Service.
+    annotations: {}
+    # -- Labels of the Service.
+    labels: {}
+
+dex:
+  # -- Deploy Dex (upstream image) for SSO. patrol-server proxies /api/dex to it. Also set
+  # configs.cm."url" and configs.cm."dex.config" (the connectors), see
+  # docs/guides/installation.md: the Dex launcher of Argo CD (gendexcfg) is not part of Patrol,
+  # so the client secret of the "patrol" static client is supplied through clientSecretRef.
+  enabled: false
+  image:
+    # -- Dex image registry (replaced by global.imageRegistry when set).
+    registry: ghcr.io
+    # -- Dex image repository.
+    repository: dexidp/dex
+    # -- Dex image tag (the Argo CD v3.5.5 baseline's Dex version).
+    tag: v2.45.1
+    # -- Dex image digest (multi-arch index of v2.45.1).
+    digest: sha256:8499afd690c437f52301efd2b05b2455da5bd2dfc20332cd697dc9937f808462
+    # -- Pull policy.
+    pullPolicy: IfNotPresent
+  # -- Dex configuration merged over the chart's (issuer, storage, web, grpc, telemetry and the
+  # patrol/patrol-cli static clients), typically connectors. Rendered into a Secret; use
+  # $ENV_VAR references with env/envFrom for credentials.
+  config: {}
+  # -- Existing Secret holding the complete Dex configuration (key config.yaml) instead of the
+  # rendered one.
+  existingConfigSecret: ""
+  clientSecretRef:
+    # -- Secret holding the client secret of the "patrol" static client (env
+    # PATROL_DEX_CLIENT_SECRET, referenced as secretEnv). Required unless existingConfigSecret.
+    name: ""
+    # -- Key of that Secret.
+    key: clientSecret
+  # -- Extra environment variables (e.g. connector secrets from secretKeyRef).
+  env: []
+  # -- Extra envFrom sources.
+  envFrom: []
+  # -- Resources.
+  resources:
+    requests:
+      cpu: 10m
+      memory: 64Mi
+    limits:
+      cpu: 500m
+      memory: 256Mi
+  # -- Pod annotations.
+  podAnnotations: {}
+  # -- Pod labels.
+  podLabels: {}
+  # -- Pod security context (the Dex image runs as UID 1001).
+  podSecurityContext:
+    runAsUser: 1001
+    runAsGroup: 1001
+    fsGroup: 1001
+  # -- Container security context.
+  containerSecurityContext: {}
+  # -- Node selector.
+  nodeSelector: {}
+  # -- Tolerations.
+  tolerations: []
+  # -- Affinity.
+  affinity: {}
+  # -- Priority class.
+  priorityClassName: ""
+  # -- Termination grace period, seconds.
+  terminationGracePeriodSeconds: 30
+  pdb:
+    # -- Create a PodDisruptionBudget.
+    enabled: true
+    # -- maxUnavailable (when minAvailable is empty). 0 blocks every voluntary eviction: node
+    # drains wait until it is changed.
+    maxUnavailable: 1
+  serviceAccount:
+    # -- Create the ServiceAccount (no RBAC with the default memory storage).
+    create: true
+    # -- Name (default <prefix>-dex-server). Required when create is false: the chart then uses this
+    # existing ServiceAccount and never falls back to the namespace's default one.
+    name: ""
+    # -- Annotations.
+    annotations: {}
+
+rbac:
+  # -- Create Roles, ClusterRoles and their bindings.
+  create: true
+  # -- "cluster": the controller manages the local cluster through a ClusterRole and the server
+  # reads live resources cluster-wide. "namespaced": namespace-install semantics, Roles only;
+  # on the local cluster the controller manages only the release namespace and
+  # rbac.managedNamespaces, and applicationNamespaces must be empty.
+  scope: cluster
+  # -- namespaced scope: extra namespaces the controller (and server) may manage on the local
+  # cluster (Roles are created there).
+  managedNamespaces: []
+  controller:
+    # -- cluster scope: grant the controller cluster-admin-equivalent rights on the local cluster
+    # (all resources, all verbs), as Argo CD does. Anyone who can create Applications in a
+    # project allowing the in-cluster destination can then deploy anything to this cluster.
+    clusterAdmin: true
+    # -- cluster scope with clusterAdmin false: ClusterRole rules for the local cluster. The
+    # default reads everything (the live-state cache needs list/watch); add write rules for the
+    # kinds Applications deploy.
+    rules:
+      - apiGroups: ["*"]
+        resources: ["*"]
+        verbs: ["get", "list", "watch"]
+      - nonResourceURLs: ["*"]
+        verbs: ["get"]
+  server:
+    # -- cluster scope: ClusterRole for live resources of the local (in-cluster) destination:
+    # get/patch/delete any resource, list events, read pods and logs, create Jobs (resource
+    # actions). patrol-server reaches the in-cluster destination with its own identity.
+    localCluster: true
+    # -- Grant pods/exec create (web terminal). Also needs configs.cm."exec.enabled": "true".
+    exec: false
+    # -- Grant impersonate on ServiceAccounts (application.sync.impersonation.enabled).
+    impersonation: false
+    # -- Extra ClusterRole rules of the server (e.g. create on kinds created by resource actions).
+    extraClusterRules: []
+  # -- Extra Role rules of the ApplicationSet controller in the release namespace (e.g. get on
+  # the duck-typed resources of the cluster decision resource generator).
+  appsetControllerExtraRules: []
+
+networkPolicy:
+  # -- Create NetworkPolicies: each component accepts only its documented callers and reaches
+  # only its documented destinations (ingress and egress are both restricted).
+  enabled: true
+  dns:
+    # -- Destinations of DNS egress (default: kube-dns pods in kube-system).
+    to:
+      - namespaceSelector:
+          matchLabels:
+            kubernetes.io/metadata.name: kube-system
+        podSelector:
+          matchLabels:
+            k8s-app: kube-dns
+    # -- DNS ports.
+    ports:
+      - port: 53
+        protocol: UDP
+      - port: 53
+        protocol: TCP
+  kubeAPIServer:
+    # -- CIDRs of the Kubernetes API server (narrow to the endpoint IPs of the kubernetes
+    # Service). Used by server, controller, appset and notifications controllers.
+    cidrs:
+      - 0.0.0.0/0
+      - ::/0
+    # -- Ports of the Kubernetes API server.
+    ports:
+      - 443
+      - 6443
+  # -- Peers allowed to scrape metrics ports (NetworkPolicyPeer list); [] blocks scraping.
+  metricsFrom:
+    - namespaceSelector: {}
+  # -- Peers allowed to reach patrol-server's API port; [] allows everyone (ingress controllers,
+  # webhooks, CLI).
+  serverFrom: []
+  # -- CIDRs removed from the external egress of the repo-server and the commit-server
+  # (repoServerEgress, commitServerEgress), which fetch tenant-supplied URLs: the cloud instance
+  # metadata endpoints (169.254.169.254 on AWS, GCP and Azure; fd00:ec2::254 on AWS IPv6).
+  # Merged into their except lists. Set [] when these components must reach a metadata server
+  # (for example for workload identity credentials).
+  excludeMetadataEndpoints:
+    - 169.254.169.254/32
+    - fd00:ec2::254/128
+  # -- External egress of patrol-server: OIDC providers, remote destination clusters, proxy
+  # extension backends. In every *Egress value, an except entry is removed from each listed
+  # CIDR that strictly contains it and is ignored elsewhere, so a narrower CIDR listed next to
+  # 0.0.0.0/0 adds a range back (cidrs [0.0.0.0/0, 10.20.0.0/16], except [10.0.0.0/8]).
+  serverEgress:
+    cidrs:
+      - 0.0.0.0/0
+      - ::/0
+    except: []
+    ports:
+      - 443
+      - 6443
+  # -- Egress of the controller to destination clusters (remote API servers).
+  controllerEgress:
+    cidrs:
+      - 0.0.0.0/0
+      - ::/0
+    except: []
+    ports:
+      - 443
+      - 6443
+  # -- Egress of the repo-server to Git, Helm and OCI hosts (narrow cidrs/ports to tighten);
+  # excludeMetadataEndpoints is added to except.
+  repoServerEgress:
+    cidrs:
+      - 0.0.0.0/0
+      - ::/0
+    except: []
+    ports:
+      - 22
+      - 80
+      - 443
+  # -- Egress of the ApplicationSet controller to SCM provider APIs.
+  appsetControllerEgress:
+    cidrs:
+      - 0.0.0.0/0
+      - ::/0
+    except: []
+    ports:
+      - 443
+  # -- Peers allowed to reach the ApplicationSet webhook port; [] allows everyone.
+  appsetWebhookFrom: []
+  # -- Egress of the notifications controller to notification services.
+  notificationsEgress:
+    cidrs:
+      - 0.0.0.0/0
+      - ::/0
+    except: []
+    ports:
+      - 80
+      - 443
+      - 465
+      - 587
+  # -- Egress of the commit-server to Git hosts; excludeMetadataEndpoints is added to except.
+  commitServerEgress:
+    cidrs:
+      - 0.0.0.0/0
+      - ::/0
+    except: []
+    ports:
+      - 22
+      - 80
+      - 443
+  # -- Egress of Dex to identity providers.
+  dexEgress:
+    cidrs:
+      - 0.0.0.0/0
+      - ::/0
+    except: []
+    ports:
+      - 443
+      - 636
+  # -- Extra egress rules (NetworkPolicyEgressRule list) per component key: server, controller,
+  # repoServer, appsetController, notificationsController, commitServer, dex.
+  extraEgress: {}
+
+metrics:
+  serviceMonitor:
+    # -- Create ServiceMonitors (needs monitoring.coreos.com/v1).
+    enabled: false
+    # -- Namespace of the ServiceMonitors (default: the release namespace).
+    namespace: ""
+    # -- Scrape interval.
+    interval: 30s
+    # -- Scrape timeout.
+    scrapeTimeout: 10s
+    # -- Labels (e.g. the Prometheus selector).
+    labels: {}
+    # -- Annotations.
+    annotations: {}
+    # -- Relabelings.
+    relabelings: []
+    # -- Metric relabelings.
+    metricRelabelings: []
+  prometheusRule:
+    # -- Create a PrometheusRule with Patrol alerts (needs monitoring.coreos.com/v1).
+    enabled: false
+    # -- Namespace of the PrometheusRule (default: the release namespace).
+    namespace: ""
+    # -- Labels (e.g. the Prometheus rule selector).
+    labels: {}
+    # -- Annotations.
+    annotations: {}
+    # -- Labels added to every alert.
+    alertLabels:
+      severity: warning
+    # -- Repo-server error ratio (internal, unavailable, deadline_exceeded,
+    # resource_exhausted) above which PatrolRepoServerErrors fires.
+    repoServerErrorRatio: 0.1
+    # -- Comparison failures per 15 minutes above which PatrolComparisonFailures fires.
+    comparisonFailuresPer15m: 10
+    # -- Extra rules appended to the group.
+    additionalRules: []
+
+tracing:
+  # -- OpenTelemetry collector address (host:port, OTLP/gRPC) for server, controller and
+  # repo-server (otlp.address).
+  otlpAddress: ""
+  # -- Connect to the collector without TLS (otlp.insecure).
+  insecure: true
+  # -- Resource attributes (key:value) (otlp.attrs).
+  attrs: []
+  headersSecret:
+    # -- Secret holding OTLP headers (k1=v1,k2=v2), e.g. authentication; passed as environment
+    # variables, never written to the ConfigMap.
+    name: ""
+    # -- Key of that Secret.
+    key: headers
+  networkPolicy:
+    # -- Destinations (NetworkPolicyPeer list) of the egress rule to the collector that the
+    # server, controller and repo-server NetworkPolicies get when an OTLP address is set
+    # (otlpAddress, or otlp.address in configs.params); [] allows the port to any destination.
+    to: []
+    # -- Collector port of that rule; 0 takes the port of the address (4317, the OTLP/gRPC
+    # port, when it has none).
+    port: 0
+
+# -- Extra objects rendered with the release (tpl strings or maps).
+extraObjects: []

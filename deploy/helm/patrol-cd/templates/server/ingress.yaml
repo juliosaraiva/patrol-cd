@@ -1,0 +1,50 @@
+{{- if and .Values.server.enabled .Values.server.ingress.enabled }}
+{{- $i := .Values.server.ingress }}
+{{- $svc := include "patrol.serverName" . }}
+{{- $port := ternary "http" "https" .Values.server.insecure }}
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  {{- include "patrol.metadata" (list . $svc "server" $i.labels $i.annotations) | nindent 2 }}
+spec:
+  {{- with $i.className }}
+  ingressClassName: {{ . }}
+  {{- end }}
+  {{- with $i.tls }}
+  tls:
+    {{- toYaml . | nindent 4 }}
+  {{- end }}
+  rules:
+    {{- range $i.hosts }}
+    - host: {{ . | quote }}
+      http:
+        paths:
+          {{- with $i.extraPaths }}
+          {{- toYaml . | nindent 10 }}
+          {{- end }}
+          - path: {{ $i.path }}
+            pathType: {{ $i.pathType }}
+            backend:
+              service:
+                name: {{ $svc }}
+                port:
+                  name: {{ $port }}
+    {{- end }}
+    {{- if not $i.hosts }}
+    - http:
+        paths:
+          {{- with $i.extraPaths }}
+          {{- toYaml . | nindent 10 }}
+          {{- end }}
+          - path: {{ $i.path }}
+            pathType: {{ $i.pathType }}
+            backend:
+              service:
+                name: {{ $svc }}
+                port:
+                  name: {{ $port }}
+    {{- end }}
+    {{- with $i.extraRules }}
+    {{- toYaml . | nindent 4 }}
+    {{- end }}
+{{- end }}

@@ -1,0 +1,12 @@
+# Files not packaged into the chart archive.
+.DS_Store
+*.swp
+*.bak
+*.tmp
+*~
+.git/
+.gitignore
+.idea/
+.vscode/
+README.md.gotmpl
+ci/
