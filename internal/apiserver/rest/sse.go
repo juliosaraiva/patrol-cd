@@ -171,7 +171,7 @@ func ServeSSE[E any](w http.ResponseWriter, r *http.Request, opts StreamOptions[
 			return
 		}
 		select {
-		case <-done:
+		case <-done: //nolint:errcheck // the stream already ended; the producer's error has no recipient
 			producerExited = true
 		case <-time.After(producerGrace):
 			logger(ctx).LogAttrs(ctx, slog.LevelWarn, "stream producer did not stop",

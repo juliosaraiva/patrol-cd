@@ -345,7 +345,7 @@ func (s *Server) Serve(ctx context.Context, l net.Listener) error {
 		cancelBase()
 		_ = srv.Close()
 	}
-	<-errCh
+	<-errCh //nolint:errcheck // Serve returns http.ErrServerClosed after Shutdown or Close
 	cancelBase()
 	s.active.Wait()
 	return nil

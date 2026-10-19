@@ -420,7 +420,7 @@ func (t *terminalSession) pump(ctx context.Context, es *execStream, msgs <-chan 
 	stop := func(r string) (string, bool) {
 		es.close()
 		select {
-		case <-done:
+		case <-done: //nolint:errcheck // the session is being closed; the shell's exit error has no recipient
 		case <-time.After(5 * time.Second):
 		}
 		return r, false

@@ -259,11 +259,11 @@ func (r *coreResolver) get(ctx context.Context) (*repository.Resolver, error) {
 	case err = <-errc:
 	case <-timer.C:
 		stop()
-		<-errc
+		<-errc //nolint:errcheck // the informers stopped; their error is superseded by the timeout
 		err = fmt.Errorf("repositories of namespace %s did not load within %s", ns, a.cfg.SyncTimeout)
 	case <-ctx.Done():
 		stop()
-		<-errc
+		<-errc //nolint:errcheck // the informers stopped; the caller's cancellation wins
 		err = ctx.Err()
 	}
 	if err != nil {

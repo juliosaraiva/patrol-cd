@@ -86,7 +86,7 @@ func TestPagesLoopAndErrors(t *testing.T) {
 	}
 	// Early break from the iterator stops fetching.
 	calls := 0
-	for range scm.Pages(context.Background(), 100, pager([]int{1, 2, 3, 4, 5}, 1, &calls)) {
+	for range scm.Pages(context.Background(), 100, pager([]int{1, 2, 3, 4, 5}, 1, &calls)) { //nolint:errcheck // the loop breaks after the first page
 		break
 	}
 	if calls != 1 {
