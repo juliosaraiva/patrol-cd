@@ -111,6 +111,8 @@ expect ok "Secret keys are exactly bearerToken,caData" -- \
 	bash -c "test \"\$(kubectl --kubeconfig '$SIM/cache/patrol-control.kubeconfig' --context kind-patrol-control -n patrol-system get secret cluster-patrol-target -o go-template='{{range \$k, \$v := .data}}{{\$k}},{{end}}')\" = 'bearerToken,caData,' && echo match"
 expect ok "Secret has no last-applied annotation" -- \
 	bash -c "! kubectl --kubeconfig '$SIM/cache/patrol-control.kubeconfig' --context kind-patrol-control -n patrol-system get secret cluster-patrol-target -o yaml | grep -q last-applied && echo none"
+C -n patrol-system get secret cluster-patrol-target -o go-template='{{index .metadata.labels "cd.patrol.example/secret-type"}}' >"$SIM/label"
+expect ok "Secret is labeled cd.patrol.example/secret-type=cluster" -- grep -x cluster "$SIM/label"
 expect ok "caData equals patrol-target's serving CA" -- cmp "$SIM/ca.pem" "$SIM/target/certs/apiserver.crt"
 # Use the stored credentials against the target API server, verifying TLS with caData.
 cat >"$SIM/patrol-manager.kubeconfig" <<EOF
@@ -134,14 +136,34 @@ C -n patrol-e2e create secret generic git-server-http-auth --from-file=username=
 C -n patrol-e2e create secret generic chart-repo-auth --from-file=username="$SIM/u" --from-file=password="$SIM/p" >/dev/null
 C -n patrol-e2e create secret generic git-server-ssh-client --from-file=sshPrivateKey="$SIM/id" --from-file=known_hosts="$ROOT/test/e2e/fixtures/git-server/known_hosts" >/dev/null
 expect fail "register.sh with invalid namespace" -- "$ROOT/test/e2e/fixtures/patrol/register.sh" --namespace Bad_NS
+# The known-hosts ConfigMap already exists with an unrelated entry (no trailing newline) and no
+# label: register.sh must keep the entry, add the fixture lines and label the ConfigMap.
+printf 'other.example ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIOTHERHOSTKEY' >"$SIM/other_host"
+C -n patrol-system create configmap patrol-ssh-known-hosts-cm --from-file=ssh_known_hosts="$SIM/other_host" >/dev/null
+# A ConfigMap that has data but not the key must not turn into a "<no value>" line.
+C create namespace patrol-nokey >/dev/null
+C -n patrol-nokey create configmap patrol-ssh-known-hosts-cm --from-literal=unrelated=x >/dev/null
+expect ok "register.sh --namespace patrol-nokey (ConfigMap without the key)" -- "$ROOT/test/e2e/fixtures/patrol/register.sh" --namespace patrol-nokey
+C -n patrol-nokey get configmap patrol-ssh-known-hosts-cm -o go-template='{{index .data "ssh_known_hosts"}}' >"$SIM/known_hosts_nokey"
+grep -v '^#' "$ROOT/test/e2e/fixtures/git-server/known_hosts" | grep . >"$SIM/known_hosts_fixture"
+expect ok "a ConfigMap without the key gets exactly the fixture lines" -- cmp "$SIM/known_hosts_nokey" "$SIM/known_hosts_fixture"
 expect ok "register.sh --namespace patrol-system --with-applications" -- "$ROOT/test/e2e/fixtures/patrol/register.sh" --namespace patrol-system --with-applications
 expect ok "register.sh again (idempotent)" -- "$ROOT/test/e2e/fixtures/patrol/register.sh" --namespace patrol-system --with-applications
+C -n patrol-system get configmap patrol-ssh-known-hosts-cm -o go-template='{{index .data "ssh_known_hosts"}}' >"$SIM/known_hosts"
+expect ok "known hosts keep the entry that was there" -- grep -xF "$(cat "$SIM/other_host")" "$SIM/known_hosts"
+grep -vxF "$(cat "$SIM/other_host")" "$SIM/known_hosts" >"$SIM/known_hosts_added"
+expect ok "known hosts gained exactly the fixture lines (4 names, once each)" -- cmp "$SIM/known_hosts_added" "$SIM/known_hosts_fixture"
+expect ok "known hosts ConfigMap is labeled part-of=patrol-cd" -- test "$(C -n patrol-system get configmap patrol-ssh-known-hosts-cm -o go-template='{{index .metadata.labels "app.kubernetes.io/part-of"}}')" = patrol-cd
 expect ok "objects present" -- C -n patrol-system get repositories.cd.patrol.example,repositorycredentials.cd.patrol.example,applications.cd.patrol.example -o name
 C -n patrol-system get repositories.cd.patrol.example,repositorycredentials.cd.patrol.example,applications.cd.patrol.example,clusters.cd.patrol.example -o name | sed 's/^/      /'
 C -n patrol-system get secret e2e-git-http-creds -o go-template='{{index .data "password" | base64decode}}' >"$SIM/p2"
 expect ok "e2e-git-http-creds password copied byte-for-byte" -- cmp "$SIM/p" "$SIM/p2"
 C -n patrol-system get secret e2e-git-ssh-creds -o go-template='{{index .data "sshPrivateKey" | base64decode}}' >"$SIM/id2"
 expect ok "e2e-git-ssh-creds sshPrivateKey copied byte-for-byte" -- cmp "$SIM/id" "$SIM/id2"
+for want in e2e-git-http-creds:repo-creds e2e-git-ssh-creds:repo-creds e2e-chart-repo-creds:repository; do
+	C -n patrol-system get secret "${want%%:*}" -o go-template='{{index .metadata.labels "cd.patrol.example/secret-type"}}' >"$SIM/label"
+	expect ok "Secret ${want%%:*} is labeled secret-type=${want##*:}" -- grep -x "${want##*:}" "$SIM/label"
+done
 
 echo "== env.sh"
 expect ok "env.sh output evaluates" -- bash -c "eval \"\$('$ROOT/hack/kind/env.sh' 2>/dev/null)\" && test \"\$PATROL_TARGET_INTERNAL_SERVER\" = https://patrol-target-control-plane:6443 && echo \"\$PATROL_CONTROL_KUBECONFIG\""

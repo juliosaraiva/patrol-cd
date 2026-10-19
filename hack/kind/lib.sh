@@ -7,6 +7,8 @@
 #   - kubectl is only ever run with an explicit --kubeconfig (a file under .cache/kind) and an
 #     explicit --context, and the context must match kind-patrol-* and point at a local kind API
 #     endpoint (127.0.0.1/localhost or a patrol-*-control-plane container on the kind network);
+#   - helm goes through patrol::helm, which pins the same kubeconfig and context and drops the
+#     HELM_KUBE* environment overrides;
 #   - kind is always given --kubeconfig, so ~/.kube/config is never read or modified.
 #
 # Compatible with bash 3.2 (macOS /bin/bash).
@@ -111,6 +113,39 @@ patrol::kubectl() {
 	kubectl --kubeconfig "$kc" --context "kind-$cluster" "$@"
 }
 
+# patrol::helm CLUSTER ARGS...: helm pinned to the cluster's kubeconfig file and context. The
+# environment variables with which helm would be pointed at another API server, identity or
+# release store are removed, so the guard above covers what helm really talks to.
+patrol::helm() {
+	local cluster=$1 kc
+	shift
+	patrol::guard_cluster "$cluster"
+	kc=$(patrol::kubeconfig "$cluster")
+	patrol::guard_kubeconfig "$kc" "kind-$cluster"
+	env -u HELM_KUBEAPISERVER -u HELM_KUBETOKEN -u HELM_KUBECAFILE -u HELM_KUBEINSECURE_SKIP_TLS_VERIFY \
+		-u HELM_KUBEASUSER -u HELM_KUBEASGROUPS -u HELM_KUBETLS_SERVER_NAME -u HELM_KUBECONTEXT \
+		-u HELM_NAMESPACE -u HELM_DRIVER \
+		helm --kubeconfig "$kc" --kube-context "kind-$cluster" "$@"
+}
+
+# patrol::wait_fixture_host_key NAMESPACE [SECONDS]: waits until the repo-server pod in NAMESPACE
+# sees the fixture git server's host key in its mounted known-hosts file. The kubelet refreshes a
+# mounted ConfigMap with a delay of up to about two minutes, and until then the repo-server
+# refuses the SSH fixture repository (the sync API answers 412).
+patrol::wait_fixture_host_key() {
+	local ns=$1 end=$((SECONDS + ${2:-180})) pod
+	while ((SECONDS < end)); do
+		pod=$(patrol::kubectl "$PATROL_CONTROL_CLUSTER" -n "$ns" get pod -l app.kubernetes.io/name=patrol-repo-server \
+			-o jsonpath='{.items[0].metadata.name}' 2>/dev/null) || pod=""
+		if [[ -n $pod ]] && patrol::kubectl "$PATROL_CONTROL_CLUSTER" -n "$ns" exec "$pod" -- \
+			grep git-server /app/config/ssh/ssh_known_hosts >/dev/null 2>&1; then
+			return 0
+		fi
+		sleep 3
+	done
+	return 1
+}
+
 # patrol::wait_established CLUSTER CRD...: waits up to 60s for each CRD to be Established.
 # (`kubectl wait` fails at once, instead of waiting, while a new CRD has no status conditions.)
 patrol::wait_established() {
@@ -139,7 +174,10 @@ patrol::kind_clusters() {
 
 patrol::cluster_exists() {
 	patrol::guard_cluster "$1"
-	patrol::kind_clusters | grep -qx -- "$1"
+	# Not `| grep -q`: grep -q exits at the first match, the producer then gets SIGPIPE and
+	# pipefail turns a successful match into a failure (intermittently). Reading the whole
+	# stream keeps the pipeline status that of grep.
+	patrol::kind_clusters | grep -x -- "$1" >/dev/null
 }
 
 # patrol::registry_state: "true"/"false" (running) or empty when the container does not exist.

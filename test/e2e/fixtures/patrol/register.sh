@@ -4,12 +4,16 @@
 #
 # Usage: test/e2e/fixtures/patrol/register.sh --namespace NS [--with-applications]
 #
-#   1. Secrets in NS, copied from the fixture Secrets in patrol-e2e (values are never printed):
+#   1. Secrets in NS, copied from the fixture Secrets in patrol-e2e (values are never printed) and
+#      labeled cd.patrol.example/secret-type=repo-creds (RepositoryCredential) or repository:
 #        e2e-git-http-creds    username, password   <- git-server-http-auth
 #        e2e-git-ssh-creds     sshPrivateKey        <- git-server-ssh-client
 #        e2e-chart-repo-creds  username, password   <- chart-repo-auth
-#   2. repositories.yaml (Repository / RepositoryCredential objects) into NS;
-#   3. with --with-applications, applications.yaml (one Application per fixture source type,
+#   2. the lines of git-server/known_hosts (the git server's TEST-ONLY SSH host key) appended to
+#      the ssh_known_hosts key of ConfigMap patrol-ssh-known-hosts-cm when missing, so the
+#      repo-server's strict host key checking accepts the fixture git server over SSH;
+#   3. repositories.yaml (Repository / RepositoryCredential objects) into NS;
+#   4. with --with-applications, applications.yaml (one Application per fixture source type,
 #      destination name patrol-target; register it first with hack/kind/register-target.sh).
 #
 # NS is the namespace Patrol CD runs in. Requires the Patrol CRDs in patrol-control and
@@ -62,14 +66,16 @@ copy_key() {
 	[[ -s $tmp/$2 ]] || patrol::die "key $2 of Secret patrol-e2e/$1 is empty"
 }
 
-# put_secret NAME KEY...: creates or updates Secret NAME in NS from $tmp/KEY files.
+# put_secret NAME TYPE KEY...: creates or updates Secret NAME in NS from $tmp/KEY files, labeled
+# cd.patrol.example/secret-type=TYPE as Patrol CD requires of Secrets that its kinds reference
+# (repo-creds: RepositoryCredential, repository: Repository, cluster: Cluster).
 put_secret() {
-	local name=$1 key
-	shift
+	local name=$1 type=$2 key
+	shift 2
 	local from=()
 	for key in "$@"; do from+=("--from-file=$key=$tmp/$key"); done
 	k -n "$ns" create secret generic "$name" "${from[@]}" --dry-run=client -o yaml |
-		k label --local -f - app.kubernetes.io/part-of=patrol-e2e-fixtures -o yaml |
+		k label --local -f - app.kubernetes.io/part-of=patrol-e2e-fixtures "cd.patrol.example/secret-type=$type" -o yaml |
 		apply -f - >/dev/null
 	rm -f "$tmp"/*
 	patrol::log "wrote Secret $ns/$name"
@@ -79,12 +85,39 @@ k create namespace "$ns" --dry-run=client -o yaml | k apply --server-side --fiel
 
 copy_key git-server-http-auth username
 copy_key git-server-http-auth password
-put_secret e2e-git-http-creds username password
+put_secret e2e-git-http-creds repo-creds username password
 copy_key git-server-ssh-client sshPrivateKey
-put_secret e2e-git-ssh-creds sshPrivateKey
+put_secret e2e-git-ssh-creds repo-creds sshPrivateKey
 copy_key chart-repo-auth username
 copy_key chart-repo-auth password
-put_secret e2e-chart-repo-creds username password
+put_secret e2e-chart-repo-creds repository username password
+
+# The repo-server checks SSH host keys strictly. The ssh_known_hosts key holds one entry per line;
+# the fixture's lines are appended when missing, keeping every other entry (idempotent). The key is
+# owned by the bootstrap or the API, so the apply forces the conflict.
+known_hosts_cm=patrol-ssh-known-hosts-cm
+# A missing ConfigMap or key reads as empty; any other failure (API error, timeout) stops the
+# script rather than being mistaken for "no known hosts" and force-applied over the real list.
+current=$(k -n "$ns" get configmap "$known_hosts_cm" --ignore-not-found \
+	-o go-template='{{with .data}}{{with index . "ssh_known_hosts"}}{{.}}{{end}}{{end}}')
+combined=$current
+added=0
+while IFS= read -r line; do
+	[[ -z $line || $line == \#* ]] && continue
+	if ! grep -qxF -- "$line" <<<"$current"; then
+		[[ -z $combined || $combined == *$'\n' ]] || combined+=$'\n'
+		combined+="$line"$'\n'
+		added=1
+	fi
+done <"$here/../git-server/known_hosts"
+if [[ $added -eq 1 ]]; then
+	printf '%s' "$combined" >"$tmp/ssh_known_hosts"
+	k -n "$ns" create configmap "$known_hosts_cm" --from-file=ssh_known_hosts="$tmp/ssh_known_hosts" --dry-run=client -o yaml |
+		k label --local -f - app.kubernetes.io/part-of=patrol-cd -o yaml |
+		apply --force-conflicts -f - >/dev/null
+	rm -f "$tmp/ssh_known_hosts"
+	patrol::log "added the fixture git server's host key to ConfigMap $ns/$known_hosts_cm"
+fi
 
 apply -f "$here/repositories.yaml"
 if [[ $with_apps -eq 1 ]]; then
