@@ -17,7 +17,7 @@ CRD_DIR := deploy/crds
 API_PATHS := ./api/...
 BOILERPLATE := hack/boilerplate.go.txt
 # Generated files compared by verify-generated.
-GENERATED := api/v1alpha1/zz_generated.deepcopy.go $(CRD_DIR)
+GENERATED := api/v1alpha1/zz_generated.deepcopy.go $(CRD_DIR) deploy/manifests
 
 GO ?= go
 GO_TEST_FLAGS ?= -race -count=1
@@ -55,9 +55,10 @@ envtest: $(SETUP_ENVTEST) ## Print the envtest assets directory (KUBEBUILDER_ASS
 ##@ Generation
 
 .PHONY: generate
-generate: $(CONTROLLER_GEN) ## Generate deepcopy code and CRD manifests (RBAC generation will be added here).
+generate: $(CONTROLLER_GEN) ## Generate deepcopy code, CRDs, the chart's generated files and the static install manifests.
 	$(CONTROLLER_GEN) object:headerFile="$(BOILERPLATE)" paths="$(API_PATHS)"
 	$(MAKE) --no-print-directory manifests
+	$(MAKE) --no-print-directory helm-docs manifests-install
 
 # The ApplicationSet CRD embeds the Application spec in every generator template. With field
 # descriptions it is about 1 MB as JSON, uncomfortably close to etcd's 1.5 MiB object limit, so, as
@@ -118,3 +119,5 @@ build: ## Build all packages; binaries under cmd/ are written to ./bin.
 	@if [ -d cmd ]; then $(GO) build -o $(LOCALBIN)/ ./cmd/...; fi
 
 include hack/build.mk
+include hack/image.mk
+include hack/deploy.mk

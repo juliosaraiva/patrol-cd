@@ -5,6 +5,7 @@
 UI_DIR ?= ui
 UI_EMBED_DIR := internal/ui/dist
 VERSION_PKG := github.com/juliosaraiva/patrol-cd/internal/server
+CLI_VERSION_PKG := github.com/juliosaraiva/patrol-cd/internal/cli/cmdutil
 VERSION ?= $(shell git describe --tags --always --dirty 2>/dev/null || echo devel)
 GIT_COMMIT ?= $(shell git rev-parse HEAD 2>/dev/null)
 GIT_TAG ?= $(shell git describe --exact-match --tags HEAD 2>/dev/null)
@@ -17,7 +18,12 @@ GO_LDFLAGS ?= -s -w \
 	-X $(VERSION_PKG).gitCommit=$(GIT_COMMIT) \
 	-X $(VERSION_PKG).gitTag=$(GIT_TAG) \
 	-X $(VERSION_PKG).gitTreeState=$(GIT_TREE_STATE) \
-	-X $(VERSION_PKG).buildDate=$(BUILD_DATE)
+	-X $(VERSION_PKG).buildDate=$(BUILD_DATE) \
+	-X $(CLI_VERSION_PKG).version=$(VERSION) \
+	-X $(CLI_VERSION_PKG).gitCommit=$(GIT_COMMIT) \
+	-X $(CLI_VERSION_PKG).gitTag=$(GIT_TAG) \
+	-X $(CLI_VERSION_PKG).gitTreeState=$(GIT_TREE_STATE) \
+	-X $(CLI_VERSION_PKG).buildDate=$(BUILD_DATE)
 
 ##@ Binaries
 
