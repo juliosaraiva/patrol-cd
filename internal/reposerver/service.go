@@ -57,6 +57,78 @@ var _ apiclient.Client = (*Service)(nil)
 
 type symlinkResult struct{ err error }
 
+// privateRootName is the subdirectory the service works in when RootDir is a mount root whose
+// mode it cannot change (see prepareRoot).
+const privateRootName = "_patrol-repo"
+
+// rootFS is the part of the file system prepareRoot depends on; tests replace it to stand in for a
+// volume root owned by another user, which a non-root test process cannot create.
+type rootFS struct {
+	chmod func(string, fs.FileMode) error
+	owner func(fs.FileInfo) (uid uint32, known bool)
+	euid  uint32
+}
+
+// prepareRoot creates rootDir and makes it private (0700), returning the directory the service
+// works in. rootDir is normally a path the process creates itself ($TMPDIR/_patrol-repo). When it
+// is the root of a volume, Kubernetes has created it owned by root and world-writable (emptyDir is
+// 0777, setgid with an fsGroup), so a non-root process may use it but cannot change its mode. The
+// service then works in a private subdirectory it creates (privateRootName) and leaves the mount
+// root as it is.
+//
+// The fallback is taken only for a root dir owned by root or by this process. A directory owned by
+// any other user is refused, as is a privateRootName entry that is not a real directory owned by
+// this process (a symlink or a directory planted by someone else is never adopted). Anyone who can
+// write the mount root can still rename the private directory, so a work volume must be mounted
+// only into the repo-server container.
+func prepareRoot(rootDir string, fsys rootFS, log *slog.Logger) (string, error) {
+	if err := os.MkdirAll(rootDir, 0o700); err != nil {
+		return "", fmt.Errorf("reposerver: create root dir: %w", err)
+	}
+	err := fsys.chmod(rootDir, 0o700)
+	if err == nil {
+		return rootDir, nil
+	}
+	if !errors.Is(err, fs.ErrPermission) {
+		return "", fmt.Errorf("reposerver: root dir permissions: %w", err)
+	}
+	fi, statErr := os.Stat(rootDir)
+	if statErr != nil {
+		return "", fmt.Errorf("reposerver: root dir permissions: %w", err)
+	}
+	uid, known := fsys.owner(fi)
+	if !known || (uid != 0 && uid != fsys.euid) {
+		return "", fmt.Errorf("reposerver: root dir %s is owned by another user and its mode cannot be changed; use a directory owned by this process: %w", rootDir, err)
+	}
+	sub := filepath.Join(rootDir, privateRootName)
+	if err := mkdirPrivate(sub, fsys); err != nil {
+		return "", fmt.Errorf("reposerver: private work dir in %s: %w", rootDir, err)
+	}
+	log.Info("cannot change the mode of the root dir; working in a private subdirectory",
+		slog.String("rootDir", rootDir), slog.String("workDir", sub))
+	return sub, nil
+}
+
+// mkdirPrivate makes dir a real directory owned by this process with mode 0700. An existing entry
+// is accepted only if it already is one (the previous process of a restarted container leaves it
+// locked, 0300); a symlink or a directory of another owner is refused.
+func mkdirPrivate(dir string, fsys rootFS) error {
+	if err := os.Mkdir(dir, 0o700); err != nil && !errors.Is(err, fs.ErrExist) {
+		return err
+	}
+	fi, err := os.Lstat(dir)
+	if err != nil {
+		return err
+	}
+	if !fi.IsDir() {
+		return fmt.Errorf("%s exists and is not a directory (%s)", dir, fi.Mode().Type())
+	}
+	if uid, known := fsys.owner(fi); !known || uid != fsys.euid {
+		return fmt.Errorf("%s exists and is not owned by this process", dir)
+	}
+	return fsys.chmod(dir, 0o700)
+}
+
 // New prepares the working directory root and returns a Service. Directories left by a
 // previous process under the root are removed (caches are disposable).
 func New(cfg Config) (*Service, error) {
@@ -65,13 +137,15 @@ func New(cfg Config) (*Service, error) {
 		return nil, err
 	}
 	log := cfg.Logger.With(slog.String("component", "reposerver"))
-	if err := os.MkdirAll(cfg.RootDir, 0o700); err != nil {
-		return nil, fmt.Errorf("reposerver: create root dir: %w", err)
+	fsys := defaultRootFS()
+	if cfg.rootFS != nil {
+		fsys = *cfg.rootFS
 	}
-	if err := os.Chmod(cfg.RootDir, 0o700); err != nil {
-		return nil, fmt.Errorf("reposerver: root dir permissions: %w", err)
+	workDir, err := prepareRoot(cfg.RootDir, fsys, log)
+	if err != nil {
+		return nil, err
 	}
-	root, err := filepath.EvalSymlinks(cfg.RootDir)
+	root, err := filepath.EvalSymlinks(workDir)
 	if err != nil {
 		return nil, fmt.Errorf("reposerver: resolve root dir: %w", err)
 	}
