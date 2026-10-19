@@ -1,0 +1,96 @@
+# Static install manifests (deploy/manifests, hack/genmanifests, hack/deploy.mk targets
+# manifests-install and verify-manifests). Guide: docs/guides/manifests.md; commands and results:
+# docs/verification/runs/2026-10-17-manifests-static.md.
+# Evidence level: generated from the chart and compared object by object with the chart renders
+# (two independent parsers), deterministic, kustomize-built, applied to a local kube-apiserver
+# 1.36 from the envtest binaries (client and server dry runs with strict field validation, Pod
+# Security "restricted" warnings, real server-side apply, idempotent re-apply, variant switches).
+# That API server has no scheduler, kubelet or controllers: no pod ran, so the bundles stay
+# in-progress until the deployment validation harness and kind exercise them (image build and
+# kind blocked, TASKS.md).
+
+OPS-001:
+  status: in-progress
+  impl: [deploy/manifests/install.yaml, deploy/manifests/cluster-install, deploy/manifests/profiles/install.yaml, hack/genmanifests]
+  tests: [hack/genmanifests/main_test.go:TestManifestsAreCurrent]
+  evidence: docs/verification/runs/2026-10-17-manifests-static.md
+  notes: >-
+    install.yaml = kustomize build deploy/manifests/cluster-install = the chart defaults rendered
+    for release/namespace patrol without Helm metadata, plus the namespace patrol (Pod Security
+    restricted labels): 61 objects (namespace, 8 CRDs, admission policy and binding, 7
+    ConfigMaps, 2 empty Secrets, 5 ServiceAccounts, 5 Roles/RoleBindings, 2
+    ClusterRoles/ClusterRoleBindings, 7 Services, 4 Deployments, the controller StatefulSet, 5
+    NetworkPolicies, 5 PDBs). Objects carry namespace patrol (a wrong -n fails) and the
+    ClusterRoleBindings bind patrol ServiceAccounts; a kustomize namespace overlay renames the
+    namespace and rewrites the subjects (checked against the API server). Server-side applied to
+    a kube-apiserver and re-applied without changes; not run with pods.
+
+OPS-002:
+  status: in-progress
+  impl: [deploy/manifests/namespace-install.yaml, deploy/manifests/namespace-install, deploy/manifests/profiles/namespace-install.yaml]
+  tests: [hack/genmanifests/main_test.go:TestManifestsAreCurrent, hack/genmanifests/main_test.go:TestCheckScope]
+  evidence: docs/verification/runs/2026-10-17-manifests-static.md
+  notes: >-
+    rbac.scope=namespaced without CRDs and admission policy: 50 objects, no namespace, CRD,
+    admission policy, ClusterRole or ClusterRoleBinding (the generator refuses any cluster-scoped
+    object or object outside namespace patrol in namespace-scoped variants). Server dry run
+    against a kube-apiserver with crds.yaml installed passed; not run with pods. Applications
+    on the local cluster need a Cluster object for https://kubernetes.default.svc listing the
+    namespace (the synthetic in-cluster cluster has no namespace list, so the live-state cache
+    would list cluster-wide); documented in docs/guides/manifests.md. Only the chart's
+    equivalent profile with that object runs in the deployment harness
+    (TestRBACSufficiency/namespaced), not this file.
+
+OPS-003:
+  status: in-progress
+  impl: [deploy/manifests/core-install.yaml, deploy/manifests/core-install, deploy/manifests/profiles/core-install.yaml]
+  tests: [hack/genmanifests/main_test.go:TestManifestsAreCurrent]
+  evidence: docs/verification/runs/2026-10-17-manifests-static.md
+  notes: >-
+    No patrol-server, Dex or notifications controller (as upstream core-install; the chart's
+    ci/core.yaml keeps notifications): controller (only ClusterRole), repo-server, ApplicationSet
+    controller, the settings ConfigMaps without patrol-notifications-cm/-secret, CRDs, admission
+    policy, namespace; no patrol-server Service (no public API or UI port; the remaining Services
+    are the controller tree API and metrics, the repo-server and the ApplicationSet controller's
+    metrics). The bootstrap init container runs on the controller. Server dry run passed; not run
+    with pods.
+
+OPS-004:
+  status: in-progress
+  impl: [deploy/manifests/ha, deploy/manifests/profiles/ha.yaml]
+  tests: [hack/genmanifests/main_test.go:TestManifestsAreCurrent]
+  evidence: docs/verification/runs/2026-10-17-manifests-static.md
+  notes: >-
+    ha/install.yaml and ha/namespace-install.yaml: patrol-server and repo-server 2 replicas with
+    required anti-affinity per node (as upstream), controller 2 replicas (2 Lease shards with
+    takeover, ADR-0008; upstream 1), ApplicationSet and notifications controllers 2 (leader
+    election; upstream 1), preferred node anti-affinity and soft zone spread for every
+    component, PDBs. No Redis HA (ADR-0004). Server dry run passed; not scheduled on a
+    multi-node cluster.
+
+OPS-005:
+  status: in-progress
+  impl: [deploy/manifests/profiles/hydrator.yaml, deploy/manifests/install-with-hydrator.yaml, deploy/manifests/namespace-install-with-hydrator.yaml, deploy/manifests/core-install-with-hydrator.yaml, deploy/manifests/ha/install-with-hydrator.yaml, deploy/manifests/ha/namespace-install-with-hydrator.yaml]
+  tests: [hack/genmanifests/main_test.go:TestManifestsAreCurrent, hack/genmanifests/main_test.go:TestVariantsAreConsistent]
+  evidence: docs/verification/runs/2026-10-17-manifests-static.md
+  notes: >-
+    All five *-with-hydrator files exist and contain the commit-server (Deployment, Service,
+    ServiceAccount, NetworkPolicy, PDB) and hydrator.enabled "true" plus commit.server in
+    patrol-cmd-params-cm, the HA ones included (upstream's HA quirk, commit-server without
+    hydrator.enabled, is not reproduced; documented). Switching back to a plain file removes the
+    two keys but does not delete the commit-server objects (kubectl does not prune; cleanup
+    command documented and executed against the API server). Not run with pods.
+
+OPS-006:
+  status: implemented
+  impl: [deploy/manifests/crds.yaml, deploy/manifests/crds]
+  tests: [hack/genmanifests/main_test.go:TestManifestsAreCurrent]
+  evidence: docs/verification/runs/2026-10-17-manifests-static.md
+  notes: >-
+    crds.yaml (and the crds/ base) hold the 8 CRDs, the Operation ValidatingAdmissionPolicy and
+    its binding with the chart's labels and without helm.sh/resource-policy. Against a
+    kube-apiserver 1.36: client-side apply fails with 'The CustomResourceDefinition
+    "applicationsets.cd.patrol.example" is invalid: metadata.annotations: Too long: may not be
+    more than 262144 bytes'; kubectl apply --server-side --force-conflicts creates all ten
+    objects and every CRD becomes Established. Every file header and the guide use server-side
+    apply. Self-management with ServerSideApply=true is not exercised here.

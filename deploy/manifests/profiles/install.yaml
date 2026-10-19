@@ -1,0 +1,8 @@
+# Value file of the static manifests (hack/genmanifests, guide: docs/guides/manifests.md).
+#
+# Cluster-wide installation: the chart defaults. API server and web UI, controller with
+# cluster-admin-equivalent rights on the local cluster (rbac.controller.clusterAdmin), the
+# server's ClusterRole for live views of the local cluster, CRDs and the Operation admission
+# policy, NetworkPolicies, PDBs. Used by install*.yaml, core-install*.yaml (with
+# core-install.yaml) and ha/install*.yaml (with ha.yaml).
+{}

@@ -1,0 +1,14 @@
+# Value file of the static manifests (hack/genmanifests, guide: docs/guides/manifests.md).
+#
+# Namespace-scoped installation (upstream namespace-install.yaml semantics): no CRDs, no
+# admission policy, no ClusterRole or ClusterRoleBinding. The controller and patrol-server get
+# Roles in the installation namespace only. Applications can deploy to the local cluster only
+# after it is registered with a Cluster object (server https://kubernetes.default.svc,
+# namespaces: [patrol]; docs/guides/manifests.md), and then only into that namespace; other
+# clusters are reached with the credentials of their Cluster objects. The CRDs and the
+# admission policy are installed separately (crds.yaml, cluster administrator).
+crds:
+  install: false
+  admissionPolicy: false
+rbac:
+  scope: namespaced

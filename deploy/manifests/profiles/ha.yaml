@@ -1,0 +1,46 @@
+# Value file of the static manifests (hack/genmanifests, guide: docs/guides/manifests.md).
+#
+# High availability, layered over install.yaml or namespace-install.yaml (ha/*.yaml manifests).
+# Needs at least three schedulable nodes: patrol-server and the repo-server run two replicas with
+# required anti-affinity per node (as upstream) and a rolling update surges a third pod; the other
+# components prefer distinct nodes. Every replicated component also prefers distinct zones.
+#
+# - patrol-server, repo-server: 2 replicas each (stateless; no shared cache, ADR-0004).
+# - controller: 2 replicas = 2 shards coordinated by Leases; a replica takes over the shard of a
+#   failed one after the Lease expires (ADR-0008). Upstream keeps a single controller.
+# - ApplicationSet and notifications controllers, commit-server: 2 replicas (leader election
+#   keeps one active controller; the commit-server is stateless and retries concurrent pushes).
+# - PDBs (maxUnavailable: 1) and the soft zone spread come from the chart.
+#
+# The selector labels below are the chart's for release "patrol" (app.kubernetes.io/instance).
+global:
+  podAntiAffinity: soft
+  topologySpread: soft
+server:
+  replicas: 2
+  affinity:
+    podAntiAffinity:
+      requiredDuringSchedulingIgnoredDuringExecution:
+        - topologyKey: kubernetes.io/hostname
+          labelSelector:
+            matchLabels:
+              app.kubernetes.io/name: patrol-server
+              app.kubernetes.io/instance: patrol
+repoServer:
+  replicas: 2
+  affinity:
+    podAntiAffinity:
+      requiredDuringSchedulingIgnoredDuringExecution:
+        - topologyKey: kubernetes.io/hostname
+          labelSelector:
+            matchLabels:
+              app.kubernetes.io/name: patrol-repo-server
+              app.kubernetes.io/instance: patrol
+controller:
+  replicas: 2
+appsetController:
+  replicas: 2
+notificationsController:
+  replicas: 2
+commitServer:
+  replicas: 2

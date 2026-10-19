@@ -1,0 +1,13 @@
+# Value file of the static manifests (hack/genmanifests, guide: docs/guides/manifests.md).
+#
+# Core (headless) installation, layered over install.yaml (core-install*.yaml manifests):
+# controller, repo-server and ApplicationSet controller with the CRDs and the controller's
+# ClusterRole; no patrol-server (API, UI, webhooks), no Dex and no notifications controller,
+# like upstream core-install.yaml. The bootstrap init container runs on the controller. Manage
+# Applications with kubectl or `patrol --core`.
+server:
+  enabled: false
+dex:
+  enabled: false
+notificationsController:
+  enabled: false

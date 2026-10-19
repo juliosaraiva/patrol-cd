@@ -1,0 +1,8 @@
+# Value file of the static manifests (hack/genmanifests, guide: docs/guides/manifests.md).
+#
+# Source hydrator, layered over another profile (*-with-hydrator manifests): sets
+# hydrator.enabled and commit.server in patrol-cmd-params-cm and deploys the commit-server
+# (no Kubernetes token; write credentials arrive with each request). Unlike upstream's HA
+# hydrator bundles, the HA variants enable the hydrator too.
+hydrator:
+  enabled: true
