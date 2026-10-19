@@ -5,6 +5,10 @@ Date: 2026-10-16 (UTC 15:19–15:43; review follow-up 15:57–16:06). Workstream
 
 ## Result
 
+**Update 2026-10-19:** the disk was freed (build cache and dangling images pruned, 152 GB free
+in the VM, `docs/verification/runs/2026-10-19-image-build.md`). The live kind validation has not
+been re-run since; it is a separate step. The text below is the 2026-10-16 record.
+
 **The live kind validation is blocked.** The Docker Desktop VM's disk is full, so Docker cannot
 create any container or build any image (`no space left on device`). No kind cluster, registry
 container or fixture image could be created. Freeing that space means deleting images, build

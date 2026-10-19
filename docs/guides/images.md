@@ -4,10 +4,10 @@ Patrol CD ships one multi-call image for every control-plane component, the CLI 
 the repo-server runs (ADR-0007). It is built from the repository's `Dockerfile`; the pins and
 helper scripts live in `hack/images/`, the make targets in `hack/image.mk`.
 
-Status: the Dockerfile and its tooling are verified piece by piece without a container runtime
-(see [Verification](#verification)). **`docker build` has not been executed yet**: Docker
-Desktop's disk is full on the development machine (TASKS.md blocker). Treat the first real build
-as part of the kind validation.
+Status: built and checked locally for `linux/arm64` on 2026-10-19 (`make image`, then
+`make image-layout-check image-smoke`; see [Verification](#verification)). Not yet done:
+`linux/amd64` and multi-arch builds, the SBOM, vulnerability and license scans, a push, and a run
+on a cluster (kind validation).
 
 ## Contents
 
@@ -284,6 +284,8 @@ sidecar must run as uid 999 so the repo-server can use the socket (`0600`).
 make image-verify-pins        # online: re-download + SHA-256, publisher sums, registry digests, Alpine index
 hack/images/verify-pins.sh --offline
 make image-rootfs-check       # assemble the runtime filesystem without Docker and compare (both arches)
+make image-layout-check       # compare the built image's filesystem with rootfs-expected.txt (needs a daemon)
+make image-smoke              # run the built image under the chart's restricted settings and probe it
 ```
 
 To bump a tool: change version, URL and SHA-256 of each of its lines in
@@ -333,15 +335,18 @@ image (`dexidp/dex`) too when SSO through the bundled Dex is used, and any CMP p
 
 ## Known limits
 
-- `docker build`, `docker buildx build --check`, `make image-multiarch` and `make image-sbom` have
-  not run on the development machine (Docker Desktop disk full); see the verification record.
-- connect-proxy has been compiled with clang against Alpine's musl headers and its undefined
-  symbols resolved against musl's `libc.a`, but the `gcc -static` command of the `connect` stage
-  (the one recorded in `BUILD`) has not been executed.
-- GnuPG, SSH and git behavior inside the image (Alpine/musl builds, read-only root filesystem)
-  is not exercised until the kind e2e run. The repo-server imports keys with `gpg --no-autostart`
-  into a fresh home; with GnuPG 2.5 on macOS that creates a keybox file and needs no agent or
-  keyboxd, but the image's GnuPG 2.4.9 has not been run that way yet.
+- `make image` and `make image-check` have run (arm64 only). `make image-multiarch` (amd64 and
+  arm64) and `make image-sbom` have not; the amd64 half of the pins and of
+  `make image-rootfs-check` is checked statically only.
+- connect-proxy is built by the Dockerfile's `gcc -static` command (the one recorded in `BUILD`)
+  and runs in the image (`Version 1.106`, asserted by `make image-smoke`). No SSH connection
+  through a SOCKS5 proxy has been made with it.
+- GnuPG, SSH and git were exercised in the arm64 image on a read-only root filesystem: the
+  repo-server's key import (`gpg --batch --no-autostart --import` into a fresh home) works with
+  the image's GnuPG 2.4.9, which ships without `gpg-agent` (import and verification only, no key
+  generation or signing); `ssh -V` and the system gitconfig hardening were checked. Cloning,
+  signature verification of a real signed commit, and SSH to a host are not exercised until the
+  kind e2e run.
 - The prebuilt Kustomize 5.8.1 and git-lfs 3.7.1 release binaries were built with Go 1.24.0 and
   1.25.3; scanners may report Go standard library CVEs for them. Rebuilding them from source would
   diverge from the baseline's binaries.
@@ -352,3 +357,15 @@ image (`dexidp/dex`) too when SSO through the bundled Dex is used, and any CMP p
 
 Static verification on 2026-10-18 (macOS arm64, no container runtime), with commands and
 results: [`docs/verification/runs/2026-10-17-image-static.md`](../verification/runs/2026-10-17-image-static.md).
+
+Build and checks of the built image on 2026-10-19 (`linux/arm64`, 386 MB, 11 layers; commands and
+results: [`docs/verification/runs/2026-10-19-image-build.md`](../verification/runs/2026-10-19-image-build.md)):
+
+- `make image-check` (BuildKit's Dockerfile checks): no warnings; `make image`: built in 89 s.
+- `make image-layout-check` (`hack/imagelayout`): the 52 expectations of `rootfs-expected.txt`
+  hold in the real image (users, modes, mount points, links, files that must be absent).
+- `make image-smoke` (`hack/images/smoke.sh`): 25 checks under `--read-only --cap-drop ALL
+  --security-opt no-new-privileges --user 999:999`: identity, version stamps of `patrolcd` and
+  `patrol`, the pinned versions of helm, kustomize and git-lfs, `connect-proxy`, all 11 component
+  aliases, and a repo-server that is ready in seconds, has `tini` as PID 1 and exits 0 on SIGTERM.
+- Not done: amd64, multi-arch, SBOM, scans, push, a run in a cluster.

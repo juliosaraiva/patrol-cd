@@ -8,6 +8,7 @@
 #   make image-multiarch                         # linux/amd64+linux/arm64 OCI archive in dist/image
 #   make image-multiarch PUSH=1 REGISTRY=registry.example.com/team TAG=v0.1.0
 #   make image-verify-pins image-rootfs-check     # no container runtime needed
+#   make image-layout-check image-smoke           # check a built IMAGE:TAG (needs a daemon)
 
 DOCKER ?= docker
 # Repository (without registry) and tag of the built image.
@@ -96,6 +97,18 @@ image-multiarch: ## Build PLATFORMS (amd64+arm64) to an OCI archive in dist/imag
 .PHONY: image-check
 image-check: ## Run BuildKit's Dockerfile checks (docker buildx build --check; needs a daemon).
 	$(DOCKER) buildx build --check --file Dockerfile $(IMAGE_BUILD_FLAGS) .
+
+# What the Dockerfile produced, against the layout hack/images/rootfs-expected.txt promises (the
+# same file image-rootfs-check applies to a filesystem assembled without Docker).
+.PHONY: image-layout-check
+image-layout-check: ## Check the built IMAGE:TAG filesystem against hack/images/rootfs-expected.txt (needs a daemon).
+	$(GO) run ./hack/imagelayout $(IMAGE):$(TAG)
+
+# Starts the repo-server from the built image with the chart's restricted runtime settings and
+# checks /readyz, /healthz, PID 1, SIGTERM handling and the version stamps.
+.PHONY: image-smoke
+image-smoke: ## Run the built IMAGE:TAG under the chart's restricted settings and probe it (needs a daemon).
+	DOCKER=$(DOCKER) hack/images/smoke.sh $(IMAGE):$(TAG)
 
 .PHONY: image-verify-pins
 image-verify-pins: ## Re-download and verify every image pin (tools, base digests, Alpine packages).

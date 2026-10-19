@@ -464,8 +464,8 @@ DV-6 change; `test/deploy` was not run for it):
 - `TestHelmLifecycle` runs `patrolcd bootstrap` with the admin kubeconfig after the install
   and after uninstall + re-install.
 
-Not verified: a run by a kubelet (no image was built and no kind cluster started: Docker
-disk full), hence the kubelet's late population of the optional token volume and the
+Not verified: a run by a kubelet (the image builds and its repo-server runs in `docker run`, but
+no kind cluster was started), hence the kubelet's late population of the optional token volume and the
 runtime effect of `readOnlyRootFilesystem` and non-root settings; the stale-Secret
 replacement with the chart's Role during a real re-install; the HA clock-skew case (reasoned
 above, not tested).

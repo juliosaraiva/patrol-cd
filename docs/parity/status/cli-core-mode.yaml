@@ -23,7 +23,7 @@ API-054:
     verification (label or StatefulSet owner, Running and Ready), caching, reselection after a
     failed dial and 403 handling are tested with a fake clientset and a fake Kubernetes API
     speaking the WebSocket protocol. Live verification against kubelet-backed port-forwards on a
-    kind cluster is pending (Docker Desktop disk full, TASKS.md blockers).
+    kind cluster is pending (no kind cluster has been created yet, TASKS.md).
 
 API-055:
   status: implemented

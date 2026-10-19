@@ -1,11 +1,13 @@
 # Container image (Dockerfile, .dockerignore, hack/image.mk, hack/images/). Guide:
-# docs/guides/images.md; commands and results: docs/verification/runs/2026-10-17-image-static.md.
-# Evidence level: static only. `docker build` was NOT EXECUTED (Docker Desktop disk full, see
-# TASKS.md), so nothing here has run inside the image; statuses stay in-progress until an image
-# is built and exercised on kind.
+# docs/guides/images.md; commands and results: docs/verification/runs/2026-10-17-image-static.md
+# (static checks) and docs/verification/runs/2026-10-19-image-build.md (build and checks of the
+# built image).
+# Evidence level: the linux/arm64 image was built on 2026-10-19 and exercised with docker run
+# under the chart's restricted settings (layout check, smoke test). Not run: linux/amd64,
+# multi-arch, SBOM, scans, kind or any cluster, so nothing is `verified`.
 
 OPS-162:
-  status: in-progress
+  status: implemented
   impl:
     - Dockerfile
     - hack/images/checksums.txt
@@ -15,6 +17,9 @@ OPS-162:
   tests:
     - hack/images/verify-pins.sh
     - hack/images/rootfs-check.sh
+    - hack/imagelayout/main_test.go
+    - hack/images/smoke.sh
+  evidence: docs/verification/runs/2026-10-19-image-build.md
   notes: >-
     Single multi-call image on alpine:3.24.2 (index digest pinned), user patrol uid/gid 999,
     entrypoint tini; Helm 4.2.1, Kustomize 5.8.1, git-lfs 3.7.1 (baseline versions) downloaded
@@ -22,18 +27,22 @@ OPS-162:
     the publishers' checksum files; Helm and git-lfs PGP signatures checked once by hand); git,
     openssh-client, gpg, tini, ca-certificates, tzdata from Alpine; connect-proxy compiled from a
     pinned source. Upstream ships Ubuntu 26.04 (glibc); Patrol uses Alpine (musl), see the guide.
-    Missing for implemented: an executed image build and `helm version`/`kustomize version`
-    inside the running repo-server (the OPS-162 test); the static checks confirm the bundled
-    binaries' versions from their Go build information only.
+    Built for linux/arm64 on 2026-10-19 (386 MB); `make image-layout-check` finds all 52 layout
+    expectations in the image and `make image-smoke` asserts helm v4.2.1, kustomize v5.8.1 and
+    git-lfs 3.7.1 (equal to the pins) by running the tools in the image. Missing for verified:
+    the linux/amd64 image, and `helm version`/`kustomize version` and a render inside the running
+    repo-server of a kind cluster (the OPS-162 test).
 
 OPS-145:
-  status: in-progress
+  status: implemented
   impl: [hack/images/aliases.txt, hack/images/link-aliases.sh, Dockerfile]
-  tests: [hack/images/rootfs-check.sh]
+  tests: [hack/images/rootfs-check.sh, hack/images/smoke.sh]
+  evidence: docs/verification/runs/2026-10-19-image-build.md
   notes: >-
     The image links every component name of binaryAliases (internal/server/commands.go) to
-    /usr/local/bin/patrolcd; rootfs-check.sh fails when the lists differ, and each link was run
-    with --help on a host build and dispatched to its subcommand. Not run inside an image.
+    /usr/local/bin/patrolcd; rootfs-check.sh fails when the lists differ, and `make image-smoke`
+    runs all 11 aliases of aliases.txt in the built arm64 image and checks that each prints its
+    own subcommand's help, not the root help. Not run on amd64 or in a pod.
 
 REPO-023:
   status: in-progress
@@ -42,7 +51,7 @@ REPO-023:
   notes: >-
     internal/git writes the `connect-proxy -5 -S host:port` ProxyCommand wrapper (upstream
     behavior); the image provides connect-proxy (ssh-connect 1.106, not packaged by Alpine) as a
-    static musl build of the pinned source. Only checked statically: connect.c compiled with
-    clang against Alpine's musl-dev headers, and the undefined symbols of the object file found
-    in musl's libc.a (nm); no link was executed and the Dockerfile's `gcc -static` command has
-    not run. No SSH-through-SOCKS5 connection has been made.
+    static musl build of the pinned source. The Dockerfile's `gcc -static` stage ran in the
+    2026-10-19 build and the binary runs in the image (`Version 1.106`, asserted by
+    hack/images/smoke.sh). No SSH-through-SOCKS5 connection has been made, so the feature stays
+    in-progress.

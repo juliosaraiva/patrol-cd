@@ -8,7 +8,8 @@ Resume rule: read this file, then `docs/parity/matrix.md`, then `docs/verificati
 
 - **2026-10-18: Phase 4 closeout** (Dockerfile, static manifests, Helm chart, first-run
   bootstrap). Two review rounds fixed; the final full `./test/deploy/` run passed (157 subtests, 281 s,
-  `docs/verification/log.md` V-0027); the signed commits follow. State and open items:
+  `docs/verification/log.md` V-0027); committed and pushed (`3ea2bd3`). **2026-10-19: the Docker
+  disk was freed (V-0028) and the image was built and checked (linux/arm64).** State and open items:
   section "PHASE 4 CLOSEOUT STATE" below. The W1–W6 lines that follow are historical.
 - W1 parity research (`docs/parity/areas/*.md`): 9/10 areas done (1,289 features); ops area + completeness critic re-running (run wf_af0f5fae-226)
 - W2 CRD types: implemented + reviewed; review-fix re-running (run wf_3b816f38-c83)
@@ -60,9 +61,7 @@ Update 2026-10-16 (afternoon):
 
 - (Resolved 2026-10-17) Commit signing / SSH via 1Password: the user unlocked the agent; 17 signed commits created and pushed.
 
-- **[BLOCKED – needs user decision] Docker Desktop VM disk is full (2026-10-16).** Every container operation fails with `no space left on device` (docker run, docker build, kind create, registry start). `docker system df`: images 48.6 GB (21.88 GB reclaimable), build cache 30.0 GB (18.7 GB reclaimable), volumes 21.5 GB (4.0 GB reclaimable), 79 containers (28 running) — almost all belong to other projects; `Docker.raw` is 95 GB. Host disk has >100 GB free, so the limit is Docker Desktop's configured disk image size. Not authorized for me to delete other projects' Docker data or change Docker Desktop settings. No non-Docker hypervisor is installed (no vfkit/qemu/lima/colima/podman), so kind and minikube are both unusable until space exists.
-  - Smallest remedy options: (a) allow `docker builder prune -f` (build cache only; no images, containers or volumes; ~18.7 GB reclaimable; regenerable), (b) allow `docker image prune -a` (unused images; ~21.9 GB; will need re-pull elsewhere), or (c) user raises Docker Desktop → Settings → Resources → Disk image size / frees space.
-  - Affects: T4.1 image build, T4.3 kind env validation (scripts exist and pass static/simulated checks, see docs/verification/runs/kind-environment.md), T5.3 e2e, T5.6–T5.8 (restart/HA/backup/benchmarks on kind). Everything else proceeds without Docker (envtest-based tests cover API server behavior but not kubelet/controllers/pods).
+- **(Resolved 2026-10-19) Docker Desktop VM disk was full (2026-10-16).** At the user's request I pruned the build cache (18.54 GB) and dangling images (5.183 GB); 152 GB are free in the VM and other projects' containers, volumes and tagged images were not touched (V-0028). Still reclaimable if ever needed: about 17 GB of tagged unused images and 4 GB of volumes (not mine to delete). Unblocks T4.3 kind validation, T5.3 e2e and T5.6–T5.8, none of which was started (out of scope until told).
 
 - (Resolved 2026-10-16) Local commits were failing on 1Password signing; signing works again, so work can now be committed normally.
 
@@ -113,7 +112,7 @@ Update 2026-10-16 (afternoon):
 - [ ] T3.4 Web UI (inventory, details, tree, diff, logs, terminal, history, sync panel, onboarding, projects, accounts, settings, appsets, notifications, extensions)
 
 ## Phase 4 — Packaging & environments
-- [~] T4.1 Dockerfile (pinned helm/kustomize/git-lfs), local image build — Dockerfile, pins, `hack/images`, `make image*` targets written; verified without a container runtime (pins, fetch, cross-compile, runtime filesystem via `make image-rootfs-check`, V-0018/V-0025). **`docker build` NOT EXECUTED** (Docker Desktop disk full), so nothing has run inside the image.
+- [x] T4.1 Dockerfile (pinned helm/kustomize/git-lfs), local image build — Dockerfile, pins, `hack/images`, `make image*` targets; static checks (V-0018/V-0025) and, since 2026-10-19, the executed build for linux/arm64 (`make image`, 386 MB) with `make image-layout-check` (52/52) and `make image-smoke` (25/25) (V-0028, `docs/verification/runs/2026-10-19-image-build.md`). Not done: linux/amd64 and multi-arch builds, SBOM, scans, push, run on a cluster.
 - [x] T4.2 Generated manifests: install, namespace-install, core-install, ha; Helm chart with documented values; NetworkPolicies; security contexts — chart and `deploy/manifests` (generated from it), validated against envtest kube-apiservers: strict dry runs, Pod Security `restricted`, helm install/upgrade/rollback/uninstall/re-install, RBAC sufficiency with the real binary (V-0019…V-0027). Caveat: live pods, probes by a kubelet and NetworkPolicy enforcement are unverified (no kubelet/CNI; kind blocked).
 - [ ] T4.3 kind environment (control + target clusters, in-cluster git server, chart repo, OCI registry)
 - [ ] T4.4 Examples (each source type, multi-source, multi-cluster, GitHub previews, notifications, CMP plugin)
@@ -139,7 +138,7 @@ Update 2026-10-16 (afternoon):
 ## Completed log
 
 - 2026-10-12 T0.1–T0.3 (see `docs/verification/log.md` entries V-0001..V-0003)
-- 2026-10-18 T4.2 chart + static manifests, T4.1 image tooling (build not executed), first-run bootstrap; two review rounds (V-0018..V-0027; final deploy-suite run pending)
+- 2026-10-18 T4.2 chart + static manifests, T4.1 image tooling, first-run bootstrap; two review rounds (V-0018..V-0027); 2026-10-19 T4.1 image built and checked (V-0028)
 
 ## Requirements carried to later tasks
 
@@ -180,20 +179,20 @@ Private repository created and `main` pushed: https://github.com/juliosaraiva/pa
 
 Scope authorized now: T4.1 Dockerfile/image tooling, T4.2 static manifests + Helm chart (+ the `patrolcd bootstrap` first-run step they require, found missing: nothing generated the admin password or `patrol-internal-token`). NOT in scope until told: CI pipelines, kind validation (Docker disk still full), e2e/security/perf phases, publishing anything.
 Workflow wf_71881e0f-20d: Build (boot, image, chart in parallel) → Assemble (static manifests, test/deploy harness incl. helm install/upgrade/uninstall + RBAC sufficiency against envtest) → independent reviews (chart-security, image-bootstrap) → fixes. Agents do not commit; the orchestrator commits (signed) and pushes after verification.
-Known limits recorded up front: `docker build` cannot be executed (Docker Desktop disk full) → image steps verified piecewise and labeled NOT EXECUTED; no kubelet/CNI in envtest → NetworkPolicy enforcement and live pods unverified.
+Known limits recorded up front: `docker build` could not be executed (Docker Desktop disk full; resolved and built 2026-10-19, see below) → image steps were verified piecewise and labeled NOT EXECUTED until then; no kubelet/CNI in envtest → NetworkPolicy enforcement and live pods unverified.
 
 ## PHASE 4 CLOSEOUT STATE (2026-10-18)
 
 Done (evidence `docs/verification/log.md` V-0018…V-0027):
-- Image tooling (T4.1 `[~]`): Dockerfile, pinned tools, `hack/images`, `make image*`; verified piecewise without Docker. **`docker build` NOT EXECUTED.**
+- Image (T4.1 `[x]`): Dockerfile, pinned tools, `hack/images`, `make image*`; built for linux/arm64 on 2026-10-19 and checked (`make image-layout-check`, `make image-smoke`, V-0028). Not done: amd64/multi-arch, SBOM, scans, push, run in a cluster.
 - Helm chart and static manifests (T4.2 `[x]`), first-run bootstrap (`patrolcd bootstrap`), deployment validation harness `test/deploy` (envtest only).
 - Review round 1 (5 findings) fixed (V-0023). Review round 2 (`wf_21493a28-fb7`): 12 confirmed findings fixed except the parts listed as not fixed; of the 25 minor findings, 24 fixed and CH-10 fixed in the docs only. DV-6 is fixed (stale initial admin Secret replaced). Per-finding table: `docs/verification/runs/2026-10-18-phase4-review-round2.md`.
 - Hash tables of the 2026-10-17 run records re-derived on the final tree; parity matrix regenerated (no status raised; deployment entries stay `in-progress`).
 
 Open items:
 - **Final full `./test/deploy/` run after round 2: passed** (21 tests, 157 subtests, 281 s; V-0027). Earlier closeout runs: one failure from a concurrent `make verify-generated`, one CRD-deletion timeout under load (V-0026); the CRD wait now reports its state and waits 5 minutes.
-- **Docker Desktop disk full** (Blockers above): blocks `docker build`, `make image-sbom`, kind (T4.3), e2e on kind.
-- **kind validation**: blocked by the disk and out of scope until the user says so.
+- **Docker disk**: resolved 2026-10-19 (Blockers above). `make image-multiarch`, `make image-sbom` and the R2-8 SBOM/license checks are now possible but were not run.
+- **kind validation** (T4.3) and e2e on kind: no longer blocked by the disk; out of scope until the user says so.
 - **CI pipelines**: not started (T0.7), out of scope until told.
 - **DV-2**: a core installation has no AppProject `default`; documented in the guides, not fixed (policy decision).
 - Round-2 follow-ups R2-3…R2-8 (`docs/verification/phase4-findings.md`; R2-1 overview.md notifications row and R2-2 `patrolcd bootstrap` help text were done by the orchestrator on 2026-10-18): `hack/build.mk` tree state, musl copyright for connect-proxy, `.gitignore` kubeconfig*.go, optional clock-free staleness check, keep-or-delete decision for the trust ConfigMaps on uninstall, SBOM/apk checks that need the image.
