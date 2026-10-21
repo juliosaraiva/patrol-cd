@@ -9,13 +9,14 @@ API, CLI and web UI) with functional parity as the goal against a frozen
 
 > **Status: work in progress, not released.** Phases 0–3 (research, architecture, libraries,
 > controllers, API, CLI, web UI, server wiring) are implemented and tested locally. Phase 4
-> packaging (Dockerfile, Helm chart, static install manifests, first-run bootstrap) is written
-> and validated statically and against envtest API servers, and the `linux/arm64` image builds
-> and passes a runtime smoke test locally, but **nothing has been installed on a real cluster**
-> and no image has been published. Cluster-level end-to-end tests, security and performance verification, CI and most
-> documentation are **not done yet**. Nothing here has been verified against a live GitHub, a
-> real kubelet or a real multi-node cluster. The API group `cd.patrol.example` is a development
-> placeholder (see ADR-0002).
+> packaging (Dockerfile, Helm chart, static install manifests, first-run bootstrap) is written,
+> validated against envtest API servers, and installed and checked on two local kind clusters
+> (`make image kind-up kind-fixtures kind-install kind-verify`: Applications of seven source
+> types sync through the API to the second cluster). No image has been published and nothing has run on a
+> cloud cluster, with more than one replica, on another CNI than kindnet, or on `linux/amd64`.
+> The full end-to-end scenario suite, security and performance verification, CI and most
+> documentation are **not done yet**. Nothing here has been verified against a live GitHub. The
+> API group `cd.patrol.example` is a development placeholder (see ADR-0002).
 
 ## What exists
 
@@ -32,10 +33,10 @@ API, CLI and web UI) with functional parity as the goal against a frozen
 | Web UI (React + TypeScript) | [`ui/`](ui) | implemented; tested against mocked APIs, Playwright specs not yet run |
 | Integration harness (real API servers via envtest, real git/helm/kustomize) | [`test/integration`](test/integration) | lifecycle + recovery scenarios passing |
 | Examples | [`examples/`](examples) | validated against the CRDs and real renderers |
-| Container image (Alpine, non-root, pinned helm/kustomize/git-lfs) | [`Dockerfile`](Dockerfile), [`hack/images`](hack/images), [`docs/guides/images.md`](docs/guides/images.md) | built for linux/arm64 and checked (layout, runtime smoke test under the chart's restricted settings); amd64, SBOM, scans and a cluster run are not done |
-| Helm chart | [`deploy/helm/patrol-cd`](deploy/helm/patrol-cd), [`docs/guides/installation.md`](docs/guides/installation.md) | value profiles lint and render deterministically; install/upgrade/rollback/uninstall and RBAC sufficiency run against envtest API servers; not run on a cluster with a kubelet |
-| Static install manifests (`install`, `namespace-install`, `core-install`, hydrator variants, `crds`) | [`deploy/manifests`](deploy/manifests), [`docs/guides/manifests.md`](docs/guides/manifests.md) | generated from the chart, verified equal to it and server-side applied to envtest |
-| First-run bootstrap (`patrolcd bootstrap`: internal token, session key, initial admin password, default SSH known hosts) | [`internal/server`](internal/server), [`bootstrap.md`](docs/architecture/components/bootstrap.md) | unit + envtest tested (including a new initial admin password after uninstall and re-install); run as an init container by the chart and manifests |
+| Container image (Alpine, non-root, pinned helm/kustomize/git-lfs) | [`Dockerfile`](Dockerfile), [`hack/images`](hack/images), [`docs/guides/images.md`](docs/guides/images.md) | built for linux/arm64 and checked (layout, runtime smoke test under the chart's restricted settings); ran the five components of the chart's default profile on a local kind cluster; amd64, SBOM and scans are not done |
+| Helm chart | [`deploy/helm/patrol-cd`](deploy/helm/patrol-cd), [`docs/guides/installation.md`](docs/guides/installation.md) | value profiles lint and render deterministically; install/upgrade/rollback/uninstall and RBAC sufficiency run against envtest API servers; default profile installed, upgraded, rolled back, uninstalled and re-installed on kind with a kubelet (`make kind-verify VERIFY_FLAGS=--lifecycle`, 58 checks) |
+| Static install manifests (`install`, `namespace-install`, `core-install`, hydrator variants, `crds`) | [`deploy/manifests`](deploy/manifests), [`docs/guides/manifests.md`](docs/guides/manifests.md) | generated from the chart, verified equal to it and server-side applied to envtest; `cluster-install` also applied once by hand to a kind cluster (61 objects, five pods Running, login works; no committed check); the other variants were not |
+| First-run bootstrap (`patrolcd bootstrap`: internal token, session key, initial admin password, default SSH known hosts) | [`internal/server`](internal/server), [`bootstrap.md`](docs/architecture/components/bootstrap.md) | unit + envtest tested (including a new initial admin password after uninstall and re-install); run as an init container by the chart and manifests, and on kind by a kubelet (default profile, checked by `hack/kind/verify-install.sh`) |
 
 Verification evidence (commands, environments, results, known gaps) is recorded in
 [`docs/verification/log.md`](docs/verification/log.md). Anything that used a fake external
@@ -69,11 +70,18 @@ and current limitations.
 
 ## Known limitations (high level)
 
-- The container image has been built for linux/arm64 only and not published, and nothing has
-  been installed on a real cluster; NetworkPolicy enforcement and live pods are unverified.
-  There is no CI pipeline yet.
-- Pod/Deployment health is simulated in tests (envtest has no kubelet); port-forward, pod logs
-  and terminal against a real kubelet are unverified.
+- The container image has been built for linux/arm64 only and not published. Patrol CD has run
+  on two local kind clusters (one CNI, kindnet; arm64; one replica per component; the chart's
+  default profile; no SSO, ingress, ApplicationSets, hydrator, CMP plugins or notifications
+  delivery exercised, no browser run), not on a cloud cluster. There is no CI pipeline yet.
+- Most unit and integration tests still run against envtest (no kubelet), where pod health is
+  simulated; the kind checks (`hack/kind/verify-install.sh`) cover the install, security
+  contexts, part of the NetworkPolicy enforcement, metrics endpoints, sync and drift on real
+  nodes, and with `--lifecycle` helm rollback, upgrade, uninstall and re-install. Pod logs and
+  the web terminal have not been exercised against a kubelet; port-forward was used only by
+  hand, by CLI core mode, to reach the control cluster's repo-server and controller (core mode's
+  `app manifests`, `app diff` and `app history` worked against the live cluster; see
+  `docs/verification/runs/2026-10-19-kind-validation.md`).
 - GitHub integration is verified against contract tests and a local fake of the GitHub API,
   not against live GitHub.
 - Argo CD parity is tracked feature by feature; many rows are still `in-progress` or

@@ -10,9 +10,14 @@ Status: the files are generated, checked against the chart renders and applied t
 kube-apiserver 1.36 (server-side apply, strict field validation, Pod Security `restricted`
 warnings, idempotent re-apply), recorded in
 [`docs/verification/runs/2026-10-17-manifests-static.md`](../verification/runs/2026-10-17-manifests-static.md).
-They have not run on a cluster with nodes yet: no Patrol image is published (`make image` builds
-`patrol-cd/patrol-cd:dev` locally) and no kind cluster has been created, so pods, probes,
-NetworkPolicy enforcement and HA scheduling are unverified.
+On a cluster with nodes they ran once, by hand: on 2026-10-19 `install.yaml` (the
+`cluster-install` base with a local image overlay) was applied to a local kind cluster (61
+objects; five pods Running without restarts, the bootstrap converged, admin login through a
+port-forward) and removed again
+([run record](../verification/runs/2026-10-19-kind-validation.md), step 14). No committed check
+applies a bundle to a cluster with nodes, and the other variants, NetworkPolicy enforcement of
+the static bundles and HA scheduling are unverified. No Patrol image is published (`make image`
+builds `patrol-cd/patrol-cd:dev` locally).
 
 ## Contents
 
@@ -480,8 +485,8 @@ regenerate. To add a variant, add it to the `variants` table in `hack/genmanifes
 
 ## Known limitations
 
-- Not yet installed on a cluster with nodes: pods, probes, NetworkPolicies and HA scheduling are
-  unverified (see Status).
+- Applied to a cluster with nodes only once, by hand (`install.yaml` on kind, see Status); the
+  other variants, NetworkPolicy enforcement and HA scheduling are unverified.
 - The image is not published; an image overlay is required.
 - No Dex, Ingress or monitoring objects in the static variants (use Helm or an overlay).
 - `kubectl apply` does not prune objects removed between versions or variants.

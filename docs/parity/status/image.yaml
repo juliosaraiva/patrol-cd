@@ -3,8 +3,11 @@
 # (static checks) and docs/verification/runs/2026-10-19-image-build.md (build and checks of the
 # built image).
 # Evidence level: the linux/arm64 image was built on 2026-10-19 and exercised with docker run
-# under the chart's restricted settings (layout check, smoke test). Not run: linux/amd64,
-# multi-arch, SBOM, scans, kind or any cluster, so nothing is `verified`.
+# under the chart's restricted settings (layout check, smoke test). The same day it ran on kind
+# (docs/verification/runs/2026-10-19-kind-validation.md; a rebuild from the working tree with
+# the KV-1 fix, version label 7c340fb-dirty): five components in pods, Helm, Kustomize, git and
+# OCI renders in the repo-server checked by hack/kind/verify-install.sh. Not run: linux/amd64,
+# multi-arch, SBOM, scans, an SSH-through-SOCKS5 connection, so nothing is `verified`.
 
 OPS-162:
   status: implemented
@@ -19,7 +22,8 @@ OPS-162:
     - hack/images/rootfs-check.sh
     - hack/imagelayout/main_test.go
     - hack/images/smoke.sh
-  evidence: docs/verification/runs/2026-10-19-image-build.md
+    - hack/kind/verify-install.sh:sync (Helm, Kustomize, git and OCI sources rendered by the running repo-server on kind)
+  evidence: docs/verification/runs/2026-10-19-image-build.md; docs/verification/runs/2026-10-19-kind-validation.md
   notes: >-
     Single multi-call image on alpine:3.24.2 (index digest pinned), user patrol uid/gid 999,
     entrypoint tini; Helm 4.2.1, Kustomize 5.8.1, git-lfs 3.7.1 (baseline versions) downloaded
@@ -29,9 +33,13 @@ OPS-162:
     pinned source. Upstream ships Ubuntu 26.04 (glibc); Patrol uses Alpine (musl), see the guide.
     Built for linux/arm64 on 2026-10-19 (386 MB); `make image-layout-check` finds all 52 layout
     expectations in the image and `make image-smoke` asserts helm v4.2.1, kustomize v5.8.1 and
-    git-lfs 3.7.1 (equal to the pins) by running the tools in the image. Missing for verified:
-    the linux/amd64 image, and `helm version`/`kustomize version` and a render inside the running
-    repo-server of a kind cluster (the OPS-162 test).
+    git-lfs 3.7.1 (equal to the pins) by running the tools in the image. On kind (2026-10-19)
+    the running repo-server of a rebuild with the same Dockerfile and pins (7c340fb-dirty, with
+    the KV-1 fix) rendered the fixture Applications (Helm chart from git, Kustomize overlay,
+    multi-source chart with $values, OCI Helm chart, OCI manifest bundle, plain manifests over
+    HTTP and SSH), which hack/kind/verify-install.sh:sync asserts end Synced/Healthy/Succeeded.
+    Missing for verified: the linux/amd64 image; `helm version` and `kustomize version` were
+    run in containers of the 3ea2bd3 image, not inside the running repo-server pod.
 
 OPS-145:
   status: implemented
@@ -42,7 +50,9 @@ OPS-145:
     The image links every component name of binaryAliases (internal/server/commands.go) to
     /usr/local/bin/patrolcd; rootfs-check.sh fails when the lists differ, and `make image-smoke`
     runs all 11 aliases of aliases.txt in the built arm64 image and checks that each prints its
-    own subcommand's help, not the root help. Not run on amd64 or in a pod.
+    own subcommand's help, not the root help. Not run on amd64. The pods of the kind validation
+    (2026-10-19) start `/usr/local/bin/patrolcd <subcommand>` (chart templates), so they do not
+    exercise the alias links.
 
 REPO-023:
   status: in-progress
@@ -53,5 +63,5 @@ REPO-023:
     behavior); the image provides connect-proxy (ssh-connect 1.106, not packaged by Alpine) as a
     static musl build of the pinned source. The Dockerfile's `gcc -static` stage ran in the
     2026-10-19 build and the binary runs in the image (`Version 1.106`, asserted by
-    hack/images/smoke.sh). No SSH-through-SOCKS5 connection has been made, so the feature stays
-    in-progress.
+    hack/images/smoke.sh). No SSH-through-SOCKS5 connection has been made (the kind validation
+    of 2026-10-19 cloned over SSH directly, without a proxy), so the feature stays in-progress.

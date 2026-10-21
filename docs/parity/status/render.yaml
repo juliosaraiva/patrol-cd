@@ -1,6 +1,12 @@
 # internal/render (manifest generation for one source; Jsonnet child; CMP client and wire
-# protocol). See docs/architecture/components/render.md. Library-level evidence: the
-# repo-server RPCs, controller and cmp-server that expose these features are not wired yet.
+# protocol). See docs/architecture/components/render.md. Library-level evidence: the tests
+# listed per row call internal/render directly. The repo-server, controller and cmp-server that
+# expose these features are wired into cmd/patrolcd. On kind (2026-10-19,
+# docs/verification/runs/2026-10-19-kind-validation.md) the deployed repo-server rendered seven
+# fixture Applications (a plain directory from git over HTTP and over SSH, a Helm chart from
+# git, a Kustomize overlay, a multi-source chart with $values, an OCI Helm chart, an OCI
+# manifest bundle), which hack/kind/verify-install.sh asserts only as Synced/Healthy end states;
+# no row is raised on that run because no kind check asserts a row's own behavior.
 
 SRC-001:
   status: implemented
@@ -9,7 +15,7 @@ SRC-001:
     - internal/render/source_test.go:TestExplicitType
     - internal/render/source_test.go:TestGenerateExplicitTypes
   notes: >-
-    Library-level (internal/render, real tools); not yet exercised through the repo-server
+    Library-level (internal/render, real tools); the listed tests do not go through the repo-server
     GenerateManifest RPC. Spec validation wording (error verifying source type) belongs to the
     API server.
 
@@ -22,7 +28,7 @@ SRC-002:
     - internal/render/helm_test.go:TestHelmDefaultCommandAndDetection
     - internal/render/kustomize_test.go:TestKustomizeBuild
   notes: >-
-    Library-level (internal/render, real tools); not yet exercised through the repo-server
+    Library-level (internal/render, real tools); the listed tests do not go through the repo-server
     GenerateManifest RPC. Built-in detection inspects only the app directory (upstream walks the
     subtree but uses only the root entry), so unreadable subdirectories do not fail detection.
 
@@ -34,7 +40,7 @@ SRC-003:
     - internal/render/source_test.go:TestGenerateExplicitTypes
     - internal/render/jsonnet_dir_test.go:TestJsonnetDisabled
   notes: >-
-    Library-level (internal/render, real tools); not yet exercised through the repo-server
+    Library-level (internal/render, real tools); the listed tests do not go through the repo-server
     GenerateManifest RPC. Honors Input.EnabledSourceTypes (Plugin never disabled); parsing of
     kustomize/helm/jsonnet.enable is internal/settings.
 
@@ -44,7 +50,7 @@ SRC-004:
   tests:
     - internal/render/source_test.go:TestAppPathResolution
   notes: >-
-    Library-level (internal/render, real tools); not yet exercised through the repo-server
+    Library-level (internal/render, real tools); the listed tests do not go through the repo-server
     GenerateManifest RPC. Spec validation messages (repoURL/path/chart required, chart
     targetRevision) belong to the API server.
 
@@ -57,7 +63,7 @@ SRC-005:
     - internal/render/directory_test.go:TestDirectoryParseErrors
     - internal/render/directory_test.go:TestDirectoryFixture
   notes: >-
-    Library-level (internal/render, real tools); not yet exercised through the repo-server
+    Library-level (internal/render, real tools); the listed tests do not go through the repo-server
     GenerateManifest RPC. Upstream FailedPrecondition is ErrorCode()==invalid_argument.
 
 SRC-006:
@@ -67,7 +73,7 @@ SRC-006:
     - internal/render/directory_test.go:TestDirectoryIgnoresUnrelatedFiles
     - internal/render/directory_test.go:TestDirectoryParseErrors
   notes: >-
-    Library-level (internal/render, real tools); not yet exercised through the repo-server
+    Library-level (internal/render, real tools); the listed tests do not go through the repo-server
     GenerateManifest RPC. A JSON object without kind that does not look like a manifest is
     skipped (upstream emits an empty object after its OCI-manifest probe).
 
@@ -78,7 +84,7 @@ SRC-007:
     - internal/render/directory_test.go:TestDirectoryRecurse
     - internal/render/directory_test.go:TestDirectoryFixture
   notes: >-
-    Library-level (internal/render, real tools); not yet exercised through the repo-server
+    Library-level (internal/render, real tools); the listed tests do not go through the repo-server
     GenerateManifest RPC.
 
 SRC-008:
@@ -89,7 +95,7 @@ SRC-008:
     - internal/render/render_test.go:TestDirGlobMatchesGobwas
     - internal/render/render_test.go:TestDirGlobPathologicalAlternation
   notes: >-
-    Library-level (internal/render, real tools); not yet exercised through the repo-server
+    Library-level (internal/render, real tools); the listed tests do not go through the repo-server
     GenerateManifest RPC. Alternation patterns are matched through an equivalent RE2 expression
     (property-tested against gobwas/glob) to stay linear-time.
 
@@ -100,7 +106,7 @@ SRC-009:
     - internal/render/directory_test.go:TestDirectoryIncludeExclude
     - internal/render/directory_test.go:TestDirectoryFixture
   notes: >-
-    Library-level (internal/render, real tools); not yet exercised through the repo-server
+    Library-level (internal/render, real tools); the listed tests do not go through the repo-server
     GenerateManifest RPC.
 
 SRC-010:
@@ -110,7 +116,7 @@ SRC-010:
     - internal/render/directory_test.go:TestDirectorySkipMarker
     - internal/render/jsonnet_dir_test.go:TestJsonnetSkipMarkerAndInclude
   notes: >-
-    Library-level (internal/render, real tools); not yet exercised through the repo-server
+    Library-level (internal/render, real tools); the listed tests do not go through the repo-server
     GenerateManifest RPC. +patrol:skip-file-rendering is honored as well.
 
 SRC-011:
@@ -121,7 +127,7 @@ SRC-011:
     - internal/render/jsonnet_dir_test.go:TestJsonnetDirectory
     - internal/render/cmp_test.go:TestPluginGenerateOutput
   notes: >-
-    Library-level (internal/render, real tools); not yet exercised through the repo-server
+    Library-level (internal/render, real tools); the listed tests do not go through the repo-server
     GenerateManifest RPC.
 
 SRC-012:
@@ -130,7 +136,7 @@ SRC-012:
   tests:
     - internal/render/directory_test.go:TestDirectorySymlinks
   notes: >-
-    Library-level (internal/render, real tools); not yet exercised through the repo-server
+    Library-level (internal/render, real tools); the listed tests do not go through the repo-server
     GenerateManifest RPC.
 
 SRC-013:
@@ -139,7 +145,7 @@ SRC-013:
   tests:
     - internal/render/directory_test.go:TestDirectoryMaxCombinedSize
   notes: >-
-    Library-level (internal/render, real tools); not yet exercised through the repo-server
+    Library-level (internal/render, real tools); the listed tests do not go through the repo-server
     GenerateManifest RPC. Limit passed in Limits.MaxCombinedDirectoryManifestsSize (upstream 0 =
     unlimited maps to -1); the setting is parsed by internal/settings.
 
@@ -152,7 +158,7 @@ SRC-014:
     - internal/render/jsonnet/jsonnet_test.go:TestRunnerChildProcess
     - internal/render/jsonnet/jsonnet_test.go:TestRunnerLimits
   notes: >-
-    Library-level (internal/render, real tools); not yet exercised through the repo-server
+    Library-level (internal/render, real tools); the listed tests do not go through the repo-server
     GenerateManifest RPC. Evaluated in a sandboxed child process (ADR-0007); cmd/patrolcd must
     call jsonnet.MaybeJsonnetMain.
 
@@ -165,7 +171,7 @@ SRC-015:
     - internal/render/jsonnet/jsonnet_test.go:TestEvaluateVarsAndTLAs
     - internal/render/jsonnet/jsonnet_test.go:TestEvaluateStopsAtFirstError
   notes: >-
-    Library-level (internal/render, real tools); not yet exercised through the repo-server
+    Library-level (internal/render, real tools); the listed tests do not go through the repo-server
     GenerateManifest RPC.
 
 SRC-016:
@@ -175,7 +181,7 @@ SRC-016:
     - internal/render/jsonnet_dir_test.go:TestJsonnetDirectory
     - internal/render/jsonnet/jsonnet_test.go:TestEvaluateVarsAndTLAs
   notes: >-
-    Library-level (internal/render, real tools); not yet exercised through the repo-server
+    Library-level (internal/render, real tools); the listed tests do not go through the repo-server
     GenerateManifest RPC.
 
 SRC-017:
@@ -186,7 +192,7 @@ SRC-017:
     - internal/render/jsonnet_dir_test.go:TestJsonnetErrors
     - internal/render/jsonnet/jsonnet_test.go:TestEvaluateLibraryPathOrder
   notes: >-
-    Library-level (internal/render, real tools); not yet exercised through the repo-server
+    Library-level (internal/render, real tools); the listed tests do not go through the repo-server
     GenerateManifest RPC.
 
 SRC-018:
@@ -197,7 +203,7 @@ SRC-018:
     - internal/render/jsonnet/jsonnet_test.go:TestEvaluateLimits
     - internal/render/jsonnet_dir_test.go:TestJsonnetErrors
   notes: >-
-    Library-level (internal/render, real tools); not yet exercised through the repo-server
+    Library-level (internal/render, real tools); the listed tests do not go through the repo-server
     GenerateManifest RPC.
 
 SRC-019:
@@ -208,7 +214,7 @@ SRC-019:
     - internal/render/helmclients_test.go:TestHelmRepositoryProxy
     - internal/render/helmclients_test.go:TestHelmClientsForProxy
   notes: >-
-    Library-level (internal/render, real tools); not yet exercised through the repo-server
+    Library-level (internal/render, real tools); the listed tests do not go through the repo-server
     GenerateManifest RPC. Per-call helm home, Chart.lock cleanup and concurrency are
     internal/helm (its own tests). The source repository's proxy/noProxy applies to helm
     template and dependency build through a per-proxy helm.Client (internal/helm has no
@@ -220,7 +226,7 @@ SRC-020:
   tests:
     - internal/render/helm_test.go:TestHelmReleaseNameAndNamespace
   notes: >-
-    Library-level (internal/render, real tools); not yet exercised through the repo-server
+    Library-level (internal/render, real tools); the listed tests do not go through the repo-server
     GenerateManifest RPC.
 
 SRC-021:
@@ -229,7 +235,7 @@ SRC-021:
   tests:
     - internal/render/helm_test.go:TestHelmReleaseNameAndNamespace
   notes: >-
-    Library-level (internal/render, real tools); not yet exercised through the repo-server
+    Library-level (internal/render, real tools); the listed tests do not go through the repo-server
     GenerateManifest RPC.
 
 SRC-022:
@@ -239,7 +245,7 @@ SRC-022:
     - internal/render/helm_test.go:TestHelmValueFiles
     - internal/render/helm_test.go:TestHelmValueFileErrors
   notes: >-
-    Library-level (internal/render, real tools); not yet exercised through the repo-server
+    Library-level (internal/render, real tools); the listed tests do not go through the repo-server
     GenerateManifest RPC.
 
 SRC-023:
@@ -249,7 +255,7 @@ SRC-023:
     - internal/render/helm_test.go:TestHelmValueFiles
     - internal/render/helm_test.go:TestHelmValueFileErrors
   notes: >-
-    Library-level (internal/render, real tools); not yet exercised through the repo-server
+    Library-level (internal/render, real tools); the listed tests do not go through the repo-server
     GenerateManifest RPC. Spec validation ignoring the NotFound glob error belongs to the API
     server.
 
@@ -261,7 +267,7 @@ SRC-024:
     - internal/render/helm_test.go:TestHelmRemoteValueFile
     - internal/render/helm_test.go:TestHelmRefSources
   notes: >-
-    Library-level (internal/render, real tools); not yet exercised through the repo-server
+    Library-level (internal/render, real tools); the listed tests do not go through the repo-server
     GenerateManifest RPC.
 
 SRC-025:
@@ -271,7 +277,7 @@ SRC-025:
     - internal/render/helm_test.go:TestHelmValueFileErrors
     - internal/render/helm_test.go:TestHelmRemoteValueFile
   notes: >-
-    Library-level (internal/render, real tools); not yet exercised through the repo-server
+    Library-level (internal/render, real tools); the listed tests do not go through the repo-server
     GenerateManifest RPC. Allowed schemes come from Input.HelmOptions.ValuesFileSchemes (nil
     allows none).
 
@@ -281,7 +287,7 @@ SRC-026:
   tests:
     - internal/render/helm_test.go:TestHelmValuePrecedence
   notes: >-
-    Library-level (internal/render, real tools); not yet exercised through the repo-server
+    Library-level (internal/render, real tools); the listed tests do not go through the repo-server
     GenerateManifest RPC. The inline values file is written 0600 inside the per-call helm home
     and always removed (upstream: 0644 in the OS temp dir). CLI --values-literal-file is the
     CLI's.
@@ -292,7 +298,7 @@ SRC-027:
   tests:
     - internal/render/helm_test.go:TestHelmValuePrecedence
   notes: >-
-    Library-level (internal/render, real tools); not yet exercised through the repo-server
+    Library-level (internal/render, real tools); the listed tests do not go through the repo-server
     GenerateManifest RPC.
 
 SRC-028:
@@ -301,7 +307,7 @@ SRC-028:
   tests:
     - internal/render/helm_test.go:TestHelmParameters
   notes: >-
-    Library-level (internal/render, real tools); not yet exercised through the repo-server
+    Library-level (internal/render, real tools); the listed tests do not go through the repo-server
     GenerateManifest RPC. CLI -p/--helm-set parsing is the CLI's.
 
 SRC-029:
@@ -311,7 +317,7 @@ SRC-029:
     - internal/render/helm_test.go:TestHelmFileParameters
     - internal/render/helm_test.go:TestHelmRefSources
   notes: >-
-    Library-level (internal/render, real tools); not yet exercised through the repo-server
+    Library-level (internal/render, real tools); the listed tests do not go through the repo-server
     GenerateManifest RPC.
 
 SRC-030:
@@ -320,7 +326,7 @@ SRC-030:
   tests:
     - internal/render/helm_test.go:TestHelmValuePrecedence
   notes: >-
-    Library-level (internal/render, real tools); not yet exercised through the repo-server
+    Library-level (internal/render, real tools); the listed tests do not go through the repo-server
     GenerateManifest RPC.
 
 SRC-031:
@@ -329,7 +335,7 @@ SRC-031:
   tests:
     - internal/render/helm_test.go:TestHelmDependencyRepos
   notes: >-
-    Library-level (internal/render, real tools); not yet exercised through the repo-server
+    Library-level (internal/render, real tools); the listed tests do not go through the repo-server
     GenerateManifest RPC. Propagated to chart pulls and dependency repositories
     (helm.Creds.PassCredentials); internal/helm tests cover the transport behavior.
 
@@ -339,7 +345,7 @@ SRC-032:
   tests:
     - internal/render/helm_test.go:TestHelmFlags
   notes: >-
-    Library-level (internal/render, real tools); not yet exercised through the repo-server
+    Library-level (internal/render, real tools); the listed tests do not go through the repo-server
     GenerateManifest RPC.
 
 SRC-033:
@@ -348,7 +354,7 @@ SRC-033:
   tests:
     - internal/render/helm_test.go:TestHelmFlags
   notes: >-
-    Library-level (internal/render, real tools); not yet exercised through the repo-server
+    Library-level (internal/render, real tools); the listed tests do not go through the repo-server
     GenerateManifest RPC.
 
 SRC-034:
@@ -357,7 +363,7 @@ SRC-034:
   tests:
     - internal/render/helm_test.go:TestHelmFlags
   notes: >-
-    Library-level (internal/render, real tools); not yet exercised through the repo-server
+    Library-level (internal/render, real tools); the listed tests do not go through the repo-server
     GenerateManifest RPC.
 
 SRC-035:
@@ -366,7 +372,7 @@ SRC-035:
   tests:
     - internal/render/helm_test.go:TestHelmFlags
   notes: >-
-    Library-level (internal/render, real tools); not yet exercised through the repo-server
+    Library-level (internal/render, real tools); the listed tests do not go through the repo-server
     GenerateManifest RPC.
 
 SRC-036:
@@ -375,7 +381,7 @@ SRC-036:
   tests:
     - internal/render/helm_test.go:TestHelmKubeVersionAndAPIVersions
   notes: >-
-    Library-level (internal/render, real tools); not yet exercised through the repo-server
+    Library-level (internal/render, real tools); the listed tests do not go through the repo-server
     GenerateManifest RPC.
 
 SRC-037:
@@ -384,7 +390,7 @@ SRC-037:
   tests:
     - internal/render/helm_test.go:TestHelmKubeVersionAndAPIVersions
   notes: >-
-    Library-level (internal/render, real tools); not yet exercised through the repo-server
+    Library-level (internal/render, real tools); the listed tests do not go through the repo-server
     GenerateManifest RPC.
 
 SRC-038:
@@ -397,7 +403,7 @@ SRC-038:
     - internal/render/helm_test.go:TestHelmFileParameters
     - internal/render/helm_test.go:TestHelmChartFromRepository
   notes: >-
-    Library-level (internal/render, real tools); not yet exercised through the repo-server
+    Library-level (internal/render, real tools); the listed tests do not go through the repo-server
     GenerateManifest RPC.
 
 SRC-039:
@@ -416,7 +422,7 @@ SRC-040:
     - internal/render/helm_test.go:TestHelmDependencyRepos
     - internal/render/helm_test.go:TestHelmDependencyBuild
   notes: >-
-    Library-level (internal/render, real tools); not yet exercised through the repo-server
+    Library-level (internal/render, real tools); the listed tests do not go through the repo-server
     GenerateManifest RPC. An oci:// dependency matched by a non-OCI credential template stays
     OCI (upstream copies the template's enableOCI).
 
@@ -426,7 +432,7 @@ SRC-041:
   tests:
     - internal/render/helm_test.go:TestHelmDependencyNotPermitted
   notes: >-
-    Library-level (internal/render, real tools); not yet exercised through the repo-server
+    Library-level (internal/render, real tools); the listed tests do not go through the repo-server
     GenerateManifest RPC. Also triggered by helm's "no cached repository for" message, because
     Patrol writes repositories.yaml instead of running helm repo add.
 
@@ -437,7 +443,7 @@ SRC-042:
     - internal/render/helm_test.go:TestHelmChartFromRepository
     - internal/render/helmclients_test.go:TestHelmRepositoryProxy
   notes: >-
-    Library-level (internal/render, real tools); not yet exercised through the repo-server
+    Library-level (internal/render, real tools); the listed tests do not go through the repo-server
     GenerateManifest RPC. Index fetch/caching and archive caching are internal/helm.
 
 SRC-043:
@@ -446,7 +452,7 @@ SRC-043:
   tests:
     - internal/render/helm_test.go:TestHelmChartFromOCIRegistry
   notes: >-
-    Library-level (internal/render, real tools); not yet exercised through the repo-server
+    Library-level (internal/render, real tools); the listed tests do not go through the repo-server
     GenerateManifest RPC. Registry credentials are written to a per-call registry config, never
     argv (internal/helm).
 
@@ -456,7 +462,7 @@ SRC-044:
   tests:
     - internal/render/helm_test.go:TestHelmChartFromRepository
   notes: >-
-    Library-level (internal/render, real tools); not yet exercised through the repo-server
+    Library-level (internal/render, real tools); the listed tests do not go through the repo-server
     GenerateManifest RPC. Resolution itself is internal/helm.ResolveChartVersion (its tests
     cover constraints and OCI tags); render resolves when Input.Revision is empty.
 
@@ -469,7 +475,7 @@ SRC-047:
     - internal/render/helm_test.go:TestHelmRefSources
     - internal/render/helm_test.go:TestHelmValueFileErrors
   notes: >-
-    Library-level (internal/render, real tools); not yet exercised through the repo-server
+    Library-level (internal/render, real tools); the listed tests do not go through the repo-server
     GenerateManifest RPC. Checkout and ref roots are replaced by "." in commands; sanitizing
     paths in returned errors (<path to cached source>) is the repo-server's.
 
@@ -482,7 +488,7 @@ SRC-048:
     - internal/render/kustomize_test.go:TestKustomizeProxyEnvironment
     - internal/render/kustomize_test.go:TestKustomizeInvalid
   notes: >-
-    Library-level (internal/render, real tools); not yet exercised through the repo-server
+    Library-level (internal/render, real tools); the listed tests do not go through the repo-server
     GenerateManifest RPC. Overrides run in a scratch copy of the repository; the shared checkout
     is never modified.
 
@@ -492,7 +498,7 @@ SRC-049:
   tests:
     - internal/render/kustomize_test.go:TestKustomizeAllOverrides
   notes: >-
-    Library-level (internal/render, real tools); not yet exercised through the repo-server
+    Library-level (internal/render, real tools); the listed tests do not go through the repo-server
     GenerateManifest RPC.
 
 SRC-050:
@@ -501,7 +507,7 @@ SRC-050:
   tests:
     - internal/render/kustomize_test.go:TestKustomizeAllOverrides
   notes: >-
-    Library-level (internal/render, real tools); not yet exercised through the repo-server
+    Library-level (internal/render, real tools); the listed tests do not go through the repo-server
     GenerateManifest RPC.
 
 SRC-051:
@@ -510,7 +516,7 @@ SRC-051:
   tests:
     - internal/render/kustomize_test.go:TestKustomizeAllOverrides
   notes: >-
-    Library-level (internal/render, real tools); not yet exercised through the repo-server
+    Library-level (internal/render, real tools); the listed tests do not go through the repo-server
     GenerateManifest RPC. CLI/UI image merge semantics are the CLI's and UI's.
 
 SRC-052:
@@ -519,7 +525,7 @@ SRC-052:
   tests:
     - internal/render/kustomize_test.go:TestKustomizeReplicas
   notes: >-
-    Library-level (internal/render, real tools); not yet exercised through the repo-server
+    Library-level (internal/render, real tools); the listed tests do not go through the repo-server
     GenerateManifest RPC.
 
 SRC-053:
@@ -529,7 +535,7 @@ SRC-053:
     - internal/render/kustomize_test.go:TestKustomizeAllOverrides
     - internal/render/kustomize_test.go:TestKustomizeLabels
   notes: >-
-    Library-level (internal/render, real tools); not yet exercised through the repo-server
+    Library-level (internal/render, real tools); the listed tests do not go through the repo-server
     GenerateManifest RPC.
 
 SRC-054:
@@ -538,7 +544,7 @@ SRC-054:
   tests:
     - internal/render/kustomize_test.go:TestKustomizeLabels
   notes: >-
-    Library-level (internal/render, real tools); not yet exercised through the repo-server
+    Library-level (internal/render, real tools); the listed tests do not go through the repo-server
     GenerateManifest RPC. --force placement verified in the command line; label replacement
     itself is kustomize's.
 
@@ -548,7 +554,7 @@ SRC-055:
   tests:
     - internal/render/kustomize_test.go:TestKustomizeLabels
   notes: >-
-    Library-level (internal/render, real tools); not yet exercised through the repo-server
+    Library-level (internal/render, real tools); the listed tests do not go through the repo-server
     GenerateManifest RPC.
 
 SRC-056:
@@ -557,7 +563,7 @@ SRC-056:
   tests:
     - internal/render/kustomize_test.go:TestKustomizeLabels
   notes: >-
-    Library-level (internal/render, real tools); not yet exercised through the repo-server
+    Library-level (internal/render, real tools); the listed tests do not go through the repo-server
     GenerateManifest RPC.
 
 SRC-057:
@@ -566,7 +572,7 @@ SRC-057:
   tests:
     - internal/render/kustomize_test.go:TestKustomizeAnnotations
   notes: >-
-    Library-level (internal/render, real tools); not yet exercised through the repo-server
+    Library-level (internal/render, real tools); the listed tests do not go through the repo-server
     GenerateManifest RPC.
 
 SRC-058:
@@ -576,7 +582,7 @@ SRC-058:
     - internal/render/kustomize_test.go:TestKustomizeAnnotations
     - internal/render/kustomize_test.go:TestKustomizeAllOverrides
   notes: >-
-    Library-level (internal/render, real tools); not yet exercised through the repo-server
+    Library-level (internal/render, real tools); the listed tests do not go through the repo-server
     GenerateManifest RPC.
 
 SRC-059:
@@ -585,7 +591,7 @@ SRC-059:
   tests:
     - internal/render/kustomize_test.go:TestKustomizeAnnotations
   notes: >-
-    Library-level (internal/render, real tools); not yet exercised through the repo-server
+    Library-level (internal/render, real tools); the listed tests do not go through the repo-server
     GenerateManifest RPC.
 
 SRC-060:
@@ -594,7 +600,7 @@ SRC-060:
   tests:
     - internal/render/kustomize_test.go:TestKustomizeAllOverrides
   notes: >-
-    Library-level (internal/render, real tools); not yet exercised through the repo-server
+    Library-level (internal/render, real tools); the listed tests do not go through the repo-server
     GenerateManifest RPC.
 
 SRC-061:
@@ -604,7 +610,7 @@ SRC-061:
     - internal/render/kustomize_test.go:TestKustomizeAllOverrides
     - internal/render/kustomize_test.go:TestKustomizePatchesWithoutKustomizationFile
   notes: >-
-    Library-level (internal/render, real tools); not yet exercised through the repo-server
+    Library-level (internal/render, real tools); the listed tests do not go through the repo-server
     GenerateManifest RPC.
 
 SRC-062:
@@ -614,7 +620,7 @@ SRC-062:
     - internal/render/kustomize_test.go:TestKustomizeComponents
     - internal/render/kustomize_test.go:TestKustomizeAllOverrides
   notes: >-
-    Library-level (internal/render, real tools); not yet exercised through the repo-server
+    Library-level (internal/render, real tools); the listed tests do not go through the repo-server
     GenerateManifest RPC.
 
 SRC-063:
@@ -623,7 +629,7 @@ SRC-063:
   tests:
     - internal/render/kustomize_test.go:TestKustomizeComponents
   notes: >-
-    Library-level (internal/render, real tools); not yet exercised through the repo-server
+    Library-level (internal/render, real tools); the listed tests do not go through the repo-server
     GenerateManifest RPC.
 
 SRC-064:
@@ -632,7 +638,7 @@ SRC-064:
   tests:
     - internal/render/kustomize_test.go:TestKustomizeVersionSelection
   notes: >-
-    Library-level (internal/render, real tools); not yet exercised through the repo-server
+    Library-level (internal/render, real tools); the listed tests do not go through the repo-server
     GenerateManifest RPC. Duplicate version registration is detected by internal/settings;
     render receives Input.KustomizeOptions.Versions.
 
@@ -642,7 +648,7 @@ SRC-065:
   tests:
     - internal/render/kustomize_test.go:TestKustomizeBuildOptions
   notes: >-
-    Library-level (internal/render, real tools); not yet exercised through the repo-server
+    Library-level (internal/render, real tools); the listed tests do not go through the repo-server
     GenerateManifest RPC.
 
 SRC-066:
@@ -651,7 +657,7 @@ SRC-066:
   tests:
     - internal/render/kustomize_test.go:TestKustomizeEnableHelm
   notes: >-
-    Library-level (internal/render, real tools); not yet exercised through the repo-server
+    Library-level (internal/render, real tools); the listed tests do not go through the repo-server
     GenerateManifest RPC.
 
 SRC-067:
@@ -661,7 +667,7 @@ SRC-067:
     - internal/render/kustomize_test.go:TestKustomizeRemoteBaseGitGuard
     - internal/render/kustomize_test.go:TestKustomizeWrappers
   notes: >-
-    Library-level (internal/render, real tools); not yet exercised through the repo-server
+    Library-level (internal/render, real tools); the listed tests do not go through the repo-server
     GenerateManifest RPC.
 
 SRC-068:
@@ -671,7 +677,7 @@ SRC-068:
     - internal/render/kustomize_test.go:TestKustomizeWrappers
     - internal/render/kustomize_test.go:TestKustomizeEnableHelm
   notes: >-
-    Library-level (internal/render, real tools); not yet exercised through the repo-server
+    Library-level (internal/render, real tools); the listed tests do not go through the repo-server
     GenerateManifest RPC. The helm wrapper's environment pinning is tested with a fake helm;
     chart inflation through the wrapper with real helm.
 
@@ -795,7 +801,7 @@ SRC-091:
     - internal/render/cmp_test.go:TestPluginNamedWithoutDiscovery
     - internal/render/helm_test.go:TestHelmParameters
   notes: >-
-    Library-level (internal/render, real tools); not yet exercised through the repo-server
+    Library-level (internal/render, real tools); the listed tests do not go through the repo-server
     GenerateManifest RPC. Every ARGOCD_APP_* variable has a PATROL_APP_* twin. The reduced
     GetAppDetails set is applied for plugin parameters; other GetAppDetails paths are the repo-
     server's.
@@ -807,7 +813,7 @@ SRC-092:
     - internal/render/source_test.go:TestOverrideFiles
     - internal/render/source_test.go:TestOverrideFileErrors
   notes: >-
-    Library-level (internal/render, real tools); not yet exercised through the repo-server
+    Library-level (internal/render, real tools); the listed tests do not go through the repo-server
     GenerateManifest RPC. .patrol-source.yaml is merged after .argocd-source.yaml (Patrol name
     wins at equal specificity).
 
@@ -817,7 +823,7 @@ SRC-093:
   tests:
     - internal/render/source_test.go:TestOverrideFiles
   notes: >-
-    Library-level (internal/render, real tools); not yet exercised through the repo-server
+    Library-level (internal/render, real tools); the listed tests do not go through the repo-server
     GenerateManifest RPC. Order: .argocd-source.yaml, .patrol-source.yaml, .argocd-
     source-<app>.yaml, .patrol-source-<app>.yaml (later wins).
 

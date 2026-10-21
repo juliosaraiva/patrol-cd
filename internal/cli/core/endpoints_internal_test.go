@@ -1,6 +1,8 @@
 package core
 
 import (
+	"errors"
+	"fmt"
 	"log/slog"
 	"path/filepath"
 	"testing"
@@ -122,6 +124,22 @@ func TestNamespaceAndDestinations(t *testing.T) {
 	assert.Equal(t, "remote-token", got.BearerToken, "the caller's own context for that cluster")
 	_, err = d.RESTConfig(t.Context(), &v1alpha1.Cluster{Spec: v1alpha1.ClusterSpec{Server: "https://unknown.example.com"}})
 	require.ErrorContains(t, err, "no kubeconfig context for destination cluster https://unknown.example.com")
+	// The API server shows the caller only errors that opt in with UserMessage; the error returned
+	// here is what core mode's application routes see (a bare 503 otherwise).
+	var um interface{ UserMessage() string }
+	require.True(t, errors.As(err, &um), "RESTConfig's error implements UserMessage")
+	assert.Contains(t, um.UserMessage(), "your own kubeconfig credentials")
 	_, err = d.RESTConfig(t.Context(), nil)
 	require.Error(t, err)
+}
+
+// TestNoContextErrorIsUserFacing: the error for a destination without a kubeconfig context
+// carries the text the API server shows to the caller (a bare "unavailable" says nothing).
+func TestNoContextErrorIsUserFacing(t *testing.T) {
+	t.Parallel()
+	var err error = &noContextError{server: "https://unknown.example.com"}
+	var um interface{ UserMessage() string }
+	require.True(t, errors.As(fmt.Errorf("wrapped: %w", err), &um), "the error implements UserMessage")
+	assert.Contains(t, um.UserMessage(), "no kubeconfig context for destination cluster https://unknown.example.com")
+	assert.Contains(t, um.UserMessage(), "your own kubeconfig credentials")
 }

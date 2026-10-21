@@ -1,0 +1,19 @@
+# Helm values for installing Patrol CD into the patrol-control kind cluster (hack/kind/install.sh).
+# Not a production profile: it points at the locally built image and opens the extra ports the
+# e2e fixtures need.
+image:
+  repository: patrol-cd/patrol-cd
+  tag: dev
+  pullPolicy: IfNotPresent
+server:
+  service:
+    # kind maps NodePort 30443 of patrol-control to https://127.0.0.1:8443 on the host.
+    type: NodePort
+    nodePortHttps: 30443
+networkPolicy:
+  repoServerEgress:
+    # NetworkPolicy ports are the destination pod's ports, after Service translation. The
+    # fixtures listen on 8080 (git over HTTP, chart repository) and 2222 (git over SSH) behind
+    # Services on ports 80 and 22, and patrol-registry listens on 5000. The chart's default is
+    # 22, 80 and 443.
+    ports: [22, 80, 443, 2222, 5000, 8080]

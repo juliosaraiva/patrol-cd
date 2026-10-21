@@ -52,7 +52,8 @@ API-079:
     Different by design (docs/architecture/components/cli-admin.md#dashboard): a loopback proxy to a
     running patrol-server through pods/portforward, login required, TLS verified (pinned tls.crt of
     patrol-secret). The WebSocket port-forward was only exercised against a protocol-faithful fake
-    (no kubelet in envtest, no kind cluster available), hence implemented.
+    (no kubelet in envtest; `admin dashboard` was not run against the kind clusters of
+    2026-10-19, whose only port-forwards were CLI core mode's, by hand), hence implemented.
 
 API-080:
   status: verified

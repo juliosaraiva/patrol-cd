@@ -6,7 +6,9 @@
 #   1. patrol-target: ServiceAccount kube-system/patrol-manager bound to cluster-admin
 #      (hack/kind/manifests/target-manager.yaml) and a bearer token for it (TokenRequest API).
 #   2. patrol-control, namespace NS (created if missing): Secret cluster-patrol-target with keys
-#      bearerToken and caData (patrol-target's cluster CA, PEM), then the Cluster object of
+#      bearerToken and caData (patrol-target's cluster CA, PEM) and the label
+#      cd.patrol.example/secret-type=cluster that Patrol CD requires of every Secret a Cluster
+#      references, then the Cluster object of
 #      hack/kind/manifests/cluster-patrol-target.yaml (server
 #      https://patrol-target-control-plane:6443).
 #
@@ -88,7 +90,7 @@ patrol::kubectl "$control" create namespace "$ns" --dry-run=client -o yaml | app
 patrol::kubectl "$control" -n "$ns" create secret generic cluster-patrol-target \
 	--from-file=bearerToken="$tmp/bearerToken" --from-file=caData="$tmp/caData" \
 	--dry-run=client -o yaml |
-	patrol::kubectl "$control" label --local -f - app.kubernetes.io/part-of=patrol-cd-dev -o yaml |
+	patrol::kubectl "$control" label --local -f - app.kubernetes.io/part-of=patrol-cd-dev cd.patrol.example/secret-type=cluster -o yaml |
 	apply -f - >/dev/null
 apply -n "$ns" -f "$PATROL_KIND_DIR/manifests/cluster-patrol-target.yaml" >/dev/null
 

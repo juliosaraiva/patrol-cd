@@ -16,7 +16,7 @@ spec:
     name: e2e-git-http-creds
 ---
 # Git over SSH: every repository under ssh://git@git-server.../git/. The server's TEST-ONLY host
-# key is in test/e2e/fixtures/git-server/known_hosts (add it to patrol-ssh-known-hosts-cm).
+# key is in test/e2e/fixtures/git-server/known_hosts (register.sh adds it to patrol-ssh-known-hosts-cm).
 apiVersion: cd.patrol.example/v1alpha1
 kind: RepositoryCredential
 metadata:

@@ -9,7 +9,9 @@ Resume rule: read this file, then `docs/parity/matrix.md`, then `docs/verificati
 - **2026-10-18: Phase 4 closeout** (Dockerfile, static manifests, Helm chart, first-run
   bootstrap). Two review rounds fixed; the final full `./test/deploy/` run passed (157 subtests, 281 s,
   `docs/verification/log.md` V-0027); committed and pushed (`3ea2bd3`). **2026-10-19: the Docker
-  disk was freed (V-0028) and the image was built and checked (linux/arm64).** State and open items:
+  disk was freed (V-0028) and the image was built and checked (linux/arm64); on the user's request
+  the kind validation (T4.3) ran (V-0029..V-0031), was reviewed twice, and its closing run after
+  the review fixes is V-0032.** State and open items:
   section "PHASE 4 CLOSEOUT STATE" below. The W1–W6 lines that follow are historical.
 - W1 parity research (`docs/parity/areas/*.md`): 9/10 areas done (1,289 features); ops area + completeness critic re-running (run wf_af0f5fae-226)
 - W2 CRD types: implemented + reviewed; review-fix re-running (run wf_3b816f38-c83)
@@ -26,7 +28,8 @@ Resume rule: read this file, then `docs/parity/matrix.md`, then `docs/verificati
 `patrolcd bootstrap` first-run step they require). CI pipelines, kind validation, e2e, the
 security and performance phases (Phase 5/6) and publishing anything (images, charts, releases,
 making the repository public) remain **out of scope until the user says otherwise**. When the
-Phase 4 closeout is committed, stop and wait for the user.
+Phase 4 closeout is committed, stop and wait for the user. (The kind validation, T4.3, was done
+on the user's request on 2026-10-19; the rest of this list is unchanged.)
 
 Superseded rule (user instruction, 2026-10-17; satisfied at the Phase 3 boundary, kept for
 history): **STOP when Phase 3 is completed.** Phase 3 = T3.1–T3.4 (API server, resource services, apiclient + CLI incl. `--core`, web UI) plus the server wiring they need (`cmd/patrolcd`, `internal/server`). At that boundary: finish the pre-push checks, make signed commits, create the PRIVATE GitHub repo and push (the earlier gate instruction, still in force), then STOP and wait for the user. Do NOT start Phase 4 (Dockerfile, Helm chart, manifests, kind validation) or Phase 5/6 work (e2e scenarios beyond the harness already in flight, security tests, benchmarks, parity audit backfill, docs workstreams).
@@ -61,7 +64,7 @@ Update 2026-10-16 (afternoon):
 
 - (Resolved 2026-10-17) Commit signing / SSH via 1Password: the user unlocked the agent; 17 signed commits created and pushed.
 
-- **(Resolved 2026-10-19) Docker Desktop VM disk was full (2026-10-16).** At the user's request I pruned the build cache (18.54 GB) and dangling images (5.183 GB); 152 GB are free in the VM and other projects' containers, volumes and tagged images were not touched (V-0028). Still reclaimable if ever needed: about 17 GB of tagged unused images and 4 GB of volumes (not mine to delete). Unblocks T4.3 kind validation, T5.3 e2e and T5.6–T5.8, none of which was started (out of scope until told).
+- **(Resolved 2026-10-19) Docker Desktop VM disk was full (2026-10-16).** At the user's request I pruned the build cache (18.54 GB) and dangling images (5.183 GB); 152 GB are free in the VM and other projects' containers, volumes and tagged images were not touched (V-0028). Still reclaimable if ever needed: about 17 GB of tagged unused images and 4 GB of volumes (not mine to delete). Unblocked T4.3 kind validation (done on the user's request on 2026-10-19, V-0029..V-0031), T5.3 e2e and T5.6–T5.8 (not started, out of scope until told).
 
 - (Resolved 2026-10-16) Local commits were failing on 1Password signing; signing works again, so work can now be committed normally.
 
@@ -112,9 +115,9 @@ Update 2026-10-16 (afternoon):
 - [ ] T3.4 Web UI (inventory, details, tree, diff, logs, terminal, history, sync panel, onboarding, projects, accounts, settings, appsets, notifications, extensions)
 
 ## Phase 4 — Packaging & environments
-- [x] T4.1 Dockerfile (pinned helm/kustomize/git-lfs), local image build — Dockerfile, pins, `hack/images`, `make image*` targets; static checks (V-0018/V-0025) and, since 2026-10-19, the executed build for linux/arm64 (`make image`, 386 MB) with `make image-layout-check` (52/52) and `make image-smoke` (25/25) (V-0028, `docs/verification/runs/2026-10-19-image-build.md`). Not done: linux/amd64 and multi-arch builds, SBOM, scans, push, run on a cluster.
-- [x] T4.2 Generated manifests: install, namespace-install, core-install, ha; Helm chart with documented values; NetworkPolicies; security contexts — chart and `deploy/manifests` (generated from it), validated against envtest kube-apiservers: strict dry runs, Pod Security `restricted`, helm install/upgrade/rollback/uninstall/re-install, RBAC sufficiency with the real binary (V-0019…V-0027). Caveat: live pods, probes by a kubelet and NetworkPolicy enforcement are unverified (no kubelet/CNI; kind blocked).
-- [ ] T4.3 kind environment (control + target clusters, in-cluster git server, chart repo, OCI registry)
+- [x] T4.1 Dockerfile (pinned helm/kustomize/git-lfs), local image build — Dockerfile, pins, `hack/images`, `make image*` targets; static checks (V-0018/V-0025) and, since 2026-10-19, the executed build for linux/arm64 (`make image`, 386 MB) with `make image-layout-check` (52/52) and `make image-smoke` (25/25) (V-0028, `docs/verification/runs/2026-10-19-image-build.md`). The arm64 image ran the five components of the chart's default profile on kind (T4.3). Not done: linux/amd64 and multi-arch builds, SBOM, scans, push.
+- [x] T4.2 Generated manifests: install, namespace-install, core-install, ha; Helm chart with documented values; NetworkPolicies; security contexts — chart and `deploy/manifests` (generated from it), validated against envtest kube-apiservers: strict dry runs, Pod Security `restricted`, helm install/upgrade/rollback/uninstall/re-install, RBAC sufficiency with the real binary (V-0019…V-0027). Since 2026-10-19 the default profile also ran on kind (T4.3): live pods, probes by a kubelet and part of the NetworkPolicy enforcement (repo-server egress, metrics ingress; kindnet). Still unverified: the other profiles and the static bundles beyond one manual `cluster-install` apply, other CNIs, HA.
+- [x] T4.3 kind environment (control + target clusters, in-cluster git server, chart repo, OCI registry) — `make image kind-up kind-fixtures kind-install kind-verify` from nothing in about 6 minutes; clean-room run 55/55 checks with `--lifecycle` and the script as it was before the review (V-0031, `docs/verification/runs/2026-10-19-kind-validation.md`); a later `make kind-verify` failed 3 checks until the fixture host key was restored (V-0031, KV-10). Closing clean-room run after the review fixes: 58 of 58 checks with `--lifecycle`, 42 of them in a default run (V-0032). One CNI (kindnet), arm64, one replica per component.
 - [ ] T4.4 Examples (each source type, multi-source, multi-cluster, GitHub previews, notifications, CMP plugin)
 
 ## Phase 5 — Verification
@@ -139,6 +142,7 @@ Update 2026-10-16 (afternoon):
 
 - 2026-10-12 T0.1–T0.3 (see `docs/verification/log.md` entries V-0001..V-0003)
 - 2026-10-18 T4.2 chart + static manifests, T4.1 image tooling, first-run bootstrap; two review rounds (V-0018..V-0027); 2026-10-19 T4.1 image built and checked (V-0028)
+- 2026-10-19 T4.3 kind validation (V-0029..V-0032)
 
 ## Requirements carried to later tasks
 
@@ -173,13 +177,13 @@ Next (NOT started, per STOP rule): the private GitHub repo + push (user instruct
 
 ## GitHub gate DONE (2026-10-17) — STOPPED at the Phase 3 boundary
 
-Private repository created and `main` pushed: https://github.com/juliosaraiva/patrol-cd (visibility PRIVATE; HEAD 5e64fa8 matched local; commits show Verified on GitHub). Pre-push: gitleaks tree+history 0 findings (V-0016 + `.gitleaks.toml`), tracked files reviewed. Per the STOP rule no Phase 4+ work has been started. Resume only when the user says so; start by reading this file, `docs/verification/log.md`, and the open decisions: Docker Desktop disk space (blocker for image build/kind), parity status audit/backfill, preserved Phase 5 scenario WIP (snapshot `20261016T214116Z`), finalizer rename, UI shuffle-order tests.
+Private repository created and `main` pushed: https://github.com/juliosaraiva/patrol-cd (visibility PRIVATE; HEAD 5e64fa8 matched local; commits show Verified on GitHub). Pre-push: gitleaks tree+history 0 findings (V-0016 + `.gitleaks.toml`), tracked files reviewed. Per the STOP rule no Phase 4+ work has been started. Resume only when the user says so; start by reading this file, `docs/verification/log.md`, and the open decisions: Docker Desktop disk space (blocker for image build/kind; resolved 2026-10-19), parity status audit/backfill, preserved Phase 5 scenario WIP (snapshot `20261016T214116Z`), finalizer rename, UI shuffle-order tests.
 
 ## PHASE 4 STARTED (2026-10-18) — user instruction: "Start on Phase 4: Dockerfile, manifests and Helm chart"
 
-Scope authorized now: T4.1 Dockerfile/image tooling, T4.2 static manifests + Helm chart (+ the `patrolcd bootstrap` first-run step they require, found missing: nothing generated the admin password or `patrol-internal-token`). NOT in scope until told: CI pipelines, kind validation (Docker disk still full), e2e/security/perf phases, publishing anything.
+Scope authorized now: T4.1 Dockerfile/image tooling, T4.2 static manifests + Helm chart (+ the `patrolcd bootstrap` first-run step they require, found missing: nothing generated the admin password or `patrol-internal-token`). NOT in scope until told: CI pipelines, kind validation (Docker disk still full; both resolved and done on the user's request on 2026-10-19), e2e/security/perf phases, publishing anything.
 Workflow wf_71881e0f-20d: Build (boot, image, chart in parallel) → Assemble (static manifests, test/deploy harness incl. helm install/upgrade/uninstall + RBAC sufficiency against envtest) → independent reviews (chart-security, image-bootstrap) → fixes. Agents do not commit; the orchestrator commits (signed) and pushes after verification.
-Known limits recorded up front: `docker build` could not be executed (Docker Desktop disk full; resolved and built 2026-10-19, see below) → image steps were verified piecewise and labeled NOT EXECUTED until then; no kubelet/CNI in envtest → NetworkPolicy enforcement and live pods unverified.
+Known limits recorded up front: `docker build` could not be executed (Docker Desktop disk full; resolved and built 2026-10-19, see below) → image steps were verified piecewise and labeled NOT EXECUTED until then; no kubelet/CNI in envtest → NetworkPolicy enforcement and live pods unverified there (the kind validation of 2026-10-19 exercised them for the default profile, T4.3).
 
 ## PHASE 4 CLOSEOUT STATE (2026-10-18)
 
@@ -192,7 +196,8 @@ Done (evidence `docs/verification/log.md` V-0018…V-0027):
 Open items:
 - **Final full `./test/deploy/` run after round 2: passed** (21 tests, 157 subtests, 281 s; V-0027). Earlier closeout runs: one failure from a concurrent `make verify-generated`, one CRD-deletion timeout under load (V-0026); the CRD wait now reports its state and waits 5 minutes.
 - **Docker disk**: resolved 2026-10-19 (Blockers above). `make image-multiarch`, `make image-sbom` and the R2-8 SBOM/license checks are now possible but were not run.
-- **kind validation** (T4.3) and e2e on kind: no longer blocked by the disk; out of scope until the user says so.
+- **kind validation** (T4.3): done 2026-10-19 on the user's request (V-0029 environment, V-0030 manual install and checks, V-0031 clean-room run 55/55 and the failed re-run after it; closing clean-room run after the review fixes V-0032, 58/58). Findings KV-1..KV-13 are in `docs/verification/phase4-findings.md`; KV-1 (repo-server crash on a volume mount root), KV-2, KV-4..KV-9 and KV-12 were fixed, KV-3 is documented, KV-10, KV-11 and KV-13 are observations (KV-11 and KV-13 open). The environment is left running (`make kind-down` removes it).
+- **e2e on kind (T5.3)**: out of scope until told. `hack/kind/verify-install.sh` covers install, security contexts, part of NetworkPolicy, metrics endpoints, sync and drift (with `--lifecycle` also helm rollback, upgrade, uninstall and re-install), but not Application update, prune, self-heal, recovery, multi-cluster tenancy, ApplicationSets, auth/SSO, notifications or extensions.
 - **CI pipelines**: not started (T0.7), out of scope until told.
 - **DV-2**: a core installation has no AppProject `default`; documented in the guides, not fixed (policy decision).
 - Round-2 follow-ups R2-3…R2-8 (`docs/verification/phase4-findings.md`; R2-1 overview.md notifications row and R2-2 `patrolcd bootstrap` help text were done by the orchestrator on 2026-10-18): `hack/build.mk` tree state, musl copyright for connect-proxy, `.gitignore` kubeconfig*.go, optional clock-free staleness check, keep-or-delete decision for the trust ConfigMaps on uninstall, SBOM/apk checks that need the image.

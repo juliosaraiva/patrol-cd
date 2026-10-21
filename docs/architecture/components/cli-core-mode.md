@@ -167,7 +167,7 @@ destination cluster authenticates, authorizes and audits the caller.
 
 | Call | With a kubeconfig context for the server | Without one |
 |------|------------------------------------------|-------------|
-| Resource routes (pod logs, events, live resources, actions, web terminal) | Caller's context | `core mode: no kubeconfig context for destination cluster <url> ...` |
+| Resource routes (pod logs, events, live resources, actions, web terminal) | Caller's context | `... the configuration of cluster <url> is not available: core mode: no kubeconfig context for destination cluster <url>; core mode reads live resources with your own kubeconfig credentials` (HTTP 503). The provider's error implements `UserMessage()`, which the applications service appends to the response (`clusterConfigUnavailable`); the cause of any other provider error stays out of the response. |
 | Connection check of `cluster add`, `cluster set`, upsert (`GET /version`) | Caller's context; the result is recorded in `Cluster.status` (connection state, server version), which the controller replaces with its own check | Not checked: nothing is sent to the cluster, the change is saved and no connection state is recorded (the controller checks the connection with the stored credentials, as for exec/AWS clusters in server mode) |
 | `cluster rotate-auth` | Caller's context: reads the token Secret named by the stored token's claims, creates the new token Secret, updates the service account and deletes the old Secret with the caller's permissions there (`secrets` get/create/delete, `serviceaccounts` get/update in that namespace); the new token is stored without a separate check (the connection check uses the caller's context) | Refused before anything changes: `core mode changes a cluster only with your own kubeconfig credentials for it, never with the credentials stored for Patrol CD: ...` |
 
@@ -210,10 +210,13 @@ with `--auth-token` / `PATROL_AUTH_TOKEN`; invalid `PATROL_CORE` values.
 
 ## Gaps
 
-- Live verification of the port-forward path on a kind cluster is pending (no kind cluster has
-  been created yet, see `TASKS.md`): kubelet-backed `pods/portforward` and controller pods
-  of a real StatefulSet have not been exercised; tests use a fake Kubernetes API serving the
-  same WebSocket protocol.
+- Run by hand on a kind cluster (2026-10-19, `docs/verification/runs/2026-10-19-kind-validation.md`,
+  step 15; no committed script or test repeats it): `app list`, `app get`, `app manifests` (the repo-server through a kubelet-backed
+  port-forward and the controller of a real StatefulSet), `app diff` and `app history` work in
+  core mode against the live control cluster. Not exercised against a kubelet: `app logs`, live
+  resources, actions and the web terminal of a destination cluster (they need a kubeconfig
+  context whose server URL equals the Cluster's `spec.server`; the kind Cluster uses a
+  container-network name the host cannot reach), `cluster add/rotate-auth`, and `appset`.
 - The tree API is reached in plain HTTP; controllers serving it with `--tls-cert` are not
   reachable in core mode (the server's `--controller-tree-api-tls` is a flag, not a
   parameter core mode can read).

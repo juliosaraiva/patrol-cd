@@ -174,6 +174,10 @@ type Config struct {
 	Logger *slog.Logger
 	// Now is the clock (tests).
 	Now func() time.Time
+
+	// rootFS replaces the file system view of the root directory (tests): a volume mount root
+	// owned by another user cannot be created by a non-root test process.
+	rootFS *rootFS
 }
 
 // withDefaults returns cfg with defaults applied and validates it.

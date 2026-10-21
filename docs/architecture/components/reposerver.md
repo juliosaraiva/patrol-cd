@@ -24,7 +24,7 @@ forward resolved credentials in every request (`apiclient.Repository`).
 
 | Symbol | Purpose |
 |--------|---------|
-| `New(Config) (*Service, error)` | Prepares the root directory (stale entries of a previous process removed, root `0300`), the renderer, Helm client, caches and metrics. |
+| `New(Config) (*Service, error)` | Prepares the root directory (stale entries of a previous process removed, root `0300`), the renderer, Helm client, caches and metrics. When `RootDir` is the root of a volume owned by another user (a Kubernetes emptyDir is owned by root and world-writable: mode 0777 with the setgid bit for the fsGroup, no sticky bit), the process cannot change its mode and works in a private subdirectory `_patrol-repo` of it instead (`prepareRoot`; found by the kind validation, KV-1). The fallback applies only when the root dir is owned by root or by the process and the error is a permission error: a root dir owned by another user is refused, and so is a `_patrol-repo` entry that is not a real directory owned by the process (a symlink, a file or someone else's directory is never adopted). Anyone who can write the mount root can still rename the private directory, so a work volume must be mounted only into the repo-server container (the chart does). |
 | `(*Service)` methods | Implement `apiclient.Client` in process (every `GenerateManifest`/`GetAppDetails`/... below). Errors carry a code (`ErrorCode`) and have working-copy paths replaced by `<path to cached source>`. |
 | `(*Service).Handler() (http.Handler, error)` | The HTTP API with the configured token, size caps, timeout, metrics and readiness. |
 | `NewHandler(apiclient.Client, HandlerOptions)` | The HTTP API around any `apiclient.Client` (tests, fakes). |

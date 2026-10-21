@@ -42,6 +42,23 @@ type clusterTarget struct {
 	impersonated string
 }
 
+// userMessager is implemented by errors of a ClusterConfigs provider whose text is meant for the
+// caller (core mode: the caller owns the kubeconfig the message is about). Any other provider
+// error stays out of the response: it can name credential Secrets and connection details.
+type userMessager interface{ UserMessage() string }
+
+// clusterConfigUnavailable is the 503 for a destination cluster whose configuration cannot be
+// built. The cause is attached for the server log; it reaches the client only when it opts in
+// with UserMessage.
+func clusterConfigUnavailable(server string, cause error) *apirest.Error {
+	msg := fmt.Sprintf("error getting application cluster config: the configuration of cluster %s is not available", server)
+	var um userMessager
+	if errors.As(cause, &um) {
+		msg += ": " + um.UserMessage()
+	}
+	return apirest.Unavailable("%s", msg).WithCause(cause)
+}
+
 // appClusterConfig resolves the destination cluster of app and its configuration (upstream
 // getApplicationClusterConfig). With impersonate, the impersonation settings are read from
 // the current snapshot: when enabled, the first spec.destinationServiceAccounts entry of
@@ -68,7 +85,7 @@ func (s *Service) appClusterConfig(ctx context.Context, app *v1alpha1.Applicatio
 			return nil, ctxErr
 		}
 		s.log().WarnContext(ctx, "applications: cannot build the destination cluster configuration", "server", cluster.Spec.Server, "error", err)
-		return nil, apirest.Unavailable("error getting application cluster config: the configuration of cluster %s is not available", cluster.Spec.Server).WithCause(err)
+		return nil, clusterConfigUnavailable(cluster.Spec.Server, err)
 	}
 	cfg = rest.CopyConfig(cfg)
 	t := &clusterTarget{cluster: cluster, config: cfg}

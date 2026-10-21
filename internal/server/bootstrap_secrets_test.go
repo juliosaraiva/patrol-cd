@@ -813,15 +813,23 @@ func TestBootstrapCommand(t *testing.T) {
 	kubeconfig := filepath.Join(t.TempDir(), "kubeconfig")
 	require.NoError(t, os.WriteFile(kubeconfig, testKubeconfig, 0o600))
 
-	var stdout, stderr bytes.Buffer
+	// Main installs the process-wide default logger, which keeps writing to these buffers after it
+	// returns (log lines of http servers of tests running in parallel included), so they are
+	// synchronized and the lines are checked for structure, not for the component of every line.
+	var stdout, stderr syncBuffer
 	code := Main("patrolcd", []string{"bootstrap", "--kubeconfig", kubeconfig, "-n", ns, "--logformat", "json", "--loglevel", "debug"}, &stdout, &stderr)
 	require.Equal(t, 0, code, stderr.String())
 	assert.Empty(t, stdout.String(), "bootstrap prints nothing on stdout")
 	lines := strings.Split(strings.TrimSpace(stderr.String()), "\n")
 	require.NotEmpty(t, lines)
+	var bootstrapLines int
 	for _, l := range lines {
-		require.True(t, strings.HasPrefix(l, "{") && strings.Contains(l, `"component":"bootstrap"`), "structured log line: %s", l)
+		require.True(t, strings.HasPrefix(l, "{"), "structured log line: %s", l)
+		if strings.Contains(l, `"component":"bootstrap"`) {
+			bootstrapLines++
+		}
 	}
+	assert.Positive(t, bootstrapLines, "the bootstrap logs with its component")
 	assert.Contains(t, stderr.String(), `"msg":"converged"`)
 
 	password := string(getSecret(t, kube, ns, InitialAdminSecretName).Data[InitialAdminSecretKey])
@@ -860,7 +868,7 @@ func TestBootstrapCommand(t *testing.T) {
 
 func TestBootstrapCommandRegistered(t *testing.T) {
 	t.Parallel()
-	var stdout, stderr bytes.Buffer
+	var stdout, stderr syncBuffer
 	require.Equal(t, 0, Main("patrolcd", []string{"--help"}, &stdout, &stderr), stderr.String())
 	assert.Regexp(t, `(?m)^  bootstrap\s+Create the first-run Secrets`, stdout.String())
 	var found bool

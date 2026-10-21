@@ -61,7 +61,7 @@ getent hosts patrol-target-control-plane
 nodes=$(kubectl --kubeconfig "$kc" get nodes -o name)
 echo "$nodes"
 test "$nodes" = node/patrol-target-control-plane
-kubectl --kubeconfig "$kc" get --raw /version | grep -q gitVersion
+kubectl --kubeconfig "$kc" get --raw /version | grep gitVersion >/dev/null
 echo "patrol-target API reachable from a patrol-control pod: $nodes"
 EOF
 
@@ -74,8 +74,8 @@ g() { git -c credential.helper= -c "credential.helper=$cred" "$@"; }
 cd "$(mktemp -d)"
 if git ls-remote "$base/guestbook.git" >/dev/null 2>&1; then echo "anonymous access to /git was allowed"; exit 1; fi
 g ls-remote "$base/guestbook.git"
-g ls-remote "$base/guestbook.git" | grep -q 'refs/heads/feature/e2e'
-g ls-remote "$base/guestbook.git" | grep -q 'refs/tags/v1.0.0^{}'
+g ls-remote "$base/guestbook.git" | grep 'refs/heads/feature/e2e' >/dev/null
+g ls-remote "$base/guestbook.git" | grep 'refs/tags/v1.0.0^{}' >/dev/null
 g clone -q --branch v1.0.0 "$base/guestbook.git" gb
 test -f gb/guestbook-ui-deployment.yaml
 grep -q 'replicas: 1' gb/guestbook-ui-deployment.yaml
@@ -119,6 +119,8 @@ EOF
 check helm-repo <<'EOF'
 set -eu
 export HOME=$(mktemp -d)
+# Helm 3.19 (the toolbox's Alpine package) does not create the --destination directory.
+mkdir -p "$HOME/charts"
 base=http://chart-repo.patrol-e2e.svc.cluster.local
 helm repo add e2e "$base" >/dev/null
 helm pull e2e/helm-guestbook --version 0.1.0 -d "$HOME/charts"
@@ -134,10 +136,11 @@ check oci <<'EOF'
 set -eu
 export HOME=$(mktemp -d)
 cd "$HOME"
+mkdir -p charts
 helm pull oci://patrol-registry:5000/patrol-e2e/charts/helm-guestbook --version 0.1.0 --plain-http -d charts
 test -f charts/helm-guestbook-0.1.0.tgz
 oras pull --plain-http patrol-registry:5000/patrol-e2e/manifests/guestbook:v1.0.0 -o bundle >/dev/null
-tar -tzf bundle/bundle.tar.gz | grep -q guestbook-ui-deployment.yaml
+tar -tzf bundle/bundle.tar.gz | grep guestbook-ui-deployment.yaml >/dev/null
 echo "OCI chart and manifest bundle pulled from patrol-registry:5000"
 EOF
 

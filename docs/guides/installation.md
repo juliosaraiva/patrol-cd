@@ -6,9 +6,15 @@ generated [chart README](../../deploy/helm/patrol-cd/README.md); this guide expl
 them. Installations without Helm render the same chart (see [Without Helm](#without-helm)).
 
 Status: the chart renders, lints and validates statically (`make helm-lint helm-template`,
-recorded in `docs/verification/runs/2026-10-17-chart-static.md`). It has not yet been installed
-on a running cluster from this repository: the image builds and passes its smoke test
-(`docs/verification/runs/2026-10-19-image-build.md`), but no kind cluster has been created yet.
+recorded in `docs/verification/runs/2026-10-17-chart-static.md`) and is installed, upgraded,
+rolled back, uninstalled and re-installed against envtest API servers (`test/deploy`,
+`docs/verification/runs/2026-10-17-deploy-validation.md`). Its default profile was installed on
+a local kind cluster with a kubelet on 2026-10-19, with a second kind cluster as the destination,
+and checked by `hack/kind/verify-install.sh`
+(`make kind-install kind-verify`; `docs/verification/runs/2026-10-19-kind-validation.md`), with
+a locally built image (`docs/verification/runs/2026-10-19-image-build.md`). Not run on a
+cluster: the other profiles, more than one replica, other CNIs than kindnet, `linux/amd64`
+nodes and any cloud cluster.
 
 ## Prerequisites
 
@@ -324,10 +330,22 @@ Tighten with the `*Egress.cidrs`/`except`/`ports` values (`ci/hardened.yaml`) an
   443/6443). Narrow it to the endpoints of the `kubernetes` Service. Some CNIs (Cilium) need
   their own construct for the API server (`toEntities: kube-apiserver`) instead of an `ipBlock`.
 - Kubelet probes come from the node and are allowed by most CNIs regardless of policies.
+- **Ports are the destination pod's ports.** NetworkPolicy matches a connection after Service
+  translation, so `ports` must list the port the target pod listens on, not the Service port. An
+  in-cluster Git server, chart repository or registry that listens on 8080 behind a Service on
+  port 80 needs 8080 in `repoServerEgress.ports` (the defaults are 22, 80 and 443); with the
+  default ports the repo-server's requests to it hang until the exec timeout (90 s for git) and
+  the Applications report a comparison error. This was seen on a kind cluster (kindnet), where
+  `ipBlock` `0.0.0.0/0` does match pod IPs, so only the port blocked the connection; other CNIs
+  differ in whether an `ipBlock` matches pod IPs at all, and then a `namespaceSelector` entry in
+  `networkPolicy.extraEgress.repoServer` is needed as well.
 - `except` entries: each one is removed from every CIDR of the same `*Egress.cidrs` list that
   strictly contains it, and ignored for the others (the API server rejects an `except` outside
-  its `cidr`). In-cluster Git servers, registries or IdPs are reached through the `0.0.0.0/0`
-  defaults; when you add `except` for private ranges, add their CIDRs back in the same list:
+  its `cidr`). In-cluster Git servers, registries or IdPs fall under the `0.0.0.0/0` CIDRs only
+  where the CNI matches pod IPs with `ipBlock` (kindnet does), and they are reached only on the
+  ports their pods listen on (see the bullet above: with the default ports 22, 80 and 443 a
+  server whose pod listens on 8080 behind a Service on 80 stays unreachable). When you add
+  `except` for private ranges, add their CIDRs back in the same list:
   `cidrs: [0.0.0.0/0, 10.20.0.0/16]` with `except: [10.0.0.0/8]` allows 10.20.0.0/16 and the
   public addresses. CIDRs must be canonical `address/prefix` strings (schema-checked).
 - The repo-server and the commit-server fetch tenant-supplied URLs, so their external egress
@@ -570,8 +588,11 @@ the same keys).
 
 ## Known limitations
 
-- Not yet installed on a live cluster from this repository (the image builds, kind validation has
-  not been run). NetworkPolicy enforcement and probes are unverified.
+- Installed from this repository only on local kind clusters (default profile, kindnet,
+  linux/arm64, one replica per component; `docs/verification/runs/2026-10-19-kind-validation.md`).
+  There the probes passed and NetworkPolicy enforcement was checked for the repo-server's egress
+  (allowed and refused connections) and for metrics scraped from another namespace; the other
+  components' policies, ingress refusals, other CNIs, HA and the other profiles are unverified.
 - Dex: no configuration launcher (OPS-152); the `patrol` client secret is a manual step; memory
   storage, one replica.
 - The controller tree API does not support client certificates (no mTLS for that hop).

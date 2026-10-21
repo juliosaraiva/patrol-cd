@@ -5,9 +5,11 @@
 # (two independent parsers), deterministic, kustomize-built, applied to a local kube-apiserver
 # 1.36 from the envtest binaries (client and server dry runs with strict field validation, Pod
 # Security "restricted" warnings, real server-side apply, idempotent re-apply, variant switches).
-# That API server has no scheduler, kubelet or controllers: no pod ran, so the bundles stay
-# in-progress until the deployment validation harness and kind exercise them (image build and
-# kind blocked, TASKS.md).
+# That API server has no scheduler, kubelet or controllers: no pod ran there. The kind
+# validation of 2026-10-19 (docs/verification/runs/2026-10-19-kind-validation.md, step 14)
+# applied only the cluster-install overlay, by hand, to patrol-target; no committed script
+# applies a bundle to a cluster with nodes, so the bundles stay in-progress. The namespace-scoped,
+# core, HA and hydrator variants were not applied to any cluster with nodes.
 
 OPS-001:
   status: in-progress
@@ -23,7 +25,13 @@ OPS-001:
     NetworkPolicies, 5 PDBs). Objects carry namespace patrol (a wrong -n fails) and the
     ClusterRoleBindings bind patrol ServiceAccounts; a kustomize namespace overlay renames the
     namespace and rewrites the subjects (checked against the API server). Server-side applied to
-    a kube-apiserver and re-applied without changes; not run with pods.
+    a kube-apiserver and re-applied without changes. On kind (2026-10-19) the documented image
+    overlay of deploy/manifests/cluster-install was built with kustomize and applied with
+    kubectl apply --server-side --force-conflicts to patrol-target by hand: 61 objects, five
+    pods Running without restarts, bootstrap converged, admin login 200 through a
+    port-forward; the controllers' pods waited about a minute for patrol-internal-token
+    (FailedMount events) until the server pod's bootstrap created it; kubectl delete -f removed
+    it again. That run is not a committed test, so the entry stays in-progress.
 
 OPS-002:
   status: in-progress

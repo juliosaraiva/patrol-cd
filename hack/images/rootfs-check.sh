@@ -315,10 +315,10 @@ if command -v go >/dev/null 2>&1; then
 		fi
 	done
 	v=$(version_of helm)
-	go version -m "$root/usr/local/bin/helm" | grep -qE "mod[[:space:]]+helm.sh/helm/v4[[:space:]]+v$v" &&
+	go version -m "$root/usr/local/bin/helm" | grep -E "mod[[:space:]]+helm.sh/helm/v4[[:space:]]+v$v" >/dev/null &&
 		pass "helm reports module helm.sh/helm/v4 v$v" || fail "helm is not v$v"
 	v=$(version_of kustomize)
-	go version -m "$root/usr/local/bin/kustomize" | grep -q "provenance.version=v$v" &&
+	go version -m "$root/usr/local/bin/kustomize" | grep "provenance.version=v$v" >/dev/null &&
 		pass "kustomize built with provenance.version=v$v" || fail "kustomize is not v$v"
 else
 	note "go not installed: Go build setting checks skipped"

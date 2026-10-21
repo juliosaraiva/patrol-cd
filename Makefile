@@ -121,3 +121,4 @@ build: ## Build all packages; binaries under cmd/ are written to ./bin.
 include hack/build.mk
 include hack/image.mk
 include hack/deploy.mk
+include hack/kind/kind.mk
