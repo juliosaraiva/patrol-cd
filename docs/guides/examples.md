@@ -5,9 +5,9 @@ generator, setting and extension point. Every object is validated against a real
 kube-apiserver with the Patrol CD CRDs, and every source is rendered with the real tools, by
 `go test ./test/examples` (see [Validation](#validation)).
 
-The Patrol CD binaries and Helm chart are not available yet, so the examples reference the
-CRDs (`deploy/crds`, [CRD reference](../reference/crds.md)) and settings objects only; nothing in
-them depends on component flags.
+The examples reference the CRDs (`deploy/crds`, [CRD reference](../reference/crds.md)) and
+settings objects only; nothing in them depends on component flags. To run Patrol CD itself, see
+the [installation guide](installation.md).
 
 ## Conventions
 
