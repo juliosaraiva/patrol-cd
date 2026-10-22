@@ -34,3 +34,5 @@ func Start(env *envtest.Environment) (*rest.Config, error) {
 	}
 	return cfg, nil
 }
+
+// ci probe (throwaway): a Go-only change that touches no workflow, Makefile or module file.
