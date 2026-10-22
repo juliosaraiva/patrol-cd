@@ -12,7 +12,8 @@ the image to the kind job through the Actions cache, and the tool-location varia
 > [`docs/verification/log.md`](../verification/log.md) V-0035 and
 > [`runs/2026-10-22-github-ci-runs.md`](../verification/runs/2026-10-22-github-ci-runs.md). After the
 > merge, the first push to `main` (full tier, all jobs), a docs-only and a code-only pull request each ran the jobs
-> of their tier and skipped the others (V-0036). Not yet observed on GitHub: the kind-only tier, a pull request
+> of their tier and skipped the others (V-0036), and a documentation-only push to `main` ran the docs-only tier
+> (V-0037). Not yet observed on GitHub: the kind-only tier, a pull request
 > with a label, `CI_HEAVY_ON_PR`, manual runs, the code and full tiers on caches restored from `main`, and arm64.
 
 ## Jobs
@@ -68,15 +69,16 @@ minutes a run (static 3, unit 24, web UI 4, image 6, integration 11, deploy 8, k
 billed rounded up, about 72), so roughly 28 such runs fit in the Free plan's 2,000 minutes a month;
 the first run, with cold caches, took about 104, and the first push to `main` (no cache of its own yet) 107
 (unit 37 minutes instead of 24). The other tiers, on cold pull-request caches: docs only about 11 job minutes
-(`static` alone took 10.7 on a cold cache; on the cache restored from `main` a later docs-only run took 3.2), code only about 44 (static 10, unit without `-race`
-17, web UI 4, image 12); the warm-cache figures of those tiers are unmeasured. A Dependabot bump of a workflow
+(`static` alone took 10.7), code only about 44 (static 10, unit without `-race` 17, web UI 4, image 12). On the
+caches restored from `main`, docs only takes about 3 (a pull request 3.2, a push to `main` 3.1); the code tier's
+warm-cache figure is unmeasured. A Dependabot bump of a workflow
 action changes `ci.yml`, so it costs a full-tier run. These are job durations; the minutes GitHub billed are not
 known. When the minutes run out Actions stop until the next month.
 
 **Cache space.** A full run saves about 4 GB of caches per ref (the Go build caches of the static, unit,
 integration and deploy jobs are 0.6 to 1 GB each) and the repository limit is 10 GB; at 17:07Z on the day of the
 first push to `main` the repository held 12.4 GB, so GitHub evicts the least recently used caches and a run can
-start cold again. Delete the caches of a closed pull request's ref (`gh cache delete --all --ref
+start cold again (after the probe pull requests' caches were deleted it was 9.4 GB, V-0037). Delete the caches of a closed pull request's ref (`gh cache delete --all --ref
 refs/pull/<n>/merge`) if space becomes the problem.
 
 ## Tools and their pins
