@@ -2,15 +2,23 @@ package server
 
 import (
 	"context"
+	"errors"
 	"fmt"
+	"log/slog"
 	"regexp"
+	"sort"
 	"strings"
+	"time"
 
 	corev1 "k8s.io/api/core/v1"
+	apierrors "k8s.io/apimachinery/pkg/api/errors"
+	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/runtime"
+	"k8s.io/client-go/discovery"
 	"k8s.io/client-go/kubernetes"
 	clientgoscheme "k8s.io/client-go/kubernetes/scheme"
 	typedcorev1 "k8s.io/client-go/kubernetes/typed/core/v1"
+	krest "k8s.io/client-go/rest"
 	"k8s.io/client-go/tools/record"
 	crcache "sigs.k8s.io/controller-runtime/pkg/cache"
 	"sigs.k8s.io/controller-runtime/pkg/client"
@@ -28,6 +36,108 @@ func newScheme() (*runtime.Scheme, error) {
 		return nil, fmt.Errorf("build scheme: %w", err)
 	}
 	return s, nil
+}
+
+// Defaults of the wait for the Patrol CRDs (waitForCRDs). The timeout stays below the time the
+// chart's liveness probes need to kill a container that serves no health endpoint yet (the
+// listeners start after the wait; the ApplicationSet and notifications controllers have no startup
+// probe: first probe at 10 s, three failures 30 s apart), so a CRD that never appears ends in this
+// error and not in a kill.
+const (
+	crdWaitTimeout  = time.Minute
+	crdWaitInterval = 2 * time.Second
+	// crdProbeTimeout bounds one discovery request.
+	crdProbeTimeout = 10 * time.Second
+)
+
+// waitForCRDs blocks until the API server serves every kind of the Patrol API group, polling
+// discovery every interval for at most timeout. A Helm release installs the CRDs together with the
+// Deployments, and a large CRD (ApplicationSet) can take longer to be served than the pods take to
+// start; without this wait the components exit with "no matches for kind", the kubelet restarts
+// them, and a loaded cluster shows restarts that mean nothing is wrong. Errors from discovery
+// (including an API server that cannot be reached yet) are retried until the timeout and
+// returned with the last of them.
+func waitForCRDs(ctx context.Context, cfg *krest.Config, log *slog.Logger, timeout, interval time.Duration) error {
+	scheme, err := newScheme()
+	if err != nil {
+		return err
+	}
+	want := patrolResourceKinds(scheme)
+	probe := krest.CopyConfig(cfg)
+	probe.Timeout = crdProbeTimeout
+	dc, err := discovery.NewDiscoveryClientForConfig(probe)
+	if err != nil {
+		return fmt.Errorf("discovery client: %w", err)
+	}
+	ctx, cancel := context.WithTimeout(ctx, timeout)
+	defer cancel()
+	start := time.Now()
+	waited := false
+	for {
+		missing, lastErr := missingPatrolKinds(ctx, dc, want)
+		if lastErr == nil && len(missing) == 0 {
+			if waited {
+				log.Info("the Patrol CRDs are served", "waited", time.Since(start).Round(time.Millisecond).String())
+			}
+			return nil
+		}
+		if !waited {
+			log.Info("waiting for the Patrol CRDs to be served", "group", v1alpha1.GroupVersion.String(), "missing", strings.Join(missing, ","), "error", fmt.Sprint(lastErr))
+			waited = true
+		}
+		select {
+		case <-ctx.Done():
+			if cause := ctx.Err(); !errors.Is(cause, context.DeadlineExceeded) {
+				return cause
+			}
+			msg := fmt.Sprintf("the Patrol CRDs (%s) are not served after %s: missing %s", v1alpha1.GroupVersion, timeout, strings.Join(missing, ", "))
+			if lastErr != nil {
+				return fmt.Errorf("%s: %w", msg, lastErr)
+			}
+			return errors.New(msg)
+		case <-time.After(interval):
+		}
+	}
+}
+
+// patrolResourceKinds returns the kinds of the Patrol API group that are resources (the ones that
+// come with a list kind).
+func patrolResourceKinds(s *runtime.Scheme) []string {
+	known := s.KnownTypes(v1alpha1.GroupVersion)
+	var kinds []string
+	for k := range known {
+		if _, ok := known[k+"List"]; ok {
+			kinds = append(kinds, k)
+		}
+	}
+	sort.Strings(kinds)
+	return kinds
+}
+
+// missingPatrolKinds lists the wanted kinds that discovery does not report. A group that is not
+// served at all is a normal answer (all kinds missing, no error); any other failure is returned.
+// It asks discovery's REST client with ctx, because ServerResourcesForGroupVersion takes none and
+// a request in flight would outlive the wait's deadline and a stop signal.
+func missingPatrolKinds(ctx context.Context, dc discovery.DiscoveryInterface, want []string) ([]string, error) {
+	list := &metav1.APIResourceList{}
+	err := dc.RESTClient().Get().AbsPath("/apis/" + v1alpha1.GroupVersion.String()).Do(ctx).Into(list)
+	if err != nil {
+		if apierrors.IsNotFound(err) {
+			return want, nil
+		}
+		return want, err
+	}
+	served := map[string]bool{}
+	for _, r := range list.APIResources {
+		served[r.Kind] = true
+	}
+	var missing []string
+	for _, k := range want {
+		if !served[k] {
+			missing = append(missing, k)
+		}
+	}
+	return missing, nil
 }
 
 // literalNamespaceRE matches Kubernetes namespace names (no glob or regexp syntax).
