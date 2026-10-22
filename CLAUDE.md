@@ -54,16 +54,20 @@ implementation: never vendor, embed, rebrand, or proxy Argo CD components.
 ## Verification commands
 
 ```bash
-make generate        # deepcopy, CRDs, RBAC, OpenAPI, TS client
+make generate        # deepcopy, CRDs, the chart's generated files, static install manifests
 make verify-generated
-make lint            # go vet, golangci-lint, ui typecheck+lint
-make test            # Go unit tests (envtest-backed integration included when KUBEBUILDER_ASSETS set)
-make ui-test         # vitest
+make lint            # go vet, golangci-lint (skipped when missing), ui typecheck+lint
+make test            # Go tests (-race, -timeout 60m); with envtest it also runs test/integration and test/deploy
+pnpm -C ui test     # vitest
 make build           # binaries into ./bin
 make image           # local OCI image
-make kind-up         # disposable kind clusters (patrol-control, patrol-target)
-make e2e             # end-to-end suite against kind
+make kind-up kind-fixtures kind-install kind-verify   # disposable kind clusters and the checks on them
+make ci-static ci-unit ci-ui ci-image                  # the CI jobs (docs/guides/ci.md); `make help` lists them
 ```
+
+OpenAPI (`go run ./internal/apiserver/cmd/genopenapi -check`), the parity matrix
+(`go run ./hack/parity -check`) and the UI API types (`pnpm -C ui gen:api:check`) are checked outside
+`make generate`; `make ci-static` and `make ci-ui` run them.
 
 Go: run `go vet ./...` after changes. UI: `pnpm -C ui typecheck` before marking done.
 
