@@ -40,7 +40,13 @@ func testScheme(t *testing.T) *runtime.Scheme {
 
 func fakeClient(t *testing.T, objs ...client.Object) client.Client {
 	t.Helper()
-	return fake.NewClientBuilder().WithScheme(testScheme(t)).WithObjects(objs...).Build()
+	// Build sets resource versions on the objects it is given, and parallel subtests share their
+	// fixtures (the Secrets of TestSCMProviderBlocks): hand it copies.
+	copies := make([]client.Object, len(objs))
+	for i, o := range objs {
+		copies[i] = o.DeepCopyObject().(client.Object)
+	}
+	return fake.NewClientBuilder().WithScheme(testScheme(t)).WithObjects(copies...).Build()
 }
 
 func appSet(goTemplate bool, opts ...string) *v1alpha1.ApplicationSet {

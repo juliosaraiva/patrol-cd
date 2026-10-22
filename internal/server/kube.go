@@ -65,6 +65,9 @@ func waitForCRDs(ctx context.Context, cfg *krest.Config, log *slog.Logger, timeo
 	want := patrolResourceKinds(scheme)
 	probe := krest.CopyConfig(cfg)
 	probe.Timeout = crdProbeTimeout
+	// One request per interval: the client's own rate limiter (the component's QPS setting) would only
+	// delay it, and near the deadline it would replace the real error with its own.
+	probe.QPS, probe.Burst = -1, 0
 	dc, err := discovery.NewDiscoveryClientForConfig(probe)
 	if err != nil {
 		return fmt.Errorf("discovery client: %w", err)
@@ -73,9 +76,19 @@ func waitForCRDs(ctx context.Context, cfg *krest.Config, log *slog.Logger, timeo
 	defer cancel()
 	start := time.Now()
 	waited := false
+	// What is known after the last answer: the kinds still missing (everything before the first
+	// answer) and the last error that was not caused by the wait ending.
+	missing := want
+	var lastErr error
 	for {
-		missing, lastErr := missingPatrolKinds(ctx, dc, want)
-		if lastErr == nil && len(missing) == 0 {
+		got, err := missingPatrolKinds(ctx, dc, want)
+		switch {
+		case err == nil:
+			missing, lastErr = got, nil
+		case ctx.Err() == nil:
+			lastErr = err
+		}
+		if err == nil && len(missing) == 0 {
 			if waited {
 				log.Info("the Patrol CRDs are served", "waited", time.Since(start).Round(time.Millisecond).String())
 			}
@@ -125,7 +138,7 @@ func missingPatrolKinds(ctx context.Context, dc discovery.DiscoveryInterface, wa
 		if apierrors.IsNotFound(err) {
 			return want, nil
 		}
-		return want, err
+		return nil, err
 	}
 	served := map[string]bool{}
 	for _, r := range list.APIResources {
