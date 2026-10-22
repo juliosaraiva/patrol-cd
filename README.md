@@ -77,7 +77,8 @@ and current limitations.
   on two local kind clusters (one CNI, kindnet; arm64; one replica per component; the chart's
   default profile; no SSO, ingress, ApplicationSets, hydrator, CMP plugins or notifications
   delivery exercised, no browser run), not on a cloud cluster. A GitHub Actions workflow
-  (`docs/guides/ci.md`) is written but has not run on GitHub yet.
+  (`docs/guides/ci.md`) has passed its full tier, including the kind lifecycle job, on one
+  pull request (`docs/verification/log.md` V-0035); other tiers and pushes to `main` have not run.
 - Most unit and integration tests still run against envtest (no kubelet), where pod health is
   simulated; the kind checks (`hack/kind/verify-install.sh`) cover the install, security
   contexts, part of the NetworkPolicy enforcement, metrics endpoints, sync and drift on real

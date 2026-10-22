@@ -7,11 +7,12 @@ runs is a `make` target or a script you can run locally. Only runner housekeepin
 freeing disk (`hack/ci/free-disk.sh`), making sure sshd can run (openssh-server, `/run/sshd`), handing
 the image to the kind job through the Actions cache, and the tool-location variables the setup action exports.
 
-> **Status.** The workflow and its helpers are written and have been checked statically
-> (`actionlint`, `shellcheck`) and by running their pieces on a developer machine and in a Linux
-> container. It has **not run on GitHub yet**. The first runs are diagnostic; their results,
-> timings and the problems they find are recorded in
-> [`docs/verification/log.md`](../verification/log.md) once they exist.
+> **Status.** The workflow has run on GitHub on pull request #4: the full tier with the kind job
+> passed on head `44b420e` (run 4 of four; the first three failed for reasons that were fixed), see
+> [`docs/verification/log.md`](../verification/log.md) V-0035 and
+> [`runs/2026-10-22-github-ci-runs.md`](../verification/runs/2026-10-22-github-ci-runs.md). Not yet
+> observed on GitHub: the docs-only and code-only tiers, pushes to `main`, manual runs, the labels,
+> and arm64.
 
 ## Jobs
 
@@ -61,11 +62,11 @@ cancelled or replaced.
 
 **Minutes.** The job timeouts bound the worst case, they are not an estimate: docs 5 + 60 + 5, code
 5 + 60 + 120 + 30 + 60 + 5 = 280, kind tier 280 + 190 = 470, full tier 280 + 100 + 75 + 190 = 645 (it
-always includes kind). Typical runs are
-expected to be a fraction of that, but nothing has been measured yet on a GitHub runner; the first
-runs' billable minutes per job go into [`docs/verification/log.md`](../verification/log.md),
-and the tiers are tuned from them. When the Free plan's minutes run out Actions stop until the next
-month.
+always includes kind). Measured on GitHub, full tier with the kind job, warm caches: about 66 job
+minutes a run (static 3, unit 24, web UI 4, image 6, integration 11, deploy 8, kind 10; each job is
+billed rounded up, about 72), so roughly 28 such runs fit in the Free plan's 2,000 minutes a month;
+the first run, with cold caches, took about 104. The code-only and docs-only tiers have not been
+measured. When the minutes run out Actions stop until the next month.
 
 ## Tools and their pins
 

@@ -3,9 +3,10 @@
 What was run to check `.github/workflows/ci.yml` and its helpers (`docs/guides/ci.md`) before their first
 run on GitHub, what it found, and what it cannot show.
 
-**Nothing here ran on GitHub Actions.** No claim about billable minutes, runner behaviour, the `ci` gate, the
-cache keys or the amd64 image is made or supported by this record. The first runs on GitHub are the real test; their
-results go into `docs/verification/log.md` when they exist.
+**Nothing here ran on GitHub Actions**: this record covers what was checked before the workflow's first run, and
+no claim about billable minutes, runner behaviour, the `ci` gate, the cache keys or the amd64 image rests on it.
+The runs on GitHub, which found four more problems (CI-F8, CI-F9, CI-F10, CI-F14), are in
+[`2026-10-22-github-ci-runs.md`](2026-10-22-github-ci-runs.md) and `log.md` V-0035.
 
 ## Environment
 
@@ -57,7 +58,7 @@ The reviewers and skeptics are language models; their agreement is evidence that
 
 ## Not done
 
-- No run on GitHub Actions (no billable-minute figure, no amd64 image build, no `ci` gate result, no cache hit or miss, no artifact upload).
+- No run on GitHub Actions when this was written (superseded: see `2026-10-22-github-ci-runs.md`).
 - No Linux `-race` run, and no Linux run of the packages that need envtest, `test/integration` or `test/deploy` (the container could not start
   control planes reliably on the loaded VM; envtest-backed packages were run on macOS).
 - `TestLFS` did not run on the developer machine (git-lfs missing); it passed in the Linux container.
