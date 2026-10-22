@@ -18,12 +18,12 @@ the image to the kind job through the Actions cache, and the tool-location varia
 | Job | What it runs | Make target | Runs on |
 |-----|--------------|-------------|---------|
 | `changes` | decides which tiers run (`hack/ci/classify-changes.sh`) | | always |
-| `static` | secret scan (history and files git does not ignore), gofmt, `go mod tidy -diff`, build, vet, golangci-lint, generated files (`verify-generated`, `verify-manifests`, `helm-lint`), OpenAPI document, parity matrix, test report rules (`must-run.txt` and `allowed-skips.txt` name existing packages), shell scripts, workflow lint | `ci-gitleaks`, `ci-gofmt`, `ci-gomod`, `ci-lint-go`, `ci-generated`, `ci-openapi`, `ci-parity`, `ci-rules`, `ci-shell`, `ci-actionlint` | always |
+| `static` | secret scan (history and files git does not ignore), gofmt, `go mod tidy -diff`, build, vet, golangci-lint, generated files (`verify-generated`, `verify-manifests`, `helm-lint`), OpenAPI document, parity matrix, test report rules (`must-run.txt` and `allowed-skips.txt` name existing packages), tier selection tests (`hack/ci/test-classify.sh`), shell scripts, workflow lint | `ci-gitleaks`, `ci-gofmt`, `ci-gomod`, `ci-lint-go`, `ci-generated`, `ci-openapi`, `ci-parity`, `ci-rules`, `ci-classify`, `ci-shell`, `ci-actionlint` | always |
 | `unit` | `go test -json` over every package except the two suites below, with the skip report, then the kind scripts' offline tests | `ci-unit`, `ci-scripts` | code changes |
 | `ui` | `pnpm install --frozen-lockfile`, API types check, typecheck, lint, vitest, build | `ci-ui` | code changes |
 | `image` | offline pin checks, BuildKit checks, image build (linux/amd64), layout, smoke and rootfs checks | `ci-image` | code changes |
 | `integration` | `test/integration` (`PATROL_INTEGRATION=1`) | `ci-integration` | full tier |
-| `deploy` | `test/deploy`: the chart and the static manifests against envtest API servers | `ci-deploy` | full tier |
+| `deploy` | `test/deploy`: the chart and the static manifests against envtest API servers, then a summary of what the Pod Security test covered (`hack/ci/podsecurity-evidence.sh`) | `ci-deploy` | full tier |
 | `kind` | three kind nodes and a registry: `kind-up`, `kind-fixtures`, `kind-smoke`, `kind-install`, `kind-verify VERIFY_FLAGS=--lifecycle` | the `kind-*` targets | kind tier |
 | `ci` | one status for the whole workflow (`hack/ci/gate.sh`) | | always |
 
@@ -44,7 +44,7 @@ minutes a month and the Go suites are expensive on a 2 vCPU runner:
 | docs only | `static` | every changed file is documentation: `docs/`, `*.md` at the repository root, `.gitignore` (pushes and pull requests alike; a README in a subdirectory counts as a change to that directory; `LICENSE` and `NOTICE` do not count, the image build copies them) |
 | code | `static`, `unit` (without `-race`), `ui`, `image` | any other pull request, push or manual run (a manual run with `full` false runs only this tier) |
 | kind | adds the image hand-over and `kind` | push to `main`, manual run with `full` true (the default), label `ci:kind` or `ci:full`, or a pull request that touches `hack/kind/`, `hack/images/`, `test/e2e/`, `deploy/`, the Dockerfile, `.dockerignore`, the Makefiles, or the CI files the job runs (`hack/ci/{install-tools.sh,tools.lock,preflight.sh,free-disk.sh,sample-resources.sh,kind-diagnostics.sh,classify-changes.sh}`; the workflow, the setup action and the other helpers reach it through the full tier or not at all) |
-| full | adds `-race` to `unit`, and `integration`, `deploy` (and the kind tier) | push to `main`, manual run with `full` true, label `ci:full`, or a pull request that touches `deploy/`, `test/deploy/`, `test/integration/`, `go.mod`, `go.sum`, `tools/`, `hack/ci/tools.lock`, the Makefiles, `.github/workflows/ci.yml`, `hack/ci/testreport/` or the two lists `hack/ci/must-run.txt` and `hack/ci/allowed-skips.txt` |
+| full | adds `-race` to `unit`, and `integration`, `deploy` (and the kind tier) | push to `main`, manual run with `full` true, label `ci:full`, or a pull request that touches `deploy/`, `test/deploy/`, `test/integration/`, `go.mod`, `go.sum`, `tools/`, `hack/ci/tools.lock`, the Makefiles, `.github/workflows/ci.yml`, `.github/actions/` (the setup action every Go job uses), `hack/ci/testreport/` or the two lists `hack/ci/must-run.txt` and `hack/ci/allowed-skips.txt` |
 
 Documentation-only changes never reach the kind and full tiers, whatever labels the pull request
 has. Set the repository variable `CI_HEAVY_ON_PR` to `true` to run the full tier on every pull

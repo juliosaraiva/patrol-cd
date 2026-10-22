@@ -112,6 +112,8 @@ jobs:
         run: make ci-parity
       - name: Test report rules
         run: make ci-rules
+      - name: Tier selection tests
+        run: make ci-classify
       - name: Shell scripts
         run: make ci-shell
       - name: Workflows
@@ -242,6 +244,14 @@ jobs:
       # test/deploy and `make verify-generated` rewrite deploy/ in place: this job runs only the former.
       - name: Deploy suite (-race)
         run: make ci-deploy
+      # What TestPodSecurityRestricted covered (profiles, pods admitted), from the event stream, for the
+      # job summary. The test fails by itself when a profile is skipped or nothing is admitted.
+      - name: Pod Security coverage
+        if: ${{ !cancelled() && hashFiles('dist/ci/deploy.json') != '' }}
+        run: hack/ci/podsecurity-evidence.sh
+      - name: Compress the test event stream
+        if: failure()
+        run: gzip -f dist/ci/deploy.json
       - name: Upload logs
         if: failure()
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
@@ -250,6 +260,7 @@ jobs:
           path: |
             dist/ci/deploy-summary.md
             dist/ci/deploy.stderr
+            dist/ci/deploy.json.gz
             dist/ci/deploy-logs/
           if-no-files-found: ignore
           retention-days: 7

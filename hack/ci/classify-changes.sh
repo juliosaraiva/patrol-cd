@@ -15,7 +15,8 @@
 #   kind       the image is packaged and the kind job runs. True whenever full is, for pull requests
 #              with the label ci:kind, and for pull requests that touch the image, the chart, the kind
 #              scripts or the CI files the kind job runs (kind_re below; workflow, setup action,
-#              gate and Dependabot changes do not qualify, ci.yml itself selects the full tier).
+#              gate and Dependabot changes do not qualify; ci.yml and the shared setup action select
+#              the full tier, and with it the kind job).
 #
 # Environment (set by the workflow, never interpolated into this script): EVENT_NAME, BASE_REF_NAME,
 # BEFORE_SHA, PR_LABELS (JSON array of label names), DISPATCH_FULL ("true"/"false"/""), HEAVY_ON_PR
@@ -29,7 +30,7 @@ out=${GITHUB_OUTPUT:-/dev/stdout}
 summary=${GITHUB_STEP_SUMMARY:-/dev/null}
 
 # Files whose change makes the full Go tier / the kind job worth their minutes for a pull request.
-full_re='^(\.github/workflows/ci\.yml$|hack/ci/(must-run|allowed-skips)\.txt$|hack/ci/tools\.lock$|hack/ci/testreport/|test/(deploy|integration)/|deploy/|go\.(mod|sum)$|tools/|Makefile$|hack/[^/]+\.mk$)'
+full_re='^(\.github/workflows/ci\.yml$|\.github/actions/|hack/ci/(must-run|allowed-skips)\.txt$|hack/ci/tools\.lock$|hack/ci/testreport/|test/(deploy|integration)/|deploy/|go\.(mod|sum)$|tools/|Makefile$|hack/[^/]+\.mk$)'
 kind_re='^(hack/(kind|images)/|hack/ci/(install-tools\.sh|tools\.lock|preflight\.sh|free-disk\.sh|sample-resources\.sh|kind-diagnostics\.sh|classify-changes\.sh)$|test/e2e/|deploy/|Dockerfile$|\.dockerignore$|Makefile$|hack/[^/]+\.mk$)'
 docs_re='^(docs/|[^/]+\.md$|\.gitignore$)'
 

@@ -55,7 +55,7 @@ ACTIONLINT ?= actionlint
 ##@ CI
 
 .PHONY: ci-static
-ci-static: ci-gofmt ci-gomod ci-lint-go ci-generated ci-openapi ci-parity ci-rules ci-shell ci-actionlint ci-gitleaks ## Everything the "static" job checks.
+ci-static: ci-gofmt ci-gomod ci-lint-go ci-generated ci-openapi ci-parity ci-rules ci-classify ci-shell ci-actionlint ci-gitleaks ## Everything the "static" job checks.
 
 .PHONY: ci-gofmt
 ci-gofmt: ## Fail when a tracked Go file is not gofmt-formatted.
@@ -106,6 +106,11 @@ ci-parity: ## Fail when docs/parity/matrix.md is stale or a status file is inval
 ci-rules: ## Fail when hack/ci/must-run.txt or allowed-skips.txt names a package that no longer exists.
 	@echo "==> ci-rules"
 	$(GO) run ./hack/ci/testreport -check-rules
+
+.PHONY: ci-classify
+ci-classify: ## Regression tests of the tier selection (hack/ci/classify-changes.sh).
+	@echo "==> ci-classify"
+	hack/ci/test-classify.sh
 
 .PHONY: ci-shell
 ci-shell: ## shellcheck -x, bash -n and dash -n over every tracked shell script.
