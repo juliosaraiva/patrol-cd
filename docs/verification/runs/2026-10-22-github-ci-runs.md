@@ -8,7 +8,8 @@ the Free plan. The local validation that came before is in
 
 This pull request changes `.github/workflows/ci.yml` and the Makefiles, so every run was in the **full tier with
 the kind job** (unit tests under `-race`, integration, deploy, image, kind). The first push to `main` after the merge
-and the two probe pull requests for the other tiers are in the last two sections.
+the two probe pull requests for the other tiers, and the first documentation-only push to `main` are in the last
+three sections.
 
 ## The runs
 
@@ -81,8 +82,8 @@ integration (610 MiB) and deploy (603 MiB) jobs, the image job's `actions/setup-
 (37 MiB), `envtest` (47 MiB), the pnpm store (44 MiB) and the image hand-over (89 MiB). By GitHub's cache scoping a
 pull request can restore these. **The repository's cache usage was 12.4 GB in 33 caches at 17:07Z against the 10 GB limit** (the
 pull-request refs #4 to #7 hold copies of most of these, saved before `main` had any), so GitHub evicts the least
-recently used caches and a later run may find a cold cache again. The first warm pull-request run after the merge
-has not been observed (see below).
+recently used caches and a later run may find a cold cache again. The runs that restored these caches, all
+docs-only so far, are under "A documentation-only push to `main`" and "Not shown".
 
 ## The other tiers, on two throwaway pull requests
 
@@ -100,18 +101,40 @@ That is what `docs/guides/ci.md` says and what `hack/ci/test-classify.sh` assert
 confirmed it. The `ci:kind` and `ci:full` labels were created (`gh label create`); applying one to a pull request
 has not been tried.
 
+## A documentation-only push to `main`
+
+Merging [#9](https://github.com/juliosaraiva/patrol-cd/pull/9), which changes `TASKS.md` and files under `docs/`
+only, pushed the merge commit `d80cd9c` to `main`: run [39835192760](https://github.com/juliosaraiva/patrol-cd/actions/runs/39835192760), event `push`,
+18:52:35 to 18:55:53Z, passed.
+
+| Job | Result | Time |
+|-----|--------|------|
+| Choose tiers | success | 5 s |
+| Static checks | success | 3.1 min (`test-classify: 36 passed, 0 failed`) |
+| Unit tests, Web UI, Image, Integration suite, Deploy suite, Kind | skipped | |
+| CI (gate) | success | 6 s |
+
+A push to `main` is classified like a pull request: documentation only selects the docs-only tier, not the full
+tier that other pushes to `main` get. `Static checks` restored `main`'s caches by exact key (`go-static-...`, 851
+MB, and the pinned tools, 37 MB; "Cache restored successfully") and took 3.1 minutes, against 9.3 in the first push
+to `main` with no caches. About 3.3 job-minutes.
+
+The caches of the closed probe pull requests were deleted after the probes (`gh cache delete --all --ref
+refs/pull/<n>/merge` for #6 and #7). At 23:19Z the repository held 9.4 GB in 26 caches, under the 10 GB limit
+(12.4 GB in 33 caches at 17:07Z); how much of the drop is that deletion and how much is GitHub's eviction is not
+known.
+
 ## Not shown
 
 - **The kind-only tier** (a pull request that touches only the kind scripts, or the `ci:kind` label) has not run on
   GitHub, nor has a pull request with a label.
 - **`CI_HEAVY_ON_PR`** and **`workflow_dispatch`** (the latter is possible now that `ci.yml` is on `main`) have not been used.
 - **Warm-cache runs of the heavier tiers.** The probes ran before `main` had caches, so the times above for the
-  code-only and docs-only tiers are cold-cache times. The only run since is the docs-only run of the pull request
-  that records this ([#9](https://github.com/juliosaraiva/patrol-cd/pull/9), run
-  [39820388783](https://github.com/juliosaraiva/patrol-cd/actions/runs/39820388783)): `Static checks` hit the
-  `go-static-...` cache saved by `main` (851 MB, "Cache restored successfully") and took 3.2 minutes instead of
-  10.7; the jobs that ran were the same three as in #6. How long the code and full tiers take on restored caches is
-  unobserved, and the cache usage is above the repository limit (see above).
+  code-only and docs-only tiers are cold-cache times. Since then only docs-only runs have restored `main`'s caches:
+  the pull request that recorded the probes ([#9](https://github.com/juliosaraiva/patrol-cd/pull/9), run
+  [39820388783](https://github.com/juliosaraiva/patrol-cd/actions/runs/39820388783), `Static checks` 3.2 minutes
+  instead of 10.7, the same three jobs as in #6) and its merge to `main` (above, 3.1 minutes). How long the code and
+  full tiers take on restored caches is unobserved.
 - **Failure paths on a runner**: the kind diagnostics bundle and its secret scrub were exercised only locally, and
   no run failed in the kind job.
 - **Flakiness.** Three of the first four runs failed for a different reason each (all fixed); the fifth run of the

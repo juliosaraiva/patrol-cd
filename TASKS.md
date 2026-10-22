@@ -13,7 +13,7 @@ Resume rule: read this file, then `docs/parity/matrix.md`, then `docs/verificati
   every push to `main`) and `release.yml` (after CI passes on `main` with a release pending: CLI binaries,
   install manifests, chart, multi-arch image to `ghcr.io/<owner>`, chart to `oci://…/charts`, tag and GitHub
   release); commit-subject lint on pull requests in the `static` job; guide `docs/guides/releasing.md`.
-  Checked locally (V-0037). **Not yet run on GitHub**; needs the repository setting "Allow GitHub Actions to
+  Checked locally (V-0038, V-0039). **Not yet run on GitHub**; needs the repository setting "Allow GitHub Actions to
   create and approve pull requests" and, for CI on the release pull request, the secret `RELEASE_TOKEN`.
 - **2026-10-21/22: CI with the kind job** (T0.7), on the user's request; pull request
   [#4](https://github.com/juliosaraiva/patrol-cd/pull/4) (`feat/ci`). `.github/workflows/ci.yml` (jobs:
@@ -26,9 +26,11 @@ Resume rule: read this file, then `docs/parity/matrix.md`, then `docs/verificati
   and its tests: git before 2.48 (`origin/HEAD`), leaked envtest control planes (`internal/envtestx`), the
   start-up race on the ApplicationSet CRD (`waitForCRDs`, KV-14), a project token refused as revoked before
   the cache saw it, and flaky or racy tests (`phase4-findings.md` CI-F1 to CI-F14). **Not yet observed on
-  GitHub**: the kind-only tier, a pull request with a label, `CI_HEAVY_ON_PR`, manual runs, the code and full tiers on
-  caches restored from `main` (the docs-only run restored them), arm64; no failure path of the kind job on a runner. The first push to `main` passed the full tier and the
-  docs-only and code-only probe pull requests ran only their tiers (V-0036); cache usage is above GitHub's 10 GB limit.
+  GitHub**: the kind-only tier, a pull request with a label, `CI_HEAVY_ON_PR`, manual runs, the code and full tiers
+  on caches restored from `main` (docs-only runs restored them), arm64; no failure path of the kind job on a runner.
+  The first push to `main` passed the full tier and the docs-only and code-only probe pull requests ran only their
+  tiers (V-0036); a documentation-only push to `main` ran only the docs-only tier (V-0037). Cache usage went over
+  GitHub's 10 GB limit after the first full runs (12.4 GB) and was 9.4 GB once the probes' caches were deleted.
 - **2026-10-18: Phase 4 closeout** (Dockerfile, static manifests, Helm chart, first-run
   bootstrap). Two review rounds fixed; the final full `./test/deploy/` run passed (157 subtests, 281 s,
   `docs/verification/log.md` V-0027); committed and pushed (`3ea2bd3`). **2026-10-19: the Docker

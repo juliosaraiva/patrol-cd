@@ -7,7 +7,7 @@ and the release workflow publishes once CI has passed on the merged commit.
 
 > **Status.** The tool (`hack/release`) is unit-tested and was run against this repository's
 > history and in a scratch clone (prepare, generated-file checks, artifacts); see
-> [`docs/verification/log.md`](../verification/log.md) V-0037 and V-0038. The two workflows have **not run on
+> [`docs/verification/log.md`](../verification/log.md) V-0038 and V-0039. The two workflows have **not run on
 > GitHub yet**: the first release pull request, image push, chart push and GitHub release are
 > unobserved.
 
