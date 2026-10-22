@@ -1,0 +1,11 @@
+# Must-run list for synthetic.json (see ../README.md). Fields are separated by tabs.
+example.com/fixture/alpha	TestPass	passes
+example.com/fixture/alpha	TestFail	failed
+example.com/fixture/alpha	TestToolSkip	skipped
+example.com/fixture/alpha	TestAllSubSkip	passed, but every subtest skipped
+example.com/fixture/alpha	TestMissing	no such test
+example.com/fixture/alpha	TestMixed(/.*)?	one subtest skipped
+example.com/fixture/beta	TestMust	passes
+example.com/fixture/hang	TestHang	did not finish
+example.com/fixture/broken	TestX	the package did not build
+example.com/fixture/gamma	TestAbsent	the package is not in the input

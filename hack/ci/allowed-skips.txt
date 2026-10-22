@@ -1,0 +1,33 @@
+# Skips that are legitimate on CI: read by hack/ci/testreport (-skips, the default path).
+#
+# Format: PACKAGE_REGEXP<TAB>TEST_REGEXP<TAB>REASON_REGEXP<TAB>comment, one rule per line; '#'
+# starts a comment line. Each regexp must match the whole import path, the whole test name as
+# go test prints it (TestA/sub) and the whole skip message (the text of t.Skip, without the
+# file:line prefix, up to 20 lines and 4 KiB of it; "." also matches a newline). Each regexp
+# must parse on its own (a stray ")" is rejected). The comment says why the skip is legitimate
+# on the CI runner and is mandatory. Every PACKAGE_REGEXP must match a package of the module:
+# `go run ./hack/ci/testreport -check-rules` fails on one that matches none.
+#
+# The skip message is the last "file.go:N:" message a test prints before its SKIP line. A log
+# that a t.Cleanup, a deferred call or a goroutine writes after t.Skip is printed after the
+# t.Skip message, so it is taken as the reason: when it matches no line here the skip fails as
+# forbidden (the report then names the earlier message that matches a line here), and when it
+# matches one the skip is allowed, whatever the t.Skip message was. So in the tests these lines
+# cover (TestConformance*/... of pkg/scm/*), a t.Cleanup or deferred function must not log
+# unless it is guarded with `if !t.Skipped()`.
+#
+# A skip that matches no line fails the job. Only skips decided by the code itself belong here
+# (a capability a provider does not have, a check a provider's test opts out of). Skips caused
+# by the environment do NOT: a missing tool (git, git-http-backend, git-lfs, gpg, ssh, sshd,
+# helm, kustomize, sh), missing envtest assets (KUBEBUILDER_ASSETS), a disabled suite
+# (PATROL_INTEGRATION), -short, or an sshd that rejects its test configuration. Those hide
+# coverage; fix the job instead. Platform skips that cannot fire on the Linux runner
+# (Windows-only, uid wrap-around) are not listed either: a line that never matches is reported
+# as stale.
+
+# pkg/scm/conformance runs the same checks against every SCM provider; a provider that does not
+# declare a capability (or whose fixture lacks the data a check needs) skips that check by design.
+github\.com/juliosaraiva/patrol-cd/pkg/scm/[a-z]+	TestConformance[A-Za-z]*/.+	capability "[A-Za-z]+" not declared	conformance check of a capability the provider does not declare (pkg/scm/conformance/conformance.go)
+github\.com/juliosaraiva/patrol-cd/pkg/scm/[a-z]+	TestConformance[A-Za-z]*/.+	skipped by provider test options	the provider's test lists this check in conformance.Options.Skip, with its reason in the test file
+github\.com/juliosaraiva/patrol-cd/pkg/scm/[a-z]+	TestConformance[A-Za-z]*/.+	fixture has no archived repositories	the provider's fixture has no archived repository for the archived-repositories check
+github\.com/juliosaraiva/patrol-cd/pkg/scm/gogs	TestConformance/RateLimit/ErrorMapping	no read capability to probe	gogs declares none of the read capabilities the rate-limit check calls

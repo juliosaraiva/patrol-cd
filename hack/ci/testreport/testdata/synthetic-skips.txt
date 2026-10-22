@@ -1,0 +1,7 @@
+# Allowlist for synthetic.json (see ../README.md). Fields are separated by tabs.
+
+example\.com/fixture/alpha	TestAllSubSkip/case[0-9]+	capability "[a-z]+" not declared	conformance capability skips
+example\.com/fixture/alpha	TestMixed/.*	rapid rejected input	property test input rejection
+example\.com/fixture/alpha	TestParentSkip(/.*)?	(parent|sub) reason.*	multi-line reason, matched across the newline
+example\.com/fixture/beta	TestNothing	never	stale: the package occurs but no skip matches
+example\.com/fixture/gamma	.*	.*	not applicable: the package is not in the input

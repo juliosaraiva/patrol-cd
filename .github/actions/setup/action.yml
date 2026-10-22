@@ -1,0 +1,111 @@
+name: Set up the Go toolchain and the pinned tools
+description: >-
+  Installs Go (from go.mod), restores the Go build and module caches, builds the Go tools pinned in
+  tools/go.mod (controller-gen, setup-envtest, kustomize), installs the checksum-verified tools of
+  hack/ci/tools.lock, exports where they are, and runs the preflight checks of one job profile.
+  Run it after actions/checkout.
+
+inputs:
+  profile:
+    description: Preflight profile (static, unit, integration, deploy).
+    required: true
+  tools:
+    description: Space separated tools of hack/ci/tools.lock to install (helm kubectl golangci-lint ...).
+    required: true
+  envtest:
+    description: Download the envtest API server binaries and export KUBEBUILDER_ASSETS ("true" or "false").
+    default: "false"
+  cache-name:
+    description: Name part of the Go cache key. Give a job its own name unless it compiles exactly the packages of the jobs sharing it; the cache is saved once per key and then frozen.
+    required: true
+
+runs:
+  using: composite
+  steps:
+    - name: Install Go
+      uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
+      with:
+        go-version-file: go.mod
+        cache: false
+
+    - name: Locate the Go caches
+      id: gocache
+      shell: bash
+      run: |
+        echo "build=$(go env GOCACHE)" >>"$GITHUB_OUTPUT"
+        echo "mod=$(go env GOMODCACHE)" >>"$GITHUB_OUTPUT"
+        echo "version=$(go env GOVERSION)" >>"$GITHUB_OUTPUT"
+
+    # A hit on the exact key (it changes with the Go version and with go.sum) is not saved again. Any
+    # other outcome (no cache yet, or a restore-keys fallback after either changed) saves a new copy when
+    # the job succeeds; on a pull request that copy is scoped to the pull request and main cannot reuse
+    # it. The Go version is in the key because a build cache made by another compiler is restored but
+    # useless, and with go.sum unchanged it would be a hit that is never replaced.
+    - name: Restore the Go build and module caches
+      uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+      with:
+        path: |
+          ${{ steps.gocache.outputs.build }}
+          ${{ steps.gocache.outputs.mod }}
+        key: go-${{ inputs.cache-name }}-${{ runner.os }}-${{ runner.arch }}-${{ steps.gocache.outputs.version }}-${{ hashFiles('go.sum', 'tools/go.sum') }}
+        restore-keys: |
+          go-${{ inputs.cache-name }}-${{ runner.os }}-${{ runner.arch }}-${{ steps.gocache.outputs.version }}-
+          go-${{ inputs.cache-name }}-${{ runner.os }}-${{ runner.arch }}-
+
+    - name: Restore the Go tools built by make tools
+      uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+      with:
+        path: |
+          bin/controller-gen
+          bin/setup-envtest
+          bin/kustomize
+        key: gotools-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('tools/go.sum', 'tools/go.mod') }}
+
+    - name: Build the pinned Go tools (make tools)
+      shell: bash
+      run: make tools
+
+    - name: Restore the envtest binaries
+      if: inputs.envtest == 'true'
+      uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+      with:
+        path: bin/envtest
+        key: envtest-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('Makefile') }}
+
+    - name: Install the pinned tools
+      shell: bash
+      env:
+        TOOLS: ${{ inputs.tools }}
+      run: |
+        read -ra tools <<<"$TOOLS"
+        hack/ci/install-tools.sh --dest "$RUNNER_TEMP/ci-bin" "${tools[@]}"
+
+    # Tests and generators find helm and kustomize through these variables before they look at PATH,
+    # where the runner image has Helm 3 and another Kustomize.
+    - name: Export tool locations
+      shell: bash
+      env:
+        ENVTEST: ${{ inputs.envtest }}
+      run: |
+        {
+          echo "HELM=$RUNNER_TEMP/ci-bin/bin/helm"
+          echo "PATROL_TEST_HELM=$RUNNER_TEMP/ci-bin/bin/helm"
+          echo "KUSTOMIZE=$GITHUB_WORKSPACE/bin/kustomize"
+          echo "PATROL_TEST_KUSTOMIZE=$GITHUB_WORKSPACE/bin/kustomize"
+        } >>"$GITHUB_ENV"
+        if [[ $ENVTEST == true ]]; then
+          # Assigned on its own so that a failed download stops the step (an assignment keeps the
+          # exit status of the command substitution; `echo "...$(cmd)"` would hide it).
+          assets=$(make --no-print-directory -s envtest)
+          if [[ ! -x $assets/kube-apiserver || ! -x $assets/etcd ]]; then
+            echo "::error title=envtest::make envtest did not provide kube-apiserver and etcd (got '$assets')"
+            exit 1
+          fi
+          echo "KUBEBUILDER_ASSETS=$assets" >>"$GITHUB_ENV"
+        fi
+
+    - name: Preflight
+      shell: bash
+      env:
+        PROFILE: ${{ inputs.profile }}
+      run: hack/ci/preflight.sh "$PROFILE"

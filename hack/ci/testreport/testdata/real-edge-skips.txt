@@ -1,0 +1,4 @@
+# Allowlist used with real-edge.json (collect_test.go TestRealEdge, main_test.go
+# TestCarriageReturns). The lost tests log this message before they skip for another reason: it
+# must never become their reason.
+example\.com/edge/lost	.*	capability "x" not declared	the message the lost tests log before they skip

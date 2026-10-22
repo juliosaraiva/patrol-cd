@@ -1,0 +1,5 @@
+# Must-run list for real-darwin.json (see ../README.md). Fields are separated by tabs.
+github.com/juliosaraiva/patrol-cd/internal/git	TestLFS	skipped in the capture: git-lfs is not on PATH
+github.com/juliosaraiva/patrol-cd/internal/git	TestVerifyCommitSignature	passed in the capture
+github.com/juliosaraiva/patrol-cd/internal/health	Test.*	the capture ran no test of this package
+github.com/juliosaraiva/patrol-cd/test/deploy	Test.*	not in the capture
