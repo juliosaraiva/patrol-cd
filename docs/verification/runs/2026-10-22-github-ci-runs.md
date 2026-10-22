@@ -105,9 +105,13 @@ has not been tried.
 - **The kind-only tier** (a pull request that touches only the kind scripts, or the `ci:kind` label) has not run on
   GitHub, nor has a pull request with a label.
 - **`CI_HEAVY_ON_PR`** and **`workflow_dispatch`** (the latter is possible now that `ci.yml` is on `main`) have not been used.
-- **Warm-cache runs on `main`'s caches.** The probes ran before `main` had caches, so the times above for the
-  code-only and docs-only tiers are cold-cache times; whether a pull request now restores `main`'s caches, and how
-  long each tier takes then, is unobserved. The cache usage is above the repository limit (see above).
+- **Warm-cache runs of the heavier tiers.** The probes ran before `main` had caches, so the times above for the
+  code-only and docs-only tiers are cold-cache times. The only run since is the docs-only run of the pull request
+  that records this ([#9](https://github.com/juliosaraiva/patrol-cd/pull/9), run
+  [39820388783](https://github.com/juliosaraiva/patrol-cd/actions/runs/39820388783)): `Static checks` hit the
+  `go-static-...` cache saved by `main` (851 MB, "Cache restored successfully") and took 3.2 minutes instead of
+  10.7; the jobs that ran were the same three as in #6. How long the code and full tiers take on restored caches is
+  unobserved, and the cache usage is above the repository limit (see above).
 - **Failure paths on a runner**: the kind diagnostics bundle and its secret scrub were exercised only locally, and
   no run failed in the kind job.
 - **Flakiness.** Three of the first four runs failed for a different reason each (all fixed); the fifth run of the
