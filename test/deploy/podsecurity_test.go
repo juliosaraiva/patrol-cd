@@ -94,14 +94,18 @@ func podFor(pt podTemplate, namespace, name string) *corev1.Pod {
 func TestPodSecurityRestricted(t *testing.T) {
 	t.Parallel()
 	k := sharedEnv(t)
-	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Minute)
-	t.Cleanup(cancel) // parallel subtests outlive this function
 	const ns = "pss-restricted"
-	if err := k.ensureNamespace(ctx, ns, restrictedLabels); err != nil {
+	setupCtx, cancelSetup := context.WithTimeout(context.Background(), time.Minute)
+	err := k.ensureNamespace(setupCtx, ns, restrictedLabels)
+	cancelSetup()
+	if err != nil {
 		t.Fatal(err)
 	}
 
 	t.Run("negative-control", func(t *testing.T) {
+		// Its own deadline: it runs now, and must not share one with the profile subtests below.
+		ctx, cancel := context.WithTimeout(context.Background(), 2*time.Minute)
+		defer cancel()
 		kube, warns := k.warningClient(t)
 		bad := &corev1.Pod{
 			ObjectMeta: metav1.ObjectMeta{Name: "privileged", Namespace: ns},
@@ -125,15 +129,28 @@ func TestPodSecurityRestricted(t *testing.T) {
 		warns.take()
 	})
 
+	all := profiles(t)
 	var mu sync.Mutex
-	pods, containers := 0, 0
+	profilesRun, pods, containers := 0, 0, 0
 	t.Cleanup(func() {
-		t.Logf("Pod Security restricted: %d pods (%d containers incl. init) admitted", pods, containers)
+		// Runs after the parallel subtests. A suite that admitted nothing, or skipped a profile,
+		// proved nothing about Pod Security.
+		t.Logf("Pod Security restricted: %d profiles, %d pods (%d containers incl. init) admitted", profilesRun, pods, containers)
+		if !t.Failed() && (profilesRun != len(all) || pods == 0) {
+			t.Errorf("Pod Security restricted exercised %d of %d profiles and admitted %d pods", profilesRun, len(all), pods)
+		}
 	})
-	for _, p := range profiles(t) {
+	for _, p := range all {
 		t.Run(p.name, func(t *testing.T) {
 			t.Parallel()
+			// A parallel subtest starts when a -parallel slot frees up, which is minutes after its
+			// parent on a 2-CPU runner (two slots, long tests ahead of it). Its deadline starts
+			// here: the client's rate limiter fails a request at once when the deadline left is
+			// shorter than its wait ("client rate limiter Wait returned an error").
+			ctx, cancel := context.WithTimeout(context.Background(), 5*time.Minute)
+			defer cancel()
 			kube, warns := k.warningClient(t)
+			admitted, admittedContainers := 0, 0
 			for i, pt := range podTemplates(t, renderProfile(t, p)) {
 				pod := podFor(pt, ns, fmt.Sprintf("%s-%d", p.name, i))
 				warns.take()
@@ -148,11 +165,14 @@ func TestPodSecurityRestricted(t *testing.T) {
 					t.Errorf("%s: warnings:\n%s", pt.owner, joinLines(ws))
 					continue
 				}
-				mu.Lock()
-				pods++
-				containers += len(pod.Spec.InitContainers) + len(pod.Spec.Containers)
-				mu.Unlock()
+				admitted++
+				admittedContainers += len(pod.Spec.InitContainers) + len(pod.Spec.Containers)
 			}
+			mu.Lock()
+			profilesRun++
+			pods += admitted
+			containers += admittedContainers
+			mu.Unlock()
 		})
 	}
 }
