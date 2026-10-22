@@ -30,6 +30,7 @@ import (
 
 	"github.com/juliosaraiva/patrol-cd/api/v1alpha1"
 	"github.com/juliosaraiva/patrol-cd/internal/commitserver"
+	"github.com/juliosaraiva/patrol-cd/internal/envtestx"
 	"github.com/juliosaraiva/patrol-cd/internal/git"
 	"github.com/juliosaraiva/patrol-cd/internal/reposerver/apiclient"
 	"github.com/juliosaraiva/patrol-cd/internal/sandbox"
@@ -81,7 +82,7 @@ func runTests(m *testing.M) int {
 		CRDDirectoryPaths:     []string{filepath.Join("..", "..", "deploy", "crds")},
 		ErrorIfCRDPathMissing: true,
 	}
-	cfg, err := env.Start()
+	cfg, err := envtestx.Start(env)
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "start envtest: %v\n", err)
 		return 1

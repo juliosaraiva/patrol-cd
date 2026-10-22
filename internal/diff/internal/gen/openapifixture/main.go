@@ -25,6 +25,8 @@ import (
 
 	"k8s.io/client-go/kubernetes"
 	"sigs.k8s.io/controller-runtime/pkg/envtest"
+
+	"github.com/juliosaraiva/patrol-cd/internal/envtestx"
 )
 
 // roots are the OpenAPI definitions the diff tests need. Everything they reference is kept.
@@ -55,7 +57,7 @@ func run(out string) (err error) {
 		return errors.New("KUBEBUILDER_ASSETS is not set")
 	}
 	env := &envtest.Environment{}
-	cfg, err := env.Start()
+	cfg, err := envtestx.Start(env)
 	if err != nil {
 		return fmt.Errorf("start envtest: %w", err)
 	}

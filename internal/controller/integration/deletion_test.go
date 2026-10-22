@@ -180,9 +180,9 @@ func TestPreDeleteHookFailure(t *testing.T) {
 	assert.True(t, ok, "resources untouched after a failed PreDelete hook")
 	// Unblock: remove the hook from Git and the finalizer is no longer needed by the app,
 	// but deletion keeps the stage-less finalizer; remove it by hand as an operator would.
-	cur := e.getApp(a)
-	cur.Finalizers = slices.DeleteFunc(cur.Finalizers, func(f string) bool { return f == v1alpha1.FinalizerPreDelete })
-	require.NoError(t, e.c.Update(e.ctx, cur))
+	e.updateApp(a, func(app *v1alpha1.Application) {
+		app.Finalizers = slices.DeleteFunc(app.Finalizers, func(f string) bool { return f == v1alpha1.FinalizerPreDelete })
+	})
 	e.waitAppGone(a)
 }
 

@@ -16,6 +16,7 @@ import (
 	ctrllog "sigs.k8s.io/controller-runtime/pkg/log"
 
 	"github.com/juliosaraiva/patrol-cd/api/v1alpha1"
+	"github.com/juliosaraiva/patrol-cd/internal/envtestx"
 )
 
 // One envtest kube-apiserver (with the Patrol CRDs) per test binary, started only when
@@ -52,7 +53,7 @@ func run(m *testing.M) int {
 		ErrorIfCRDPathMissing: true,
 		UseExistingCluster:    ptr.To(false),
 	}
-	cfg, err := env.Start()
+	cfg, err := envtestx.Start(env)
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "start envtest control plane: %v\n", err)
 		return 1

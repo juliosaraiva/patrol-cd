@@ -64,6 +64,7 @@ import (
 	"github.com/juliosaraiva/patrol-cd/internal/auth"
 	"github.com/juliosaraiva/patrol-cd/internal/cli"
 	clusterlib "github.com/juliosaraiva/patrol-cd/internal/clusters"
+	"github.com/juliosaraiva/patrol-cd/internal/envtestx"
 	"github.com/juliosaraiva/patrol-cd/internal/rbac"
 	"github.com/juliosaraiva/patrol-cd/internal/repository"
 	"github.com/juliosaraiva/patrol-cd/internal/settings"
@@ -92,7 +93,7 @@ func Main(m *testing.M) int {
 	}
 	ctrllog.SetLogger(logr.Discard())
 	env := &envtest.Environment{CRDDirectoryPaths: []string{CRDDir()}, ErrorIfCRDPathMissing: true}
-	cfg, err := env.Start()
+	cfg, err := envtestx.Start(env)
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "start envtest: %v\n", err)
 		return 1
