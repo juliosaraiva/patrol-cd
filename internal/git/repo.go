@@ -130,6 +130,9 @@ func (c *Client) Fetch(ctx context.Context, revision string) error {
 		c.cleanupOrphanedTempPackfiles()
 		return err
 	}
+	if revision == "" {
+		c.ensureRemoteHEAD(ctx)
+	}
 	if c.opts.enableLFS {
 		files, err := c.lsLargeFiles(ctx)
 		if err == nil && len(files) > 0 {
@@ -139,6 +142,24 @@ func (c *Client) Fetch(ctx context.Context, revision string) error {
 		}
 	}
 	return nil
+}
+
+// ensureRemoteHEAD makes origin/HEAD resolve after a default fetch, because Checkout("")
+// checks it out. Git 2.48 and later create it as part of fetch (remote.origin.followRemoteHEAD);
+// earlier versions only set it on clone, and the working copy is created by init. A failure is
+// logged, not returned: Checkout reports the missing ref, and CheckoutRevision falls back to
+// fetching HEAD explicitly.
+func (c *Client) ensureRemoteHEAD(ctx context.Context) {
+	if _, err := c.git(ctx, cmdSpec{args: []string{"rev-parse", "--verify", "--quiet", "refs/remotes/origin/HEAD"}, maxStdout: maxSmallOutput}); err == nil {
+		return
+	}
+	err := c.withRetry(ctx, func() error {
+		_, err := c.run(ctx, cmdSpec{args: []string{"remote", "set-head", "origin", "--auto"}, credentialed: true, maxStdout: maxSmallOutput})
+		return err
+	})
+	if err != nil && ctx.Err() == nil {
+		c.log.Warn("git: failed to set origin/HEAD", slog.String("repo", c.RepoURL()), slog.Any("error", err))
+	}
 }
 
 // cleanupOrphanedTempPackfiles removes temporary pack files left by a fetch that
