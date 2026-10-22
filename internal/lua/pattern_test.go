@@ -183,7 +183,9 @@ func TestPatternHonorsContext(t *testing.T) {
 				assert.Less(t, elapsed, 2*time.Second)
 				return
 			}
-			assert.Equal(t, context.DeadlineExceeded.Error(), errText)
+			// Stopping early is the point: on a fast machine the matcher can reach its depth
+			// limit before the deadline, on a slow one the deadline comes first.
+			assert.Contains(t, []string{context.DeadlineExceeded.Error(), "pattern/input too complex"}, errText)
 			assert.Less(t, elapsed, 2*time.Second)
 		})
 	}

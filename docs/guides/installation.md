@@ -48,7 +48,11 @@ registry, your credentials) and install `oci://registry.example.com/charts/patro
 What happens on the first install:
 
 1. Helm applies the CRDs, the Operation admission policy, the settings ConfigMaps, an empty
-   `patrol-secret`, RBAC, Services and workloads.
+   `patrol-secret`, RBAC, Services and workloads. The server, the controller, the ApplicationSet
+   controller and the notifications controller wait up to a minute for the API server to serve every
+   Patrol kind before they start (a large CRD can lag behind the pods on a busy cluster); the log
+   says `waiting for the Patrol CRDs to be served`. Past that minute they exit with the missing kinds
+   in the error and the kubelet restarts them.
 2. The `bootstrap` init container of patrol-server (of the controller in a core install) runs
    `patrolcd bootstrap`: it creates `patrol-internal-token`, the session signing key in
    `patrol-secret` and the initial admin password (`patrol-secret` `admin.password`, plaintext in

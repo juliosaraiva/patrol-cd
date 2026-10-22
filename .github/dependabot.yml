@@ -1,0 +1,18 @@
+# Keeps the pinned GitHub Actions (full commit SHAs with a version comment) current. Only actions:
+# Go modules, npm packages and the image's base images are pinned and bumped by hand together with
+# their checksums (hack/images/checksums.txt, hack/ci/tools.lock, ADR-0007).
+version: 2
+updates:
+  - package-ecosystem: github-actions
+    directories:
+      - /
+      - /.github/actions/*
+    schedule:
+      interval: monthly
+    commit-message:
+      prefix: ci
+    open-pull-requests-limit: 5
+    labels: []
+    groups:
+      github-actions:
+        patterns: ["*"]

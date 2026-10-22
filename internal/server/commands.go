@@ -146,6 +146,22 @@ type component struct {
 	run     func(ctx context.Context, rt *Runtime) error
 }
 
+// start waits for the Patrol CRDs (components that use the control-plane API only), then runs the
+// component. The wait ends crdWaitTimeout after began, the start of the process, so that it counts
+// the time bootstrap took. A stop during the wait is a clean stop, as it is during the run.
+func (c *component) start(ctx context.Context, rt *Runtime, began time.Time) error {
+	if c.flags.kube && rt.Rest != nil {
+		wait := max(crdWaitTimeout-time.Since(began), crdWaitInterval)
+		if err := waitForCRDs(ctx, rt.Rest, rt.Log, wait, crdWaitInterval); err != nil {
+			if ctx.Err() != nil {
+				return nil
+			}
+			return err
+		}
+	}
+	return c.run(ctx, rt)
+}
+
 func (c *component) command() *cobra.Command {
 	cmd := &cobra.Command{
 		Use:   c.use,
@@ -153,6 +169,7 @@ func (c *component) command() *cobra.Command {
 		Long:  c.long,
 		Args:  cobra.NoArgs,
 		RunE: func(cmd *cobra.Command, _ []string) error {
+			began := time.Now()
 			ctx, stop := signal.NotifyContext(cmd.Context(), os.Interrupt, syscall.SIGTERM)
 			defer stop()
 			// A second signal terminates the process at once (default disposition).
@@ -183,7 +200,7 @@ func (c *component) command() *cobra.Command {
 				}()
 			}
 			rt.Log.Info("starting", "version", VersionInfo().Version, "namespace", rt.Namespace)
-			err = c.run(ctx, rt)
+			err = c.start(ctx, rt, began)
 			if err == nil || errors.Is(err, context.Canceled) {
 				rt.Log.Info("stopped")
 				return nil

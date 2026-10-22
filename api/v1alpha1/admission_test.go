@@ -29,6 +29,7 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/envtest"
 
 	v1alpha1 "github.com/juliosaraiva/patrol-cd/api/v1alpha1"
+	"github.com/juliosaraiva/patrol-cd/internal/envtestx"
 )
 
 // The admission tests run the generated CRDs and the Operation admission policy (deploy/crds) in a
@@ -61,7 +62,7 @@ func runTests(m *testing.M) int {
 		CRDDirectoryPaths:     []string{crdDir},
 		ErrorIfCRDPathMissing: true,
 	}
-	cfg, err := env.Start()
+	cfg, err := envtestx.Start(env)
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "start envtest: %v\n", err)
 		return 1

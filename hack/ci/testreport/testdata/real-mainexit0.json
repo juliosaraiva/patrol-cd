@@ -1,0 +1,13 @@
+{"Time":"2026-10-22T02:15:44.69721-03:00","Action":"start","Package":"example.com/edge/mainexit0"}
+{"Time":"2026-10-22T02:15:44.938651-03:00","Action":"run","Package":"example.com/edge/mainexit0","Test":"TestFails"}
+{"Time":"2026-10-22T02:15:44.939066-03:00","Action":"output","Package":"example.com/edge/mainexit0","Test":"TestFails","Output":"=== RUN   TestFails\n","OutputType":"frame"}
+{"Time":"2026-10-22T02:15:44.939534-03:00","Action":"output","Package":"example.com/edge/mainexit0","Test":"TestFails","Output":"    a_test.go:15: failed, but the package passes\n","OutputType":"error"}
+{"Time":"2026-10-22T02:15:44.940033-03:00","Action":"output","Package":"example.com/edge/mainexit0","Test":"TestFails","Output":"--- FAIL: TestFails (0.00s)\n","OutputType":"frame"}
+{"Time":"2026-10-22T02:15:44.940061-03:00","Action":"fail","Package":"example.com/edge/mainexit0","Test":"TestFails","Elapsed":0}
+{"Time":"2026-10-22T02:15:44.940092-03:00","Action":"run","Package":"example.com/edge/mainexit0","Test":"TestPasses"}
+{"Time":"2026-10-22T02:15:44.9401-03:00","Action":"output","Package":"example.com/edge/mainexit0","Test":"TestPasses","Output":"=== RUN   TestPasses\n","OutputType":"frame"}
+{"Time":"2026-10-22T02:15:44.940241-03:00","Action":"output","Package":"example.com/edge/mainexit0","Test":"TestPasses","Output":"--- PASS: TestPasses (0.00s)\n","OutputType":"frame"}
+{"Time":"2026-10-22T02:15:44.940261-03:00","Action":"pass","Package":"example.com/edge/mainexit0","Test":"TestPasses","Elapsed":0}
+{"Time":"2026-10-22T02:15:44.940278-03:00","Action":"output","Package":"example.com/edge/mainexit0","Output":"FAIL\n","OutputType":"frame"}
+{"Time":"2026-10-22T02:15:44.940356-03:00","Action":"output","Package":"example.com/edge/mainexit0","Output":"ok  \texample.com/edge/mainexit0\t0.241s\n"}
+{"Time":"2026-10-22T02:15:44.940441-03:00","Action":"pass","Package":"example.com/edge/mainexit0","Elapsed":0.243}

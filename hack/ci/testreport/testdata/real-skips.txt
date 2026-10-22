@@ -1,0 +1,2 @@
+# Allowlist for real-darwin.json (see ../README.md). Fields are separated by tabs.
+github\.com/juliosaraiva/patrol-cd/pkg/scm/[a-z]+	TestConformance/.+	capability "[A-Za-z]+" not declared|skipped by provider test options|no read capability to probe	conformance checks of capabilities the provider does not declare

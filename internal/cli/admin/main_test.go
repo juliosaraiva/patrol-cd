@@ -24,6 +24,8 @@ import (
 	"k8s.io/client-go/kubernetes"
 	"k8s.io/client-go/rest"
 	"sigs.k8s.io/controller-runtime/pkg/envtest"
+
+	"github.com/juliosaraiva/patrol-cd/internal/envtestx"
 )
 
 // One envtest API server per test binary, started when KUBEBUILDER_ASSETS is set (required
@@ -63,7 +65,7 @@ func runTests(m *testing.M) int {
 		return 1
 	}
 	env := &envtest.Environment{CRDDirectoryPaths: []string{crdDir, oldDir}, ErrorIfCRDPathMissing: true}
-	cfg, err := env.Start()
+	cfg, err := envtestx.Start(env)
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "start envtest: %v\n", err)
 		return 1

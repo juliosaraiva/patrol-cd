@@ -52,17 +52,20 @@ make tools            # install pinned tools into ./bin
 make generate         # deepcopy, CRDs, the chart's generated files, static install manifests
 make verify-generated # fails if generated files are stale
 make build            # Go binaries into ./bin
-make test             # Go tests incl. envtest-backed ones
+make test             # Go tests incl. envtest-backed ones, test/integration and test/deploy (slow)
 pnpm -C ui install && pnpm -C ui test && pnpm -C ui build
 
 # integrated lifecycle/recovery suite (real kube-apiservers via envtest)
-PATROL_INTEGRATION=1 go test ./test/integration/...
+PATROL_INTEGRATION=1 go test -race -timeout 60m ./test/integration/...
 
 # packaging checks that need no container runtime
 make helm-lint helm-template verify-manifests image-rootfs-check
 # deployment validation of the chart and manifests against envtest API servers
 KUBEBUILDER_ASSETS="$(make --no-print-directory -s envtest)" PATROL_REQUIRE_ENVTEST=1 \
-  go test -race ./test/deploy/
+  go test -race -timeout 40m ./test/deploy/
+
+# the CI jobs, runnable locally (docs/guides/ci.md)
+make ci-static ci-unit ci-ui ci-image   # see `make help` for the others
 ```
 
 See [`CLAUDE.md`](CLAUDE.md) for conventions and [`TASKS.md`](TASKS.md) for the task tracker
@@ -73,7 +76,9 @@ and current limitations.
 - The container image has been built for linux/arm64 only and not published. Patrol CD has run
   on two local kind clusters (one CNI, kindnet; arm64; one replica per component; the chart's
   default profile; no SSO, ingress, ApplicationSets, hydrator, CMP plugins or notifications
-  delivery exercised, no browser run), not on a cloud cluster. There is no CI pipeline yet.
+  delivery exercised, no browser run), not on a cloud cluster. A GitHub Actions workflow
+  (`docs/guides/ci.md`) has passed its full tier, including the kind lifecycle job, on one
+  pull request (`docs/verification/log.md` V-0035); other tiers and pushes to `main` have not run.
 - Most unit and integration tests still run against envtest (no kubelet), where pod health is
   simulated; the kind checks (`hack/kind/verify-install.sh`) cover the install, security
   contexts, part of the NetworkPolicy enforcement, metrics endpoints, sync and drift on real

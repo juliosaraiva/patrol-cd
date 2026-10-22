@@ -35,17 +35,17 @@ func TestDeletionConfirmation(t *testing.T) {
 	assert.True(t, got.Status.Resources[0].RequiresDeletionConfirmation)
 
 	// An approval older than the deletion does not count.
-	stale := e.getApp(a)
-	stale.Annotations = map[string]string{v1alpha1.AnnotationKeyDeletionApproved: time.Now().Add(-time.Hour).UTC().Format(time.RFC3339)}
-	require.NoError(t, e.c.Update(e.ctx, stale))
+	e.updateApp(a, func(app *v1alpha1.Application) {
+		app.Annotations = map[string]string{v1alpha1.AnnotationKeyDeletionApproved: time.Now().Add(-time.Hour).UTC().Format(time.RFC3339)}
+	})
 	e.deleteApp(a)
 	time.Sleep(2 * time.Second)
 	cm := mustLive(t, e, "confirm-cm")
 	assert.Nil(t, cm.GetDeletionTimestamp(), "deletion waits for confirmation")
 
-	cur := e.getApp(a)
-	cur.Annotations[v1alpha1.AnnotationKeyDeletionApproved] = time.Now().Add(time.Second).UTC().Format(time.RFC3339)
-	require.NoError(t, e.c.Update(e.ctx, cur))
+	e.updateApp(a, func(app *v1alpha1.Application) {
+		app.Annotations[v1alpha1.AnnotationKeyDeletionApproved] = time.Now().Add(time.Second).UTC().Format(time.RFC3339)
+	})
 	e.waitLive(gvrConfigMap, "confirm-cm", "deleted after approval", gone)
 	e.waitAppGone(a)
 }

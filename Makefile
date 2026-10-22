@@ -20,7 +20,7 @@ BOILERPLATE := hack/boilerplate.go.txt
 GENERATED := api/v1alpha1/zz_generated.deepcopy.go $(CRD_DIR) deploy/manifests
 
 GO ?= go
-GO_TEST_FLAGS ?= -race -count=1
+GO_TEST_FLAGS ?= -race -count=1 -timeout 60m
 # Packages for vet/lint/test, e.g. `make test PKGS=./api/...`.
 PKGS ?= ./...
 
@@ -46,11 +46,16 @@ $(KUSTOMIZE): | $(LOCALBIN)
 tools: $(CONTROLLER_GEN) $(SETUP_ENVTEST) $(KUSTOMIZE) ## Install pinned tools into ./bin (skips installed ones).
 
 # Absolute path of the envtest binaries. Uses installed binaries when present (offline), otherwise
-# downloads them.
+# downloads them. The release index is pinned to a controller-tools commit: setup-envtest checks each
+# archive against the SHA-512 in that index, and the index at HEAD can change under us.
+ENVTEST_INDEX ?= https://raw.githubusercontent.com/kubernetes-sigs/controller-tools/1031496fc98a4f51010c3bdfdeb57b5d67bea7bd/envtest-releases.yaml
+ENVTEST_USE = $(SETUP_ENVTEST) use $(ENVTEST_K8S_VERSION) --bin-dir $(ENVTEST_DIR) --index $(ENVTEST_INDEX)
+# The same thing as a shell expression, for recipes that must not contain a literal $(MAKE) (GNU make
+# runs such lines even under -n).
+ENVTEST_ASSETS = $$($(ENVTEST_USE) -i -p path 2>/dev/null || $(ENVTEST_USE) -p path)
 .PHONY: envtest
 envtest: $(SETUP_ENVTEST) ## Print the envtest assets directory (KUBEBUILDER_ASSETS).
-	@$(SETUP_ENVTEST) use $(ENVTEST_K8S_VERSION) --bin-dir $(ENVTEST_DIR) -i -p path 2>/dev/null \
-		|| $(SETUP_ENVTEST) use $(ENVTEST_K8S_VERSION) --bin-dir $(ENVTEST_DIR) -p path
+	@$(ENVTEST_USE) -i -p path 2>/dev/null || $(ENVTEST_USE) -p path
 
 ##@ Generation
 
@@ -122,3 +127,4 @@ include hack/build.mk
 include hack/image.mk
 include hack/deploy.mk
 include hack/kind/kind.mk
+include hack/ci.mk

@@ -295,7 +295,10 @@ func TestRunnerChildProcess(t *testing.T) {
 func TestRunnerLimits(t *testing.T) {
 	t.Parallel()
 	root := repo(t, map[string]string{
-		"slow.jsonnet": `std.foldl(function(a, b) a + b, std.range(1, 200000000), 0)`,
+		// CPU-bound with a small footprint: the race detector multiplies memory use and the sandbox's
+		// address-space limit (4 GiB) would end a program that builds a 200 million element array
+		// before the timeout does ("ThreadSanitizer failed to allocate ...").
+		"slow.jsonnet": `std.foldl(function(acc, i) acc + std.length(std.range(1, 2000)), std.range(1, 2000000), 0)`,
 		"big.jsonnet":  `[std.repeat('x', 1 << 16)]`,
 	})
 	r := Runner{Limits: sandbox.Limits{Timeout: 2 * time.Second}}

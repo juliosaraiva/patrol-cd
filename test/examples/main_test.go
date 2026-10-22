@@ -14,6 +14,8 @@ import (
 	"k8s.io/utils/ptr"
 	"sigs.k8s.io/controller-runtime/pkg/envtest"
 	ctrllog "sigs.k8s.io/controller-runtime/pkg/log"
+
+	"github.com/juliosaraiva/patrol-cd/internal/envtestx"
 )
 
 // envtestK8sVersion is the kube-apiserver version installed by `make envtest`.
@@ -67,7 +69,7 @@ func run(m *testing.M) int {
 		ErrorIfCRDPathMissing: true,
 		UseExistingCluster:    ptr.To(false),
 	}
-	cfg, err := env.Start()
+	cfg, err := envtestx.Start(env)
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "start envtest control plane: %v\n", err)
 		return 1

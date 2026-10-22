@@ -22,6 +22,8 @@ import (
 	openapiproto "k8s.io/kube-openapi/pkg/util/proto"
 	"k8s.io/utils/ptr"
 	"sigs.k8s.io/controller-runtime/pkg/envtest"
+
+	"github.com/juliosaraiva/patrol-cd/internal/envtestx"
 )
 
 // kubeDryRunner is a DryRunner backed by a real API server (server-side apply, dryRun=All,
@@ -98,7 +100,7 @@ func envtestClients(t *testing.T) (*kubeDryRunner, *managedfields.GvkParser) {
 	}
 	envOnce.Do(func() {
 		testEnv = &envtest.Environment{}
-		cfg, err := testEnv.Start()
+		cfg, err := envtestx.Start(testEnv)
 		if err != nil {
 			envErr = err
 			return

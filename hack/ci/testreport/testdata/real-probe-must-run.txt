@@ -1,0 +1,4 @@
+# Must-run list used with real-probe.json (collect_test.go TestRealProbe).
+example.com/probe/a	TestPass	passes
+example.com/probe/a	TestFail	fails: a violation
+example.com/probe/a	TestNested3	passes, but every subtest below it skipped: a violation

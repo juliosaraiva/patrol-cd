@@ -1,0 +1,41 @@
+# Tests that must PASS in CI: read by hack/ci/testreport (-must-run, the default path).
+#
+# Format: PACKAGE<TAB>TEST_REGEXP<TAB>comment, one rule per line; '#' starts a comment line.
+# PACKAGE is a full import path. TEST_REGEXP must match whole test names as go test prints them
+# (top-level tests and subtests, e.g. TestA/case_1). A rule applies only when its package occurs
+# in the go test -json input, so one list serves every shard and job; then at least one test
+# must match and every matching test must have passed (a skipped, failed, missing or unfinished
+# test is a violation, and so is a passed test whose subtests all skipped). Since a rule for an
+# absent package is silently not applied, `go run ./hack/ci/testreport -check-rules` fails when
+# a PACKAGE here is not in `go list ./...` (renamed or moved). TEST_REGEXP must parse on its own
+# (a stray ")" is rejected).
+#
+# The list is short on purpose: it names the tests whose silent skip would hide real coverage
+# because they depend on a tool the CI job must install (sshd, git-lfs, gpg, git-http-backend,
+# Helm 4, kustomize 5.8.1) or on envtest. Skips of every other test are caught by
+# hack/ci/allowed-skips.txt, which forbids any skip it does not list.
+
+# internal/git: the git client against real servers.
+github.com/juliosaraiva/patrol-cd/internal/git	TestSSHTransport	needs a non-root sshd, ssh and ssh-keygen; skips when sshd is missing or rejects the config
+github.com/juliosaraiva/patrol-cd/internal/git	TestLFS	needs git-lfs on PATH; skips without it (it was not on PATH on the developer machine)
+github.com/juliosaraiva/patrol-cd/internal/git	TestVerifyCommitSignature	needs gpg; skips without it
+github.com/juliosaraiva/patrol-cd/internal/git	TestHTTPBasicAuthViaAskpass|TestHTTPSClientCertificate	need git-http-backend (git --exec-path); HTTPS runs against the runner's libcurl TLS stack
+
+# internal/reposerver and internal/render: manifest generation with the real tools.
+github.com/juliosaraiva/patrol-cd/internal/reposerver	TestSourceIntegrity	GnuPG source verification; skips without gpg
+github.com/juliosaraiva/patrol-cd/internal/reposerver	TestGenerateManifestRefValuesHelm	Helm rendering through the repo-server; skips without helm
+github.com/juliosaraiva/patrol-cd/internal/reposerver	TestErrorPathSanitization	the only reposerver test that runs kustomize; skips without it
+github.com/juliosaraiva/patrol-cd/internal/render	TestHelmDefaultCommandAndDetection	Helm rendering; skips without helm
+github.com/juliosaraiva/patrol-cd/internal/render	TestKustomizeBuild	kustomize rendering; skips without kustomize
+github.com/juliosaraiva/patrol-cd/internal/helm	TestDependencyBuildHTTP	helm dependency build against a chart repository; skips without helm
+github.com/juliosaraiva/patrol-cd/hack/helmdocs	TestRenderedProfiles	renders the chart profiles with helm; skips without it
+
+# Generated artifacts and API server behaviour.
+github.com/juliosaraiva/patrol-cd/internal/envtestx	TestStartFailureStopsWhatStarted	envtest leaves etcd and kube-apiserver running when a start fails; needs the envtest binaries and fails without them under PATROL_REQUIRE_ENVTEST=1
+github.com/juliosaraiva/patrol-cd/hack/genmanifests	TestManifestsAreCurrent	deploy/manifests match the chart; needs Helm 4 and kustomize v5.8.1, skips without them unless PATROL_REQUIRE_DEPLOY_TOOLS=1
+github.com/juliosaraiva/patrol-cd/api/v1alpha1	TestAdmission[A-Za-z]*	CRD validation and admission policies against an envtest API server; skip without KUBEBUILDER_ASSETS
+github.com/juliosaraiva/patrol-cd/test/examples	Test[^/]*	examples/ against envtest with helm and kustomize; every top-level test must pass
+
+# Suites with jobs of their own (they apply only where the package is in the input).
+github.com/juliosaraiva/patrol-cd/test/integration	Test[^/]*	the whole suite skips unless PATROL_INTEGRATION=1 or KUBEBUILDER_ASSETS is set
+github.com/juliosaraiva/patrol-cd/test/deploy	Test[^/]*	chart and static manifests against envtest; skips without envtest, helm, kustomize or git-http-backend unless required

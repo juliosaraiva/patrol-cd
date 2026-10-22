@@ -10,6 +10,8 @@ import (
 	"k8s.io/utils/ptr"
 	"sigs.k8s.io/controller-runtime/pkg/envtest"
 	ctrllog "sigs.k8s.io/controller-runtime/pkg/log"
+
+	"github.com/juliosaraiva/patrol-cd/internal/envtestx"
 )
 
 // testEnv is a local kube-apiserver + etcd shared by the integration tests of this package.
@@ -29,7 +31,7 @@ func run(m *testing.M) int {
 	}
 	ctrllog.SetLogger(logr.Discard())
 	testEnv = &envtest.Environment{UseExistingCluster: ptr.To(false)}
-	cfg, err := testEnv.Start()
+	cfg, err := envtestx.Start(testEnv)
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "start envtest control plane: %v\n", err)
 		return 1

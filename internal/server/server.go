@@ -619,5 +619,16 @@ func (s *serverAssembly) projectGetter() apiserver.ProjectGetter {
 	}
 }
 
+// liveProjectGetter reads an AppProject from the API server, not from the informer cache.
+func (s *serverAssembly) liveProjectGetter() apiserver.ProjectGetter {
+	return func(ctx context.Context, name string) (*v1alpha1.AppProject, error) {
+		var p v1alpha1.AppProject
+		if err := s.direct.Get(ctx, client.ObjectKey{Namespace: s.cfg.Namespace, Name: name}, &p); err != nil {
+			return nil, err
+		}
+		return &p, nil
+	}
+}
+
 // auditRecorder adapts the event recorder for audit Events.
 func (s *serverAssembly) auditRecorder() rest.EventRecorder { return s.recorder }

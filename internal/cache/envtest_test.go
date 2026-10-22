@@ -827,6 +827,14 @@ func TestEnvtestConcurrencyStress(t *testing.T) {
 		}
 		return assert.ObjectsAreEqual(want, got)
 	}, "cache converges to the API server state")
+
+	// The resync above may have delivered the writes as one list, so no event need have reached the
+	// handler yet (on a fast machine the writes are still in flight at the resync and it has run; on a
+	// slow one they are done). A change after the resync must reach it.
+	_, err := k.cs.CoreV1().ConfigMaps(ns).Patch(ctx, "root", types.MergePatchType,
+		[]byte(`{"metadata":{"labels":{"stress":"done"}}}`), metav1.PatchOptions{})
+	require.NoError(t, err)
+	eventually(t, waitTimeout, func() bool { return handled.Load() > 0 }, "the update handler runs for a change after the resync")
 	close(stop)
 	readers.Wait()
 

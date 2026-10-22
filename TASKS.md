@@ -6,6 +6,19 @@ Resume rule: read this file, then `docs/parity/matrix.md`, then `docs/verificati
 
 ## Current work
 
+- **2026-10-21/22: CI with the kind job** (T0.7), on the user's request; pull request
+  [#4](https://github.com/juliosaraiva/patrol-cd/pull/4) (`feat/ci`). `.github/workflows/ci.yml` (jobs:
+  static, unit, ui, image, integration, deploy, kind, and the `ci` gate), `hack/ci.mk` (`make ci-*`),
+  `hack/ci/` (pinned tool installer, preflight, `go test -json` skip report, tier selection and its tests,
+  kind diagnostics), the kind scripts' `PATROL_WAIT_SCALE`; guide `docs/guides/ci.md`. Checked locally first
+  (V-0034), then on GitHub: four runs of the full tier with the kind job, the first and third failed and were
+  fixed, the second and fourth **passed all 9 jobs** (V-0035, tested head `44b420e`;
+  `docs/verification/runs/2026-10-22-github-ci-runs.md`). The work also fixed what it found in the product
+  and its tests: git before 2.48 (`origin/HEAD`), leaked envtest control planes (`internal/envtestx`), the
+  start-up race on the ApplicationSet CRD (`waitForCRDs`, KV-14), a project token refused as revoked before
+  the cache saw it, and flaky or racy tests (`phase4-findings.md` CI-F1 to CI-F14). **Not yet observed on
+  GitHub**: the docs-only and code-only tiers, pushes to `main`, manual runs, the labels, arm64; no failure
+  path of the kind job on a runner.
 - **2026-10-18: Phase 4 closeout** (Dockerfile, static manifests, Helm chart, first-run
   bootstrap). Two review rounds fixed; the final full `./test/deploy/` run passed (157 subtests, 281 s,
   `docs/verification/log.md` V-0027); committed and pushed (`3ea2bd3`). **2026-10-19: the Docker
@@ -29,7 +42,8 @@ Resume rule: read this file, then `docs/parity/matrix.md`, then `docs/verificati
 security and performance phases (Phase 5/6) and publishing anything (images, charts, releases,
 making the repository public) remain **out of scope until the user says otherwise**. When the
 Phase 4 closeout is committed, stop and wait for the user. (The kind validation, T4.3, was done
-on the user's request on 2026-10-19; the rest of this list is unchanged.)
+on the user's request on 2026-10-19, and CI with the kind job on 2026-10-21; the rest of this list
+is unchanged.)
 
 Superseded rule (user instruction, 2026-10-17; satisfied at the Phase 3 boundary, kept for
 history): **STOP when Phase 3 is completed.** Phase 3 = T3.1–T3.4 (API server, resource services, apiclient + CLI incl. `--core`, web UI) plus the server wiring they need (`cmd/patrolcd`, `internal/server`). At that boundary: finish the pre-push checks, make signed commits, create the PRIVATE GitHub repo and push (the earlier gate instruction, still in force), then STOP and wait for the user. Do NOT start Phase 4 (Dockerfile, Helm chart, manifests, kind validation) or Phase 5/6 work (e2e scenarios beyond the harness already in flight, security tests, benchmarks, parity audit backfill, docs workstreams).
@@ -78,7 +92,7 @@ Update 2026-10-16 (afternoon):
 - [~] T0.4 Parity inventory per area (9/10 done) → `docs/parity/areas/*.md`
 - [x] T0.5 Parity matrix generator `hack/parity` (areas + `docs/parity/status/*.yaml` overlays → `matrix.md`)
 - [~] T0.6 CRD types + CEL + envtest admission tests
-- [ ] T0.7 Makefile, CI workflow, lint config, `verify-generated`
+- [~] T0.7 Makefile, CI workflow, lint config, `verify-generated` — Makefile and `verify-generated` done; the CI workflow passed its full tier on GitHub (V-0035, `docs/guides/ci.md`); no golangci-lint config (the defaults apply)
 
 ## Phase 1 — Core libraries (parallel, disjoint packages)
 - [ ] T1.1 `internal/settings`: settings ConfigMaps/Secrets parser, watcher, validation
@@ -199,7 +213,7 @@ Open items:
 - **Docker disk**: resolved 2026-10-19 (Blockers above). `make image-multiarch`, `make image-sbom` and the R2-8 SBOM/license checks are now possible but were not run.
 - **kind validation** (T4.3): done 2026-10-19 on the user's request (V-0029 environment, V-0030 manual install and checks, V-0031 clean-room run 55/55 and the failed re-run after it; closing clean-room run after the review fixes V-0032, 58/58). Findings KV-1..KV-13 are in `docs/verification/phase4-findings.md`; KV-1 (repo-server crash on a volume mount root), KV-2, KV-4..KV-9 and KV-12 were fixed, KV-3 is documented, KV-10, KV-11 and KV-13 are observations (KV-11 and KV-13 open). The environment is left running (`make kind-down` removes it).
 - **e2e on kind (T5.3)**: out of scope until told. `hack/kind/verify-install.sh` covers install, security contexts, part of NetworkPolicy, metrics endpoints, sync and drift (with `--lifecycle` also helm rollback, upgrade, uninstall and re-install), but not Application update, prune, self-heal, recovery, multi-cluster tenancy, ApplicationSets, auth/SSO, notifications or extensions.
-- **CI pipelines**: not started (T0.7), out of scope until told.
+- **CI pipelines** (T0.7): authorized 2026-10-21 (CI with the kind job); done and passing its full tier on GitHub (see Current work). Not in scope: publishing images or charts, required checks (no branch protection on the Free plan), Playwright, scheduled runs.
 - **DV-2**: a core installation has no AppProject `default`; documented in the guides, not fixed (policy decision).
 - Round-2 follow-ups R2-3…R2-8 (`docs/verification/phase4-findings.md`; R2-1 overview.md notifications row and R2-2 `patrolcd bootstrap` help text were done by the orchestrator on 2026-10-18): `hack/build.mk` tree state, musl copyright for connect-proxy, `.gitignore` kubeconfig*.go, optional clock-free staleness check, keep-or-delete decision for the trust ConfigMaps on uninstall, SBOM/apk checks that need the image.
 - Other Phase 4 findings still listed in `phase4-findings.md` (M-2…M-7, DV-3…DV-5, DV-7…DV-9): check their status there before acting.

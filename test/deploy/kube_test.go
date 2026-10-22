@@ -31,6 +31,7 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/envtest"
 
 	"github.com/juliosaraiva/patrol-cd/api/v1alpha1"
+	"github.com/juliosaraiva/patrol-cd/internal/envtestx"
 )
 
 // auditPolicy logs every request at Metadata level (no bodies), except Operation creations,
@@ -108,7 +109,7 @@ func startKubeEnv(assets string, o envOptions) (*kubeEnv, error) {
 		k.env.CRDDirectoryPaths = []string{crdDir()}
 		k.env.ErrorIfCRDPathMissing = true
 	}
-	cfg, err := k.env.Start()
+	cfg, err := envtestx.Start(k.env)
 	if err != nil {
 		_ = os.RemoveAll(dir)
 		return nil, fmt.Errorf("start envtest %s: %w", o.name, err)

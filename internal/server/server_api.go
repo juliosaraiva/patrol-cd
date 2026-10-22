@@ -150,7 +150,7 @@ func (s *serverAssembly) buildAPI(ctx context.Context, keys auth.KeySet) error {
 	}
 	tokens, err := auth.NewTokenService(auth.TokenServiceConfig{
 		Keys: keys, Accounts: accounts, Revocations: revocations,
-		Projects: apiserver.ProjectTokenRegistry(s.projectGetter()),
+		Projects: apiserver.ProjectTokenRegistryWithFallback(s.projectGetter(), s.liveProjectGetter()),
 		External: sso.ExternalVerifier(s.settings),
 	})
 	if err != nil {

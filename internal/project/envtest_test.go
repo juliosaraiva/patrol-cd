@@ -22,6 +22,7 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/envtest"
 
 	"github.com/juliosaraiva/patrol-cd/api/v1alpha1"
+	"github.com/juliosaraiva/patrol-cd/internal/envtestx"
 )
 
 // One envtest API server per test binary, started only when KUBEBUILDER_ASSETS is set (and
@@ -48,7 +49,7 @@ func runTests(m *testing.M) int {
 		CRDDirectoryPaths:     []string{filepath.Join("..", "..", "deploy", "crds")},
 		ErrorIfCRDPathMissing: true,
 	}
-	cfg, err := env.Start()
+	cfg, err := envtestx.Start(env)
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "start envtest: %v\n", err)
 		return 1

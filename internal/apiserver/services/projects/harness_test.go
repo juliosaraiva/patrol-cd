@@ -35,6 +35,7 @@ import (
 	restapi "github.com/juliosaraiva/patrol-cd/internal/apiserver/rest"
 	"github.com/juliosaraiva/patrol-cd/internal/apiserver/services/projects"
 	"github.com/juliosaraiva/patrol-cd/internal/auth"
+	"github.com/juliosaraiva/patrol-cd/internal/envtestx"
 	"github.com/juliosaraiva/patrol-cd/internal/rbac"
 	"github.com/juliosaraiva/patrol-cd/internal/settings"
 	"github.com/juliosaraiva/patrol-cd/pkg/apiclient"
@@ -68,7 +69,7 @@ func run(m *testing.M) int {
 		CRDDirectoryPaths:     []string{filepath.Join("..", "..", "..", "..", "deploy", "crds")},
 		ErrorIfCRDPathMissing: true,
 	}
-	cfg, err := env.Start()
+	cfg, err := envtestx.Start(env)
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "start envtest control plane: %v\n", err)
 		return 1

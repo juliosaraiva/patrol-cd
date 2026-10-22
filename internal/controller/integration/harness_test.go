@@ -30,6 +30,7 @@ import (
 	"k8s.io/client-go/dynamic"
 	clientgoscheme "k8s.io/client-go/kubernetes/scheme"
 	"k8s.io/client-go/rest"
+	"k8s.io/client-go/util/retry"
 	"k8s.io/utils/ptr"
 	ctrl "sigs.k8s.io/controller-runtime"
 	crcache "sigs.k8s.io/controller-runtime/pkg/cache"
@@ -559,6 +560,21 @@ func (e *env) getApp(a *v1alpha1.Application) *v1alpha1.Application {
 	out := &v1alpha1.Application{}
 	require.NoError(e.t, e.c.Get(e.ctx, client.ObjectKeyFromObject(a), out))
 	return out
+}
+
+// updateApp applies fn to the latest Application and updates it. The running controller also
+// writes the object, so a read followed by an update can lose the race for the resource version;
+// the whole read-modify-write is retried on a conflict.
+func (e *env) updateApp(a *v1alpha1.Application, fn func(*v1alpha1.Application)) {
+	e.t.Helper()
+	require.NoError(e.t, retry.RetryOnConflict(retry.DefaultBackoff, func() error {
+		cur := &v1alpha1.Application{}
+		if err := e.c.Get(e.ctx, client.ObjectKeyFromObject(a), cur); err != nil {
+			return err
+		}
+		fn(cur)
+		return e.c.Update(e.ctx, cur)
+	}))
 }
 
 // waitApp polls the Application until cond holds.

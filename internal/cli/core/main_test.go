@@ -25,6 +25,7 @@ import (
 
 	"github.com/juliosaraiva/patrol-cd/api/v1alpha1"
 	"github.com/juliosaraiva/patrol-cd/internal/cli/clitest"
+	"github.com/juliosaraiva/patrol-cd/internal/envtestx"
 )
 
 // One envtest kube-apiserver per test binary with the Patrol CRDs, the Operation admission
@@ -71,7 +72,7 @@ func runTests(m *testing.M) int {
 	env.ControlPlane.GetAPIServer().Configure().
 		Set("audit-policy-file", policy).
 		Set("audit-log-path", auditLogPath)
-	cfg, err := env.Start()
+	cfg, err := envtestx.Start(env)
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "start envtest: %v\n", err)
 		return 1

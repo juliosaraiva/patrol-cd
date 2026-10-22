@@ -32,6 +32,7 @@ import (
 
 	"github.com/juliosaraiva/patrol-cd/api/v1alpha1"
 	"github.com/juliosaraiva/patrol-cd/internal/clusters"
+	"github.com/juliosaraiva/patrol-cd/internal/envtestx"
 	"github.com/juliosaraiva/patrol-cd/internal/server"
 )
 
@@ -244,7 +245,7 @@ func startEnvtest(assets string, o envtestOptions) (*Cluster, error) {
 		// killed after a short grace period instead.
 		env.ControlPlaneStopTimeout = stopGrace
 	}
-	cfg, err := env.Start()
+	cfg, err := envtestx.Start(env)
 	if err != nil {
 		return nil, err
 	}

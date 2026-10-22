@@ -33,6 +33,7 @@ import (
 	"github.com/juliosaraiva/patrol-cd/internal/apiserver/rest"
 	"github.com/juliosaraiva/patrol-cd/internal/apiserver/services/repositories"
 	"github.com/juliosaraiva/patrol-cd/internal/auth"
+	"github.com/juliosaraiva/patrol-cd/internal/envtestx"
 	"github.com/juliosaraiva/patrol-cd/internal/rbac"
 	reposerver "github.com/juliosaraiva/patrol-cd/internal/reposerver/apiclient"
 	"github.com/juliosaraiva/patrol-cd/internal/repository"
@@ -60,7 +61,7 @@ func run(m *testing.M) int {
 		UseExistingCluster: ptr.To(false),
 		CRDInstallOptions:  envtest.CRDInstallOptions{Paths: paths, ErrorIfPathMissing: true},
 	}
-	cfg, err := env.Start()
+	cfg, err := envtestx.Start(env)
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "start envtest control plane: %v\n", err)
 		return 1

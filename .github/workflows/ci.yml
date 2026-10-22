@@ -1,0 +1,493 @@
+# Patrol CD CI. Guide: docs/guides/ci.md. Every job installs pinned tools and calls a `make ci-*`
+# target (hack/ci.mk) or, for the kind job, the existing `make kind-*` targets, so each one can be
+# run on a developer machine. The runner image's own helm (3.x), kustomize and kubectl are never
+# used: hack/ci/install-tools.sh installs checksum-verified versions (hack/ci/tools.lock).
+#
+# Tiers (hack/ci/classify-changes.sh decides):
+#   always         static
+#   code changes   unit (without -race), ui, image
+#   full           unit under -race, integration, deploy, and kind: pushes to main, manual runs,
+#                  pull requests with the label ci:full, pull requests that touch the chart, the
+#                  deploy/integration suites, the modules, the pinned tools or the Makefiles, and every pull request
+#                  when the repository variable CI_HEAVY_ON_PR is "true"
+#   kind           the image is packaged and the kind job runs: also for pull requests with the
+#                  label ci:kind or that touch the image, kind scripts or CI files
+# A label takes effect on the next push to the pull request (label changes alone do not start a run).
+#   docs only      static only
+# Minutes matter: a private repository on the Free plan has 2,000 a month (docs/guides/ci.md).
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    types: [opened, synchronize, reopened]
+  workflow_dispatch:
+    inputs:
+      full:
+        description: Run the full tier (unit under -race, integration, deploy) and the kind job
+        type: boolean
+        default: true
+
+# Nothing in this workflow needs more than reading the repository. Jobs repeat `contents: read`
+# so that the permissions are visible where they are used.
+permissions: {}
+
+# A new push to a pull request replaces its run in progress; every other run (a push to main, a
+# manual run) has a group of its own, so it is never cancelled or replaced.
+concurrency:
+  group: ci-${{ github.event_name == 'pull_request' && format('pr-{0}', github.event.pull_request.number) || format('run-{0}', github.run_id) }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
+defaults:
+  run:
+    shell: bash
+
+env:
+  # Never let `go` download another toolchain behind the pin in go.mod.
+  GOTOOLCHAIN: local
+  GOFLAGS: -mod=readonly
+
+jobs:
+  changes:
+    name: Choose tiers
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    permissions:
+      contents: read
+    outputs:
+      docs_only: ${{ steps.classify.outputs.docs_only }}
+      full: ${{ steps.classify.outputs.full }}
+      kind: ${{ steps.classify.outputs.kind }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+      - name: Classify the change
+        id: classify
+        env:
+          EVENT_NAME: ${{ github.event_name }}
+          BASE_REF_NAME: ${{ github.ref_name }}
+          BEFORE_SHA: ${{ github.event.before }}
+          PR_LABELS: ${{ toJSON(github.event.pull_request.labels.*.name) }}
+          DISPATCH_FULL: ${{ inputs.full }}
+          HEAVY_ON_PR: ${{ vars.CI_HEAVY_ON_PR }}
+        run: hack/ci/classify-changes.sh
+
+  static:
+    name: Static checks
+    runs-on: ubuntu-24.04
+    timeout-minutes: 60
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 0 # gitleaks scans the whole history
+          persist-credentials: false
+      # First, on the clean checkout: gitleaks does not honor .gitignore and must not see the
+      # tools and caches the next steps put into the workspace.
+      - name: Install gitleaks
+        run: hack/ci/install-tools.sh --dest "$RUNNER_TEMP/ci-bin" gitleaks
+      - name: Secret scan
+        run: make ci-gitleaks
+      - name: Set up Go and the pinned tools
+        uses: ./.github/actions/setup
+        with:
+          profile: static
+          tools: helm golangci-lint shellcheck actionlint
+          cache-name: static
+      - name: gofmt
+        run: make ci-gofmt
+      - name: Go modules
+        run: make ci-gomod
+      - name: Build, vet and golangci-lint
+        run: make ci-lint-go
+      - name: Generated files, manifests and chart lint
+        run: make ci-generated
+      - name: OpenAPI document
+        run: make ci-openapi
+      - name: Parity matrix
+        run: make ci-parity
+      - name: Test report rules
+        run: make ci-rules
+      - name: Tier selection tests
+        run: make ci-classify
+      - name: Shell scripts
+        run: make ci-shell
+      - name: Workflows
+        run: make ci-actionlint
+
+  unit:
+    name: Unit tests
+    needs: changes
+    if: needs.changes.outputs.docs_only != 'true'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 120
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      # The SSH tests run sshd -t first; when it runs as root (not here) Debian's sshd also wants
+      # /run/sshd. Creating it is a harmless safeguard for a runner image that does not have it.
+      - name: Make sure sshd can run
+        run: |
+          test -x /usr/sbin/sshd || { sudo apt-get update -qq && sudo apt-get install -y -qq --no-install-recommends openssh-server; }
+          sudo install -d -m 0755 /run/sshd
+      - name: Set up Go and the pinned tools
+        id: setup
+        uses: ./.github/actions/setup
+        with:
+          profile: unit
+          tools: helm kubectl
+          envtest: "true"
+          # Ordinary pull requests compile without -race: they reuse the cache the static job saves.
+          cache-name: ${{ needs.changes.outputs.full == 'true' && 'race-unit' || 'static' }}
+      # -race is for the full tier; ordinary pull requests run the same tests without it.
+      - name: Go tests
+        env:
+          CI_RACE: ${{ needs.changes.outputs.full == 'true' && '1' || '0' }}
+        run: make ci-unit
+      - name: Kind script tests (offline)
+        if: ${{ !cancelled() && steps.setup.outcome == 'success' }}
+        run: make ci-scripts
+      - name: Upload the test report
+        if: always()
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: unit-report-${{ github.run_id }}-${{ github.run_attempt }}
+          path: |
+            dist/ci/unit-report.json
+            dist/ci/unit-summary.md
+            dist/ci/unit.stderr
+          if-no-files-found: ignore
+          retention-days: 14
+      - name: Compress the test event stream
+        if: failure()
+        run: gzip -f dist/ci/unit.json
+      - name: Upload the test event stream
+        if: failure()
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: unit-events-${{ github.run_id }}-${{ github.run_attempt }}
+          path: dist/ci/unit.json.gz
+          if-no-files-found: ignore
+          retention-days: 7
+
+  integration:
+    name: Integration suite
+    needs: changes
+    if: needs.changes.outputs.full == 'true'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 100
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      # The SSH tests run sshd -t first; when it runs as root (not here) Debian's sshd also wants
+      # /run/sshd. Creating it is a harmless safeguard for a runner image that does not have it.
+      - name: Make sure sshd can run
+        run: |
+          test -x /usr/sbin/sshd || { sudo apt-get update -qq && sudo apt-get install -y -qq --no-install-recommends openssh-server; }
+          sudo install -d -m 0755 /run/sshd
+      - name: Set up Go and the pinned tools
+        uses: ./.github/actions/setup
+        with:
+          profile: integration
+          tools: helm
+          envtest: "true"
+          cache-name: race-integration
+      - name: Integration suite (-race)
+        run: make ci-integration
+      - name: Upload logs
+        if: failure()
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: integration-logs-${{ github.run_id }}-${{ github.run_attempt }}
+          path: |
+            dist/ci/integration-summary.md
+            dist/ci/integration.stderr
+            dist/ci/integration-logs/
+          if-no-files-found: ignore
+          retention-days: 7
+
+  deploy:
+    name: Deploy suite
+    needs: changes
+    if: needs.changes.outputs.full == 'true'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 75
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      # The SSH tests run sshd -t first; when it runs as root (not here) Debian's sshd also wants
+      # /run/sshd. Creating it is a harmless safeguard for a runner image that does not have it.
+      - name: Make sure sshd can run
+        run: |
+          test -x /usr/sbin/sshd || { sudo apt-get update -qq && sudo apt-get install -y -qq --no-install-recommends openssh-server; }
+          sudo install -d -m 0755 /run/sshd
+      - name: Set up Go and the pinned tools
+        uses: ./.github/actions/setup
+        with:
+          profile: deploy
+          tools: helm
+          envtest: "true"
+          cache-name: race-deploy
+      # test/deploy and `make verify-generated` rewrite deploy/ in place: this job runs only the former.
+      - name: Deploy suite (-race)
+        run: make ci-deploy
+      # What TestPodSecurityRestricted covered (profiles, pods admitted), from the event stream, for the
+      # job summary. The test fails by itself when a profile is skipped or nothing is admitted.
+      - name: Pod Security coverage
+        if: ${{ !cancelled() && hashFiles('dist/ci/deploy.json') != '' }}
+        run: hack/ci/podsecurity-evidence.sh
+      - name: Compress the test event stream
+        if: failure()
+        run: gzip -f dist/ci/deploy.json
+      - name: Upload logs
+        if: failure()
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: deploy-logs-${{ github.run_id }}-${{ github.run_attempt }}
+          path: |
+            dist/ci/deploy-summary.md
+            dist/ci/deploy.stderr
+            dist/ci/deploy.json.gz
+            dist/ci/deploy-logs/
+          if-no-files-found: ignore
+          retention-days: 7
+
+  ui:
+    name: Web UI
+    needs: changes
+    if: needs.changes.outputs.docs_only != 'true'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version: 22.23.3
+      # The same pnpm, with the same SHA-512, as the Dockerfile (one source of truth).
+      - name: Install pnpm
+        run: hack/ci/setup-pnpm.sh
+      # Compares node and pnpm with the Dockerfile's (the versions above are written out here).
+      - name: Preflight
+        run: hack/ci/preflight.sh ui
+      - name: Locate the pnpm store
+        id: pnpm
+        run: echo "store=$(pnpm store path --silent)" >>"$GITHUB_OUTPUT"
+      - name: Restore the pnpm store
+        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: ${{ steps.pnpm.outputs.store }}
+          key: pnpm-store-${{ runner.os }}-${{ runner.arch }}-node22.23.3-${{ hashFiles('ui/pnpm-lock.yaml') }}
+          restore-keys: |
+            pnpm-store-${{ runner.os }}-${{ runner.arch }}-node22.23.3-
+      - name: Web UI checks
+        run: make ci-ui
+
+  image:
+    name: Image (linux/amd64)
+    needs: changes
+    if: needs.changes.outputs.docs_only != 'true'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 60
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - name: Free disk space
+        run: hack/ci/free-disk.sh
+      # make image-layout-check and image-rootfs-check run Go programs of this repository (the
+      # runner's own Go is older than go.mod).
+      - name: Install Go
+        uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
+        with:
+          go-version-file: go.mod
+          cache-dependency-path: go.sum
+      # No docker/setup-buildx-action: its docker-container builder would leave the image in the
+      # build cache instead of the daemon's image store, where make image-smoke and kind need it.
+      - name: Preflight
+        run: hack/ci/preflight.sh image
+      - name: Build and check the image
+        run: make ci-image
+      - name: Package the image for the kind job
+        if: needs.changes.outputs.kind == 'true'
+        run: |
+          docker save patrol-cd/patrol-cd:dev | zstd -T0 -3 -q -o "$RUNNER_TEMP/image.tar.zst"
+          ls -l "$RUNNER_TEMP/image.tar.zst"
+      - name: Save the image for the kind job
+        if: needs.changes.outputs.kind == 'true'
+        uses: actions/cache/save@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: ${{ runner.temp }}/image.tar.zst
+          key: patrol-image-${{ github.sha }}
+
+  kind:
+    name: Kind (install, verify, lifecycle)
+    needs: [changes, image]
+    if: needs.changes.outputs.kind == 'true'
+    runs-on: ubuntu-24.04
+    # The step timeouts below add up to about 185 minutes in the worst case, diagnostics included;
+    # the job limit is above them so that a hang ends as a failed step (which still runs the
+    # diagnostics) and not as a cancelled job (which skips every later step). A normal run takes a
+    # fraction of this. A step's timeout must cover the waits its script can run one after the other
+    # at PATROL_WAIT_SCALE=3, soft ones included, so that the script reports the failure: kind-up
+    # (kind --wait 9 minutes, then the node wait 9 minutes), kind-fixtures (the 15 minute wait for the
+    # seed Job after the image builds), kind-smoke (two pull checks of 6 minutes each), kind-install
+    # (helm --timeout 18 minutes).
+    timeout-minutes: 190
+    permissions:
+      contents: read
+    env:
+      # The kind scripts' waits are tuned on 8 CPUs; this runner has 2 (hack/kind/lib.sh).
+      PATROL_WAIT_SCALE: "3"
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - name: Free disk space
+        timeout-minutes: 10
+        run: hack/ci/free-disk.sh
+      - name: Install the pinned tools
+        timeout-minutes: 5
+        run: hack/ci/install-tools.sh --dest "$RUNNER_TEMP/ci-bin" helm kind kubectl
+      - name: Preflight
+        timeout-minutes: 5
+        run: hack/ci/preflight.sh kind --fix --warn-disk
+      - name: Sample resource use
+        run: |
+          mkdir -p dist/ci
+          nohup hack/ci/sample-resources.sh dist/ci/resources.tsv 30 >/dev/null 2>&1 &
+      - name: Restore the image built by the image job
+        timeout-minutes: 5
+        uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: ${{ runner.temp }}/image.tar.zst
+          key: patrol-image-${{ github.sha }}
+          fail-on-cache-miss: true
+      - name: Load the image into Docker
+        timeout-minutes: 10
+        run: |
+          zstd -dc "$RUNNER_TEMP/image.tar.zst" | docker load
+          docker image inspect patrol-cd/patrol-cd:dev --format '{{.Id}} {{.Architecture}}'
+          rm -f "$RUNNER_TEMP/image.tar.zst"
+      - name: Remove leftovers
+        timeout-minutes: 5
+        run: make kind-down
+      - name: Create the clusters and the registry
+        timeout-minutes: 25
+        run: make kind-up
+      - name: Build and deploy the fixtures
+        timeout-minutes: 25
+        run: make kind-fixtures
+      - name: Fixture smoke checks
+        timeout-minutes: 15
+        run: make kind-smoke
+      - name: Install Patrol CD
+        timeout-minutes: 25
+        run: make kind-install
+      - name: Verify the installation (with lifecycle)
+        timeout-minutes: 30
+        run: make kind-verify VERIFY_FLAGS=--lifecycle 2>&1 | tee dist/ci/verify-install.log
+      - name: Summary
+        if: always()
+        run: |
+          {
+            echo "### Kind verification"
+            echo
+            echo "Runner image: \`${ImageOS:-?} ${ImageVersion:-?}\`"
+            echo
+            if [[ -f dist/ci/verify-install.log ]]; then
+              echo '```'
+              grep -E '^(FAIL|verify-install:)' dist/ci/verify-install.log || true
+              echo '```'
+            else
+              echo "verify-install did not run."
+            fi
+          } >>"$GITHUB_STEP_SUMMARY"
+      # The bundle is collected outside the upload path and moved there only when the secret scrub
+      # vouches for it, so a step that times out or fails cannot leave unscrubbed files to upload.
+      - name: Collect diagnostics
+        id: diag
+        if: failure()
+        timeout-minutes: 20
+        run: |
+          stage="$RUNNER_TEMP/diagnostics"
+          rc=0
+          timeout --kill-after=60 15m hack/ci/kind-diagnostics.sh "$stage" || rc=$?
+          [[ $rc -eq 0 ]] || echo "::warning::kind-diagnostics.sh exited $rc (124 = time budget)"
+          mkdir -p dist/ci/diagnostics
+          if grep -qs '^scrub: ok' "$stage/INDEX.txt"; then
+            mv "$stage"/* dist/ci/diagnostics/
+            echo "vouched=true" >>"$GITHUB_OUTPUT"
+          else
+            echo "::warning::the diagnostics secret scrub did not vouch for the bundle: uploading only INDEX.txt"
+            cp "$stage/INDEX.txt" dist/ci/diagnostics/ 2>/dev/null || echo "no INDEX.txt: the diagnostics script did not finish" >dist/ci/diagnostics/INDEX.txt
+          fi
+      - name: Upload the run record
+        if: always()
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: kind-record-${{ github.run_id }}-${{ github.run_attempt }}
+          path: |
+            dist/ci/verify-install.log
+            dist/ci/resources.tsv
+          if-no-files-found: ignore
+          retention-days: 30
+      - name: Upload the diagnostics
+        if: failure() && steps.diag.conclusion != 'skipped'
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: kind-diagnostics-${{ github.run_id }}-${{ github.run_attempt }}
+          path: dist/ci/diagnostics/
+          if-no-files-found: ignore
+          retention-days: 7
+      - name: Remove the clusters
+        if: always()
+        timeout-minutes: 5
+        continue-on-error: true
+        run: make kind-down
+
+  # The single status that stands for the workflow (a required check, where branch protection exists).
+  ci:
+    name: CI
+    needs: [changes, static, unit, ui, image, integration, deploy, kind]
+    if: always()
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - name: Check the results of the jobs
+        env:
+          RESULTS: >-
+            changes=${{ needs.changes.result }}
+            static=${{ needs.static.result }}
+            unit=${{ needs.unit.result }}
+            ui=${{ needs.ui.result }}
+            image=${{ needs.image.result }}
+            integration=${{ needs.integration.result }}
+            deploy=${{ needs.deploy.result }}
+            kind=${{ needs.kind.result }}
+        run: |
+          read -ra results <<<"$RESULTS"
+          hack/ci/gate.sh --optional unit,ui,image,integration,deploy,kind "${results[@]}"

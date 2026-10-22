@@ -10,6 +10,8 @@ import (
 	"k8s.io/client-go/rest"
 	"sigs.k8s.io/controller-runtime/pkg/envtest"
 	ctrllog "sigs.k8s.io/controller-runtime/pkg/log"
+
+	"github.com/juliosaraiva/patrol-cd/internal/envtestx"
 )
 
 // One envtest API server (with the generated CRDs) per test binary, started only when
@@ -33,7 +35,7 @@ func run(m *testing.M) int {
 		CRDDirectoryPaths:     []string{filepath.Join("..", "..", "..", "deploy", "crds")},
 		ErrorIfCRDPathMissing: true,
 	}
-	cfg, err := env.Start()
+	cfg, err := envtestx.Start(env)
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "start envtest: %v\n", err)
 		return 1
