@@ -17,8 +17,9 @@ Resume rule: read this file, then `docs/parity/matrix.md`, then `docs/verificati
   and its tests: git before 2.48 (`origin/HEAD`), leaked envtest control planes (`internal/envtestx`), the
   start-up race on the ApplicationSet CRD (`waitForCRDs`, KV-14), a project token refused as revoked before
   the cache saw it, and flaky or racy tests (`phase4-findings.md` CI-F1 to CI-F14). **Not yet observed on
-  GitHub**: the docs-only and code-only tiers, pushes to `main`, manual runs, the labels, arm64; no failure
-  path of the kind job on a runner.
+  GitHub**: the kind-only tier, a pull request with a label, `CI_HEAVY_ON_PR`, manual runs, the code and full tiers on
+  caches restored from `main` (the docs-only run restored them), arm64; no failure path of the kind job on a runner. The first push to `main` passed the full tier and the
+  docs-only and code-only probe pull requests ran only their tiers (V-0036); cache usage is above GitHub's 10 GB limit.
 - **2026-10-18: Phase 4 closeout** (Dockerfile, static manifests, Helm chart, first-run
   bootstrap). Two review rounds fixed; the final full `./test/deploy/` run passed (157 subtests, 281 s,
   `docs/verification/log.md` V-0027); committed and pushed (`3ea2bd3`). **2026-10-19: the Docker
