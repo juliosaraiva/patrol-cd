@@ -35,28 +35,48 @@ type ProjectGetter func(ctx context.Context, name string) (*v1alpha1.AppProject,
 // the record revokes the token.
 func ProjectTokenRegistry(get ProjectGetter) auth.TokenRegistry {
 	return auth.TokenRegistryFunc(func(ctx context.Context, subject, jti string, issuedAt int64) (bool, error) {
-		project, role, ok := auth.ParseProjectSubject(subject)
-		if !ok {
-			return false, nil
-		}
-		p, err := get(ctx, project)
-		if err != nil {
-			if apierrors.IsNotFound(err) {
-				return false, nil
-			}
-			return false, fmt.Errorf("get project %s: %w", project, err)
-		}
-		if !slices.ContainsFunc(p.Spec.Roles, func(r v1alpha1.ProjectRole) bool { return r.Name == role }) {
-			return false, nil
-		}
-		for _, t := range p.Status.JWTTokensByRole[role].Items {
-			if jti != "" && t.ID == jti {
-				return true, nil
-			}
-			if t.ID == "" && issuedAt != 0 && t.IssuedAt == issuedAt {
-				return true, nil
-			}
-		}
-		return false, nil
+		return projectTokenKnown(ctx, get, subject, jti, issuedAt)
 	})
+}
+
+// ProjectTokenRegistryWithFallback is ProjectTokenRegistry for a getter that can be stale (an
+// informer cache). A token the cached view does not list is looked up again with live before it
+// is declared revoked: a token is recorded by one request and first used by another, often on
+// another replica, before that replica's cache has seen the write, and a token that works as
+// soon as it is returned must not be refused as revoked. A token the cached view lists is
+// accepted without the second read; a revoked one costs one live read per attempt.
+func ProjectTokenRegistryWithFallback(cached, live ProjectGetter) auth.TokenRegistry {
+	return auth.TokenRegistryFunc(func(ctx context.Context, subject, jti string, issuedAt int64) (bool, error) {
+		known, err := projectTokenKnown(ctx, cached, subject, jti, issuedAt)
+		if err != nil || known {
+			return known, err
+		}
+		return projectTokenKnown(ctx, live, subject, jti, issuedAt)
+	})
+}
+
+func projectTokenKnown(ctx context.Context, get ProjectGetter, subject, jti string, issuedAt int64) (bool, error) {
+	project, role, ok := auth.ParseProjectSubject(subject)
+	if !ok {
+		return false, nil
+	}
+	p, err := get(ctx, project)
+	if err != nil {
+		if apierrors.IsNotFound(err) {
+			return false, nil
+		}
+		return false, fmt.Errorf("get project %s: %w", project, err)
+	}
+	if !slices.ContainsFunc(p.Spec.Roles, func(r v1alpha1.ProjectRole) bool { return r.Name == role }) {
+		return false, nil
+	}
+	for _, t := range p.Status.JWTTokensByRole[role].Items {
+		if jti != "" && t.ID == jti {
+			return true, nil
+		}
+		if t.ID == "" && issuedAt != 0 && t.IssuedAt == issuedAt {
+			return true, nil
+		}
+	}
+	return false, nil
 }
