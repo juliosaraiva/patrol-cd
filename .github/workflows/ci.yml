@@ -118,6 +118,13 @@ jobs:
         run: make ci-shell
       - name: Workflows
         run: make ci-actionlint
+      # The changelog is generated from these subjects (docs/guides/releasing.md).
+      - name: Conventional commit subjects
+        if: github.event_name == 'pull_request'
+        env:
+          BASE_SHA: ${{ github.event.pull_request.base.sha }}
+          HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+        run: make release-lint-commits RELEASE_RANGE="$BASE_SHA..$HEAD_SHA"
 
   unit:
     name: Unit tests

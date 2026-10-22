@@ -6,6 +6,15 @@ Resume rule: read this file, then `docs/parity/matrix.md`, then `docs/verificati
 
 ## Current work
 
+- **2026-10-22: automated releases with a changelog**, on the user's request (branch
+  `claude/automated-release-management-801d68`). `hack/release` (next version from conventional commits,
+  `CHANGELOG.md` section, chart version bump, release notes, release assets; unit-tested), `hack/release.mk`
+  (`make release-*`), `.github/workflows/release-pr.yml` (keeps the `release/next` pull request current after
+  every push to `main`) and `release.yml` (after CI passes on `main` with a release pending: CLI binaries,
+  install manifests, chart, multi-arch image to `ghcr.io/<owner>`, chart to `oci://…/charts`, tag and GitHub
+  release); commit-subject lint on pull requests in the `static` job; guide `docs/guides/releasing.md`.
+  Checked locally (V-0036). **Not yet run on GitHub**; needs the repository setting "Allow GitHub Actions to
+  create and approve pull requests" and, for CI on the release pull request, the secret `RELEASE_TOKEN`.
 - **2026-10-21/22: CI with the kind job** (T0.7), on the user's request; pull request
   [#4](https://github.com/juliosaraiva/patrol-cd/pull/4) (`feat/ci`). `.github/workflows/ci.yml` (jobs:
   static, unit, ui, image, integration, deploy, kind, and the `ci` gate), `hack/ci.mk` (`make ci-*`),
