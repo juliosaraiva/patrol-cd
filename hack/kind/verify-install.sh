@@ -37,6 +37,21 @@
 # registered again (the re-install drops the fixture git server's host key) and the run waits until
 # e2e-guestbook-ssh has really been compared again. A failed rollback, upgrade, uninstall or
 # install stops the run with the commands that put the installation back.
+#
+# Waits: a polled condition is always checked at least once, also when its time is already up, and
+# once more after the last pause. The controller compares and syncs the fixture Applications
+# concurrently, so the comparison wait and the wait for the sync operations (150 s and 180 s, times
+# PATROL_WAIT_SCALE) are each one deadline shared by all of them, not one per Application: every
+# Application waits for what is left of it. When an Application has not compared by then (or the
+# number of fixture Applications is not 7), the run stops before it sends any sync request.
+#
+# PATROL_WAIT_SCALE (1-10, default 1; see hack/kind/lib.sh) multiplies the polling limits and the
+# helm timeouts. A larger value lets a wait run longer before it gives up. The condition checked
+# stays the same (e.g. "no restarts"), but a check that something happens within a window also
+# accepts the slower path: at PATROL_WAIT_SCALE >= 2 the drift window exceeds the controller's
+# periodic refresh (120 s + up to 60 s jitter), so it also passes when only the periodic refresh
+# reports the drift. Watch-driven refresh is covered by internal/controller/integration
+# TestRefreshAnnotationAndRecentRefresh.
 set -uo pipefail
 here=$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)
 # shellcheck source=hack/kind/lib.sh
@@ -117,16 +132,20 @@ kt() { patrol::kubectl "$target" "$@"; }
 eq() {
 	if [[ "$3" == "$4" ]]; then ok "$1" "$2"; else bad "$1" "$2: got '$3', want '$4'"; fi
 }
-# until_true SECONDS CMD...: polls every 3 s.
+# until_true SECONDS CMD...: runs CMD every 3 s until it succeeds or SECONDS have passed (callers
+# pass "$(patrol::secs N)" or "$(time_left "$deadline")"). CMD runs at least once, also with a
+# limit of 0, and once more after the last pause, so the verdict is always the current state.
 until_true() {
 	local end=$((SECONDS + $1))
 	shift
-	while ((SECONDS < end)); do
+	while :; do
 		"$@" >/dev/null 2>&1 && return 0
+		((SECONDS < end)) || return 1
 		sleep 3
 	done
-	return 1
 }
+# time_left DEADLINE: the seconds from now until DEADLINE (a value of $SECONDS); 0 once it has passed.
+time_left() { echo $(($1 > SECONDS ? $1 - SECONDS : 0)); }
 # gate WHAT: the run stops here, before a section that changes state, unless every check so far passed.
 gate() {
 	[[ $fail -eq 0 ]] && return 0
@@ -204,7 +223,9 @@ check api "default AppProject exists" -- default_project_listed
 
 echo "== netpol (repo-server egress)"
 rs=$(pod_of patrol-repo-server)
-nc_from_rs() { k exec "$rs" -- nc -z -w 4 "$1" "$2"; }
+# The connect timeout scales with PATROL_WAIT_SCALE as a safety margin; a longer wait only makes
+# the "refused" checks stricter.
+nc_from_rs() { k exec "$rs" -- nc -z -w "$(patrol::secs 4)" "$1" "$2"; }
 check netpol "git-server Service port 80 (pod port 8080) is allowed" -- nc_from_rs git-server.patrol-e2e.svc.cluster.local 80
 check netpol "git-server Service port 22 (pod port 2222) is allowed" -- nc_from_rs git-server.patrol-e2e.svc.cluster.local 22
 check netpol "patrol-registry:5000 is allowed" -- nc_from_rs patrol-registry 5000
@@ -233,11 +254,16 @@ app_op() { k get applications.cd.patrol.example "$1" -o jsonpath='{.status.opera
 # (an earlier success must not satisfy the check).
 app_done() { [[ "$(app_op "$1")" != "$(cat "$work/op.$1")" && "$(app_result "$1")" == Synced/Healthy/Succeeded ]]; }
 request_sync() { app_op "$1" >"$work/op.$1"; api_sync "$1"; }
-api_sync() { curl -sk -m 30 -X POST -H @"$work/auth.hdr" -H 'Content-Type: application/json' -d '{}' "$api/api/v1/applications/$1/sync?appNamespace=$ns" -o "$work/sync-response.$1" -w '%{http_code}'; }
-# Every Application must have compared once (not Unknown) before it is synced.
+# The sync request resolves the revision through the repo-server (git, Helm or OCI) before it
+# answers, so its time limit scales.
+api_sync() { curl -sk -m "$(patrol::secs 30)" -X POST -H @"$work/auth.hdr" -H 'Content-Type: application/json' -d '{}' "$api/api/v1/applications/$1/sync?appNamespace=$ns" -o "$work/sync-response.$1" -w '%{http_code}'; }
+# Every Application must have compared once (not Unknown) before any is synced. The controller
+# compares them concurrently, so they share one deadline (see the header).
+deadline=$((SECONDS + $(patrol::secs 150)))
 for a in $apps; do
-	until_true 150 app_compared "$a" || bad sync "$a: no comparison result (status $(app_state "$a"))"
+	until_true "$(time_left "$deadline")" app_compared "$a" || bad sync "$a: no comparison result (status $(app_state "$a"))"
 done
+gate "the sync requests and the drift and lifecycle sections"
 for a in $apps; do
 	code=$(request_sync "$a")
 	if [[ $code == 200 ]]; then
@@ -246,10 +272,12 @@ for a in $apps; do
 		bad sync "$a: sync request refused with HTTP $code: $(sed -n 's/.*"detail":"\([^"]*\)".*/\1/p' "$work/sync-response.$a" | head -c 300)"
 	fi
 done
+# The operations run concurrently too: one deadline for all of them, counted from the last request.
+deadline=$((SECONDS + $(patrol::secs 180)))
 for a in $apps; do
 	# The wait and the verdict are the same condition: a new operation (not the one recorded before
 	# the request) that ended Synced/Healthy/Succeeded. An earlier success never counts.
-	if until_true 180 app_done "$a"; then
+	if until_true "$(time_left "$deadline")" app_done "$a"; then
 		ok sync "$a: new operation $(app_op "$a") ended Synced/Healthy/Succeeded"
 	else
 		bad sync "$a: no new operation ended Synced/Healthy/Succeeded (operation '$(app_op "$a")', before: '$(cat "$work/op.$a")', result $(app_result "$a"))"
@@ -269,9 +297,9 @@ echo "== drift"
 app_outofsync() { [[ "$(app_state e2e-guestbook)" == OutOfSync/* ]]; }
 app_synced_healthy() { [[ "$(app_state e2e-guestbook)" == Synced/Healthy ]] && app_done e2e-guestbook; }
 kt -n e2e-guestbook scale deploy guestbook-ui --replicas=5 >/dev/null
-if until_true 90 app_outofsync; then ok drift "scaling a Deployment on $target is reported OutOfSync"; else bad drift "drift not detected within 90 s"; fi
+if until_true "$(patrol::secs 90)" app_outofsync; then ok drift "scaling a Deployment on $target is reported OutOfSync"; else bad drift "drift not detected within $(patrol::secs 90) s"; fi
 request_sync e2e-guestbook >/dev/null
-until_true 120 app_synced_healthy
+until_true "$(patrol::secs 120)" app_synced_healthy
 eq drift "a new sync operation restores Synced/Healthy" "$(app_state e2e-guestbook)/$([[ "$(app_op e2e-guestbook)" != "$(cat "$work/op.e2e-guestbook")" ]] && echo new-operation || echo same-operation)" Synced/Healthy/new-operation
 eq drift "and the replica count of 1" "$(kt -n e2e-guestbook get deploy guestbook-ui -o jsonpath='{.spec.replicas}')" 1
 
@@ -290,8 +318,8 @@ if [[ $lifecycle -eq 1 ]]; then
 		exit 1
 	}
 	rel=patrol
-	check lifecycle "helm rollback to revision 1" -- helmc rollback "$rel" 1 --wait --timeout 4m
-	check lifecycle "helm upgrade back to the kind values" -- helmc upgrade "$rel" "$PATROL_ROOT/deploy/helm/patrol-cd" --values "$here/values.yaml" --wait --timeout 5m
+	check lifecycle "helm rollback to revision 1" -- helmc rollback "$rel" 1 --wait --timeout "$(patrol::secs 240)s"
+	check lifecycle "helm upgrade back to the kind values" -- helmc upgrade "$rel" "$PATROL_ROOT/deploy/helm/patrol-cd" --values "$here/values.yaml" --wait --timeout "$(patrol::secs 300)s"
 	[[ $fail -eq 0 ]] || lifecycle_stop "the release could not be rolled back and upgraded; nothing else was changed. Run: make kind-install"
 	# A new admin password through the API; the initial one must stop working.
 	LC_ALL=C tr -dc 'A-Za-z0-9' </dev/urandom | head -c 28 >"$work/pw-changed"
@@ -308,13 +336,13 @@ if [[ $lifecycle -eq 1 ]]; then
 	eq lifecycle "login with the changed password" "$(login "$work/pw-changed")" 200
 	eq lifecycle "login with the old initial password is refused" "$(login "$work/pw")" 401
 	old_uid=$(k get secret patrol-initial-admin-secret -o jsonpath='{.metadata.uid}')
-	check lifecycle "helm uninstall" -- helmc uninstall "$rel" --wait --timeout 4m
+	check lifecycle "helm uninstall" -- helmc uninstall "$rel" --wait --timeout "$(patrol::secs 240)s"
 	[[ $fail -eq 0 ]] || lifecycle_stop "helm uninstall failed; the release may be partly removed and the admin password was changed. Run: $recover"
 	eq lifecycle "CRDs survive the uninstall" "$(patrol::kubectl "$control" get crd -o name | grep -c cd.patrol.example)" 8
 	eq lifecycle "Applications survive the uninstall" "$(k get applications.cd.patrol.example -o name | grep -c .)" 7
 	no_pods() { [[ -z "$(k get pods -o name)" ]]; }
-	until_true 120 no_pods || true
-	check lifecycle "helm install again" -- helmc install "$rel" "$PATROL_ROOT/deploy/helm/patrol-cd" --values "$here/values.yaml" --wait --timeout 6m
+	until_true "$(patrol::secs 120)" no_pods || true
+	check lifecycle "helm install again" -- helmc install "$rel" "$PATROL_ROOT/deploy/helm/patrol-cd" --values "$here/values.yaml" --wait --timeout "$(patrol::secs 360)s"
 	[[ $fail -eq 0 ]] || lifecycle_stop "the release is not installed. Run: make kind-install (if helm reports a ConfigMap that it does not own, delete that ConfigMap first)"
 	lifecycle_dirty=""
 	new_uid=$(k get secret patrol-initial-admin-secret -o jsonpath='{.metadata.uid}')
@@ -325,7 +353,7 @@ if [[ $lifecycle -eq 1 ]]; then
 	fi
 	secret_value patrol-initial-admin-secret password >"$work/pw-new"
 	healthz_ok() { [[ "$(curl -sk -m 5 -o /dev/null -w '%{http_code}' "$api/healthz")" == 200 ]]; }
-	until_true 90 healthz_ok
+	until_true "$(patrol::secs 90)" healthz_ok
 	eq lifecycle "login with the changed password is refused" "$(login "$work/pw-changed")" 401
 	eq lifecycle "login with the old initial password is refused" "$(login "$work/pw")" 401
 	eq lifecycle "login with the new initial password" "$(login "$work/pw-new")" 200
@@ -335,7 +363,7 @@ if [[ $lifecycle -eq 1 ]]; then
 	check lifecycle "fixtures registered again (host key, repositories, Applications)" -- "$PATROL_ROOT/test/e2e/fixtures/patrol/register.sh" --namespace "$ns" --with-applications
 	# The kubelet refreshes the mounted ConfigMap file with a delay; refresh the Application only
 	# once the repo-server can see the key.
-	patrol::wait_fixture_host_key "$ns" 180 || true
+	patrol::wait_fixture_host_key "$ns" "$(patrol::secs 180)" || true
 	# The Application keeps the status it had before the uninstall, and the new controller does not
 	# write repository errors to it for the first 180 s: a Synced status alone proves nothing. Ask
 	# for a hard refresh and wait until the controller has consumed the request (the annotation is
@@ -347,7 +375,7 @@ if [[ $lifecycle -eq 1 ]]; then
 	ssh_app_recompared() {
 		[[ -z "$(refresh_pending)" && "$(app_reconciled_at)" != "$before" && "$(app_state e2e-guestbook-ssh)" == Synced/Healthy ]]
 	}
-	if until_true 180 ssh_app_recompared; then
+	if until_true "$(patrol::secs 180)" ssh_app_recompared; then
 		ok lifecycle "e2e-guestbook-ssh is compared again (reconciledAt $before -> $(app_reconciled_at)) and Synced/Healthy with the restored host key"
 	else bad lifecycle "e2e-guestbook-ssh was not compared again after the refresh (reconciledAt '$(app_reconciled_at)' since '$before', refresh annotation '$(refresh_pending)', status $(app_state e2e-guestbook-ssh))"; fi
 fi

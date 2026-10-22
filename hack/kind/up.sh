@@ -13,7 +13,9 @@
 #                                                  (for clients running inside patrol-control)
 #   .cache/kind/patrol-target-control-plane.ip     its IP on the kind network (informational)
 #
-# Environment: PATROL_KIND_NODE_IMAGE, PATROL_REGISTRY_IMAGE (see lib.sh).
+# Missing node and registry images are pulled first, with retries (patrol::docker_pull_retry).
+#
+# Environment: PATROL_KIND_NODE_IMAGE, PATROL_REGISTRY_IMAGE, PATROL_WAIT_SCALE (see lib.sh).
 set -euo pipefail
 here=$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)
 # shellcheck source=hack/kind/lib.sh
@@ -34,10 +36,20 @@ docker info >/dev/null 2>&1 || patrol::die "the docker daemon is not reachable"
 mkdir -p "$PATROL_KIND_CACHE"
 chmod 700 "$PATROL_KIND_CACHE"
 
+# pull_missing IMAGE: pulls IMAGE with retries unless it is already in the local image store, so
+# that a transient registry error is retried and reported with the image name instead of failing
+# `docker run` or `kind create cluster` (which would otherwise pull it themselves).
+pull_missing() {
+	docker image inspect "$1" >/dev/null 2>&1 && return 0
+	patrol::log "pulling $1"
+	patrol::docker_pull_retry "$1"
+}
+
 ensure_registry() {
 	local state
 	state=$(patrol::registry_state)
 	if [[ -z $state ]]; then
+		pull_missing "$PATROL_REGISTRY_IMAGE"
 		patrol::log "creating registry container $PATROL_REGISTRY_NAME ($PATROL_REGISTRY_IMAGE) on 127.0.0.1:$PATROL_REGISTRY_HOST_PORT"
 		docker run -d --restart=always --name "$PATROL_REGISTRY_NAME" --label "$PATROL_DOCKER_LABEL" \
 			-p "127.0.0.1:${PATROL_REGISTRY_HOST_PORT}:5000" "$PATROL_REGISTRY_IMAGE" >/dev/null
@@ -93,9 +105,10 @@ ensure_cluster() {
 		patrol::log "cluster $cluster already exists"
 		start_stopped_nodes "$cluster"
 	else
+		pull_missing "$PATROL_KIND_NODE_IMAGE"
 		patrol::log "creating cluster $cluster with $PATROL_KIND_NODE_IMAGE"
 		kind create cluster --name "$cluster" --config "$PATROL_KIND_DIR/$cluster.yaml" \
-			--image "$PATROL_KIND_NODE_IMAGE" --kubeconfig "$kc" --wait 180s
+			--image "$PATROL_KIND_NODE_IMAGE" --kubeconfig "$kc" --wait "$(patrol::secs 180)s"
 	fi
 	write_kubeconfig "$cluster"
 }
@@ -136,8 +149,8 @@ EOF
 wait_ready() {
 	local cluster=$1
 	patrol::log "waiting for $cluster nodes and CoreDNS"
-	patrol::kubectl "$cluster" wait --for=condition=Ready nodes --all --timeout=180s >/dev/null
-	patrol::kubectl "$cluster" -n kube-system rollout status deployment/coredns --timeout=180s >/dev/null
+	patrol::kubectl "$cluster" wait --for=condition=Ready nodes --all --timeout="$(patrol::secs 180)s" >/dev/null
+	patrol::kubectl "$cluster" -n kube-system rollout status deployment/coredns --timeout="$(patrol::secs 180)s" >/dev/null
 }
 
 write_internal_kubeconfig() {

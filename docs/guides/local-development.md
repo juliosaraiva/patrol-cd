@@ -346,6 +346,68 @@ the hack/kind label) with its storage volume, and the kubeconfigs in `.cache/kin
 verifies that none remain. The `kind` network, other kind clusters and images are kept;
 `docker image rm` the `patrol-cd/*:dev` images yourself if you want the space back.
 
+## Slow machines and CI
+
+The GitHub Actions workflow and the `make ci-*` targets that mirror its jobs are described in
+[ci.md](ci.md).
+
+The waits in the kind and fixture scripts were tuned on an 8-CPU workstation. On a slower machine,
+such as a 2-vCPU CI runner, give every wait more time with `PATROL_WAIT_SCALE`:
+
+```bash
+PATROL_WAIT_SCALE=3 make kind-up kind-fixtures kind-install kind-verify
+```
+
+- **What scales.** Every wait and timeout of `hack/kind/*.sh` and `test/e2e/fixtures/*.sh` is
+  multiplied by it:
+  - `kind create cluster --wait`;
+  - the node, CoreDNS, rollout, Job and Pod waits (`kubectl --timeout`);
+  - the `helm --timeout` of `install.sh` and of the `--lifecycle` section;
+  - the polling limits of `verify-install.sh`;
+  - the host-key wait and the CRD wait;
+  - the git-seed Job's deadline and its wait for the git server;
+  - the repo-server connection checks (`nc -w`) and the sync request's time limit.
+
+  Poll intervals and the short limits of single API calls (`curl -m`, guards against a hung
+  connection) stay as they are.
+- **Range.** An integer from 1 to 10. Unset or empty means 1, which keeps the values in the
+  scripts. Any other value stops the script before it does anything.
+- **What a check accepts.** A larger value lets a wait run longer before it gives up. The
+  condition checked stays the same: for example, `verify-install.sh` still requires every Patrol
+  pod to have 0 restarts. But a check that something happens within a window also accepts the
+  slower path. For example, at `PATROL_WAIT_SCALE` >= 2 the `drift` window exceeds the
+  controller's periodic refresh (120 s + up to 60 s jitter), so it also passes when only the
+  periodic refresh reports the drift. Watch-driven refresh is covered by
+  `TestRefreshAnnotationAndRecentRefresh` in `internal/controller/integration`, which runs in the
+  unit job.
+- **Shared deadlines.** `verify-install.sh` waits for the fixture Applications to compare, and
+  later for their sync operations, with one deadline each (150 s and 180 s, scaled) shared by all
+  seven Applications, because the controller works on them concurrently. A polled condition is
+  always checked at least once, also when the deadline has passed. When an Application has not
+  compared by the deadline (or the number of fixture Applications is not 7), the run stops before
+  it sends any sync request.
+- **CI.** The kind job of the GitHub Actions workflow (`.github/workflows/ci.yml`) sets it.
+
+**Pinned images.** Like the kind node image, the registry image (`registry:3.0.0`,
+`PATROL_REGISTRY_IMAGE` in `hack/kind/lib.sh`) and the toolbox's `oras` build stage
+(`ghcr.io/oras-project/oras:v1.3.4`, `test/e2e/fixtures/toolbox/Dockerfile`) are pinned to the
+digest of their multi-platform index. To refresh a pin or move to a new tag, read the index digest
+(the `Digest:` line) and check that `linux/amd64` and `linux/arm64` are listed:
+
+```bash
+docker buildx imagetools inspect registry:3.0.0
+docker buildx imagetools inspect ghcr.io/oras-project/oras:v1.3.4
+```
+
+Then put `<name>:<tag>@<digest>` in that file and in the `docker pull` list of
+[test/e2e/fixtures/README.md](../../test/e2e/fixtures/README.md#network-and-offline-use).
+`test/e2e/fixtures/test-scripts.sh` checks that the references stay digest-pinned.
+
+**Pull retries.** When the node or registry image is missing locally, `up.sh` pulls it itself
+before `kind create cluster` or `docker run`. It makes up to 3 attempts, 5 s and then 15 s apart
+(this backoff does not scale), so a transient Docker Hub error (429 rate limit, 5xx) is retried.
+If the last attempt fails, the error names the image. Images already present are not pulled again.
+
 ## Troubleshooting
 
 | Symptom | Cause / fix |

@@ -82,11 +82,16 @@ if [[ $registry -eq 1 ]]; then
 fi
 
 arch=$(docker version -f '{{.Server.Arch}}')
+# Directory of the fallback's image archive while it exists; removed on every way out.
+tmp=""
+trap '[[ -z $tmp ]] || rm -rf "$tmp"' EXIT
 for cluster in $clusters; do
 	patrol::cluster_exists "$cluster" || patrol::die "kind cluster $cluster does not exist (run hack/kind/up.sh)"
 	for img in "${images[@]}"; do
 		patrol::log "loading $img into $cluster"
-		if ! kind load docker-image "$img" --name "$cluster" >/dev/null; then
+		if kind load docker-image "$img" --name "$cluster" >/dev/null; then
+			patrol::log "loaded $img into $cluster (kind load docker-image)"
+		else
 			# Docker's containerd image store can hand kind a multi-platform index whose other
 			# platforms are not present locally; retry with a single-platform archive.
 			patrol::log "kind load docker-image failed; retrying with a linux/$arch image archive"
@@ -94,6 +99,8 @@ for cluster in $clusters; do
 			docker save --platform "linux/$arch" -o "$tmp/image.tar" "$img"
 			kind load image-archive "$tmp/image.tar" --name "$cluster" >/dev/null
 			rm -rf "$tmp"
+			tmp=""
+			patrol::log "loaded $img into $cluster (docker save --platform linux/$arch + kind load image-archive)"
 		fi
 	done
 done

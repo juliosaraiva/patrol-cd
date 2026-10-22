@@ -21,6 +21,8 @@
 #   GIT_SERVER_URL         required, base URL, e.g. http://git-server.patrol-e2e.svc.cluster.local/git
 #   GIT_USERNAME/PASSWORD  basic-auth credentials (answered through GIT_ASKPASS)
 #   GIT_SERVER_HEALTH_URL  optional URL polled (wget) until the server answers
+#   GIT_SERVER_WAIT_SECONDS  how long to poll it, default 180 (deploy.sh scales it with
+#                          PATROL_WAIT_SCALE)
 #   SEED_REPOS_DIR         default /seed/repos
 #   SEED_UPDATES_DIR       default /seed/updates
 #   SEED_EXTRA_DIR         default /seed/extra (may be empty or missing)
@@ -57,10 +59,15 @@ die() {
 
 wait_for_server() {
 	[ -n "${GIT_SERVER_HEALTH_URL:-}" ] || return 0
+	limit=${GIT_SERVER_WAIT_SECONDS:-180}
+	case $limit in
+	*[!0-9]*) die "GIT_SERVER_WAIT_SECONDS must be a whole number of seconds (got '$limit')" ;;
+	esac
+	# One attempt every 2 s: 90 attempts for the default 180 s.
 	i=0
 	until wget -q -O /dev/null "$GIT_SERVER_HEALTH_URL" 2>/dev/null; do
-		i=$((i + 1))
-		[ "$i" -lt 90 ] || die "git server not reachable at $GIT_SERVER_HEALTH_URL"
+		i=$((i + 2))
+		[ "$i" -lt "$limit" ] || die "git server not reachable at $GIT_SERVER_HEALTH_URL within $limit s"
 		sleep 2
 	done
 }

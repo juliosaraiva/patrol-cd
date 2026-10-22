@@ -4,7 +4,9 @@
 # plain-manifest OCI bundle with oras.
 # Network: "apk add" needs network access on the first build (helm and kubectl are Alpine
 # community packages); it precedes the oras COPY, so later rebuilds reuse it from the build cache.
-FROM ghcr.io/oras-project/oras:v1.3.4 AS oras
+# oras v1.3.4 is pinned to the digest of its multi-platform index (linux/amd64 and linux/arm64 among
+# others); refresh with `docker buildx imagetools inspect ghcr.io/oras-project/oras:<tag>`.
+FROM ghcr.io/oras-project/oras:v1.3.4@sha256:f7bc056d54d97baa399414ed5048ecc67c3371b750d4bbce1d871827a5758179 AS oras
 
 FROM alpine:3.24.2@sha256:294b683cb724975bec92580e1e685676bd4b50bda910ddb8c51d4cabeaec77e6
 RUN set -eux; \

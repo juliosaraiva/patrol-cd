@@ -16,9 +16,12 @@
 # Usage: test/e2e/fixtures/validate.sh
 #   KUBEBUILDER_ASSETS  default: bin/envtest/k8s/1.36.0-<os>-<arch> (make envtest)
 #   KUSTOMIZE           default: bin/kustomize, else kustomize on PATH
+#   PATROL_WAIT_SCALE   multiplies the wait for the CRDs (see hack/kind/lib.sh)
 set -euo pipefail
 here=$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)
 root=$(cd "$here/../../.." && pwd)
+# shellcheck source=hack/kind/lib.sh
+source "$here/../../../hack/kind/lib.sh"
 # shellcheck source=test/e2e/fixtures/lib/envtest.sh
 source "$here/lib/envtest.sh"
 
@@ -79,7 +82,7 @@ rendered() {
 echo "installing Patrol CRDs (server-side apply of deploy/crds)"
 k apply --server-side -f "$root/deploy/crds" >/dev/null
 # `kubectl wait` fails at once while a new CRD has no status conditions yet, so retry.
-for _ in $(seq 1 30); do
+for _ in $(seq 1 "$(patrol::secs 30)"); do
 	k wait --for=condition=Established --timeout=2s crd --all >/dev/null 2>&1 && break
 	sleep 1
 done

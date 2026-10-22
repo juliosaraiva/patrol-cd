@@ -70,7 +70,7 @@ if patrol::helm "$cluster" -n "$ns" status patrol >/dev/null 2>&1; then existed=
 patrol::log "helm upgrade --install patrol into $cluster/$ns (values: hack/kind/values.yaml)"
 patrol::helm "$cluster" upgrade --install patrol "$PATROL_ROOT/deploy/helm/patrol-cd" \
 	--namespace "$ns" --create-namespace \
-	--values "$here/values.yaml" --wait --timeout 6m >/dev/null
+	--values "$here/values.yaml" --wait --timeout "$(patrol::secs 360)s" >/dev/null
 
 if [[ $load -eq 1 && $existed -eq 1 ]]; then
 	patrol::log "restarting the Patrol CD workloads to pick up the loaded image"
@@ -81,7 +81,7 @@ if [[ $load -eq 1 && $existed -eq 1 ]]; then
 		patrol::kubectl "$cluster" -n "$ns" rollout restart "$w" >/dev/null
 	done <<<"$workloads"
 	while IFS= read -r w; do
-		patrol::kubectl "$cluster" -n "$ns" rollout status "$w" --timeout=5m >/dev/null
+		patrol::kubectl "$cluster" -n "$ns" rollout status "$w" --timeout="$(patrol::secs 300)s" >/dev/null
 	done <<<"$workloads"
 fi
 
@@ -89,8 +89,8 @@ if [[ $register -eq 1 ]]; then
 	"$here/register-target.sh" --namespace "$ns"
 	"$PATROL_ROOT/test/e2e/fixtures/patrol/register.sh" --namespace "$ns" --with-applications
 	patrol::log "waiting for the repo-server to see the fixture git server's host key (the kubelet refreshes mounted ConfigMaps with a delay)"
-	patrol::wait_fixture_host_key "$ns" 240 ||
-		patrol::die "the repo-server does not see the fixture host key in /app/config/ssh/ssh_known_hosts after 240 s"
+	patrol::wait_fixture_host_key "$ns" "$(patrol::secs 240)" ||
+		patrol::die "the repo-server does not see the fixture host key in /app/config/ssh/ssh_known_hosts after $(patrol::secs 240) s"
 fi
 
 cat <<EOF

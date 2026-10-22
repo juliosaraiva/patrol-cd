@@ -41,9 +41,9 @@ Base images to pull while online (otherwise `up.sh` and `docker build` pull them
 
 ```bash
 docker pull kindest/node:v1.36.4@sha256:099e049362a1526b2db71494e1947aae99bd16290d7c895f2b7ea312e3cbfaed  # kind nodes
-docker pull registry:3.0.0                                                                                # patrol-registry
+docker pull registry:3.0.0@sha256:6c5666b861f3505b116bb9aa9b25175e71210414bd010d92035ff64018f9457e         # patrol-registry
 docker pull alpine:3.24.2@sha256:294b683cb724975bec92580e1e685676bd4b50bda910ddb8c51d4cabeaec77e6       # fixture images
-docker pull ghcr.io/oras-project/oras:v1.3.4                                                              # toolbox build stage
+docker pull ghcr.io/oras-project/oras:v1.3.4@sha256:f7bc056d54d97baa399414ed5048ecc67c3371b750d4bbce1d871827a5758179  # toolbox build stage
 ```
 
 After the fixture images have been built once, the fixtures work offline:

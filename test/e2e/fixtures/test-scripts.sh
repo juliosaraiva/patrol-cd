@@ -3,6 +3,12 @@
 # whose kubeconfig contexts are named kind-patrol-control and kind-patrol-target, points
 # PATROL_KIND_CACHE at them, and exercises:
 #   - the hack/kind/lib.sh guards (cluster names, context names, non-local servers);
+#   - PATROL_WAIT_SCALE validation and patrol::secs, the digest pins of the registry, kind node and
+#     oras images, patrol::docker_pull_retry and the hack/kind/load-image.sh fallback (with fake
+#     docker, kind and sleep commands first on PATH);
+#   - the polling helpers of hack/kind/verify-install.sh (until_true, time_left) and its comparison
+#     and sync waits with their shared deadlines, both taken from the script and run with a fake
+#     clock (sleep advances $SECONDS instead of waiting) and stubs for the kubectl and API calls;
 #   - hack/kind/register-target.sh (CRD install, ServiceAccount + TokenRequest in the target,
 #     Secret + Cluster in the control plane; the stored token authenticates against the target
 #     with TLS verified by the stored caData);
@@ -77,6 +83,280 @@ kubectl config --kubeconfig "$SIM/remote.kubeconfig" set-cluster kind-patrol-con
 expect fail "guard_kubeconfig: kind-patrol-control -> https://203.0.113.10:6443" -- lib patrol::guard_kubeconfig "$SIM/remote.kubeconfig" kind-patrol-control
 expect fail "guard_kubeconfig: context missing from file" -- lib patrol::guard_kubeconfig "$SIM/cache/patrol-control.kubeconfig" kind-patrol-target
 expect ok "guard_kubeconfig: internal https://patrol-target-control-plane:6443" -- lib patrol::guard_kubeconfig "$SIM/cache/patrol-target-internal.kubeconfig" kind-patrol-target
+
+echo "== PATROL_WAIT_SCALE and patrol::secs"
+# secs_is SCALE N WANT: patrol::secs N prints WANT with PATROL_WAIT_SCALE=SCALE ("unset": not set).
+secs_is() {
+	local got
+	if [[ $1 == unset ]]; then
+		got=$(env -u PATROL_WAIT_SCALE bash -c "source '$ROOT/hack/kind/lib.sh'; patrol::secs $2") || return 1
+	else
+		got=$(PATROL_WAIT_SCALE=$1 bash -c "source '$ROOT/hack/kind/lib.sh'; patrol::secs $2") || return 1
+	fi
+	echo "patrol::secs $2 = $got"
+	[[ $got == "$3" ]]
+}
+# scale_refused VALUE: sourcing lib.sh with PATROL_WAIT_SCALE=VALUE fails with a message naming it.
+scale_refused() {
+	local out
+	if out=$(PATROL_WAIT_SCALE=$1 bash -c "source '$ROOT/hack/kind/lib.sh'; echo sourced" 2>&1); then
+		echo "accepted: $out"
+		return 1
+	fi
+	echo "$out"
+	[[ $out == *"PATROL_WAIT_SCALE must be an integer from 1 to 10 (got '$1')"* ]]
+}
+expect ok "patrol::secs 180, PATROL_WAIT_SCALE unset: 180" -- secs_is unset 180 180
+expect ok "patrol::secs 180, PATROL_WAIT_SCALE empty (default 1): 180" -- secs_is '' 180 180
+expect ok "patrol::secs 180, PATROL_WAIT_SCALE=1: 180" -- secs_is 1 180 180
+expect ok "patrol::secs 180, PATROL_WAIT_SCALE=3: 540" -- secs_is 3 180 540
+expect ok "patrol::secs 4, PATROL_WAIT_SCALE=10: 40" -- secs_is 10 4 40
+for v in 0 11 abc -1 07 2.5; do
+	expect ok "PATROL_WAIT_SCALE=$v is refused with a clear message" -- scale_refused "$v"
+done
+expect fail "hack/kind/env.sh stops when PATROL_WAIT_SCALE=0" -- env PATROL_WAIT_SCALE=0 "$ROOT/hack/kind/env.sh"
+
+echo "== verify-install.sh polling helpers and waits (fake clock)"
+# The helpers and the waits are taken from verify-install.sh itself (the script needs the live
+# clusters). The clock is fake and deterministic: SECONDS is unset first, which makes it an ordinary
+# variable, and sleep is a function that advances it, so nothing here really waits.
+sed -n -e '/^until_true() {$/,/^}$/p' -e '/^time_left() /p' "$ROOT/hack/kind/verify-install.sh" >"$SIM/poll.sh"
+# The waits of the sync section, as they are in the script: the comparison wait, the sync requests
+# and the wait for the operations, up to the Deployment check.
+awk '/^# Every Application must have compared once/ {on = 1} /^if deployments=/ {on = 0} on' \
+	"$ROOT/hack/kind/verify-install.sh" >"$SIM/loops.sh"
+polling_helpers_found() {
+	cat "$SIM/poll.sh"
+	bash -c 'source "$1" && declare -F until_true time_left' _ "$SIM/poll.sh"
+}
+# sync_waits_found: the extracted block has both deadlines (150 s and 180 s).
+sync_waits_found() {
+	cat "$SIM/loops.sh"
+	grep -qF 'patrol::secs 150' "$SIM/loops.sh" || return 1
+	grep -qF 'patrol::secs 180' "$SIM/loops.sh" || return 1
+	echo "the comparison and sync waits: $(grep -c . "$SIM/loops.sh") lines"
+}
+# until_true_gives LIMIT OK_AT WANT: until_true LIMIT on a probe that succeeds from its OK_AT-th call
+# on (0: never) prints WANT, "STATUS CALLS PAUSES ELAPSED" (the pauses are 3 s each; ELAPSED is
+# in fake seconds).
+until_true_gives() {
+	local got
+	got=$(bash -c '
+		source "$1"
+		limit=$2 ok_at=$3 calls=0 pauses=0
+		unset SECONDS
+		SECONDS=1000
+		sleep() {
+			pauses=$((pauses + 1))
+			SECONDS=$((SECONDS + $1))
+		}
+		probe() {
+			calls=$((calls + 1))
+			[[ $ok_at -gt 0 && $calls -ge $ok_at ]]
+		}
+		if until_true "$limit" probe; then status=0; else status=1; fi
+		echo "$status $calls $pauses $((SECONDS - 1000))"
+	' _ "$SIM/poll.sh" "$1" "$2") || return 1
+	echo "status, probe calls, pauses, fake seconds: $got"
+	[[ $got == "$3" ]]
+}
+# sync_waits_give REQUEST_SECS NEVER_COMPARED NEVER_DONE WANT: runs the extracted waits for the
+# Applications a to g at PATROL_WAIT_SCALE 1, with stubs for the helpers they call. The Applications
+# in NEVER_COMPARED (space-separated) never compare, the others at their first check; each sync
+# request takes REQUEST_SECS; the new operation of an Application not in NEVER_DONE has ended at
+# its second check (after one 3 s pause). gate stops the run, like the real one, once anything
+# failed. Prints WANT, "FAILED REQUESTS ELAPSED" (FAILED: comma-separated or none; REQUESTS: the
+# sync requests sent; ELAPSED: fake seconds). A helper renamed in the script is "not found" here,
+# which changes the result.
+sync_waits_give() {
+	local req=$1 never_compared=$2 never_done=$3 want=$4 got
+	rm -rf "$SIM/loops-work"
+	mkdir "$SIM/loops-work"
+	got=$(bash -c '
+		set -uo pipefail
+		source "$1"
+		work=$3 req=$4 never_compared=" $5 " never_done=" $6 "
+		apps=$(printf "%s\n" a b c d e f g) failed="" requests=0
+		unset SECONDS
+		SECONDS=1000
+		sleep() { SECONDS=$((SECONDS + $1)); }
+		result() {
+			failed=${failed#,}
+			echo "${failed:-none} $requests $((SECONDS - 1000))"
+		}
+		patrol::secs() { echo "$1"; }
+		gate() {
+			[[ -z $failed ]] && return 0
+			result
+			exit 0
+		}
+		# request_sync runs in $(...), where a change of the clock is lost: the time of each request
+		# is charged when it is reported.
+		ok() {
+			case $2 in *": sync request accepted")
+				requests=$((requests + 1))
+				SECONDS=$((SECONDS + req))
+				;;
+			esac
+		}
+		bad() { failed="$failed,${2%%:*}"; }
+		app_state() { echo Unknown/Unknown; }
+		app_result() { echo Synced/Healthy/Succeeded; }
+		app_op() { echo op-1; }
+		app_compared() { [[ $never_compared != *" $1 "* ]]; }
+		request_sync() {
+			app_op "$1" >"$work/op.$1"
+			echo 200
+		}
+		app_done() {
+			[[ $never_done != *" $1 "* && -e $work/checked.$1 ]] && return 0
+			: >"$work/checked.$1"
+			return 1
+		}
+		source "$2"
+		result
+	' _ "$SIM/poll.sh" "$SIM/loops.sh" "$SIM/loops-work" "$req" "$never_compared" "$never_done") || return 1
+	echo "failed, sync requests, fake seconds: $got"
+	[[ $got == "$want" ]]
+}
+expect ok "until_true and time_left found in verify-install.sh" -- polling_helpers_found
+expect ok "comparison and sync waits found in verify-install.sh" -- sync_waits_found
+expect ok "until_true 0, probe fails: checked once, no pause, status 1" -- until_true_gives 0 0 "1 1 0 0"
+expect ok "until_true 0, probe succeeds: checked once, status 0" -- until_true_gives 0 1 "0 1 0 0"
+expect ok "until_true 10, probe succeeds at the 3rd check: after 6 s" -- until_true_gives 10 3 "0 3 2 6"
+# Checks at 0, 3, 6 and 9 s, a last pause, and a last check at 12 s.
+expect ok "until_true 10, probe never succeeds: gives up at 12 s" -- until_true_gives 10 0 "1 5 4 12"
+expect ok "until_true 30, probe never succeeds: gives up at 30 s" -- until_true_gives 30 0 "1 11 10 30"
+expect ok "waits: all compare, operations end at the 2nd check: 21 s" -- sync_waits_give 0 "" "" "none 7 21"
+# a uses up the one 150 s comparison deadline; b to f still get their one check and pass; g fails at
+# once. The gate then stops the run before any sync request.
+expect ok "waits: a and g never compare: they fail at 150 s, no request" -- sync_waits_give 0 "a g" "" "a,g 0 150"
+# Seven requests of 30 s each (210 s); the 180 s deadline of the operations counts from the last.
+expect ok "waits: 30 s per request: sync deadline counts from the last" -- sync_waits_give 30 "" "" "none 7 231"
+# a to f end at their 2nd check (18 s); g, whose operation never ends, gets the rest of the one
+# 180 s deadline.
+expect ok "waits: g's operation never ends: only g fails, at 180 s" -- sync_waits_give 0 "" g "g 7 180"
+
+echo "== digest-pinned images"
+# pinned REF: REF is NAME[:TAG]@sha256:<64 hex digits>.
+pinned() {
+	echo "$1"
+	[[ $1 =~ ^[^@]+@sha256:[0-9a-f]{64}$ ]]
+}
+default_of() { env -u "$1" bash -c "source '$ROOT/hack/kind/lib.sh'; printf '%s\n' \"\$$1\""; }
+expect ok "default PATROL_REGISTRY_IMAGE is digest-pinned" -- pinned "$(default_of PATROL_REGISTRY_IMAGE)"
+expect ok "default PATROL_KIND_NODE_IMAGE is digest-pinned" -- pinned "$(default_of PATROL_KIND_NODE_IMAGE)"
+expect ok "toolbox Dockerfile: the oras stage is digest-pinned" -- \
+	pinned "$(sed -n 's/^FROM \([^ ]*\) AS oras$/\1/p' "$ROOT/test/e2e/fixtures/toolbox/Dockerfile")"
+
+echo "== patrol::docker_pull_retry and the load-image.sh fallback (fake docker, kind, sleep)"
+fakebin=$SIM/fakebin
+mkdir -p "$fakebin"
+cat >"$fakebin/docker" <<'EOF'
+#!/bin/sh
+# Fake docker: records every call. "pull" fails the first $FAKE_PULL_FAILS times; "save" writes a
+# partial archive and then fails when FAKE_SAVE_FAILS=1.
+printf '%s\n' "$*" >>"$FAKE_STATE/docker.calls"
+case $1 in
+pull)
+	if [ "$(grep -c '^pull ' "$FAKE_STATE/docker.calls")" -le "${FAKE_PULL_FAILS:-0}" ]; then
+		echo "Error response from daemon: toomanyrequests: fake rate limit" >&2
+		exit 1
+	fi
+	;;
+version) echo arm64 ;;
+save)
+	while [ $# -gt 1 ]; do
+		if [ "$1" = -o ]; then echo partial >"$2"; fi
+		shift
+	done
+	if [ "${FAKE_SAVE_FAILS:-0}" = 1 ]; then
+		echo "fake docker save failure" >&2
+		exit 1
+	fi
+	;;
+esac
+exit 0
+EOF
+cat >"$fakebin/kind" <<'EOF'
+#!/bin/sh
+# Fake kind: both patrol clusters exist; "load docker-image" always fails.
+printf '%s\n' "$*" >>"$FAKE_STATE/kind.calls"
+case "$1 $2" in
+"get clusters") printf 'patrol-control\npatrol-target\n' ;;
+"load docker-image")
+	echo "ERROR: fake kind load docker-image failure" >&2
+	exit 1
+	;;
+esac
+exit 0
+EOF
+cat >"$fakebin/sleep" <<'EOF'
+#!/bin/sh
+# Fake sleep: records the delay instead of sleeping.
+printf '%s\n' "$*" >>"$FAKE_STATE/sleep.calls"
+EOF
+chmod 755 "$fakebin/docker" "$fakebin/kind" "$fakebin/sleep"
+# with_fakes CMD...: runs CMD with the fakes first on PATH and a fresh call record.
+with_fakes() {
+	rm -rf "$SIM/fake-state"
+	mkdir -p "$SIM/fake-state"
+	PATH="$fakebin:$PATH" FAKE_STATE=$SIM/fake-state "$@"
+}
+# pull_failing N: patrol::docker_pull_retry against a docker whose first N pulls fail.
+pull_failing() {
+	with_fakes env FAKE_PULL_FAILS="$1" bash -c "source '$ROOT/hack/kind/lib.sh'; patrol::docker_pull_retry example.test/fake:1"
+}
+# pull_record ATTEMPTS SLEEPS: the last pull_failing made ATTEMPTS identical pull calls and slept
+# SLEEPS (comma-separated seconds).
+pull_record() {
+	local calls sleeps
+	calls=$(grep -c . "$SIM/fake-state/docker.calls")
+	sleeps=$(paste -s -d , "$SIM/fake-state/sleep.calls" 2>/dev/null) || sleeps=""
+	echo "pull calls: $calls, sleeps: ${sleeps:-none}"
+	[[ $calls == "$1" && $(grep -cx 'pull --quiet example.test/fake:1' "$SIM/fake-state/docker.calls") == "$1" && $sleeps == "$2" ]]
+}
+pull_gives_up() {
+	local out
+	if out=$(pull_failing 99 2>&1); then
+		echo "the pull succeeded"
+		return 1
+	fi
+	printf '%s\n' "$out"
+	[[ $out == *"docker pull example.test/fake:1 failed after 3 attempts"* ]]
+}
+expect ok "docker_pull_retry: a working pull" -- pull_failing 0
+expect ok "  ... is tried once, without sleeping" -- pull_record 1 ""
+expect ok "docker_pull_retry: a pull that fails twice succeeds" -- pull_failing 2
+expect ok "  ... on the 3rd attempt, after 5 s and 15 s" -- pull_record 3 "5,15"
+expect ok "docker_pull_retry: a pull that always fails stops, naming the image" -- pull_gives_up
+expect ok "  ... after 3 attempts (5 s and 15 s apart)" -- pull_record 3 "5,15"
+# load-image.sh: kind load docker-image fails, so the docker save fallback runs.
+load_fallback() { with_fakes env FAKE_SAVE_FAILS="$1" "$ROOT/hack/kind/load-image.sh" --cluster patrol-control patrol-cd/fake:dev; }
+load_fallback_logged() {
+	local out
+	out=$(load_fallback 0 2>&1) || {
+		printf '%s\n' "$out"
+		return 1
+	}
+	printf '%s\n' "$out"
+	[[ $out == *"loaded patrol-cd/fake:dev into patrol-control (docker save --platform linux/arm64 + kind load image-archive)"* ]]
+}
+# no_temp_left: the directory of the archive the fake docker save wrote (-o) was removed.
+no_temp_left() {
+	local archive
+	archive=$(sed -n 's/^save .* -o \([^ ]*\) .*/\1/p' "$SIM/fake-state/docker.calls")
+	[[ -n $archive ]] || {
+		echo "docker save was not called"
+		return 1
+	}
+	echo "archive directory $(dirname "$archive")"
+	[[ ! -e $(dirname "$archive") ]]
+}
+expect ok "load-image.sh: fallback to docker save + kind load image-archive, logged" -- load_fallback_logged
+expect ok "  ... leaves no temporary directory" -- no_temp_left
+expect fail "load-image.sh: the fallback's docker save fails" -- load_fallback 1
+expect ok "  ... and still leaves no temporary directory" -- no_temp_left
 
 echo "== register-target.sh on a control plane without CRDs"
 expect fail "register-target.sh without CRDs and without --install-crds" -- "$ROOT/hack/kind/register-target.sh" --namespace patrol-system

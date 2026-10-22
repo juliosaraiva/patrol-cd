@@ -104,12 +104,32 @@ rm -rf "${tmp:?}"/*
 
 patrol::log "deploying git server"
 k apply -f "$here/git-server/manifests/" >/dev/null
-kn rollout status deployment/git-server --timeout=180s
+kn rollout status deployment/git-server --timeout="$(patrol::secs 180)s"
 
 patrol::log "seeding repositories"
 kn delete job git-seed --ignore-not-found --wait=true >/dev/null
-k apply -f "$here/git-server/seed-job.yaml" >/dev/null
-if ! kn wait --for=condition=Complete job/git-seed --timeout=300s >/dev/null; then
+# The Job's deadline (600 s in the manifest) and git-seed's wait for the server (180 s) scale with
+# PATROL_WAIT_SCALE like the wait below.
+seed_patch=$(printf '{"spec":{"activeDeadlineSeconds":%d,"template":{"spec":{"containers":[{"name":"seed","env":[{"name":"GIT_SERVER_WAIT_SECONDS","value":"%d"}]}]}}}}' \
+	"$(patrol::secs 600)" "$(patrol::secs 180)")
+k patch --local -f "$here/git-server/seed-job.yaml" --type strategic -p "$seed_patch" -o yaml |
+	k apply -f - >/dev/null
+# `kubectl wait --for=condition=Complete` does not return when the Job fails, so a crashing seed
+# would use the whole wait; poll for both outcomes instead.
+seed_end=$((SECONDS + $(patrol::secs 300)))
+seed_complete=0
+while :; do
+	seed_conditions=$(kn get job git-seed -o jsonpath='{range .status.conditions[?(@.status=="True")]}{.type}{"\n"}{end}' 2>/dev/null || true)
+	if grep -qx Complete <<<"$seed_conditions"; then
+		seed_complete=1
+		break
+	fi
+	if grep -qx Failed <<<"$seed_conditions" || [[ $SECONDS -ge $seed_end ]]; then
+		break
+	fi
+	sleep 3
+done
+if [[ $seed_complete -ne 1 ]]; then
 	kn logs job/git-seed --all-containers >&2 || true
 	patrol::die "git-seed Job did not complete"
 fi
@@ -117,11 +137,11 @@ kn logs job/git-seed >&2
 
 patrol::log "deploying chart repository and toolbox"
 k apply -f "$here/chart-repo/manifests/" >/dev/null
-kn rollout status deployment/chart-repo --timeout=120s
+kn rollout status deployment/chart-repo --timeout="$(patrol::secs 120)s"
 # Pods are immutable: replace the toolbox so it picks up new Secrets and images.
 kn delete pod toolbox --ignore-not-found --wait=true >/dev/null
 k apply -f "$here/toolbox/pod.yaml" >/dev/null
-kn wait --for=condition=Ready pod/toolbox --timeout=120s >/dev/null
+kn wait --for=condition=Ready pod/toolbox --timeout="$(patrol::secs 120)s" >/dev/null
 
 if [[ $skip_oci -eq 0 ]]; then
 	"$here/oci/push.sh"

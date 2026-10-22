@@ -33,7 +33,9 @@ PATROL_KIND_NODE_IMAGE=${PATROL_KIND_NODE_IMAGE:-kindest/node:v1.36.4@sha256:099
 PATROL_KIND_NETWORK=kind
 
 PATROL_REGISTRY_NAME=patrol-registry
-PATROL_REGISTRY_IMAGE=${PATROL_REGISTRY_IMAGE:-registry:3.0.0}
+# registry:3.0.0 pinned to the digest of its multi-platform index (linux/amd64 and linux/arm64
+# among others). Refresh with `docker buildx imagetools inspect registry:<tag>` (the Digest line).
+PATROL_REGISTRY_IMAGE=${PATROL_REGISTRY_IMAGE:-registry:3.0.0@sha256:6c5666b861f3505b116bb9aa9b25175e71210414bd010d92035ff64018f9457e}
 PATROL_REGISTRY_HOST_PORT=5001
 # Address of the registry as seen from the host (and, through containerd hosts.toml, from kind
 # nodes pulling images) and from pods/containers on the kind network.
@@ -46,10 +48,47 @@ PATROL_DOCKER_LABEL="${PATROL_DOCKER_LABEL_KEY}=registry"
 # Internal API endpoint of patrol-target for clients running inside patrol-control.
 PATROL_TARGET_INTERNAL_SERVER="https://${PATROL_TARGET_CLUSTER}-control-plane:6443"
 
+# Multiplier of every wait and timeout of the kind scripts and the e2e fixture scripts (kind
+# create --wait, kubectl/helm timeouts, polling limits), an integer from 1 to 10; unset or empty
+# means 1. A larger value lets a wait run longer before it gives up, for a slow machine such as a
+# 2-vCPU CI runner. The condition checked stays the same, but a check that something happens
+# within a window also accepts the slower path: for example, at PATROL_WAIT_SCALE >= 2 the 'drift'
+# window of hack/kind/verify-install.sh exceeds the controller's periodic refresh (120 s + up to
+# 60 s jitter), so it also passes when only the periodic refresh reports the drift. Watch-driven
+# refresh is covered by internal/controller/integration TestRefreshAnnotationAndRecentRefresh.
+# Validated below.
+PATROL_WAIT_SCALE=${PATROL_WAIT_SCALE:-1}
+
 patrol::log() { printf '[patrol-kind] %s\n' "$*" >&2; }
 patrol::die() {
 	printf '[patrol-kind] error: %s\n' "$*" >&2
 	exit 1
+}
+
+case "$PATROL_WAIT_SCALE" in
+[1-9] | 10) ;;
+*) patrol::die "PATROL_WAIT_SCALE must be an integer from 1 to 10 (got '${PATROL_WAIT_SCALE}')" ;;
+esac
+
+# patrol::secs N: prints N times PATROL_WAIT_SCALE. N is a whole number of seconds (or of the
+# unit the caller appends, e.g. "$(patrol::secs 180)s").
+patrol::secs() { printf '%d\n' "$(($1 * PATROL_WAIT_SCALE))"; }
+
+# patrol::docker_pull_retry IMAGE: docker pull with up to 3 attempts, 5 s and then 15 s apart, so
+# a transient registry error (Docker Hub 429 or 5xx) does not fail the run; the final error names
+# the image. The backoff does not scale with PATROL_WAIT_SCALE.
+patrol::docker_pull_retry() {
+	local image=$1 attempt=1 delay
+	while ! docker pull --quiet "$image" >/dev/null; do
+		case $attempt in
+		1) delay=5 ;;
+		2) delay=15 ;;
+		*) patrol::die "docker pull $image failed after $attempt attempts" ;;
+		esac
+		patrol::log "docker pull $image failed (attempt $attempt of 3); retrying in $delay s"
+		sleep "$delay"
+		attempt=$((attempt + 1))
+	done
 }
 
 patrol::require_tools() {
@@ -131,9 +170,12 @@ patrol::helm() {
 # patrol::wait_fixture_host_key NAMESPACE [SECONDS]: waits until the repo-server pod in NAMESPACE
 # sees the fixture git server's host key in its mounted known-hosts file. The kubelet refreshes a
 # mounted ConfigMap with a delay of up to about two minutes, and until then the repo-server
-# refuses the SSH fixture repository (the sync API answers 412).
+# refuses the SSH fixture repository (the sync API answers 412). SECONDS is used as given (pass
+# "$(patrol::secs N)"); the default is $(patrol::secs 180).
 patrol::wait_fixture_host_key() {
-	local ns=$1 end=$((SECONDS + ${2:-180})) pod
+	local ns=$1 limit=${2-} end pod
+	[[ -n $limit ]] || limit=$(patrol::secs 180)
+	end=$((SECONDS + limit))
 	while ((SECONDS < end)); do
 		pod=$(patrol::kubectl "$PATROL_CONTROL_CLUSTER" -n "$ns" get pod -l app.kubernetes.io/name=patrol-repo-server \
 			-o jsonpath='{.items[0].metadata.name}' 2>/dev/null) || pod=""
@@ -146,13 +188,14 @@ patrol::wait_fixture_host_key() {
 	return 1
 }
 
-# patrol::wait_established CLUSTER CRD...: waits up to 60s for each CRD to be Established.
-# (`kubectl wait` fails at once, instead of waiting, while a new CRD has no status conditions.)
+# patrol::wait_established CLUSTER CRD...: waits for each CRD to be Established, with
+# $(patrol::secs 30) attempts of up to 2 s plus a 1 s pause each. (`kubectl wait` fails at once,
+# instead of waiting, while a new CRD has no status conditions.)
 patrol::wait_established() {
 	local cluster=$1 crd _
 	shift
 	for crd in "$@"; do
-		for _ in $(seq 1 30); do
+		for _ in $(seq 1 "$(patrol::secs 30)"); do
 			if patrol::kubectl "$cluster" wait --for=condition=Established --timeout=2s "crd/$crd" >/dev/null 2>&1; then
 				continue 2
 			fi

@@ -34,7 +34,7 @@ patrol::require_tools kubectl kind docker
 cluster=$PATROL_CONTROL_CLUSTER
 ns=patrol-e2e
 kn() { patrol::kubectl "$cluster" -n "$ns" "$@"; }
-kn wait --for=condition=Ready pod/toolbox --timeout=60s >/dev/null
+kn wait --for=condition=Ready pod/toolbox --timeout="$(patrol::secs 60)s" >/dev/null
 
 passed=0
 failed=0
@@ -151,7 +151,7 @@ if [[ $with_registry_image -eq 1 ]]; then
 		patrol::kubectl "$c" -n default run registry-pull-check --image="$ref" --image-pull-policy=Always \
 			--restart=Never --command -- true >/dev/null
 		if patrol::kubectl "$c" -n default wait --for=jsonpath='{.status.phase}'=Succeeded \
-			pod/registry-pull-check --timeout=120s >/dev/null 2>&1; then
+			pod/registry-pull-check --timeout="$(patrol::secs 120)s" >/dev/null 2>&1; then
 			passed=$((passed + 1))
 			printf 'PASS  %-16s %s pulled and ran %s\n' registry-image "$c" "$ref"
 		else
