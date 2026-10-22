@@ -2,8 +2,13 @@
 #
 # Runs after every successful CI run on a push to main (and on demand). When a release is pending
 # (Chart.yaml names version X, CHANGELOG.md has X's section and the tag vX does not exist, which is
-# the state right after the release pull request of release-pr.yml is merged) it publishes, from
-# exactly the commit CI tested:
+# the state right after the release pull request of release-pr.yml is merged) it publishes the
+# release commit: the newest commit on main's first-parent history that changed CHANGELOG.md (the
+# merge of the release pull request). Both events choose it the same way (`hack/release select`),
+# whatever commit the CI run tested or the manual run started from, and publish only once a CI run
+# of the push of that very commit passed every job of the full tier. A later commit is never
+# tagged (its changes would be in the tag but in no changelog section), and a run that skipped
+# jobs (a documentation-only push runs the static checks only) never counts:
 #
 #   1. artifacts  the patrol CLI for Linux, macOS and Windows (amd64, arm64), the install manifests
 #                 (install.yaml, namespace-install.yaml, core-install.yaml, ha-*.yaml, crds.yaml,
@@ -56,30 +61,29 @@ jobs:
     timeout-minutes: 10
     permissions:
       contents: read
+      actions: read # the CI runs and jobs of the release commit
     outputs:
-      pending: ${{ steps.status.outputs.pending }}
-      version: ${{ steps.status.outputs.current }}
-      tag: ${{ steps.status.outputs.tag }}
-      sha: ${{ steps.sha.outputs.sha }}
+      release: ${{ steps.select.outputs.release }}
+      version: ${{ steps.select.outputs.current }}
+      tag: ${{ steps.select.outputs.tag }}
+      sha: ${{ steps.select.outputs.sha }}
       registry: ${{ steps.registry.outputs.registry }}
     steps:
-      - name: Choose the commit
-        id: sha
-        env:
-          RUN_SHA: ${{ github.event.workflow_run.head_sha }}
-        run: echo "sha=${RUN_SHA:-$GITHUB_SHA}" >>"$GITHUB_OUTPUT"
+      # main's tip, not the commit of the event: the release commit is found from there.
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
-          ref: ${{ steps.sha.outputs.sha }}
-          fetch-depth: 0 # the tags
+          ref: main
+          fetch-depth: 0 # the first-parent history and the tags
           persist-credentials: false
       - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
         with:
           go-version-file: go.mod
           cache: false
-      - name: Release status
-        id: status
-        run: go run ./hack/release status -github-output
+      - name: Choose the release commit and check its CI
+        id: select
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: go run ./hack/release select -github-output
       - name: Registry
         id: registry
         env:
@@ -92,19 +96,34 @@ jobs:
           echo "registry=$registry" >>"$GITHUB_OUTPUT"
       - name: Summary
         env:
-          PENDING: ${{ steps.status.outputs.pending }}
-          TAG: ${{ steps.status.outputs.tag }}
+          EVENT: ${{ github.event_name }}
+          PENDING: ${{ steps.select.outputs.pending }}
+          RELEASE: ${{ steps.select.outputs.release }}
+          CI: ${{ steps.select.outputs.ci }}
+          REASON: ${{ steps.select.outputs.ci_reason }}
+          TAG: ${{ steps.select.outputs.tag }}
+          SHA: ${{ steps.select.outputs.sha }}
         run: |
-          if [[ $PENDING == true ]]; then
-            echo "::notice title=release::releasing $TAG"
-          else
+          if [[ $RELEASE == true ]]; then
+            echo "::notice title=release::releasing $TAG from ${SHA:0:7}: $REASON"
+          elif [[ $PENDING != true ]]; then
             echo "::notice title=release::no release pending ($TAG is tagged, or CHANGELOG.md has no section for it)"
+          elif [[ $CI == failed ]]; then
+            # Blocked until CI passes on the release commit: re-run its CI run, or merge the fix
+            # and re-prepare the same version (docs/guides/releasing.md).
+            echo "::error title=release::$TAG is blocked: $REASON"
+            exit 1
+          elif [[ $EVENT == workflow_dispatch ]]; then
+            echo "::error title=release::$TAG is not released yet: $REASON"
+            exit 1
+          else
+            echo "::notice title=release::$TAG waits for CI on the release commit ${SHA:0:7}: $REASON"
           fi
 
   artifacts:
     name: Build the release artifacts
     needs: plan
-    if: needs.plan.outputs.pending == 'true'
+    if: needs.plan.outputs.release == 'true'
     runs-on: ubuntu-24.04
     timeout-minutes: 45
     permissions:
@@ -135,7 +154,7 @@ jobs:
   image:
     name: Push the image
     needs: plan
-    if: needs.plan.outputs.pending == 'true'
+    if: needs.plan.outputs.release == 'true'
     runs-on: ubuntu-24.04
     timeout-minutes: 120
     permissions:

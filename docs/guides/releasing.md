@@ -7,7 +7,7 @@ and the release workflow publishes once CI has passed on the merged commit.
 
 > **Status.** The tool (`hack/release`) is unit-tested and was run against this repository's
 > history and in a scratch clone (prepare, generated-file checks, artifacts); see
-> [`docs/verification/log.md`](../verification/log.md) V-0037. The two workflows have **not run on
+> [`docs/verification/log.md`](../verification/log.md) V-0037 and V-0038. The two workflows have **not run on
 > GitHub yet**: the first release pull request, image push, chart push and GitHub release are
 > unobserved.
 
@@ -27,9 +27,18 @@ merge the PR ──► CI on main (full tier) ──► Release workflow (releas
    `main` rebuild it, so it always describes `main` as it is.
 2. **Review and merge the pull request.** Reword `CHANGELOG.md` lines in it if needed, right
    before merging (the next push to `main` would rebuild the branch and drop the edit).
-3. **CI runs on the merge** (it changes the chart, so the full tier). When the CI workflow succeeds
-   on a push to `main`, `release.yml` checks whether a release is *pending*: `Chart.yaml` names
-   X.Y.Z, `CHANGELOG.md` has its section and the tag `vX.Y.Z` does not exist. If so it publishes:
+3. **CI runs on the merge** (pushes to `main` run the full tier). After every successful CI run of
+   a push to `main`, and on a manual **Run workflow** of `release.yml`, `hack/release select`
+   checks whether a release is *pending*: `Chart.yaml` names X.Y.Z, `CHANGELOG.md` has its section
+   and the tag `vX.Y.Z` does not exist. Both events then choose the same commit, the **release
+   commit**: the newest commit on `main`'s first-parent history that changed `CHANGELOG.md` (the
+   merge of the release pull request, or its squashed or rebased commit). The commit the event
+   happened to point at is never used: a later commit would be tagged with changes no changelog
+   section lists (and the next release starts from the tag), and a documentation-only push runs the
+   static checks only. The release commit is published once the newest CI run of its push to `main`
+   passed every job (`Choose tiers`, `Static checks`, `Unit tests`, `Web UI`, `Image`,
+   `Integration suite`, `Deploy suite`, `Kind`, `CI`; a skipped job does not count). Until then a
+   CI-triggered run waits (a notice); a manual run fails with the reason. It publishes:
 
    | Job | What | Where |
    |-----|------|-------|
@@ -38,11 +47,17 @@ merge the PR ──► CI on main (full tier) ──► Release workflow (releas
    | `publish` | checks `SHA256SUMS`, `helm push`, then `gh release create vX.Y.Z --target <tested sha>` with the changelog section, install commands, image digest and the artifacts | `oci://REGISTRY/charts/patrol-cd`, GitHub release |
 
    The tag is created last: it exists only when everything else was published. A failed run can be
-   re-run from the Actions page or with **Run workflow** on `release.yml` (pushing the same image
+   re-run from the Actions page or with **Run workflow** on `release.yml` (it checks CI on the release commit the same way) (pushing the same image
    tag and chart version again replaces them).
 
 Nothing new is proposed while a release is pending, so the release pull request does not reappear
 between the merge and the tag.
+
+**CI failed on the release commit.** The release workflow reports the release as blocked. For a
+flaky failure, re-run the failed jobs of that CI run; its success starts the release. For a real
+defect, merge the fix, then run the **Release PR** workflow manually with `version` set to the
+pending version: it rebuilds that version's changelog section (now listing the fix) and the merge
+of that pull request becomes the release commit.
 
 ## Versions
 
@@ -59,7 +74,7 @@ binaries (`vX.Y.Z`).
 
 The first release (no tag yet) is the chart's current version, `0.1.0`. To choose a version
 yourself (1.0.0, say), run the **Release PR** workflow manually with `version` set; it must be
-newer than the last tag. Pre-releases (`-rc.1`) are not produced.
+newer than the last tag (or the pending version itself, to rebuild its section). Pre-releases (`-rc.1`) are not produced.
 
 ## Changelog
 
@@ -99,8 +114,9 @@ make release-prepare                   # what the workflow commits (needs helm 4
 make release-artifacts RELEASE_VERSION=0.1.0 RELEASE_REGISTRY=ghcr.io/juliosaraiva   # dist/release
 ```
 
-`go run ./hack/release status` prints the release state the release workflow acts on
-(`current`, `tag`, `tagged`, `changelog`, `pending`). Nothing here pushes, tags or publishes.
+`go run ./hack/release status` prints the release state (`current`, `tag`, `tagged`, `changelog`,
+`pending`); `GH_TOKEN=… go run ./hack/release select -repo owner/name` adds the release commit
+(`sha`), its CI result (`ci`, `ci_reason`) and the decision (`release`), as the workflow sees them. Nothing here pushes, tags or publishes.
 
 ## Not covered yet
 

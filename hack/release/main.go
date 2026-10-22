@@ -14,6 +14,7 @@
 //	go run ./hack/release preview  [-version X.Y.Z]   # the next CHANGELOG.md section
 //	go run ./hack/release prepare  [-version X.Y.Z]   # write CHANGELOG.md and Chart.yaml
 //	go run ./hack/release status   [-github-output]   # current=, tagged=, changelog=, pending=
+//	go run ./hack/release select   [-github-output]   # status + sha= (release commit), ci=, release=
 //	go run ./hack/release notes    -version X.Y.Z     # release notes from CHANGELOG.md
 //	go run ./hack/release lint     REV-RANGE          # fail on non-conventional commit subjects
 //	go run ./hack/release stage    -version X.Y.Z -registry HOST[/NS] -out DIR
@@ -30,10 +31,12 @@ import (
 	"flag"
 	"fmt"
 	"io"
+	"net/http"
 	"os"
 	"path/filepath"
 	"regexp"
 	"strings"
+	"time"
 )
 
 const (
@@ -70,6 +73,10 @@ func run(ctx context.Context, args []string, stdout io.Writer) error {
 	ghOutput := fs.Bool("github-output", false, "status: also append the values to $GITHUB_OUTPUT")
 	registry := fs.String("registry", "", "stage: registry (host[:port][/namespace]) the image is published to")
 	out := fs.String("out", "", "stage: output directory")
+	apiURL := fs.String("api-url", envOr("GITHUB_API_URL", "https://api.github.com"), "select: GitHub REST API URL")
+	ghRepo := fs.String("repo", os.Getenv("GITHUB_REPOSITORY"), "select: repository owner/name")
+	workflow := fs.String("workflow", "ci.yml", "select: CI workflow file whose run must pass on the release commit")
+	branch := fs.String("branch", "main", "select: branch the release commit was pushed to")
 	if err := fs.Parse(args); err != nil {
 		return err
 	}
@@ -107,6 +114,25 @@ func run(ctx context.Context, args []string, stdout io.Writer) error {
 		}
 		kv := fmt.Sprintf("current=%s\ntag=%s\ntagged=%t\nchangelog=%t\npending=%t\n",
 			st.current, st.current.Tag(), st.tagged, st.changelog, st.pending())
+		_, _ = fmt.Fprint(stdout, kv)
+		if *ghOutput {
+			return appendFile(os.Getenv("GITHUB_OUTPUT"), kv)
+		}
+		return nil
+	case "select":
+		if *ghRepo == "" {
+			return errors.New("select: -repo (or GITHUB_REPOSITORY) is required")
+		}
+		c := &ciChecker{client: &http.Client{Timeout: 30 * time.Second}, api: *apiURL, repo: *ghRepo,
+			token: envOr("GH_TOKEN", os.Getenv("GITHUB_TOKEN")), workflow: *workflow, branch: *branch}
+		sel, err := r.selectRelease(ctx, c)
+		if err != nil {
+			return err
+		}
+		st := sel.status
+		kv := fmt.Sprintf("current=%s\ntag=%s\ntagged=%t\nchangelog=%t\npending=%t\nsha=%s\nci=%s\nci_reason=%s\nrelease=%t\n",
+			st.current, st.current.Tag(), st.tagged, st.changelog, st.pending(), sel.sha, sel.ci,
+			strings.ReplaceAll(sel.ciReason, "\n", " "), sel.release())
 		_, _ = fmt.Fprint(stdout, kv)
 		if *ghOutput {
 			return appendFile(os.Getenv("GITHUB_OUTPUT"), kv)
@@ -193,7 +219,10 @@ func (r *repo) plan(ctx context.Context, explicit string) (*releaseInfo, error) 
 	if err != nil {
 		return nil, err
 	}
-	if st.pending() {
+	// While a release is pending nothing new is proposed, except the pending version itself
+	// asked for explicitly: that rebuilds its section after its release commit failed CI for a
+	// real defect and the fix was merged (docs/guides/releasing.md).
+	if st.pending() && explicit != st.current.String() {
 		return nil, nil
 	}
 	prevTag, prev, err := latestTag(ctx, r.root)
@@ -337,6 +366,13 @@ func stage(root, outDir, registry string, v version) error {
 		return err
 	}
 	return stageChart(filepath.Join(root, chartDir), filepath.Join(outDir, "chart"), registry)
+}
+
+func envOr(key, def string) string {
+	if v := os.Getenv(key); v != "" {
+		return v
+	}
+	return def
 }
 
 func appendFile(path, s string) error {
