@@ -31,16 +31,17 @@ the image to the kind job through the Actions cache, and the tool-location varia
 | `ci` | one status for the whole workflow (`hack/ci/gate.sh`) | | always |
 
 Playwright (`ui/e2e`) is not part of CI: the specs have never been run, and they need a running
-server. Branch protection is not available for private repositories on the Free plan, so `ci`
-cannot be made a required check; it reports, it does not block.
+server. `ci` is not a required check yet: no ruleset or branch protection names it (#25); it reports, it
+does not block.
 
 ## Tiers and triggers
 
 The workflow runs on pushes to `main`, on pull requests (opened, updated, reopened) and on manual
 dispatch. Draft pull requests are tested like any other, and marking one ready for review does not
 start a second run on the same commit. What runs depends on the change
-(`hack/ci/classify-changes.sh`), because a private repository on the Free plan has 2,000 Actions
-minutes a month and the Go suites are expensive on a 2 vCPU runner:
+(`hack/ci/classify-changes.sh`), because the Go suites are slow on a 2 vCPU runner and every full run
+adds about 4 GB to the 10 GB Actions cache. (The tiers were designed when the repository was private
+and had 2,000 Actions minutes a month; standard runners cost nothing for a public repository.)
 
 | Tier | Jobs | When |
 |------|------|------|
@@ -66,14 +67,13 @@ cancelled or replaced.
 5 + 60 + 120 + 30 + 60 + 5 = 280, kind tier 280 + 190 = 470, full tier 280 + 100 + 75 + 190 = 645 (it
 always includes kind). Measured on GitHub, full tier with the kind job, warm caches: about 66 job
 minutes a run (static 3, unit 24, web UI 4, image 6, integration 11, deploy 8, kind 10; each job is
-billed rounded up, about 72), so roughly 28 such runs fit in the Free plan's 2,000 minutes a month;
-the first run, with cold caches, took about 104, and the first push to `main` (no cache of its own yet) 107
+billed rounded up, about 72, when the repository was private); the first run, with cold caches, took about 104, and the first push to `main` (no cache of its own yet) 107
 (unit 37 minutes instead of 24). The other tiers, on cold pull-request caches: docs only about 11 job minutes
 (`static` alone took 10.7), code only about 44 (static 10, unit without `-race` 17, web UI 4, image 12). On the
 caches restored from `main`, docs only takes about 3 (a pull request 3.2, a push to `main` 3.1); the code tier's
 warm-cache figure is unmeasured. A Dependabot bump of a workflow
 action changes `ci.yml`, so it costs a full-tier run. These are job durations; the minutes GitHub billed are not
-known. When the minutes run out Actions stop until the next month.
+known. Since the repository is public, standard GitHub-hosted runners are not billed.
 
 **Cache space.** A full run saves about 4 GB of caches per ref (the Go build caches of the static, unit,
 integration and deploy jobs are 0.6 to 1 GB each) and the repository limit is 10 GB; at 17:07Z on the day of the
@@ -211,5 +211,5 @@ summary and a JSON report; `PATROL_WAIT_SCALE=3` gives the kind scripts the CI t
 ## Not covered yet
 
 Playwright specs, a multi-architecture or arm64 image build in CI (the release workflow builds
-both, [releasing.md](releasing.md)), vulnerability scans, required checks (no branch protection on the Free plan), and a scheduled
+both, [releasing.md](releasing.md)), vulnerability scans (#106), required checks (#25), and a scheduled
 run that would catch drift of external dependencies (Docker Hub images, tool downloads).

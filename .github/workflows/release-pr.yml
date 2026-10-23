@@ -103,7 +103,9 @@ jobs:
             cat "$RUNNER_TEMP/notes.md"
           } >"$RUNNER_TEMP/body.md"
           title="chore(release): v$VERSION"
-          number=$(gh pr list --head "$BRANCH" --base main --state open --json number --jq '.[0].number // empty')
+          # Only this repository's release/next: `--head` matches the branch name of forks too.
+          number=$(gh pr list --head "$BRANCH" --base main --state open --json number,isCrossRepository \
+            --jq '[.[] | select(.isCrossRepository | not)][0].number // empty')
           if [[ -n $number ]]; then
             gh pr edit "$number" --title "$title" --body-file "$RUNNER_TEMP/body.md"
             echo "::notice title=release::updated pull request #$number for v$VERSION"

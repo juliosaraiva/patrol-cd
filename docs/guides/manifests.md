@@ -105,7 +105,7 @@ kubectl kustomize ./overlay | kubectl apply --server-side --force-conflicts -f -
 ```
 
 Kustomize can also read a base from Git (`https://github.com/juliosaraiva/patrol-cd//deploy/manifests/cluster-install?ref=<tag>`);
-the repository is private, so that needs Git credentials on the machine running kustomize.
+pin `ref` to a release tag.
 
 ## Install a cluster-wide variant
 

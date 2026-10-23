@@ -92,6 +92,10 @@ See [`CLAUDE.md`](CLAUDE.md) for conventions. Tasks, known defects and limitatio
 - Argo CD parity is tracked feature by feature; many rows are still `in-progress` or
   `not-started` in the matrix.
 
+## Security
+
+Report vulnerabilities privately, as [`SECURITY.md`](SECURITY.md) describes; never in a public issue.
+
 ## License
 
 Apache License 2.0 (see [`LICENSE`](LICENSE) and [`NOTICE`](NOTICE)). Some Lua health-check and
