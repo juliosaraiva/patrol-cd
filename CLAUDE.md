@@ -84,7 +84,12 @@ tagged `patrol-cd/*:dev`, temp dirs under the session scratchpad.
 
 ## Durable state
 
-- `TASKS.md` — checklist, current work, blockers. Update when work starts/finishes.
+- GitHub issues (`gh issue`, repo `juliosaraiva/patrol-cd`) — the task tracker: one issue per unit of
+  work, labelled `kind/*`, `area/*` and `priority/p0`–`p3` (plus `topic/observability`,
+  `topic/production-readiness`); tracking issues (label `tracking`) group them. File new work, findings
+  and blockers as issues; comment when work starts; close through the pull request (`Closes #N`) with
+  the evidence. `TASKS.md` only points there and lists the scope rules in force; the old tracker is
+  archived in `docs/history/tasks-until-2026-10-23.md`.
 - `docs/parity/matrix.md` — feature status with evidence links.
 - `docs/verification/log.md` — executed checks (command, env, exit status, artifact).
 - Upstream research clone (not committed): session scratchpad `upstream/argo-cd` at
