@@ -68,8 +68,8 @@ KUBEBUILDER_ASSETS="$(make --no-print-directory -s envtest)" PATROL_REQUIRE_ENVT
 make ci-static ci-unit ci-ui ci-image   # see `make help` for the others
 ```
 
-See [`CLAUDE.md`](CLAUDE.md) for conventions and [`TASKS.md`](TASKS.md) for the task tracker
-and current limitations.
+See [`CLAUDE.md`](CLAUDE.md) for conventions. Tasks, known defects and limitations are tracked as
+[GitHub issues](https://github.com/juliosaraiva/patrol-cd/issues); [`TASKS.md`](TASKS.md) lists the scope rules in force.
 
 ## Known limitations (high level)
 
