@@ -20,19 +20,19 @@ guide is [docs/guides/claude-code-sdlc.md](../../guides/claude-code-sdlc.md).
 
 The machine was shared with up to 16 review and red-team agents during most runs.
 
-## Checks of the code at HEAD `6f9f985` (the last commit before this record)
+## Checks of the code at `c409428` (the last code commit before this record's update)
 
 | Command | Result |
 |---------|--------|
 | `go vet ./hack/sdlc/... ./internal/git/...`; `golangci-lint run ./hack/sdlc/... ./internal/git/...` | passed, 0 issues |
 | `shellcheck hack/sdlc/*.sh .githooks/pre-push` | passed |
-| `go test -race -count=1 ./hack/sdlc/...` | passed: `pushcheck` and `sarifgate`, 355 tests (counted with `-json`) |
-| `bash hack/sdlc/test-sdlc.sh` (the gate end to end in scratch repositories with a bare remote) | passed: 101 passed, 0 failed |
-| `PATH="$PWD/bin:$PATH" go test -race -count=1 ./internal/git/... ./internal/reposerver/...` | passed |
+| `go test -race -count=1 ./hack/sdlc/...` | passed: `pushcheck` and `sarifgate`, 411 tests (counted with `-json`) |
+| `bash hack/sdlc/test-sdlc.sh` (the gate end to end in scratch repositories with a bare remote) | passed: 106 passed, 0 failed |
+| `PATH="$PWD/bin:$PATH" go test -race -count=1 ./internal/git/...` | passed (and `./internal/reposerver/...` on `6f9f985`, which has the same `internal/git`) |
 
 ## Agent review
 
-Seven runs of `.claude/workflows/sdlc-review.js` on successive trees, each verified finding fixed
+Eight runs of `.claude/workflows/sdlc-review.js` on successive trees, each verified finding fixed
 before the next run:
 
 | Tree | Blocking (verified) | Minor | Refuted |
@@ -44,11 +44,17 @@ before the next run:
 | `4922ea6` | 15 | 13 | 0 |
 | `b9bbfb2` | 11 | 7 | 0 |
 | `83ea66c` | 7 | 6 | 0 |
+| `fbdc7df` | 8 | 7 | 0 |
 
 Most findings were ways around the Claude Code hook (shell and git constructs it read differently
-from bash, zsh or git) and tests that could not fail; the last run's were six untested branches and
-one bypass (a zsh function defined through `functions[…]=`). The review of the tree that contains
-this record runs after it is written; its result is in the pull request.
+from bash, zsh or git) and tests that could not fail. The seventh run's were six untested branches
+and one bypass (a zsh function defined through `functions[…]=`). The eighth run's were six more
+spellings the walker misread (a quoted or escaped `export`, `=env`, a piped script with shell
+options, `rebase -x'…'`, `watch`, git's upload-pack and receive-pack commands) and two gaps in the
+gate scripts (a local branch named `origin/main`, ignored source files). Rather than model each new
+spelling, the hook now has a net under the walker: a command it does not model, whose own words
+name `--no-verify`, `core.hooksPath` or an unsafe `GIT_*` variable, is refused. The review of the
+tree that contains this record runs after it is written; its result is in the pull request.
 
 ## Red team
 
@@ -76,7 +82,14 @@ and sixth runs, and tests that fail under load: `internal/server`
 (`TestApplicationLogs`, #223), `internal/appset/generators` (`TestPluginGeneratorFailures/timeout`,
 #224), and once `internal/cmp` (the test was not identified: the report was overwritten by a later
 run; `go test -race -count=5 ./internal/cmp/...` alone passed). `ci-static` and the commit-subject
-check passed in every run. The run on the tree that contains this record is in the pull request.
+check passed in every run.
+
+A seventh run, on `a7346cd` (tree `fbdc7df`, with the #227 fix), ran every step while 12 review
+agents loaded the machine: `ci-static` passed (314 s), the commit-subject check passed, the Go tests
+of all 102 packages passed (1790 s), and CodeQL of Go, the web UI and the workflows passed (638 s).
+It then stopped with `check.sh: line 172: syntax error`: the file had been edited while it ran, and
+bash reads a script as it goes. Nothing was recorded. check.sh is now one group that bash reads whole
+before running it. The run on the tree that contains this record is in the pull request.
 
 ## Findings outside the SDLC
 
