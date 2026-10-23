@@ -42,6 +42,11 @@ this guide.
 A documentation-only change (the rule of `hack/ci/classify-changes.sh`: `docs/`, `*.md` at the root,
 `.gitignore`) runs the first row only. The script stops at the first failure.
 
+The linters read no configuration from outside the tree (`golangci-lint run --no-config`,
+`shellcheck --norc` with `SHELLCHECK_OPTS` cleared), so a file in HOME or a parent directory cannot
+make a local run lenient where CI's is not; and the gate's scripts ignore replace refs
+(`GIT_NO_REPLACE_OBJECTS`), which could make a commit read with another commit's tree.
+
 When every check passed on a **clean** tree, it writes a record for HEAD's tree
 (`git rev-parse HEAD^{tree}`) to `$(git rev-parse --git-common-dir)/patrol-sdlc/checks/<tree>`. A
 dirty tree is checked but not recorded, and `--no-codeql` (`make sdlc-check SDLC_CHECK_FLAGS=--no-codeql`,
@@ -174,9 +179,10 @@ Two hooks run it:
     commands. `cd`, `pushd` and `git -C` move the directory only where they certainly run: inside a
     pipeline, a background job, a subshell, a substitution or a command run by `env`, a wrapper,
     `find -exec` or `kubectl exec` they do not reach the commands after them; a `cd` that may or may
-    not run (after `||`, in an
-    `if`, `case`, loop or function) leaves the directory unknown; and so does a `cd` that may fail
-    without stopping the command (`cd DIR; git push`), unless `&&` or `|| exit` guards it. It follows
+    not run (after `||`, in an `if`, `case`, loop or function, or in an `if` or `while` condition,
+    whose branches can run whether it worked or not) leaves the directory unknown; and so does a
+    `cd` that may fail without stopping the command (`cd DIR; git push`), unless `&&` or `|| exit`
+    guards it; sudo's `-D`, `-R` and `-i` run the command from an unknown directory. It follows
     the command a wrapper runs (`timeout`, `nice`, `sudo`, `nohup`, `env`, `xargs`, `find -exec`,
     `kubectl`/`docker exec -- …`, `command`, `exec`, …) into that command, and parses `bash -c '…'`,
     a heredoc or here-string given to `bash`/`sh`/`zsh`/`dash`/`ksh`/`mksh`, a literal script piped
@@ -194,7 +200,8 @@ Two hooks run it:
       nameref), `read`, `printf -v`, `let`, arithmetic or `${NAME:=…}`, but not merely printed.
       `GIT_EDITOR`, `GIT_PAGER` and `GIT_SEQUENCE_EDITOR` pass with a literal value that is safe
       shell code, since git runs it through `sh`, and so do `EDITOR`, `VISUAL` and `PAGER`, which git
-      falls back to;
+      falls back to; set from a value the hook does not read (`read`, `printf -v`, a `for` loop),
+      they are refused;
     - `git -c`, `git --config-env` and `git config` writes of keys outside a short safe list
       (`core.hooksPath`, `alias.*`, `include.*`, `core.pager`, `diff.external`,
       `diff.<driver>.command` …); `--git-dir`, `--work-tree`, `--bare`, `--shallow-file` and other
@@ -206,8 +213,9 @@ Two hooks run it:
       `submodule foreach`, `for-each-repo`, the upload-pack of `fetch`, `pull`, `clone` and
       `ls-remote`, push's receive-pack and `--exec`, `archive --exec`, `grep -O`;
     - a write to the ref the gate measures a change from: `update-ref` (also `--stdin`) or
-      `symbolic-ref` under `refs/remotes/`, a `fetch` or `pull` refspec into `remotes/`, and
-      `git remote add`, `remove`, `rename`, `set-url` or `set-branches`;
+      `symbolic-ref` under `refs/remotes/`, a `fetch` or `pull` refspec into `remotes/`,
+      `git remote add`, `remove`, `rename`, `set-url` or `set-branches`, and `git fast-import` and
+      `git replace`;
     - a git subcommand that is not a git command: an alias, whose definition the command could
       change on the way (a config file it writes, `HOME`, `XDG_CONFIG_HOME`). A `git-*` program run
       by its own name, and git run in a container by `kubectl`/`docker exec`, are not alias lookups
@@ -220,7 +228,8 @@ Two hooks run it:
     - a push it cannot resolve: inside `$(…)`, behind `eval` with a dynamic string, through a
       non-literal command word, git option or shell script, piped through `xargs` or `parallel`, in
       a script piped to a shell by a producer it cannot read (`printf`, a chain through `tee`), or
-      in a command that does not parse as bash and names git.
+      in a command that does not parse as bash and names git. Its text check for these reads git's
+      global options and their values (`git -C DIR push`, `git -c K=V push`) and git by its path.
   - **What it refuses for a push in this clone:** an unknown `git push` option, and the forms the
     gate cannot check ref by ref: `--all`, `--branches`, `--mirror`, `--tags`, `:`, a glob.
 
@@ -269,6 +278,10 @@ A second hook (`hack/sdlc/claude-format.sh`, `PostToolUse` for Edit, MultiEdit a
 - The Claude Code hook checks the gate, and `core.hooksPath`, as they are before the command runs. A
   command line that commits and also turns git's hook off on the way without naming it (a program
   or an editor that rewrites `.git/config` or the hook) pushes the new commit unchecked.
+- golangci-lint, shellcheck and actionlint are pinned to the tree's configuration; the UI's ESLint and
+  TypeScript find the tree's own files first. A check added later that reads a configuration file
+  from a parent directory or HOME needs the same pinning, or a local run can judge differently from
+  CI.
 - The gate measures a change from `refs/remotes/origin/main` as this clone has it. A command that
   moves that ref other than through the forms above (writing the ref file) changes what counts as
   the change, and a change that then looks like documentation only skips the review.

@@ -1,6 +1,10 @@
 # Helpers shared by the hack/sdlc scripts (sourced, not run). See docs/guides/claude-code-sdlc.md.
 # shellcheck shell=bash
 
+# A replace ref (git replace) can make a commit read with another commit's tree or parents, and so
+# change what counts as the change: the gate's git commands ignore replace refs.
+export GIT_NO_REPLACE_OBJECTS=1
+
 # sdlc_state_dir prints the directory that holds this clone's check and review records. It lives in
 # the git directory, so records are never committed, and in the common one, so every worktree of the
 # clone shares them (records are keyed by tree hash, which names the content exactly).
@@ -48,12 +52,14 @@ sdlc_weakened() {
 }
 
 # sdlc_ignored prints the ignored files and directories the checks could read although HEAD's tree
-# lacks them: a .gitignore pattern such as kubeconfig* or coverage.* can hide a source file. The
-# build's outputs and caches (bin/, dist/, ui/dist/, node_modules/, test reports, *.test, *.out ...)
-# and dot directories at the top (tool state, which go and the UI build do not read) do not count.
+# lacks them: a .gitignore pattern such as kubeconfig* or coverage.* can hide a source file, and an
+# ignored dot file can configure a linter (.shellcheckrc, .golangci.yml, .github/actionlint.yaml).
+# The build's outputs and caches (bin/, dist/, ui/dist/, node_modules/, test reports, *.test, *.out
+# ...) and the state directories of the tools that work on the tree (.cache/, .agents/, .codex/,
+# .claude/worktrees/, Claude Code's .claude/settings.local.json) do not count.
 sdlc_ignored() {
 	git ls-files --others --ignored --exclude-standard --directory --no-empty-directory |
-		grep -Ev '^(\.|bin/|dist/|ui/dist/|test/e2e/artifacts/)|(^|/)(node_modules|coverage|test-results|playwright-report)/|(^|/)(\.DS_Store|\.env(\..*)?)$|\.(test|out|swp|tsbuildinfo)$' || true
+		grep -Ev '^(\.(cache|agents|codex)/|\.claude/(worktrees/|settings\.local\.json$)|bin/|dist/|ui/dist/|test/e2e/artifacts/)|(^|/)(node_modules|coverage|test-results|playwright-report)/|(^|/)(\.DS_Store|\.env(\..*)?)$|\.(test|out|swp|tsbuildinfo)$' || true
 }
 
 # sdlc_clean succeeds when the working tree has no tracked changes, no untracked files that git

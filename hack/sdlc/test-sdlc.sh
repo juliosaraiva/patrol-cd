@@ -67,6 +67,24 @@ check "settings hook: the wrapper is killed" 2 "$(settings_hook "$work/p")"
 printf 'exit 1\n' >"$work/p/hack/sdlc/claude-pre-push.sh"
 check "settings hook: the wrapper fails" 2 "$(settings_hook "$work/p")"
 
+# The shell lint reads no shellcheck configuration from outside the tree: an rc file in HOME that
+# disables every check leaves a finding a finding.
+if command -v shellcheck >/dev/null 2>&1; then
+	lint=$work/lint
+	git init -q "$lint"
+	mkdir -p "$lint/hack/ci" "$work/lint-home"
+	cp "$src/hack/ci/lint-shell.sh" "$lint/hack/ci/"
+	# shellcheck disable=SC2016 # the script text holds an unquoted $1 on purpose
+	printf '#!/usr/bin/env bash\necho $1\n' >"$lint/bad.sh"
+	git -C "$lint" add -A
+	echo 'disable=all' >"$work/lint-home/.shellcheckrc"
+	rc=0
+	(cd "$lint" && HOME=$work/lint-home SHELLCHECK_OPTS='--exclude=SC2086' hack/ci/lint-shell.sh) >/dev/null 2>&1 || rc=$?
+	check "shell lint ignores a HOME rc file and SHELLCHECK_OPTS" 1 "$rc"
+else
+	echo "test-sdlc: shellcheck not installed; skipping the shell lint configuration check"
+fi
+
 # Build the hook's binary (the wrapper builds it on first use).
 (cd "$src" && go build -o bin/sdlc-pushcheck ./hack/sdlc/pushcheck)
 
@@ -352,6 +370,24 @@ git update-index --assume-unchanged main.go
 # shellcheck source=hack/sdlc/lib.sh
 check "an assume-unchanged file is not clean" 1 "$(source hack/sdlc/lib.sh && sdlc_clean && echo 0 || echo 1)"
 git update-index --no-assume-unchanged main.go
+# An ignored dot file can configure a linter (.shellcheckrc, .golangci.yml): not clean. Tool state
+# directories (.cache/) are.
+printf '.shellcheckrc\n.cache/\n' >>.git/info/exclude
+echo 'disable=all' >.shellcheckrc
+# shellcheck source=hack/sdlc/lib.sh
+check "an ignored linter configuration is not clean" 1 "$(source hack/sdlc/lib.sh && sdlc_clean && echo 0 || echo 1)"
+rm .shellcheckrc
+mkdir -p .cache && touch .cache/state
+# shellcheck source=hack/sdlc/lib.sh
+check "an ignored tool state directory is clean" 0 "$(source hack/sdlc/lib.sh && sdlc_clean && echo 0 || echo 1)"
+rm -r .cache
+# A replace ref that gives origin/main HEAD's tree cannot make the change look empty.
+mainsha=$(git rev-parse refs/remotes/origin/main)
+git replace "$mainsha" "$(git commit-tree "$(git rev-parse 'HEAD^{tree}')" -m fake)"
+# shellcheck source=hack/sdlc/lib.sh
+check "replace refs do not change what counts as the change" main.go \
+	"$(source hack/sdlc/lib.sh && sdlc_changed "$(sdlc_base HEAD)" HEAD | paste -sd, -)"
+git replace -d "$mainsha" >/dev/null
 
 # check.sh records nothing when the environment can weaken a check (sdlc_weakened).
 printf 'GOLANGCI_LINT ?= golangci-lint\n' >"$work/w.mk"

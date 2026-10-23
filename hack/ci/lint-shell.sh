@@ -42,7 +42,10 @@ command -v shellcheck >/dev/null 2>&1 || {
 }
 
 echo "lint-shell: shellcheck $(shellcheck --version | sed -n 's/^version: //p') on ${#all[@]} scripts (${#sh_files[@]} POSIX sh)"
-shellcheck -x "${all[@]}"
+# No configuration from outside the tree (an rc file in HOME or a parent directory, SHELLCHECK_OPTS):
+# the result must be CI's.
+unset SHELLCHECK_OPTS
+shellcheck --norc -x "${all[@]}"
 
 status=0
 for f in "${bash_files[@]}"; do

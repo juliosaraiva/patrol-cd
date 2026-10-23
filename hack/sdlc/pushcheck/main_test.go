@@ -182,8 +182,14 @@ func TestGatePushChecksTheGateFiles(t *testing.T) {
 	gitIn(t, root, "commit", "-q", "-m", "gate")
 	gitIn(t, root, "config", "core.hooksPath", ".githooks")
 	p := push{Dir: root, Sources: []string{"main"}}
+	gitIn(t, root, "switch", "-q", "-c", "other")
+	gitIn(t, root, "commit", "-q", "--allow-empty", "-m", "other")
+	gitIn(t, root, "switch", "-q", "main")
+	other, err := gitOut(root, "rev-parse", "other")
+	require.NoError(t, err)
 
-	assert.Contains(t, gatePush(p, root), "gate saw ", "the gate runs on the pushed commit and refuses it")
+	assert.Contains(t, gatePush(push{Dir: root, Sources: []string{"other"}}, root), "gate saw "+other,
+		"the gate runs on the pushed commit, not HEAD, and refuses it")
 	require.NoError(t, os.Chmod(hook, 0o644))
 	assert.Contains(t, gatePush(p, root), "missing or not executable")
 	require.NoError(t, os.Chmod(hook, 0o755))
@@ -191,6 +197,15 @@ func TestGatePushChecksTheGateFiles(t *testing.T) {
 	assert.Contains(t, gatePush(p, root), "uncommitted changes", "an edited gate does not decide")
 	gitIn(t, root, "commit", "-q", "-am", "gate passes")
 	assert.Empty(t, gatePush(p, root))
+	// A form the gate cannot check ref by ref is refused, even with the gate passing.
+	for _, command := range []string{"git push --tags origin", "git push --all origin", "git push origin :",
+		"git push origin 'refs/heads/*:refs/heads/*'", "git push --frobnicate origin main", "git push -x origin main"} {
+		a, err := findPushes(command, root)
+		require.NoError(t, err)
+		require.Len(t, a.Pushes, 1, command)
+		require.NotEmpty(t, a.Pushes[0].Refused, command)
+		assert.Equal(t, a.Pushes[0].Refused, gatePush(a.Pushes[0], root), command)
+	}
 	// An edit git status is told not to show does not decide either.
 	for _, mark := range []string{"assume-unchanged", "skip-worktree"} {
 		gitIn(t, root, "update-index", "--"+mark, "hack/sdlc/gate.sh")

@@ -75,6 +75,13 @@ func TestFindPushes(t *testing.T) {
 		{name: "sudo --chdir", command: "sudo --chdir=/tmp/other git push origin a", want: []push{{Dir: "", Sources: []string{"a"}}}},
 		{name: "sudo -i runs in the target user's home", command: "sudo -i git push origin a", want: []push{{Dir: "", Sources: []string{"a"}}}},
 		{name: "sudo -A takes no value", command: "sudo -A git push origin a", want: []push{{Dir: "/repo", Sources: []string{"a"}}}},
+		// A branch after a condition can run whether the condition's cd worked or not.
+		{name: "a negated cd in an if", command: "if ! cd /x; then git push origin a; fi", want: []push{{Dir: "", Sources: []string{"a"}}}},
+		{name: "the else of a cd", command: "if cd /x; then :; else git push origin a; fi", want: []push{{Dir: "", Sources: []string{"a"}}}},
+		{name: "an until body", command: "until cd /x; do git push origin a; done", want: []push{{Dir: "", Sources: []string{"a"}}}},
+		{name: "zsh runs a function's last pipeline element in this shell", command: "f() { true | cd /x; }; f && git push origin a", want: []push{{Dir: "", Sources: []string{"a"}}}},
+		{name: "unknown short option", command: "git push -x origin a", want: []push{{Dir: "/repo", Sources: []string{"a"},
+			Refused: "unknown git push option -x; spell options out in full"}}},
 		{name: "unknown directory", command: `cd "$TMP" && git push`, want: []push{{Dir: "", Sources: head}}},
 		{name: "cd in a subshell does not leak", command: "(cd /other && git status); git push", want: []push{{Dir: "/repo", Sources: head}}},
 		{name: "cd in the background does not leak", command: "cd /tmp & git push", want: []push{{Dir: "/repo", Sources: head}}},
@@ -145,6 +152,8 @@ func TestFindPushes(t *testing.T) {
 		{name: "bash -co VALUE", command: `bash -co pipefail 'git push origin d'`, want: []push{{Dir: "/repo", Sources: []string{"d"}}}},
 		{name: "heredoc to a shell", command: "bash <<'EOF'\ncd /y && git push origin d\nEOF", want: []push{{Dir: "/y", Sources: []string{"d"}}}},
 		{name: "heredoc after -eo VALUE", command: "bash -eo pipefail <<'EOF'\ngit push origin d\nEOF", want: []push{{Dir: "/repo", Sources: []string{"d"}}}},
+		{name: "-s reads the script from standard input, the operands are its arguments", command: "bash -s x <<'EOF'\ncd /y && git push origin d\nEOF",
+			want: []push{{Dir: "/y", Sources: []string{"d"}}}},
 		{name: "here-string to a shell", command: `sh <<< 'git push origin d'`, want: []push{{Dir: "/repo", Sources: []string{"d"}}}},
 		{name: "echo piped to a shell", command: "echo 'git push origin a' | sh", want: []push{{Dir: "/repo", Sources: []string{"a"}}}},
 		{name: "cat heredoc piped to a shell", command: "cat <<'EOF' | bash\ngit push origin a\nEOF", want: []push{{Dir: "/repo", Sources: []string{"a"}}}},
@@ -417,7 +426,9 @@ func TestFindPushesBlocked(t *testing.T) {
 		{`echo "$(git -c alias.ship=push ship)"; git status`, config},
 		// Fail-closed refusals of a push the walker cannot follow, each on its own path.
 		{`trap "git push origin $B" EXIT`, "a git push through trap cannot be checked"},
-		{`timeout 60 "$X" git push origin a`, "a git push through timeout cannot be checked"},
+		{`timeout 60 "$X" sh -c 'git push origin a'`, "a git push through timeout cannot be checked"},
+		{`timeout 60 "$GIT" push origin main`, "a git push through a command word that is not literal"},
+		{`echo | xargs "$GIT" push origin main`, "a git push through a command word that is not literal"},
 		{"kubectl exec pod -- git -c alias.ship=push ship origin a", config},
 		{`watch -n 1 "git push origin $B"`, "a git push through watch cannot be checked"},
 		{"eval 'print -l ${(f)x}; git push origin a'", "cannot parse the string eval runs"},
@@ -428,6 +439,31 @@ func TestFindPushesBlocked(t *testing.T) {
 		{"git --frobnicate x push origin a", "a git global option the hook does not model comes before push"},
 		{"git config unset", "git configuration (edit)"},
 		{`git config "$K" x`, "git config writes a key the hook cannot read"},
+		// The fallback text check reads git's global options and their values, and git by its path.
+		{`bash -c "git -C $D push origin main"`, "a git push through a shell argument that is not literal"},
+		{`eval "git -C $D push origin main"`, "a git push through eval"},
+		{"command -p git -C /other push origin main", "a git push through command with options"},
+		{"zsh -c 'git -C /other push origin main; print -l ${(f)x}'", "cannot parse the shell script"},
+		{"printf 'git -C /other push origin main' | bash", "a git push through a script piped to a shell"},
+		{"parallel ::: 'git -C /x push origin a'", "through parallel"},
+		{`eval "git -c color.ui=never push origin $B"`, "a git push through eval"},
+		{`eval "/usr/bin/git push origin $B"`, "a git push through eval"},
+		{`eval "G=git; git --git-dir /x push origin $B"`, "a git push through eval"},
+		{`eval "git-push origin $B"`, "a git push through eval"},
+		// A short option's value attached and not literal.
+		{`git rebase -x"$C" HEAD~1`, "that the hook cannot read"},
+		{`git rebase -ix"$C" HEAD~1`, "that the hook cannot read"},
+		{`git clone -u"$X" /tmp/r.git d`, "that the hook cannot read"},
+		// Shell code git runs, from a value the hook does not read.
+		{`: ${GIT_EDITOR:='git -C /other push origin main'}; git commit --amend`, gitEnv},
+		{"for EDITOR in 'git -C /other push origin main'; do git commit --amend; done", "shell code git runs"},
+		{"read -r EDITOR < f; git commit --amend", "shell code git runs"},
+		{"printf -v VISUAL '%s' 'git push origin main'; git commit", "shell code git runs"},
+		// Configuration under diff. or merge. with a subsection, and what rewrites refs or objects.
+		{"git -c diff.x.binary=true diff", config},
+		{"git -c merge.x.name=y merge z", config},
+		{"git replace HEAD~1 HEAD", "can move origin/main"},
+		{"git fast-import < stream", "can move origin/main"},
 		// A shell the command runs inherits what a sourced file or a dynamic eval set before it.
 		{"source ./x.sh; cd /repo && bash -c 'git push origin a'", "a file sourced earlier"},
 		{`eval "$E"; cd /repo && bash -c 'git push origin a'`, "an eval of a dynamic string earlier"},
@@ -536,6 +572,11 @@ func TestFindPushesAllowed(t *testing.T) {
 		"git fetch origin main:refs/heads/main-copy",
 		"git update-ref refs/heads/scratch HEAD",
 		"git symbolic-ref --short HEAD",
+		"git --help push",
+		"git -C /x --version",
+		"export EDITOR; git commit",
+		": ${PAGER:=less}; git log -1",
+		"VISUAL= git commit",
 	} {
 		t.Run(command, func(t *testing.T) {
 			t.Parallel()
@@ -607,6 +648,7 @@ func TestFindPushesAutoCD(t *testing.T) {
 		{"sub x && git push origin a", root},       // with an argument it is a command, not a cd
 		{"(sub && true); git push origin a", root}, // in a subshell
 		{"if true; then sub; fi; git push origin a", ""},
+		{"f() { sub; }; f && git push origin a", ""}, // a function that runs AUTO_CD
 	} {
 		got, err := findPushes(tt.command, root)
 		require.NoError(t, err)
@@ -655,5 +697,9 @@ func TestFindPushesInvalidBash(t *testing.T) {
 
 func TestMain(m *testing.M) {
 	_ = os.Unsetenv("CDPATH") // relative-cd cases must not depend on the developer's CDPATH
+	// Nor may the git the code under test runs read the developer's global or system configuration (a
+	// global hooks directory, say); the tests are parallel, so not t.Setenv.
+	_ = os.Setenv("GIT_CONFIG_GLOBAL", os.DevNull)
+	_ = os.Setenv("GIT_CONFIG_NOSYSTEM", "1")
 	os.Exit(m.Run())
 }
