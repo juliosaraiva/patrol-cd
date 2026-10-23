@@ -114,6 +114,8 @@ jobs:
         run: make ci-rules
       - name: Tier selection tests
         run: make ci-classify
+      - name: SDLC gate tests
+        run: make ci-sdlc
       - name: Shell scripts
         run: make ci-shell
       - name: Workflows
