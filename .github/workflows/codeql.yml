@@ -62,9 +62,9 @@ jobs:
           build-mode: ${{ matrix.build-mode }}
           queries: security-extended
           config-file: ./.github/codeql/codeql-config.yml
-          # The bundle this pinned action version ships: CodeQL 2.27.3 (src/defaults.json at the commit
-          # above), the version hack/sdlc/codeql.sh pins, so local and CI results agree. Bump both together.
-          tools: linked
+          # The bundle hack/sdlc/codeql.sh pins, so local and CI results agree whatever bundle the action
+          # ships after a Dependabot bump; hack/sdlc/test-sdlc.sh checks that the two versions match.
+          tools: https://github.com/github/codeql-action/releases/download/codeql-bundle-v2.27.3/codeql-bundle-linux64.tar.zst
       - name: Build
         if: matrix.build-mode == 'manual'
         run: go build ./...
