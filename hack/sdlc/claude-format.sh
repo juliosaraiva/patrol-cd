@@ -8,7 +8,7 @@ file=$(jq -r '.tool_input.file_path // empty' 2>/dev/null) || exit 0
 [[ $file == *.go && -f $file ]] || exit 0
 top=$(git -C "$(dirname "$file")" rev-parse --show-toplevel 2>/dev/null) || exit 0
 [[ -x $top/hack/sdlc/gate.sh ]] || exit 0
-gofmt -w "$file" 2>&1 || {
+gofmt -w "$file" >&2 || { # Claude Code shows a hook's stderr, with gofmt's file:line error
 	echo "gofmt could not format $file (syntax error?)" >&2
 	exit 2
 }
