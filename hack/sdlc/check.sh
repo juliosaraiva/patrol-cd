@@ -51,6 +51,10 @@ if ! sdlc_clean; then
 	echo "sdlc-check: the working tree has uncommitted changes; checking it, but recording nothing (commit first)"
 fi
 [[ $codeql -eq 1 ]] || record=0
+if [[ -n ${PATROL_SDLC_BASE:-} ]]; then
+	record=0 # the gate measures from origin/main; a check against another base proves nothing for it
+	echo "sdlc-check: PATROL_SDLC_BASE is set; checking against it, but recording nothing"
+fi
 
 echo "sdlc-check: HEAD $head (tree $tree), base $base, ${#changed[@]} changed files"
 
@@ -85,23 +89,29 @@ if printf '%s\n' ${changed[@]+"${changed[@]}"} | sdlc_docs_only; then
 	echo
 	echo "sdlc-check: documentation only; no tests, no CodeQL"
 else
-	# Go packages of the changed Go files (and of changed testdata), without the two suites that have
-	# their own targets.
+	# Go packages of the changed files: Go files, testdata, and any other file next to Go sources
+	# (embedded data); without the two suites that have their own targets, and only packages go can
+	# load (hack/deps holds a single `//go:build tools` file).
 	pkgs=()
 	if any '^(go\.mod|go\.sum)$'; then
 		pkgs=(./...)
 	else
+		dirs=()
 		seen=$'\n'
 		for f in ${changed[@]+"${changed[@]}"}; do
-			[[ $f == *.go || $f == */testdata/* ]] || continue
 			d=${f%%/testdata/*}
 			[[ $d == "$f" ]] && d=$(dirname "$f")
 			[[ $d == test/integration* || $d == test/deploy* ]] && continue
 			compgen -G "$d/*.go" >/dev/null || continue
 			[[ $seen == *$'\n'"$d"$'\n'* ]] && continue
 			seen+="$d"$'\n'
-			pkgs+=("./$d")
+			dirs+=("./$d")
 		done
+		if [[ ${#dirs[@]} -gt 0 ]]; then
+			while IFS= read -r p; do
+				[[ -n $p ]] && pkgs+=("$p")
+			done < <(go list -e -f '{{if not .Error}}{{.ImportPath}}{{end}}' "${dirs[@]}")
+		fi
 	fi
 	if [[ ${#pkgs[@]} -gt 0 ]]; then
 		step "go tests (${#pkgs[@]} packages)" make --no-print-directory ci-unit CI_UNIT_PKGS="${pkgs[*]}"
@@ -123,6 +133,10 @@ else
 		any '\.go$|^go\.(mod|sum)$' && langs+=(go)
 		any '\.(ts|tsx|js|jsx|mjs|cjs)$|(^|/)package\.json$' && langs+=(javascript-typescript)
 		any '^\.github/(workflows|actions)/' && langs+=(actions)
+		# The gate's own inputs: every language, so a new pin, query configuration or baseline is tried.
+		if any '^(hack/sdlc/(codeql\.sh|codeql-baseline\.txt|sarifgate/)|\.github/codeql/)'; then
+			langs=(go javascript-typescript actions)
+		fi
 		if [[ ${#langs[@]} -gt 0 ]]; then
 			step "codeql (${langs[*]})" hack/sdlc/codeql.sh analyze "${langs[@]}"
 		else
