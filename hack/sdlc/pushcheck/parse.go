@@ -71,9 +71,14 @@ func skipsHook(a string) bool {
 	return len(name) >= len("--no-v") && strings.HasPrefix("--no-verify", name)
 }
 
+// parseBash parses a script as bash.
+func parseBash(script string) (*syntax.File, error) {
+	return syntax.NewParser(syntax.Variant(syntax.LangBash)).Parse(strings.NewReader(script), "")
+}
+
 // findPushes parses command as bash and returns what it does with git, starting in cwd.
 func findPushes(command, cwd string) (analysis, error) {
-	f, err := syntax.NewParser(syntax.Variant(syntax.LangBash)).Parse(strings.NewReader(command), "")
+	f, err := parseBash(command)
 	if err != nil {
 		return analysis{}, err
 	}
@@ -137,8 +142,10 @@ type walker struct {
 	pushes  []push
 	calls   []string
 	blocked string
-	sourced bool // a file was sourced: it can change the directory and git's environment
-	seen    map[*syntax.CallExpr]bool
+	// envUnknown says why git's environment and the directory may have changed in ways the walker
+	// cannot see (a sourced file, an eval of a dynamic string); a later push is refused.
+	envUnknown string
+	seen       map[*syntax.CallExpr]bool
 }
 
 func newWalker(dir, src string) *walker {
@@ -618,14 +625,14 @@ func expandLiteral(word *syntax.Word) ([]string, bool) {
 	for i, part := range word.Parts {
 		switch p := part.(type) {
 		case *syntax.Lit:
-			if pattern.HasMeta(p.Value, 0) || strings.Contains(p.Value, "$") ||
+			if pattern.HasMeta(p.Value, 0) || bareDollar(p.Value) >= 0 ||
 				(i == 0 && (strings.HasPrefix(p.Value, "~+") || strings.HasPrefix(p.Value, "~-"))) {
 				return nil, false
 			}
 		case *syntax.SglQuoted:
 		case *syntax.DblQuoted:
 			for _, q := range p.Parts {
-				if lit, ok := q.(*syntax.Lit); !ok || strings.Contains(lit.Value, "$") {
+				if lit, ok := q.(*syntax.Lit); !ok || bareDollar(lit.Value) >= 0 {
 					return nil, false
 				}
 			}
@@ -638,6 +645,20 @@ func expandLiteral(word *syntax.Word) ([]string, bool) {
 		return nil, false
 	}
 	return fs, true
+}
+
+// bareDollar returns the index of the first $ in a literal that no backslash escapes, or -1. bash
+// leaves such a $ as text, but zsh expands `$=x`, `$^x` and `$~x`; `\$` is text in both.
+func bareDollar(s string) int {
+	for i := 0; i < len(s); i++ {
+		switch s[i] {
+		case '\\':
+			i++ // the next character is escaped
+		case '$':
+			return i
+		}
+	}
+	return -1
 }
 
 // literalWord is expandLiteral for a word that must make exactly one field.
@@ -659,8 +680,8 @@ func literalPrefix(word *syntax.Word) string {
 			if pattern.HasMeta(p.Value, 0) {
 				return b.String()
 			}
-			if before, _, found := strings.Cut(p.Value, "$"); found {
-				return b.String() + before
+			if i := bareDollar(p.Value); i >= 0 {
+				return b.String() + p.Value[:i]
 			}
 			b.WriteString(p.Value)
 		case *syntax.SglQuoted:
@@ -671,8 +692,8 @@ func literalPrefix(word *syntax.Word) string {
 				if !ok {
 					return b.String()
 				}
-				if before, _, found := strings.Cut(lit.Value, "$"); found {
-					return b.String() + before
+				if i := bareDollar(lit.Value); i >= 0 {
+					return b.String() + lit.Value[:i]
 				}
 				b.WriteString(lit.Value)
 			}
@@ -700,10 +721,24 @@ func fields(words []*syntax.Word) (args []string, lit []bool) {
 
 var home, _ = os.UserHomeDir()
 
+// zshCode lists zsh's special parameters whose values are shell code: assigning one defines a
+// function or an alias (functions[gp]='git push --no-verify "$@"').
+var zshCode = map[string]bool{"functions": true, "dis_functions": true, "aliases": true, "dis_aliases": true,
+	"galiases": true, "dis_galiases": true, "saliases": true, "dis_saliases": true}
+
 func (w *walker) call(c *syntax.CallExpr, redirs []*syntax.Redirect) {
 	for _, a := range c.Assigns {
-		if a.Name != nil {
-			w.assign(a.Name.Value, a.Value, a.Naked && a.Value == nil)
+		if a.Name == nil {
+			continue
+		}
+		w.assign(a.Name.Value, a.Value, a.Naked && a.Value == nil)
+		if zshCode[a.Name.Value] {
+			code, ok := literalWord(a.Value)
+			if !ok || a.Array != nil {
+				w.block("zsh's " + a.Name.Value + " parameter set from a value the hook cannot read defines code it cannot check; " + runAlone)
+				continue
+			}
+			w.definition("zsh's "+a.Name.Value+" parameter", code)
 		}
 	}
 	saved := w.cmdText
@@ -713,14 +748,24 @@ func (w *walker) call(c *syntax.CallExpr, redirs []*syntax.Redirect) {
 	w.cmdText = saved
 }
 
+// definition checks code the command defines to run later under a name (an alias, or a zsh function
+// set through its parameter). The walker cannot follow a name to where it runs, so code that runs
+// git, mentions a hook override, or changes the directory is refused.
+func (w *walker) definition(how, code string) {
+	f, err := parseBash(code)
+	if mentionsGit(code) || (err == nil && w.changesDir(f)) {
+		w.block(how + " defines code that runs git or changes the directory, which the hook cannot follow to where it runs; " + runAlone)
+	}
+}
+
 // command dispatches an already-expanded argv.
 func (w *walker) command(args []string, lit []bool, redirs []*syntax.Redirect) {
 	args, lit = stripBraces(args, lit)
 	// env runs the rest as a child process, whose cd cannot move this shell.
-	dir, sourced, child := w.dir, w.sourced, false
+	dir, envUnknown, child := w.dir, w.envUnknown, false
 	defer func() {
 		if child {
-			w.dir, w.sourced = dir, sourced
+			w.dir, w.envUnknown = dir, envUnknown
 		}
 	}()
 prefix:
@@ -740,7 +785,15 @@ prefix:
 			child = true
 			args, lit = args[1:], lit[1:]
 		envOpts:
-			for len(args) > 0 && lit[0] {
+			for len(args) > 0 {
+				if !lit[0] { // NAME=$VALUE: still an assignment when NAME is literal
+					if !envName.MatchString(args[0]) {
+						break envOpts
+					}
+					w.assignWord(args[0])
+					args, lit = args[1:], lit[1:]
+					continue
+				}
 				switch a := args[0]; {
 				case !strings.HasPrefix(a, "-") && strings.Contains(a, "="):
 					w.assignWord(a)
@@ -781,8 +834,10 @@ prefix:
 		return
 	}
 	name := path.Base(strings.TrimPrefix(args[0], "=")) // zsh =cmd expands to the path of cmd
-	if sub, ok := strings.CutPrefix(name, "git-"); ok && sub != "" {
-		// git's dashed subcommand binaries: git-push is `git push`, so analyse it as git <sub>.
+	if sub, ok := strings.CutPrefix(name, "git-"); ok && (sub == "push" || sub == "config" || gitPushLike[sub] || gitRunners[sub]) {
+		// git's dashed subcommand binaries: git-push is `git push`, so analyse it as git <sub>. Any
+		// other git-* program (git-seed, git-lfs) is run by its own name, never as an alias, so it is
+		// an ordinary command.
 		w.git(append([]string{sub}, args[1:]...), append([]bool{true}, lit[1:]...))
 		return
 	}
@@ -795,7 +850,7 @@ prefix:
 	case name == "popd":
 		w.dir = ""
 	case name == "source" || name == ".":
-		w.dir, w.sourced = "", true
+		w.dir, w.envUnknown = "", "a file sourced earlier in the command"
 	case name == "git":
 		w.git(args[1:], lit[1:])
 	case shells[name]:
@@ -815,10 +870,35 @@ prefix:
 		}
 		if len(a) > 0 {
 			if l[0] {
+				// The action runs later, on exit or a signal (DEBUG: before each command), from
+				// wherever the shell is then: a push in it runs from an unknown directory, and a cd in
+				// it leaves the directory unknown from here on.
+				saved := w.dir
+				w.dir = ""
 				w.script(a[0])
+				w.dir = saved
+				if f, err := parseBash(a[0]); err != nil || w.changesDir(f) {
+					w.dir = ""
+				}
 			} else {
 				w.blockText(w.cmdText, "trap")
 			}
+		}
+	case name == "alias": // alias [-gs…] NAME=VALUE…: VALUE runs wherever NAME is used later
+		for i, a := range args[1:] {
+			switch {
+			case !lit[i+1]:
+				if mentionsGit(w.cmdText) {
+					w.block("an alias defined from a value the hook cannot read can run git; " + runAlone)
+				}
+			case strings.Contains(a, "=") && !strings.HasPrefix(a, "-") && !strings.HasPrefix(a, "+"):
+				aliasName, value, _ := strings.Cut(a, "=")
+				w.definition("alias "+aliasName, value)
+			}
+		}
+	case name == "hash": // hash -p PATH NAME, zsh's hash NAME=PATH: the name runs another program
+		if mentionsGit(w.cmdText) {
+			w.block("hash can make the name git run another program; " + runAlone)
 		}
 	case name == "xargs" || name == "parallel":
 		w.xargs(name, args[1:], lit[1:])
@@ -856,6 +936,9 @@ prefix:
 	}
 }
 
+// envName matches the literal prefix of an env operand NAME=VALUE whose value is not literal.
+var envName = regexp.MustCompile(`^[A-Za-z_][A-Za-z0-9_]*=`)
+
 // dataCommands read their arguments as data (patterns, text, files) and never run them, so a git
 // push or a --no-verify among them is not handed to git.
 var dataCommands = map[string]bool{"grep": true, "egrep": true, "fgrep": true, "rg": true, "ag": true, "ack": true,
@@ -865,10 +948,10 @@ var dataCommands = map[string]bool{"grep": true, "egrep": true, "fgrep": true, "
 
 // inChild walks the command a child process runs, from dir: its cd and source do not reach this shell.
 func (w *walker) inChild(dir string, args []string, lit []bool, redirs []*syntax.Redirect) {
-	savedDir, sourced := w.dir, w.sourced
+	savedDir, envUnknown := w.dir, w.envUnknown
 	w.dir = dir
 	w.command(args, lit, redirs)
-	w.dir, w.sourced = savedDir, sourced
+	w.dir, w.envUnknown = savedDir, envUnknown
 }
 
 // argvHasGitPush reports whether argv holds a literal `git` whose subcommand (after git's global
@@ -969,7 +1052,13 @@ func (w *walker) execRunner(args []string, lit []bool) {
 	for i := 1; i < len(args); i++ {
 		if lit[i] && args[i] == "--" {
 			if i+1 < len(args) {
-				w.inChild(w.dir, args[i+1:], lit[i+1:], nil)
+				// It runs in a container: its cd stays there, and its git reads the container's
+				// configuration (so its subcommands are not checked for aliases here). A push or a
+				// refusal still counts.
+				s := newWalker(w.dir, w.src)
+				s.command(args[i+1:], lit[i+1:], nil)
+				w.pushes = append(w.pushes, s.pushes...)
+				w.block(s.blocked)
 			}
 			return
 		}
@@ -1002,17 +1091,17 @@ func (w *walker) findExec(args []string, lit []bool) {
 }
 
 // eval runs its argument as a script in the current shell, so a literal script's cd, sourced state,
-// pushes and refusals all carry back. A dynamic string leaves the directory and sourced state
-// unknown, and is refused if eval's own words (not sibling commands) name a push.
+// pushes and refusals all carry back. A dynamic string (eval "$(ssh-agent -s)") leaves the directory
+// and git's environment unknown, and is refused if eval's own words (not sibling commands) name a push.
 func (w *walker) eval(args []string, lit []bool) {
 	for _, l := range lit {
 		if !l {
 			w.blockText(w.cmdText, "eval")
-			w.dir, w.sourced = "", true
+			w.dir, w.envUnknown = "", "an eval of a dynamic string earlier in the command"
 			return
 		}
 	}
-	f, err := syntax.NewParser(syntax.Variant(syntax.LangBash)).Parse(strings.NewReader(strings.Join(args, " ")), "")
+	f, err := parseBash(strings.Join(args, " "))
 	if err != nil {
 		if mentionsGitPush(strings.Join(args, " ")) {
 			w.block("cannot parse the string eval runs around git push; " + runAlone)
@@ -1386,8 +1475,8 @@ func (w *walker) git(args []string, lit []bool) {
 		w.block("git " + unsafe + " can point git at another repository or configuration, where the pre-push hook does not run; push from the work tree without it")
 		return
 	}
-	if w.sourced {
-		w.block("a file sourced earlier in the command can change the directory and git's environment; " + runAlone)
+	if w.envUnknown != "" {
+		w.block(w.envUnknown + " can change the directory and git's environment; run `git push` in a command of its own")
 		return
 	}
 	p, skip, ok := pushArgs(dir, rest, restLit)

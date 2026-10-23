@@ -9,13 +9,27 @@
 # hack/sdlc/pushcheck, which parses it as bash (so a "git push" in quoted text or a heredoc is not a
 # push) and runs the gate. The binary is built into bin/ on first use and rebuilt when its sources or
 # go.sum change; while a change does not build, the last binary that did is used, and without one,
-# commands that mention git are refused and the others run, so the build can be fixed. Exit 2 blocks
-# the command and shows stderr to Claude Code.
+# commands that mention git are refused and the others run, so the build can be fixed. The browser
+# pane's preview_start runs the command a .claude/launch.json configuration names; that command is
+# checked the same way. Exit 2 blocks the command and shows stderr to Claude Code.
 set -uo pipefail
 
 input=$(cat)
 root=$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)
 command=$(jq -r '.tool_input.command // empty' <<<"$input" 2>/dev/null) || command=""
+if [[ $(jq -r '.tool_name // empty' <<<"$input" 2>/dev/null) == *Claude_Browser__preview_start ]]; then
+	name=$(jq -r '.tool_input.name // empty' <<<"$input" 2>/dev/null)
+	if [[ -n $name ]]; then
+		# shellcheck disable=SC2016 # a jq program, not shell
+		command=$(jq -er --arg n "$name" '[.configurations[]? | select(.name == $n)]
+			| if length == 1 then .[0] | ([.runtimeExecutable // empty] + (.runtimeArgs // [])) | map(tostring | @sh) | join(" ")
+			  else error("not one configuration") end' "$root/.claude/launch.json" 2>/dev/null) || {
+			echo "sdlc pre-push hook: cannot read the configuration \"$name\" from .claude/launch.json, so the command preview_start would run cannot be checked" >&2
+			exit 2
+		}
+		input=$(jq --arg c "$command" '.tool_input.command = $c' <<<"$input")
+	fi
+fi
 
 if [[ -f $root/.githooks/pre-push && $command != "make sdlc-git-hooks" ]] && git -C "$root" rev-parse --git-dir >/dev/null 2>&1 &&
 	[[ $(git -C "$root" config --get core.hooksPath) != .githooks ]]; then

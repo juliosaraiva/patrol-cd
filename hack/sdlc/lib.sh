@@ -33,6 +33,19 @@ sdlc_docs_only() {
 	return 0
 }
 
+# sdlc_weakened MAKEFILE... prints what in the environment could weaken a check, one per line: a
+# make variable the makefiles define with `?=` (replace a tool with a no-op, drop -race, change the
+# commit range), CI_GO_TEST_FLAGS, and GOFLAGS from the environment or Go's env file (`go env -w`,
+# GOENV), which can skip tests. The list is derived, so a new `?=` variable is covered.
+sdlc_weakened() {
+	local v
+	while IFS= read -r v; do
+		[[ -n ${!v:-} ]] && printf '%s\n' "$v"
+	done < <(sed -nE 's/^[[:space:]]*([A-Z][A-Z0-9_]*)[[:space:]]*\?=.*/\1/p' "$@" | sort -u
+		printf '%s\n' CI_GO_TEST_FLAGS)
+	[[ -z $(go env GOFLAGS 2>/dev/null) ]] || printf '%s\n' "GOFLAGS (go env)"
+}
+
 # sdlc_clean succeeds when the working tree has no tracked changes and no untracked files that git
 # does not ignore: only then is HEAD's tree what the checks saw.
 sdlc_clean() {

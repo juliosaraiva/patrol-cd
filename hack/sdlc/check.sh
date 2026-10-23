@@ -24,8 +24,9 @@
 set -euo pipefail
 
 # Drop any inherited make flags: `-i`/`-k` would make failing recipes (gofmt, vet, the test suite)
-# be ignored and let a broken run record a pass.
-unset MAKEFLAGS MFLAGS MAKELEVEL GNUMAKEFLAGS
+# be ignored and let a broken run record a pass. MAKEFILES would read a makefile before ours, whose
+# `:=` beats our `?=` (a tool replaced by a no-op).
+unset MAKEFLAGS MFLAGS MAKELEVEL GNUMAKEFLAGS MAKEFILES
 
 cd "$(git rev-parse --show-toplevel)"
 # shellcheck source=hack/sdlc/lib.sh
@@ -60,15 +61,10 @@ if [[ -n ${PATROL_SDLC_BASE:-} ]]; then
 	record=0 # the gate measures from origin/main; a check against another base proves nothing for it
 	echo "sdlc-check: PATROL_SDLC_BASE is set; checking against it, but recording nothing"
 fi
-# Any make variable the build defines with `?=` can be overridden from the environment to weaken a
-# check (replace a tool with a no-op, drop -race, change the commit range). A recorded pass must come
-# from a canonical run, so if any such variable, or GOFLAGS/CI_GO_TEST_FLAGS, is set in the
-# environment, check but record nothing. (The list is derived, so a new `?=` variable is covered.)
+# A recorded pass must come from a canonical run: if the environment can weaken a check
+# (sdlc_weakened), check but record nothing.
 weakened=()
-while IFS= read -r v; do
-	[[ -n ${!v:-} ]] && weakened+=("$v")
-done < <(sed -nE 's/^[[:space:]]*([A-Z][A-Z0-9_]*)[[:space:]]*\?=.*/\1/p' Makefile hack/*.mk | sort -u
-	printf '%s\n' GOFLAGS CI_GO_TEST_FLAGS)
+while IFS= read -r v; do weakened+=("$v"); done < <(sdlc_weakened Makefile hack/*.mk)
 if [[ ${#weakened[@]} -gt 0 ]]; then
 	record=0
 	echo "sdlc-check: ${weakened[*]} set in the environment; checking, but recording nothing (the gate needs a canonical run)"

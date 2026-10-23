@@ -86,6 +86,12 @@ wrapper() { # wrapper COMMAND: exit status of the Claude Code hook script itself
 		"$repo/hack/sdlc/claude-pre-push.sh" >/dev/null 2>"$work/hook.err" || rc=$?
 	echo "$rc"
 }
+preview() { # preview NAME: exit status of the hook script for the browser pane's preview_start
+	local rc=0
+	jq -n --arg n "$1" --arg d "$repo" '{tool_name: "mcp__Claude_Browser__preview_start", tool_input: {name: $n}, cwd: $d}' |
+		"$repo/hack/sdlc/claude-pre-push.sh" >/dev/null 2>"$work/hook.err" || rc=$?
+	echo "$rc"
+}
 gate() {
 	local rc=0
 	hack/sdlc/gate.sh >/dev/null 2>"$work/gate.err" || rc=$?
@@ -136,6 +142,21 @@ git config core.hooksPath .githooks
 check "git hook enabled: any command" 0 "$(wrapper 'ls')"
 check "git hook enabled: the wrapper runs pushcheck on every command" 2 "$(wrapper "git p''ush --no-verify origin change")"
 contains "reason: --no-verify" "$work/hook.err" "--no-verify skips the pre-push hook"
+# preview_start runs the command of a .claude/launch.json configuration: the wrapper checks it.
+mkdir -p .claude
+cat >.claude/launch.json <<'EOF'
+{"version": "0.0.1", "configurations": [
+  {"name": "push", "runtimeExecutable": "git", "runtimeArgs": ["-c", "core.hooksPath=/dev/null", "push", "origin", "HEAD:x"], "port": 1},
+  {"name": "dev", "runtimeExecutable": "pnpm", "runtimeArgs": ["dev"], "port": 5173},
+  {"name": "attach", "url": "http://localhost:5173"}
+]}
+EOF
+check "preview_start of a push with git's hook off" 2 "$(preview push)"
+contains "reason: core.hooksPath" "$work/hook.err" "core.hooksPath"
+check "preview_start of a dev server" 0 "$(preview dev)"
+check "preview_start attaching to a server" 0 "$(preview attach)"
+check "preview_start of an unknown configuration" 2 "$(preview nosuch)"
+rm -r .claude
 
 # Forms the hook refuses whatever the records.
 check "--tags" 2 "$(hook 'git push --tags origin')"
@@ -164,6 +185,9 @@ check "alias written by the command" 2 "$(hook "printf '[alias]\\n\\tship = push
 check "alias from another HOME" 2 "$(hook 'HOME=$PWD/h git ship origin change')"
 # A shell alias or function (the Bash tool loads the user's, such as gp='git push') handed --no-verify.
 check "--no-verify to a shell alias" 2 "$(hook 'gp --no-verify origin change')"
+# A zsh function or alias the command defines for itself.
+check "zsh function defined through its parameter" 2 "$(hook "functions[gp]='git push --no-verify'; gp origin change")"
+check "alias defined and run through eval" 2 "$(hook "alias gp='git push --no-verify'; eval 'gp origin change'")"
 
 # Forms that keep git's hook from running (the relative core.hooksPath has no hook outside the work
 # tree) are refused wherever they run.
@@ -271,6 +295,16 @@ check "review input tree" "$newtree" "$(jq -r .tree <<<"$input")"
 check "review input files" "main.go" "$(jq -r '.files | join(",")' <<<"$input")"
 check "review input docsOnly" false "$(jq -r .docsOnly <<<"$input")"
 if [[ -s $(jq -r .diffFile <<<"$input") ]]; then check "review input diff written" yes yes; else check "review input diff written" yes no; fi
+
+# check.sh records nothing when the environment can weaken a check (sdlc_weakened).
+printf 'GOLANGCI_LINT ?= golangci-lint\n' >"$work/w.mk"
+printf 'GOFLAGS=-skip=TestX\n' >"$work/goenv"
+# shellcheck source=hack/sdlc/lib.sh
+check "weakened: nothing set" "" "$(source "$src/hack/sdlc/lib.sh" && GOENV=off GOFLAGS='' sdlc_weakened "$work/w.mk")"
+# shellcheck source=hack/sdlc/lib.sh
+check "weakened: a ?= variable" GOLANGCI_LINT "$(source "$src/hack/sdlc/lib.sh" && GOENV=off GOFLAGS='' GOLANGCI_LINT=true sdlc_weakened "$work/w.mk")"
+# shellcheck source=hack/sdlc/lib.sh
+check "weakened: GOFLAGS in Go's env file" "GOFLAGS (go env)" "$(source "$src/hack/sdlc/lib.sh" && GOENV=$work/goenv GOFLAGS='' sdlc_weakened "$work/w.mk")"
 
 echo "test-sdlc: $passed passed, $failed failed"
 [[ $failed -eq 0 ]]

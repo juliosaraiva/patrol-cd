@@ -99,6 +99,10 @@ func TestCheckSubcommands(t *testing.T) {
 		}
 	}
 	assert.Empty(t, checkSubcommands(nil, root))
+	// The project's own tools in bin/ (git-lfs …) are git commands too.
+	require.NoError(t, os.MkdirAll(filepath.Join(root, "bin"), 0o755))
+	require.NoError(t, os.WriteFile(filepath.Join(root, "bin", "git-projtool"), []byte("#!/bin/sh\n"), 0o755))
+	assert.Empty(t, checkSubcommands([]string{"projtool"}, root))
 	assert.Contains(t, checkSubcommands([]string{"status", "a", "b", "a"}, root), "git a, git b:", "each alias named once")
 }
 

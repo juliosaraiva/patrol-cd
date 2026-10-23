@@ -191,7 +191,11 @@ func checkSubcommands(calls []string, root string) string {
 	if len(calls) == 0 {
 		return ""
 	}
-	list, err := gitOut(root, "--list-cmds=builtins,main,others")
+	// The project's tools (git-lfs …) are in its bin/, first on PATH as hack/sdlc/check.sh puts it.
+	cmd := exec.Command("git", "-C", root, "--list-cmds=builtins,main,others")
+	cmd.Env = append(os.Environ(), "PATH="+filepath.Join(root, "bin")+string(os.PathListSeparator)+os.Getenv("PATH"))
+	out, err := cmd.Output()
+	list := string(out)
 	if err != nil {
 		return "cannot list git's commands (git --list-cmds) to tell them from aliases: " + err.Error()
 	}

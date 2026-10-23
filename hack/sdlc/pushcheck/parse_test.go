@@ -90,7 +90,11 @@ func TestFindPushes(t *testing.T) {
 		{name: "eval of a literal script", command: "eval 'git push origin main'", want: []push{{Dir: "/repo", Sources: []string{"main"}}}},
 		{name: "eval carries its cd", command: "eval 'cd /x' && git push origin a", want: []push{{Dir: "/x", Sources: []string{"a"}}}},
 		{name: "eval's cd may fail before a ;", command: "eval 'cd /x'; git push origin a", want: []push{{Dir: "", Sources: []string{"a"}}}},
-		{name: "trap with a leading --", command: "trap -- 'git push origin a' EXIT", want: []push{{Dir: "/repo", Sources: []string{"a"}}}},
+		{name: "trap action runs later, from an unknown directory", command: "trap -- 'git push origin a' EXIT", want: []push{{Dir: "", Sources: []string{"a"}}}},
+		{name: "trap action runs after a later cd", command: "trap 'git push origin a' EXIT; cd /other && true", want: []push{{Dir: "", Sources: []string{"a"}}}},
+		{name: "a cd in a trap leaves the directory unknown", command: "trap 'cd /x' DEBUG; git push origin a", want: []push{{Dir: "", Sources: []string{"a"}}}},
+		{name: "a trap without a cd keeps it", command: "trap 'rm -f /tmp/x' EXIT; git push origin a", want: []push{{Dir: "/repo", Sources: []string{"a"}}}},
+		{name: "cd in a background job inside an if", command: "if true; then cd /tmp & fi; git push origin a", want: []push{{Dir: "/repo", Sources: []string{"a"}}}},
 		{name: "git-push dashed binary", command: "git-push origin a", want: []push{{Dir: "/repo", Sources: []string{"a"}}}},
 		{name: "cd || die leaves the dir unknown (die may be undefined)", command: "cd /x || die; git push", want: []push{{Dir: "", Sources: head}}},
 		{name: "cd || return leaves the dir unknown (return at top level goes on)", command: "cd /x || return; git push", want: []push{{Dir: "", Sources: head}}},
@@ -104,6 +108,7 @@ func TestFindPushes(t *testing.T) {
 		{name: "nice wraps a push", command: "nice -n 5 git push origin a", want: []push{{Dir: "/repo", Sources: []string{"a"}}}},
 		{name: "sudo wraps a push", command: "sudo -u ci git push origin a", want: []push{{Dir: "/repo", Sources: []string{"a"}}}},
 		{name: "env unset then push", command: "env -i git push origin a", want: []push{{Dir: "/repo", Sources: []string{"a"}}}},
+		{name: "env with an assignment that is not literal", command: `env PATH="$PWD/bin:$PATH" git push origin a`, want: []push{{Dir: "/repo", Sources: []string{"a"}}}},
 		{name: "find -exec a push", command: "find . -maxdepth 0 -exec git push origin a ;", want: []push{{Dir: "/repo", Sources: []string{"a"}}}},
 		{name: "find -execdir runs from each file's directory", command: "find . -name x -execdir git push origin a ;", want: []push{{Dir: "", Sources: []string{"a"}}}},
 		{name: "kubectl exec a push", command: "kubectl exec pod -- git push origin a", want: []push{{Dir: "/repo", Sources: []string{"a"}}}},
@@ -297,6 +302,36 @@ func TestFindPushesBlocked(t *testing.T) {
 		{"_ gp --no-verify origin main", givenTo},
 		{"gp --no-veri origin main", givenTo},
 		{"gcfg core.hooksPath /dev/null", givenTo},
+		// Round 7: config keys in the allowed sections that run a command.
+		{"git -c diff.external='git push --no-verify origin a' diff", config},
+		{"git -c Diff.External=x diff", config},
+		{"git -c gc.recentObjectsHook='git push --no-verify origin a' gc", config},
+		{"git config diff.external x", config},
+		{"git -c merge.tool=x mergetool", config},
+		// xargs options that take only an attached value, with git's subcommand from standard input.
+		{"echo push --no-verify origin main | xargs -e git", "through xargs"},
+		{"echo push --no-verify origin main | xargs -l git", "through xargs"},
+		{"echo push --no-verify origin main | xargs -i git", "through xargs"},
+		{"echo push --no-verify origin main | xargs --replace git", "through xargs"},
+		{"git difftool -y -x 'git push --no-verify origin a' HEAD~1", "git difftool"},
+		{"git difftool --extcmd='git push origin a' HEAD~1", "git difftool"},
+		{"docker exec c git push --no-verify origin main", "run through docker"},
+		{"declare -x GIT_DIR; git push", gitEnv},
+		{"(( GIT_DIR++ )); git push", gitEnv},
+		// Code the command defines under a name, run later through it.
+		{`functions[gp]='git push --no-verify "$@"'; gp origin change`, "defines code"},
+		{"aliases[gp]='git push --no-verify'; eval 'gp origin change'", "defines code"},
+		{"alias gp='git push --no-verify'; eval 'gp origin change'", "defines code"},
+		{"bash -c 'shopt -s expand_aliases\nalias gp=\"git -c core.hooksPath=/dev/null push\"\ngp origin change'", "defines code"},
+		{"alias up='cd /tmp'; eval up; git push origin a", "defines code"},
+		{`functions[gp]="$X"; gp origin change`, "cannot read"},
+		{"aliases=(gp 'git push --no-verify'); eval 'gp origin a'", "cannot read"},
+		{`alias gp="$G push --no-verify"; eval 'gp origin a'`, "alias defined from a value the hook cannot read"},
+		{"hash -p /tmp/x git; git push origin a", "hash"},
+		// The red team's seventh round: forms kept refused, with their own reason.
+		{`eval "$(ssh-agent -s)" >/dev/null && git push origin HEAD`, "an eval of a dynamic string earlier in the command"},
+		{`env GIT_DIR="$X" git push origin a`, gitEnv},
+		{"git-config core.hooksPath /dev/null", config},
 	} {
 		t.Run(tt.command, func(t *testing.T) {
 			t.Parallel()
@@ -383,6 +418,11 @@ func TestFindPushesAllowed(t *testing.T) {
 		"echo --no-verify; printf '%s\\n' --no-verify",
 		"go test ./hack/sdlc/pushcheck -run 'TestFindPushesBlocked/--no-verify'",
 		"git commit --no-verify -m 'chore: x'",
+		"alias ll='ls -la'",
+		"trap 'rm -rf \"$tmp\"' EXIT; go test ./hack/sdlc/...",
+		"hash -r",
+		`GIT_SEQUENCE_EDITOR="sed -i '' '2,\$s/^pick/squash/'" git rebase -i HEAD~3`,
+		"test/e2e/fixtures/git-server/rootfs/usr/local/bin/git-seed",
 	} {
 		t.Run(command, func(t *testing.T) {
 			t.Parallel()
@@ -399,6 +439,42 @@ func TestFindPushesCalls(t *testing.T) {
 	got, err := findPushes("git status; cd /x && git ship origin a; git --git-dir=/y lg; echo a | xargs git ls", "/repo")
 	require.NoError(t, err)
 	assert.Equal(t, []string{"status", "ship", "lg", "ls"}, got.Calls)
+	// A git-* program run by its own name, and git in a container, are not alias lookups here.
+	for _, command := range []string{
+		"kubectl -n patrol-e2e run git-seed-manual --rm -i --restart=Never --image=patrol-cd/git-server:dev -- /usr/local/bin/git-seed",
+		"test/e2e/fixtures/git-server/rootfs/usr/local/bin/git-seed",
+		"kubectl -n patrol-system exec deploy/patrol-repo-server -- git lfs env",
+	} {
+		got, err := findPushes(command, "/repo")
+		require.NoError(t, err)
+		assert.Empty(t, got.Calls, command)
+		assert.Empty(t, got.Blocked, command)
+	}
+	// A git subcommand (perhaps an alias) is found wherever the walker follows a command.
+	for _, command := range []string{
+		"x=$(git ship origin main)",
+		"bash -c 'git ship origin main'",
+		"bash <<'EOF'\ngit ship origin main\nEOF",
+		"trap 'git ship origin main' EXIT",
+		"eval 'git ship origin main'",
+		"git rebase -x 'git ship origin main' HEAD~1",
+		"git bisect run git ship origin main",
+	} {
+		got, err := findPushes(command, "/repo")
+		require.NoError(t, err)
+		assert.Contains(t, got.Calls, "ship", command)
+	}
+}
+
+// With CDPATH set, a relative cd may go elsewhere, so its directory is unknown; an absolute one is not.
+func TestFindPushesCDPATH(t *testing.T) {
+	t.Setenv("CDPATH", t.TempDir())
+	got, err := findPushes("cd sub && git push origin a", "/repo")
+	require.NoError(t, err)
+	assert.Equal(t, []push{{Dir: "", Sources: []string{"a"}}}, got.Pushes)
+	got, err = findPushes("cd /abs/sub && git push origin a", "/repo")
+	require.NoError(t, err)
+	assert.Equal(t, []push{{Dir: "/abs/sub", Sources: []string{"a"}}}, got.Pushes)
 }
 
 // zsh's AUTO_CD (on in the Bash tool's zsh) runs a lone directory name as a cd.
@@ -406,7 +482,9 @@ func TestFindPushesAutoCD(t *testing.T) {
 	t.Parallel()
 	root := t.TempDir()
 	require.NoError(t, os.Mkdir(filepath.Join(root, "sub"), 0o755))
+	require.NoError(t, os.Mkdir(filepath.Join(root, "ls"), 0o755))
 	for _, tt := range []struct{ command, dir string }{
+		{"ls && git push origin a", root}, // a command on PATH runs, even with a directory of its name
 		{"sub && git push origin a", filepath.Join(root, "sub")},
 		{"./sub && git push origin a", filepath.Join(root, "sub")},
 		{"sub; git push origin a", ""},             // the cd may fail
