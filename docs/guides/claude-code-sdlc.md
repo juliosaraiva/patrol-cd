@@ -123,8 +123,8 @@ Two hooks run it:
   commit made in the same command line (`git commit … && git push`), a push from a script, an
   alias or another tool are all checked. A person can bypass it in an emergency with
   `git push --no-verify`.
-- **the Claude Code hook** (`hack/sdlc/claude-pre-push.sh`, a `PreToolUse` hook for the Bash tool
-  and the terminal tool in `.claude/settings.json`). While git's hook is not enabled it refuses every
+- **the Claude Code hook** (`hack/sdlc/claude-pre-push.sh`, a `PreToolUse` hook for the Bash,
+  Monitor and terminal tools in `.claude/settings.json`). While git's hook is not enabled it refuses every
   command but `make sdlc-git-hooks`, so git's hook runs whatever Claude Code pushes. Then every
   command goes to `hack/sdlc/pushcheck` (built into `bin/` on first use), which parses it as bash
   with `mvdan.cc/sh`. Its contract:

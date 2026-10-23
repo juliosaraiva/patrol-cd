@@ -77,10 +77,15 @@ func run(stdin io.Reader, stderr io.Writer, root string) int {
 		return 2
 	}
 	cwd := in.Cwd
-	if d := in.ToolInput.Cwd; d != "" {
-		if filepath.IsAbs(d) || cwd == "" {
+	if d := in.ToolInput.Cwd; d != "" { // the terminal tool's cwd: absolute, ~, or relative to the session's
+		switch {
+		case d == "~" || strings.HasPrefix(d, "~/"):
+			if h, err := os.UserHomeDir(); err == nil {
+				cwd = filepath.Join(h, strings.TrimPrefix(d, "~"))
+			}
+		case filepath.IsAbs(d) || cwd == "":
 			cwd = d
-		} else {
+		default:
 			cwd = filepath.Join(cwd, d)
 		}
 	}

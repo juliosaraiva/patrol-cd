@@ -191,7 +191,15 @@ mkdir -p "$state/checks" "$state/reviews"
 printf 'tree=%s\nresult=pass\n' "$tree" >"$state/checks/$tree"
 check "review missing" 1 "$(gate)"
 contains "reason says review missing" "$work/gate.err" "agent review for tree $tree: missing"
+# The gate measures from origin/main whatever PATROL_SDLC_BASE says, so a self-referencing base
+# cannot make the diff empty and skip the review.
+check "gate ignores PATROL_SDLC_BASE" 1 "$(PATROL_SDLC_BASE=$(git rev-parse HEAD) gate)"
 echo "# review" >"$work/report.md"
+# record-review refuses a tree with no prepared review input (the diff review-input.sh writes).
+rc=0
+hack/sdlc/record-review.sh --tree "$tree" --blocking 0 --report "$work/report.md" >/dev/null 2>&1 || rc=$?
+check "record without a review input is refused" 1 "$rc"
+touch "$state/reviews/$tree.diff" # review-input.sh writes this in the real flow
 rc=0
 hack/sdlc/record-review.sh --tree "$tree" --blocking 2 --report "$work/report.md" >/dev/null || rc=$?
 check "record a failing review" 0 "$rc"

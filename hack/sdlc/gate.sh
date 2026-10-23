@@ -9,6 +9,12 @@
 # Usage: hack/sdlc/gate.sh [COMMIT]   (default HEAD)
 set -euo pipefail
 
+# The gate is the authority on what may be pushed, so it always measures the change against
+# origin/main; it ignores PATROL_SDLC_BASE, which only lets hack/sdlc/check.sh iterate locally (and
+# check.sh records nothing while it is set). Without this, a push could set the base to its own
+# commit, make the diff empty, and be waved through as "documentation only" without a review.
+unset PATROL_SDLC_BASE
+
 cd "$(git rev-parse --show-toplevel)"
 # shellcheck source=hack/sdlc/lib.sh
 source hack/sdlc/lib.sh

@@ -56,6 +56,17 @@ if [[ -n ${PATROL_SDLC_BASE:-} ]]; then
 	record=0 # the gate measures from origin/main; a check against another base proves nothing for it
 	echo "sdlc-check: PATROL_SDLC_BASE is set; checking against it, but recording nothing"
 fi
+# Overrides that would replace a checker with a no-op or drop -race: check, but record nothing, so a
+# weakened run cannot stand in for the real one the gate requires.
+weakened=()
+[[ ${CI_RACE:-1} != 1 ]] && weakened+=(CI_RACE)
+for v in GO GOLANGCI_LINT ACTIONLINT GITLEAKS SHELLCHECK RELEASE_RANGE CI_UNIT_PKGS CI_SKIP; do
+	[[ -n ${!v:-} ]] && weakened+=("$v")
+done
+if [[ ${#weakened[@]} -gt 0 ]]; then
+	record=0
+	echo "sdlc-check: ${weakened[*]} set in the environment; checking, but recording nothing (the gate needs an unweakened run)"
+fi
 
 echo "sdlc-check: HEAD $head (tree $tree), base $base, ${#changed[@]} changed files"
 
@@ -96,7 +107,11 @@ else
 	# packages go can load (hack/deps holds a single `//go:build tools` file).
 	pkgs=()
 	if any '^(go\.mod|go\.sum)$'; then
-		pkgs=(./...)
+		# A dependency change touches every package; test them all except the two suites that have
+		# their own targets (ci-integration, ci-deploy), which ci-unit's default also excludes.
+		while IFS= read -r p; do
+			[[ -n $p ]] && pkgs+=("$p")
+		done < <(go list ./... | grep -v -e '/test/integration' -e '/test/deploy')
 	else
 		dirs=()
 		seen=$'\n'

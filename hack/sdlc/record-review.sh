@@ -33,6 +33,13 @@ if [[ $tree != "$current" ]] || ! sdlc_clean; then
 	exit 1
 fi
 state=$(sdlc_state_dir)
+# The review must have gone through the review-change skill, which writes the diff review-input.sh
+# produced for this tree. Without it there is nothing to record (and no record may be forged by
+# calling this script directly).
+if [[ ! -f $state/reviews/$tree.diff ]]; then
+	echo "record-review: no review input for tree $tree ($state/reviews/$tree.diff is missing): run the review-change skill, which prepares it, instead of this script directly" >&2
+	exit 1
+fi
 if [[ $report != "$state/reviews/$tree.md" ]]; then
 	cp "$report" "$state/reviews/$tree.md"
 fi
