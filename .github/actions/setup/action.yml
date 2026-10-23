@@ -7,7 +7,7 @@ description: >-
 
 inputs:
   profile:
-    description: Preflight profile (static, unit, integration, deploy).
+    description: Preflight profile (static, unit, integration, deploy, release).
     required: true
   tools:
     description: Space separated tools of hack/ci/tools.lock to install (helm kubectl golangci-lint ...).

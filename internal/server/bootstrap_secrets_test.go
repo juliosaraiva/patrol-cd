@@ -663,7 +663,11 @@ func serviceAccountClient(t *testing.T, kube kubernetes.Interface, ns, sa string
 		UserName: "system:serviceaccount:" + ns + ":" + sa,
 		Groups:   []string{"system:serviceaccounts", "system:serviceaccounts:" + ns, "system:authenticated"},
 	}
-	c, err := kubernetes.NewForConfig(cfg)
+	// The command's client (newBootstrapClient: no client-side rate limiter). With client-go's
+	// default limiter a request near the deadline fails with "rate: Wait(n=1) would exceed context
+	// deadline" instead of the Forbidden the run kept retrying, which is what the RBAC cases check
+	// (failed on a CI runner under load).
+	c, err := newBootstrapClient(cfg)
 	require.NoError(t, err)
 	if rules != nil {
 		// Wait until the RBAC authorizer sees the binding (get on patrol-cm is in every

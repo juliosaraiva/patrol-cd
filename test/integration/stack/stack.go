@@ -254,19 +254,38 @@ func randomHex(t testing.TB, n int) string {
 	return hex.EncodeToString(b)
 }
 
-// freeAddr returns a loopback address that was free a moment ago. Components that restart
-// keep their address, so clients and the tree API URL stay valid.
+// handedOut holds every address freeAddr returned in this process. A port is free again as
+// soon as its probe listener closes, so the kernel can hand it out twice before the component
+// that was given it binds it (two components of one stack got the same metrics port on a CI
+// runner); no address is returned twice.
+var handedOut = struct {
+	sync.Mutex
+	addrs map[string]bool
+}{addrs: map[string]bool{}}
+
+// freeAddr returns a loopback address that was free a moment ago and that no other caller in
+// this process was given. Components that restart keep their address, so clients and the tree
+// API URL stay valid.
 func freeAddr(t testing.TB) string {
 	t.Helper()
-	l, err := net.Listen("tcp", "127.0.0.1:0")
-	if err != nil {
-		t.Fatal(err)
+	handedOut.Lock()
+	defer handedOut.Unlock()
+	for range 100 {
+		l, err := net.Listen("tcp", "127.0.0.1:0")
+		if err != nil {
+			t.Fatal(err)
+		}
+		addr := l.Addr().String()
+		if err := l.Close(); err != nil {
+			t.Fatal(err)
+		}
+		if !handedOut.addrs[addr] {
+			handedOut.addrs[addr] = true
+			return addr
+		}
 	}
-	addr := l.Addr().String()
-	if err := l.Close(); err != nil {
-		t.Fatal(err)
-	}
-	return addr
+	t.Fatal("freeAddr: no unused loopback port after 100 attempts")
+	return ""
 }
 
 // makeRemovable restores owner permissions below dir (the repo-server makes its root
@@ -502,18 +521,22 @@ func (s *Stack) defineComponents(t *testing.T) {
 			})
 		}}
 	}
-	// Stop in reverse dependency order: clients first, the repo-server last.
-	t.Cleanup(func() {
-		names := []string{NotificationsController, AppSetController, Server}
-		for i := replicas - 1; i >= 0; i-- {
-			names = append(names, ControllerReplica(i))
+	t.Cleanup(func() { s.stopComponents(t) })
+}
+
+// stopComponents stops every running component in reverse dependency order: clients first,
+// the repo-server last. Stopped components are skipped, so it can run more than once.
+func (s *Stack) stopComponents(t testing.TB) {
+	t.Helper()
+	names := []string{NotificationsController, AppSetController, Server}
+	for i := max(1, s.opts.ControllerReplicas) - 1; i >= 0; i-- {
+		names = append(names, ControllerReplica(i))
+	}
+	for _, name := range append(names, RepoServer) {
+		if c := s.comps[name]; c != nil {
+			s.stopComponent(t, c)
 		}
-		for _, name := range append(names, RepoServer) {
-			if c := s.comps[name]; c != nil {
-				s.stopComponent(t, c)
-			}
-		}
-	})
+	}
 }
 
 // applyRepoServerEnv maps the repo-server tuning variables of Options.RepoServerEnv.
@@ -583,6 +606,14 @@ func (s *Stack) waitReady(t testing.TB, c *component) {
 	Eventually(t, 2*time.Minute, c.name+" ready", func() (bool, string) {
 		select {
 		case err := <-done:
+			// The component is gone: clear it so that the stop at cleanup does not wait for an
+			// exit it can no longer receive.
+			s.mu.Lock()
+			if c.done == done {
+				c.cancel()
+				c.cancel, c.done = nil, nil
+			}
+			s.mu.Unlock()
 			t.Fatalf("%s exited during startup: %v", c.name, err)
 		default:
 		}
@@ -681,7 +712,15 @@ func (s *Stack) Git() *GitServer { return s.git }
 // register its repositories through the API).
 func (s *Stack) NewGitServer(t testing.TB) *GitServer {
 	t.Helper()
-	return newGitServer(t, "git-"+krand.String(16))
+	g := newGitServer(t, "git-"+krand.String(16))
+	// Cleanups run last-in first-out, so the server's (registered just now, after Start's)
+	// would close it while the components still fetch from it and log the failure as an
+	// ERROR. Stop the components first (only at the end of the stack's own test: a subtest's
+	// server outlives nothing).
+	if t == s.T {
+		t.Cleanup(func() { s.stopComponents(t) })
+	}
+	return g
 }
 
 // AllowErrors adds patterns to the ERROR log allow-list (from now until the end).

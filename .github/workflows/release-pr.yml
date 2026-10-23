@@ -1,0 +1,113 @@
+# Release pull request. Guide: docs/guides/releasing.md.
+#
+# After every push to main, hack/release works out whether the commits since the last tag call for
+# a release (feat, fix, perf, revert or a breaking change) and, if so, keeps one pull request open
+# from the branch release/next: CHANGELOG.md gains the new section, Chart.yaml the new version and
+# appVersion, and the chart README and static manifests are regenerated. The branch is rebuilt from
+# main on every run, so the pull request always describes main as it is; edits pushed to it by hand
+# are replaced by the next run. Merging it is the decision to release: release.yml tags and
+# publishes once CI has passed on the merged commit.
+#
+# Nothing is proposed while a release is pending (merged, not yet tagged).
+#
+# Token: pull requests opened with the workflow's GITHUB_TOKEN do not start other workflows, so CI
+# would not run on the release pull request. Set the secret RELEASE_TOKEN (a fine-grained token or
+# GitHub App token with contents and pull-requests write on this repository) to have CI run on it;
+# without it the pull request is still opened, and CI starts once someone pushes to it or closes and
+# reopens it. Either way the repository setting "Allow GitHub Actions to create and approve pull
+# requests" must be on.
+name: Release PR
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+    inputs:
+      version:
+        description: Release this version (X.Y.Z) instead of the computed one, e.g. 1.0.0
+        type: string
+        default: ""
+
+permissions: {}
+
+# One run at a time; a newer push to main supersedes the run in progress.
+concurrency:
+  group: release-pr
+  cancel-in-progress: true
+
+defaults:
+  run:
+    shell: bash
+
+env:
+  GOTOOLCHAIN: local
+  GOFLAGS: -mod=readonly
+  BRANCH: release/next
+
+jobs:
+  release-pr:
+    name: Open or update the release pull request
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    permissions:
+      contents: write
+      pull-requests: write
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 0 # the commits since the last tag, and the tags
+          token: ${{ secrets.RELEASE_TOKEN || github.token }}
+      - name: Set up Go and the pinned tools
+        uses: ./.github/actions/setup
+        with:
+          profile: release
+          tools: helm
+          cache-name: release
+      - name: Work out the next version
+        id: next
+        env:
+          VERSION: ${{ inputs.version }}
+        run: |
+          next=$(make --no-print-directory -s release-next RELEASE_VERSION="$VERSION")
+          echo "version=$next" >>"$GITHUB_OUTPUT"
+          if [[ -z $next ]]; then
+            echo "::notice title=release::nothing to release (no releasable commit since the last tag, or a release is pending)"
+          fi
+      - name: Prepare the release commit
+        if: steps.next.outputs.version != ''
+        env:
+          VERSION: ${{ steps.next.outputs.version }}
+        run: |
+          git switch -C "$BRANCH"
+          make release-prepare RELEASE_VERSION="$VERSION"
+          go run ./hack/release notes -version "$VERSION" >"$RUNNER_TEMP/notes.md"
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add -A
+          git commit -q -m "chore(release): v$VERSION"
+          git show --stat HEAD
+      - name: Push and open or update the pull request
+        if: steps.next.outputs.version != ''
+        env:
+          VERSION: ${{ steps.next.outputs.version }}
+          GH_TOKEN: ${{ secrets.RELEASE_TOKEN || github.token }}
+        run: |
+          git push --force origin "HEAD:refs/heads/$BRANCH"
+          {
+            echo "Merging this pull request releases **v$VERSION**: once CI passes on main, the release"
+            echo "workflow tags \`v$VERSION\`, pushes the image and the chart, and publishes the GitHub release."
+            echo "This branch is rebuilt from main on every push; reword CHANGELOG.md here only right before merging."
+            echo
+            echo "---"
+            echo
+            cat "$RUNNER_TEMP/notes.md"
+          } >"$RUNNER_TEMP/body.md"
+          title="chore(release): v$VERSION"
+          number=$(gh pr list --head "$BRANCH" --base main --state open --json number --jq '.[0].number // empty')
+          if [[ -n $number ]]; then
+            gh pr edit "$number" --title "$title" --body-file "$RUNNER_TEMP/body.md"
+            echo "::notice title=release::updated pull request #$number for v$VERSION"
+          else
+            gh pr create --head "$BRANCH" --base main --title "$title" --body-file "$RUNNER_TEMP/body.md" --label release ||
+              gh pr create --head "$BRANCH" --base main --title "$title" --body-file "$RUNNER_TEMP/body.md"
+          fi

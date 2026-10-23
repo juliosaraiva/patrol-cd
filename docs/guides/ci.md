@@ -21,7 +21,7 @@ the image to the kind job through the Actions cache, and the tool-location varia
 | Job | What it runs | Make target | Runs on |
 |-----|--------------|-------------|---------|
 | `changes` | decides which tiers run (`hack/ci/classify-changes.sh`) | | always |
-| `static` | secret scan (history and files git does not ignore), gofmt, `go mod tidy -diff`, build, vet, golangci-lint, generated files (`verify-generated`, `verify-manifests`, `helm-lint`), OpenAPI document, parity matrix, test report rules (`must-run.txt` and `allowed-skips.txt` name existing packages), tier selection tests (`hack/ci/test-classify.sh`), shell scripts, workflow lint | `ci-gitleaks`, `ci-gofmt`, `ci-gomod`, `ci-lint-go`, `ci-generated`, `ci-openapi`, `ci-parity`, `ci-rules`, `ci-classify`, `ci-shell`, `ci-actionlint` | always |
+| `static` | secret scan (history and files git does not ignore), gofmt, `go mod tidy -diff`, build, vet, golangci-lint, generated files (`verify-generated`, `verify-manifests`, `helm-lint`), OpenAPI document, parity matrix, test report rules (`must-run.txt` and `allowed-skips.txt` name existing packages), tier selection tests (`hack/ci/test-classify.sh`), shell scripts, workflow lint; on pull requests, conventional commit subjects ([releasing.md](releasing.md)) | `ci-gitleaks`, `ci-gofmt`, `ci-gomod`, `ci-lint-go`, `ci-generated`, `ci-openapi`, `ci-parity`, `ci-rules`, `ci-classify`, `ci-shell`, `ci-actionlint`, `release-lint-commits` | always |
 | `unit` | `go test -json` over every package except the two suites below, with the skip report, then the kind scripts' offline tests | `ci-unit`, `ci-scripts` | code changes |
 | `ui` | `pnpm install --frozen-lockfile`, API types check, typecheck, lint, vitest, build | `ci-ui` | code changes |
 | `image` | offline pin checks, BuildKit checks, image build (linux/amd64), layout, smoke and rootfs checks | `ci-image` | code changes |
@@ -210,6 +210,6 @@ summary and a JSON report; `PATROL_WAIT_SCALE=3` gives the kind scripts the CI t
 
 ## Not covered yet
 
-Playwright specs, a multi-architecture or arm64 image build, SBOM and vulnerability scans,
-publishing anything, required checks (no branch protection on the Free plan), and a scheduled
+Playwright specs, a multi-architecture or arm64 image build in CI (the release workflow builds
+both, [releasing.md](releasing.md)), vulnerability scans, required checks (no branch protection on the Free plan), and a scheduled
 run that would catch drift of external dependencies (Docker Hub images, tool downloads).

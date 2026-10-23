@@ -12,7 +12,7 @@
 #
 # Usage: hack/ci/preflight.sh [--fix] [--warn-disk] PROFILE...
 #
-#   PROFILE      static | unit | integration | deploy | ui | image | kind (several are merged)
+#   PROFILE      static | unit | integration | deploy | ui | image | kind | release (several are merged)
 #   --fix        kind: raise fs.inotify.max_user_watches/max_user_instances to kind's
 #                recommendation with `sudo -n sysctl -w` when they are lower (Linux, passwordless
 #                sudo only); without it low limits are a FAIL
@@ -46,7 +46,7 @@ while [[ $# -gt 0 ]]; do
 		usage
 		exit 0
 		;;
-	static | unit | integration | deploy | ui | image | kind) profiles+=("$1") ;;
+	static | unit | integration | deploy | ui | image | kind | release) profiles+=("$1") ;;
 	*) usage_error "unknown profile or option: $1" ;;
 	esac
 	shift
@@ -59,6 +59,7 @@ for p in "${profiles[@]}"; do
 	case $p in
 	unit | integration | deploy) need_go=1 need_gotest=1 need_helm=1 need_kustomize=1 ;;
 	static) need_go=1 need_static=1 need_helm=1 need_kustomize=1 ;;
+	release) need_go=1 need_helm=1 need_kustomize=1 ;;
 	ui) need_ui=1 ;;
 	image) need_docker=1 need_go=1 ;;
 	kind) need_docker=1 need_kind=1 need_helm=1 ;;

@@ -1,0 +1,261 @@
+# Release. Guide: docs/guides/releasing.md.
+#
+# Runs after every successful CI run on a push to main (and on demand). When a release is pending
+# (Chart.yaml names version X, CHANGELOG.md has X's section and the tag vX does not exist, which is
+# the state right after the release pull request of release-pr.yml is merged) it publishes the
+# release commit: the newest commit on main's first-parent history that changed CHANGELOG.md (the
+# merge of the release pull request). Both events choose it the same way (`hack/release select`),
+# whatever commit the CI run tested or the manual run started from, and publish only once a CI run
+# of the push of that very commit passed every job of the full tier. A later commit is never
+# tagged (its changes would be in the tag but in no changelog section), and a run that skipped
+# jobs (a documentation-only push runs the static checks only) never counts:
+#
+#   1. artifacts  the patrol CLI for Linux, macOS and Windows (amd64, arm64), the install manifests
+#                 (install.yaml, namespace-install.yaml, core-install.yaml, ha-*.yaml, crds.yaml,
+#                 *-with-hydrator.yaml) and the chart archive, both pointed at the published image,
+#                 the release notes and SHA256SUMS
+#   2. image      REGISTRY/patrol-cd/patrol-cd:X for linux/amd64 and linux/arm64, with SBOM and
+#                 provenance attestations (make image-multiarch PUSH=1)
+#   3. publish    the chart to oci://REGISTRY/charts, then the tag vX and the GitHub release with
+#                 the notes from CHANGELOG.md and the artifacts
+#
+# The tag is created last, so it exists only when everything was published; a failed run can be
+# re-run (pushing the same image tag and chart version again replaces them). Otherwise the run does
+# nothing. REGISTRY is the repository variable RELEASE_REGISTRY, default ghcr.io/<owner>.
+name: Release
+
+on:
+  workflow_run:
+    workflows: [CI]
+    types: [completed]
+    branches: [main]
+  workflow_dispatch:
+
+permissions: {}
+
+# Releases run one at a time and are never cancelled half way.
+concurrency:
+  group: release
+  cancel-in-progress: false
+
+defaults:
+  run:
+    shell: bash
+
+env:
+  GOTOOLCHAIN: local
+  GOFLAGS: -mod=readonly
+
+jobs:
+  plan:
+    name: Is a release pending?
+    # Only CI runs of pushes to main of this repository (never pull requests or forks), or a manual
+    # run on main.
+    if: >-
+      (github.event_name == 'workflow_dispatch' && github.ref == 'refs/heads/main') ||
+      (github.event.workflow_run.conclusion == 'success' &&
+       github.event.workflow_run.event == 'push' &&
+       github.event.workflow_run.head_branch == 'main' &&
+       github.event.workflow_run.head_repository.full_name == github.repository)
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    permissions:
+      contents: read
+      actions: read # the CI runs and jobs of the release commit
+    outputs:
+      release: ${{ steps.select.outputs.release }}
+      version: ${{ steps.select.outputs.current }}
+      tag: ${{ steps.select.outputs.tag }}
+      sha: ${{ steps.select.outputs.sha }}
+      registry: ${{ steps.registry.outputs.registry }}
+    steps:
+      # main's tip, not the commit of the event: the release commit is found from there.
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: main
+          fetch-depth: 0 # the first-parent history and the tags
+          persist-credentials: false
+      - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
+        with:
+          go-version-file: go.mod
+          cache: false
+      - name: Choose the release commit and check its CI
+        id: select
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: go run ./hack/release select -github-output
+      - name: Registry
+        id: registry
+        env:
+          REGISTRY: ${{ vars.RELEASE_REGISTRY }}
+          OWNER: ${{ github.repository_owner }}
+        run: |
+          registry=${REGISTRY:-ghcr.io/$OWNER}
+          registry=${registry,,}
+          [[ $registry =~ ^[a-z0-9.-]+(:[0-9]+)?(/[a-z0-9._-]+)*$ ]] || { echo "::error::invalid RELEASE_REGISTRY '$registry'"; exit 1; }
+          echo "registry=$registry" >>"$GITHUB_OUTPUT"
+      - name: Summary
+        env:
+          EVENT: ${{ github.event_name }}
+          PENDING: ${{ steps.select.outputs.pending }}
+          RELEASE: ${{ steps.select.outputs.release }}
+          CI: ${{ steps.select.outputs.ci }}
+          REASON: ${{ steps.select.outputs.ci_reason }}
+          TAG: ${{ steps.select.outputs.tag }}
+          SHA: ${{ steps.select.outputs.sha }}
+        run: |
+          if [[ $RELEASE == true ]]; then
+            echo "::notice title=release::releasing $TAG from ${SHA:0:7}: $REASON"
+          elif [[ $PENDING != true ]]; then
+            echo "::notice title=release::no release pending ($TAG is tagged, or CHANGELOG.md has no section for it)"
+          elif [[ $CI == failed ]]; then
+            # Blocked until CI passes on the release commit: re-run its CI run, or merge the fix
+            # and re-prepare the same version (docs/guides/releasing.md).
+            echo "::error title=release::$TAG is blocked: $REASON"
+            exit 1
+          elif [[ $EVENT == workflow_dispatch ]]; then
+            echo "::error title=release::$TAG is not released yet: $REASON"
+            exit 1
+          else
+            echo "::notice title=release::$TAG waits for CI on the release commit ${SHA:0:7}: $REASON"
+          fi
+
+  artifacts:
+    name: Build the release artifacts
+    needs: plan
+    if: needs.plan.outputs.release == 'true'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 45
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ needs.plan.outputs.sha }}
+          persist-credentials: false
+      - name: Set up Go and the pinned tools
+        uses: ./.github/actions/setup
+        with:
+          profile: release
+          tools: helm
+          cache-name: release
+      - name: Build
+        env:
+          VERSION: ${{ needs.plan.outputs.version }}
+          REGISTRY: ${{ needs.plan.outputs.registry }}
+        run: make release-artifacts RELEASE_VERSION="$VERSION" RELEASE_REGISTRY="$REGISTRY"
+      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: release
+          path: dist/release/
+          if-no-files-found: error
+          retention-days: 7
+
+  image:
+    name: Push the image
+    needs: plan
+    if: needs.plan.outputs.release == 'true'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 120
+    permissions:
+      contents: read
+      packages: write
+    outputs:
+      digest: ${{ steps.push.outputs.digest }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ needs.plan.outputs.sha }}
+          persist-credentials: false
+      - name: Free disk space
+        run: hack/ci/free-disk.sh
+      # The Dockerfile's TARGETPLATFORM stages run under QEMU for the foreign platform, and a
+      # multi-platform push needs a docker-container builder (docs/guides/images.md).
+      - uses: docker/setup-qemu-action@99012661954931238ded8c8b007157a8430204e1 # v4.4.0
+      - uses: docker/setup-buildx-action@f87e5991a6d7451dcb8d9637bfbc97413f497069 # v4.4.1
+      - name: Log in to the registry
+        env:
+          REGISTRY: ${{ needs.plan.outputs.registry }}
+          ACTOR: ${{ github.actor }}
+          TOKEN: ${{ secrets.RELEASE_REGISTRY_TOKEN || github.token }}
+        run: printf '%s' "$TOKEN" | docker login "${REGISTRY%%/*}" --username "$ACTOR" --password-stdin
+      - name: Build and push linux/amd64 and linux/arm64
+        id: push
+        env:
+          VERSION: ${{ needs.plan.outputs.version }}
+          REGISTRY: ${{ needs.plan.outputs.registry }}
+        run: |
+          make image-multiarch PUSH=1 REGISTRY="$REGISTRY" TAG="$VERSION" \
+            VERSION="v$VERSION" GIT_TAG="v$VERSION" GIT_TREE_STATE=clean
+          digest=$(docker buildx imagetools inspect "$REGISTRY/patrol-cd/patrol-cd:$VERSION" --format '{{.Manifest.Digest}}')
+          [[ $digest =~ ^sha256:[0-9a-f]{64}$ ]] || { echo "::error::unexpected digest '$digest'"; exit 1; }
+          echo "digest=$digest" >>"$GITHUB_OUTPUT"
+          echo "::notice title=image::$REGISTRY/patrol-cd/patrol-cd:$VERSION@$digest"
+      - name: Log out
+        if: always()
+        env:
+          REGISTRY: ${{ needs.plan.outputs.registry }}
+        run: docker logout "${REGISTRY%%/*}" || true
+
+  publish:
+    name: Publish the chart, tag and GitHub release
+    needs: [plan, artifacts, image]
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    permissions:
+      contents: write
+      packages: write
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ needs.plan.outputs.sha }}
+          persist-credentials: false
+      - name: Install helm
+        run: hack/ci/install-tools.sh --dest "$RUNNER_TEMP/ci-bin" helm
+      - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        with:
+          name: release
+          path: dist/release
+      - name: Verify the artifacts
+        working-directory: dist/release
+        run: sha256sum --check --strict SHA256SUMS
+      - name: Push the chart
+        env:
+          VERSION: ${{ needs.plan.outputs.version }}
+          REGISTRY: ${{ needs.plan.outputs.registry }}
+          ACTOR: ${{ github.actor }}
+          TOKEN: ${{ secrets.RELEASE_REGISTRY_TOKEN || github.token }}
+        run: |
+          helm=$RUNNER_TEMP/ci-bin/bin/helm
+          printf '%s' "$TOKEN" | "$helm" registry login "${REGISTRY%%/*}" --username "$ACTOR" --password-stdin
+          "$helm" push "dist/release/patrol-cd-$VERSION.tgz" "oci://$REGISTRY/charts"
+          "$helm" registry logout "${REGISTRY%%/*}" || true
+      - name: Tag and publish the GitHub release
+        env:
+          GH_TOKEN: ${{ github.token }}
+          VERSION: ${{ needs.plan.outputs.version }}
+          TAG: ${{ needs.plan.outputs.tag }}
+          SHA: ${{ needs.plan.outputs.sha }}
+          REGISTRY: ${{ needs.plan.outputs.registry }}
+          DIGEST: ${{ needs.image.outputs.digest }}
+        run: |
+          {
+            cat dist/release/notes.md
+            echo
+            echo "### Install"
+            echo
+            echo '```bash'
+            echo "kubectl apply --server-side --force-conflicts -f https://github.com/$GITHUB_REPOSITORY/releases/download/$TAG/install.yaml"
+            echo "# or"
+            echo "helm install patrol oci://$REGISTRY/charts/patrol-cd --version $VERSION -n patrol --create-namespace"
+            echo '```'
+            echo
+            echo "Image: \`$REGISTRY/patrol-cd/patrol-cd:$VERSION\` (\`$DIGEST\`), linux/amd64 and linux/arm64."
+            echo "CLI: the \`patrol-<os>-<arch>\` assets; verify downloads with \`sha256sum --check --ignore-missing SHA256SUMS\`."
+          } >"$RUNNER_TEMP/notes.md"
+          files=()
+          for f in dist/release/*; do
+            [[ $(basename "$f") == notes.md ]] || files+=("$f")
+          done
+          gh release create "$TAG" --target "$SHA" --title "$TAG" --notes-file "$RUNNER_TEMP/notes.md" "${files[@]}"
+          echo "::notice title=release::published $TAG"
