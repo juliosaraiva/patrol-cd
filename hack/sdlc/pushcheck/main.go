@@ -1,21 +1,34 @@
 // Command pushcheck is the Claude Code PreToolUse hook of the SDLC push gate
 // (docs/guides/claude-code-sdlc.md), run by hack/sdlc/claude-pre-push.sh with the repository root as
-// its argument. It reads the hook input (JSON with .tool_input.command and .cwd) on stdin and parses
-// the command as bash: quoted text, heredoc bodies and comments are not commands, `cd DIR` and
-// `git -C DIR` move the directory, and `bash -c '...'` and a heredoc or here-string given to a shell
-// are parsed too.
+// its argument for every command Claude Code runs. It reads the hook input (JSON with
+// .tool_input.command and .cwd) on stdin and parses the command as bash with mvdan.cc/sh: quoted
+// text, heredoc bodies and comments are not commands; words are expanded the way bash does it when
+// that does not depend on the environment, the filesystem or another command (quotes, escapes,
+// $'…', braces); `cd DIR` and `git -C DIR` move the directory only where they certainly run; and
+// `bash -c '…'` and a heredoc or here-string given to a shell are parsed too.
 //
-// The hook checks pushes early, with clear messages; the authority is git's own pre-push hook
-// (.githooks/pre-push), which sees the commits actually pushed, also by a script or an alias. So the
-// wrapper requires core.hooksPath=.githooks before any command runs, and this hook refuses what would
-// keep git's hook from running (--no-verify in full or abbreviated, -c core.hooksPath, GIT_*
-// variables, --git-dir and other global options that move the repository, a push from inside a
-// .git directory, -c alias.* and git config of core.hooksPath or an alias next to a push), every form
-// it cannot analyze (a push inside $(...), eval, timeout, sudo, a script piped to a shell, a
-// non-literal script, command word or argument, a command it cannot parse), and the forms the gate
-// cannot check ref by ref (--all, --mirror, --tags, ':'). For a push from a clone of this project
-// (or one of its worktrees) it then runs that clone's hack/sdlc/gate.sh on each pushed commit as it
-// is now. Exit status 2 blocks the command and shows stderr to Claude Code; 0 lets it run.
+// The authority is git's own pre-push hook (.githooks/pre-push), which sees the commits actually
+// pushed, also by a script or an alias; the wrapper requires it to be enabled before any command
+// runs. This hook gives early, clear refusals and keeps git's hook from being skipped. It refuses,
+// wherever the command runs:
+//   - what can point git at another repository or change its configuration, hooks or aliases:
+//     GIT_* variables outside a short safe list (inline, env, export, read, ...), git -c and
+//     git config writes of keys outside a short safe list, --git-dir, --work-tree, --bare and other
+//     global options before push, an alias for a push, a sourced file before a push;
+//   - a git push it cannot follow: inside $(...), eval, timeout, sudo, xargs, trap, an interpreter
+//     or another command that runs its arguments, a script piped to a shell, a non-literal command
+//     word, git option or shell script, a command that does not parse as bash.
+//
+// For a push from a clone of this project (or one of its worktrees) it also refuses --no-verify, an
+// abbreviated or unknown push option, a non-literal argument, a push from inside .git, from an
+// unknown directory or while core.hooksPath is not .githooks, and the forms the gate cannot check
+// ref by ref (--all, --mirror, --tags, ':'); then it runs that clone's hack/sdlc/gate.sh on each
+// pushed commit as it is now. Exit status 2 blocks the command and shows stderr to Claude Code; 0
+// lets it run.
+//
+// What it cannot see: a command whose git invocation is assembled at run time (the command name or
+// subcommand built from variables or files) and the content of script files. git's own hook checks
+// those pushes; a script that disables it on purpose is out of reach, as the guide's Limits say.
 package main
 
 import (
@@ -25,6 +38,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"regexp"
 	"strings"
 )
 
@@ -32,8 +46,12 @@ type hookInput struct {
 	Cwd       string `json:"cwd"`
 	ToolInput struct {
 		Command string `json:"command"`
+		Cwd     string `json:"cwd"` // the terminal tool's directory, relative to the session's
 	} `json:"tool_input"`
 }
+
+// hookText is what a command that does not parse may not mention, besides git and push.
+var hookText = regexp.MustCompile(`(?i)hookspath|no-verify|GIT_[A-Z]`)
 
 func main() {
 	if len(os.Args) != 2 {
@@ -53,17 +71,28 @@ func run(stdin io.Reader, stderr io.Writer, root string) int {
 		_, _ = fmt.Fprintf(stderr, "sdlc pre-push hook: %s\n  (docs/guides/claude-code-sdlc.md)\n", msg)
 		return 2
 	}
-	a, err := findPushes(cmd, in.Cwd)
+	cwd := in.Cwd
+	if d := in.ToolInput.Cwd; d != "" {
+		if filepath.IsAbs(d) || cwd == "" {
+			cwd = d
+		} else {
+			cwd = filepath.Join(cwd, d)
+		}
+	}
+	a, err := findPushes(cmd, cwd)
 	if err != nil {
-		if mentionsGitPush.MatchString(cmd) {
-			return refuse("cannot parse the command as bash (the Bash tool may run another shell, such as zsh), so its git push cannot be checked; " + runAlone)
+		if mentionsGitPush(cmd) || hookText.MatchString(normalize(cmd)) {
+			return refuse("cannot parse the command as bash (the Bash tool may run another shell, such as zsh), so what it does with git cannot be checked; " + runAlone)
 		}
 		return 0
 	}
-	if a.Hidden != "" {
-		return refuse(a.Hidden)
+	if a.Blocked != "" {
+		return refuse(a.Blocked)
 	}
 	var problems []string
+	if msg := checkAliases(a.Calls, root); msg != "" {
+		problems = append(problems, msg)
+	}
 	for _, p := range a.Pushes {
 		if msg := gatePush(p, root); msg != "" {
 			problems = append(problems, msg)
@@ -136,6 +165,29 @@ func gatePush(p push, root string) string {
 		}
 	}
 	return strings.Join(problems, "\n")
+}
+
+// checkAliases refuses a git subcommand that is an alias for a push or for a change of git's hooks,
+// configured before the command (an alias the command itself defines is refused by the parser).
+func checkAliases(calls []gitCall, root string) string {
+	seen := map[gitCall]bool{}
+	for _, c := range calls {
+		if c.Dir == "" {
+			c.Dir = root
+		}
+		if seen[c] {
+			continue
+		}
+		seen[c] = true
+		v, err := gitOut(c.Dir, "config", "--get", "alias."+c.Sub)
+		if err != nil || v == "" {
+			continue
+		}
+		if n := strings.ToLower(normalize(v)); strings.Contains(n, "push") || hookText.MatchString(n) {
+			return fmt.Sprintf("git %s is an alias (%q) that pushes or changes git's hooks; run the git command itself", c.Sub, v)
+		}
+	}
+	return ""
 }
 
 // sameRepository reports whether two work trees share a git directory (a clone and its worktrees).

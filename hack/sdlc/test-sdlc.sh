@@ -42,6 +42,11 @@ ci_re=$(sed -n "s/^docs_re='\(.*\)'\$/\1/p" "$src/hack/ci/classify-changes.sh")
 sdlc_re=$(sed -n 's/.*\[\[ -z \$f || \$f =~ \(.*\) \]\] || return 1/\1/p' "$src/hack/sdlc/lib.sh")
 check "docs rule agrees with classify-changes.sh" "$ci_re" "$sdlc_re"
 
+# CI's CodeQL bundle must be the one hack/sdlc/codeql.sh pins.
+check "CodeQL bundle of CI is codeql.sh's" \
+	"$(sed -n 's/^version=//p' "$src/hack/sdlc/codeql.sh")" \
+	"$(sed -n 's|.*tools: https://github.com/github/codeql-action/releases/download/codeql-bundle-v\([0-9.]*\)/.*|\1|p' "$src/.github/workflows/codeql.yml")"
+
 # Build the hook's binary (the wrapper builds it on first use).
 (cd "$src" && go build -o bin/sdlc-pushcheck ./hack/sdlc/pushcheck)
 
@@ -59,6 +64,10 @@ git add -A
 git commit -q -m base
 git remote add origin "$remote"
 git push -q origin main
+# The hook script runs this binary (it would build it from hack/sdlc/pushcheck, which this clone lacks).
+mkdir bin
+cp "$src/bin/sdlc-pushcheck" bin/
+echo bin/ >>.git/info/exclude
 git checkout -q -b change
 echo code >main.go
 git add main.go
@@ -72,7 +81,7 @@ hook() { # hook COMMAND [CWD]: prints the exit status of the hook binary for thi
 		"$src/bin/sdlc-pushcheck" "$repo" >/dev/null 2>"$work/hook.err" || rc=$?
 	echo "$rc"
 }
-wrapper() { # wrapper COMMAND: exit status of the Claude Code hook script itself (commands without "push" only: it would build pushcheck)
+wrapper() { # wrapper COMMAND: exit status of the Claude Code hook script itself
 	local rc=0
 	jq -n --arg c "$1" --arg d "$repo" '{tool_name: "Bash", tool_input: {command: $c}, cwd: $d}' |
 		"$repo/hack/sdlc/claude-pre-push.sh" >/dev/null 2>"$work/hook.err" || rc=$?
@@ -107,6 +116,7 @@ check "push from another repository" 0 "$(hook "git -C $work/other push")"
 check "git hook not enabled: any command" 2 "$(wrapper 'ls')"
 contains "reason: make sdlc-git-hooks" "$work/hook.err" "make sdlc-git-hooks"
 check "git hook not enabled: make sdlc-git-hooks runs" 0 "$(wrapper 'make sdlc-git-hooks')"
+check "git hook not enabled: only make sdlc-git-hooks itself" 2 "$(wrapper 'make sdlc-git-hooks; git push origin change')"
 check "git hook not enabled: push" 2 "$(hook 'git push -u origin change')"
 contains "reason: make sdlc-git-hooks" "$work/hook.err" "make sdlc-git-hooks"
 check "git hook not enabled: negated dry run" 2 "$(hook 'git push -n --no-dry-run origin change')"
@@ -117,6 +127,8 @@ check "second clone without the git hook" 2 "$(hook 'git push origin HEAD:other'
 contains "reason: make sdlc-git-hooks in the second clone" "$work/hook.err" "make sdlc-git-hooks"
 git config core.hooksPath .githooks
 check "git hook enabled: any command" 0 "$(wrapper 'ls')"
+check "git hook enabled: the wrapper runs pushcheck on every command" 2 "$(wrapper "git p''ush --no-verify origin change")"
+contains "reason: --no-verify" "$work/hook.err" "--no-verify skips the pre-push hook"
 
 # Forms the hook refuses whatever the records.
 check "--tags" 2 "$(hook 'git push --tags origin')"
@@ -131,6 +143,11 @@ check "directory that does not exist" 2 "$(hook "cd $work/nowhere && git push")"
 check "unknown source" 2 "$(hook 'git push origin no-such-branch')"
 check "abbreviated --no-verify" 2 "$(hook 'git push --no-veri origin change')"
 check "alias defined with -c" 2 "$(hook "git -c alias.ship='push --no-verify' ship origin change")"
+check "configuration included with -c" 2 "$(hook 'git -c include.path=/x.cfg push origin change')"
+git config alias.ship 'push --no-verify'
+check "configured alias for a push" 2 "$(hook 'git ship origin change')"
+contains "reason: alias" "$work/hook.err" "git ship is an alias"
+git config --unset alias.ship
 
 # Forms that keep git's hook from running (the relative core.hooksPath has no hook outside the work
 # tree) are refused wherever they run.
@@ -149,6 +166,12 @@ check "cd DIR && git push" 2 "$(hook "cd $repo && git push origin change" "$work
 check "git hook refuses the push" 1 "$(gitpush origin change)"
 check "remote did not get it" none "$(remote_has change)"
 check "help is not a push" 0 "$(hook 'git push -h')"
+
+# A worktree of this clone on a commit from before the gate: git's hook is not there to run.
+old=$(git commit-tree "$(git hash-object -t tree /dev/null)" -m "chore: before the gate")
+git worktree add -q -b old "$work/old" "$old"
+check "push from a branch without the gate" 2 "$(hook 'git push origin old' "$work/old")"
+contains "reason: rebase it on main" "$work/hook.err" "rebase it on main"
 
 # A worktree of the clone shares its records and core.hooksPath.
 git worktree add -q -b wt "$work/wt"
