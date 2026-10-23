@@ -72,8 +72,11 @@ analyze() {
 		case $lang in
 		go)
 			pack=go
-			GOFLAGS=-mod=readonly "$codeql" database create "$db" --language=go --source-root=. \
-				--command='go build ./...' --threads=0 --overwrite --quiet
+			# cgo off, as every build of this repository (hack/build.mk, Dockerfile); it also keeps the
+			# traced build from calling the C toolchain, which the macOS bundle's x86_64 tracer cannot load.
+			CGO_ENABLED=0 GOFLAGS=-mod=readonly "$codeql" database create "$db" --language=go --source-root=. \
+				--codescanning-config=.github/codeql/codeql-config.yml --command='go build ./...' \
+				--threads=0 --overwrite --quiet
 			;;
 		javascript-typescript)
 			pack=javascript

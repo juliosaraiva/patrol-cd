@@ -25,6 +25,7 @@ concurrency:
 env:
   GOTOOLCHAIN: local
   GOFLAGS: -mod=readonly
+  CGO_ENABLED: "0" # as every build of this repository (hack/build.mk, Dockerfile)
 
 jobs:
   analyze:
