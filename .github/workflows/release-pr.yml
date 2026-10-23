@@ -108,6 +108,20 @@ jobs:
             gh pr edit "$number" --title "$title" --body-file "$RUNNER_TEMP/body.md"
             echo "::notice title=release::updated pull request #$number for v$VERSION"
           else
-            gh pr create --head "$BRANCH" --base main --title "$title" --body-file "$RUNNER_TEMP/body.md" --label release ||
-              gh pr create --head "$BRANCH" --base main --title "$title" --body-file "$RUNNER_TEMP/body.md"
+            create() { gh pr create --head "$BRANCH" --base main --title "$title" --body-file "$RUNNER_TEMP/body.md" "$@" 2>&1; }
+            status=0
+            out=$(create --label release) || status=$?
+            if [[ $status -ne 0 ]] && grep -q "'release' not found" <<<"$out"; then
+              echo "$out"
+              echo "::warning title=release::the label 'release' does not exist; opening the pull request without it (docs/guides/releasing.md, Repository settings)"
+              status=0
+              out=$(create) || status=$?
+            fi
+            echo "$out"
+            if [[ $status -ne 0 ]]; then
+              if grep -q "not permitted to create or approve pull requests" <<<"$out"; then
+                echo "::error title=release::GitHub Actions may not open pull requests in this repository. Turn on Settings > Actions > General > 'Allow GitHub Actions to create and approve pull requests', or set the secret RELEASE_TOKEN (docs/guides/releasing.md, Repository settings)."
+              fi
+              exit "$status"
+            fi
           fi
