@@ -186,6 +186,28 @@ func TestCommandErrorRedaction(t *testing.T) {
 	assert.Equal(t, "git fetch: x ****** y (exit status 128)", err.Error())
 }
 
+// With LFS enabled the client configures the LFS filter itself, whatever the host's system
+// gitconfig holds (git-lfs skips the checkout of large files without it); without LFS it does not.
+func TestLFSFilterConfig(t *testing.T) {
+	t.Parallel()
+	filter := func(c *Client) map[string]string {
+		got := map[string]string{}
+		for _, e := range c.baseConfig() {
+			if strings.HasPrefix(e.key, "filter.lfs.") {
+				got[e.key] = e.value
+			}
+		}
+		return got
+	}
+	assert.Equal(t, map[string]string{
+		"filter.lfs.clean":    "git-lfs clean -- %f",
+		"filter.lfs.smudge":   "git-lfs smudge -- %f",
+		"filter.lfs.process":  "git-lfs filter-process",
+		"filter.lfs.required": "true",
+	}, filter(newTestClient(t, "https://example.com/x", nil, EnableLFS(true))))
+	assert.Empty(t, filter(newTestClient(t, "https://example.com/x", nil)))
+}
+
 func TestLFS(t *testing.T) {
 	t.Parallel()
 	gitBin(t)
