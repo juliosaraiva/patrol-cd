@@ -25,6 +25,9 @@ set -euo pipefail
 cd "$(git rev-parse --show-toplevel)"
 # shellcheck source=hack/sdlc/lib.sh
 source hack/sdlc/lib.sh
+# The tools `make tools` and hack/ci/install-tools.sh put in bin/ (kustomize, git-lfs, ...) come first,
+# as on CI, where the setup action puts its tool directory on PATH.
+export PATH="$PWD/bin:$PATH"
 
 codeql=1
 for arg in "$@"; do
