@@ -1,5 +1,7 @@
 import { render, screen, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
+import { flushSync } from 'react-dom';
+import { createRoot } from 'react-dom/client';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { largeTreeFixture } from '../../../../mocks/fixtures/apps-resources';
 import { buildResourceModel } from '../model/resources';
@@ -109,7 +111,28 @@ describe('GraphCanvas', () => {
     const after = drawn();
     expect(after.nodes).toBeGreaterThan(1);
     expect(after.nodes).toBeLessThan(100);
+    expect(after.edges).toBeGreaterThan(0);
     expect(after.edges).toBeLessThan(100);
+  });
+
+  it('measures the viewport before the first paint', () => {
+    // render() mounts inside act(), which also runs passive effects. Mount outside act, as a browser
+    // does: when flushSync returns, React would yield to paint, so the DOM must already be culled.
+    const env = globalThis as typeof globalThis & { IS_REACT_ACT_ENVIRONMENT?: boolean };
+    const actEnvironment = env.IS_REACT_ACT_ENVIRONMENT;
+    env.IS_REACT_ACT_ENVIRONMENT = false;
+    const container = document.body.appendChild(document.createElement('div'));
+    const root = createRoot(container);
+    try {
+      flushSync(() => root.render(<GraphCanvas graph={bigGraph(200)} label="Big tree" onActivate={() => undefined} />));
+      const painted = drawn();
+      expect(painted.nodes).toBeGreaterThan(1);
+      expect(painted.nodes).toBeLessThan(100);
+    } finally {
+      root.unmount();
+      container.remove();
+      env.IS_REACT_ACT_ENVIRONMENT = actEnvironment;
+    }
   });
 
   it('draws every node when the viewport measures 0×0', () => {
@@ -123,6 +146,7 @@ describe('GraphCanvas', () => {
     render(<GraphCanvas graph={graph} label="Big tree" onActivate={() => undefined} />);
     expect(atMeasurement[0]).toEqual({ nodes: 1, edges: 0 });
     expect(within(screen.getByRole('tree', { name: 'Big tree' })).getAllByRole('treeitem')).toHaveLength(graph.nodes.length);
+    expect(drawn().edges).toBe(graph.edges.length);
   });
 });
 
