@@ -65,7 +65,8 @@ func TestClientServerRoundTripProperty(t *testing.T) {
 
 	rapid.Check(t, func(rt *rapid.T) {
 		in := roundTrip{
-			Name:  rapid.StringMatching(`[^\x00]{1,24}`).Filter(func(s string) bool { return s != "." && s != ".." }).Draw(rt, "name"),
+			// A name of exactly "/" is never routed (TestSlashOnlyPathValueIsNotRouted).
+			Name:  rapid.StringMatching(`[^\x00]{1,24}`).Filter(func(s string) bool { return s != "." && s != ".." && s != "/" }).Draw(rt, "name"),
 			Rest:  strings.Join(rapid.SliceOfN(segment(), 1, 4).Draw(rt, "rest"), "/"),
 			Q:     rapid.String().Draw(rt, "q"),
 			Tags:  rapid.SliceOfN(rapid.String().Filter(func(s string) bool { return s != "" }), 0, 3).Draw(rt, "tags"),
@@ -88,4 +89,38 @@ func TestClientServerRoundTripProperty(t *testing.T) {
 		want := roundTripEcho(in)
 		require.Equal(rt, want, out)
 	})
+}
+
+// TestSlashOnlyPathValueIsNotRouted pins what a single-segment path value of exactly "/"
+// gets. The client escapes it to %2F; http.ServeMux unescapes a segment before matching and
+// takes a lone "/" for a trailing slash, so it never binds to a {name} wildcard and the
+// request ends at the router's 404, not at the handler. Values that only contain a slash
+// still match. Kubernetes names cannot be "/" (CI-F20).
+func TestSlashOnlyPathValueIsNotRouted(t *testing.T) {
+	t.Parallel()
+	tbl := rest.NewTable()
+	rest.Register(tbl, rest.Route{Method: http.MethodPost, Path: "/api/v1/rt/{name}/x/{rest...}", OperationID: "roundTrip", Access: rest.Public()},
+		func(_ context.Context, r *roundTrip) (*roundTripEcho, error) {
+			return &roundTripEcho{Name: r.Name, Rest: r.Rest}, nil
+		})
+	h, err := tbl.Handler(&rest.Env{DisableAuth: true})
+	require.NoError(t, err)
+	srv := httptest.NewServer(h)
+	t.Cleanup(srv.Close)
+	c, err := apiclient.NewClient(&apiclient.ClientOptions{ServerAddr: srv.URL})
+	require.NoError(t, err)
+
+	var out roundTripEcho
+	err = c.Do(context.Background(), http.MethodPost, "/api/v1/rt/{name}/x/{rest...}", &roundTrip{Name: "/", Rest: "r"}, &out)
+	var apiErr *apiclient.APIError
+	require.ErrorAs(t, err, &apiErr)
+	require.Equal(t, http.StatusNotFound, apiErr.StatusCode)
+	require.Equal(t, apiclient.CodeNotFound, apiErr.Problem.Code)
+	require.Contains(t, apiErr.Problem.Detail, "no route for POST /api/v1/rt/", "the router answers, not the handler")
+
+	for _, name := range []string{"//", "a/b", "/a", "a/", "https://github.com/a/b"} {
+		out = roundTripEcho{}
+		require.NoError(t, c.Do(context.Background(), http.MethodPost, "/api/v1/rt/{name}/x/{rest...}", &roundTrip{Name: name, Rest: "r"}, &out), name)
+		require.Equal(t, name, out.Name)
+	}
 }

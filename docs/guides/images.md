@@ -166,7 +166,8 @@ otherwise `docker buildx create --name patrol --use` first.
 the SPDX JSON under `dist/image/sbom/` (installed Alpine packages, Go modules of every binary from
 their build information). The UI's npm dependencies are compiled into `patrolcd` and are not
 visible to the scanner; their inventory is `ui/pnpm-lock.yaml`. Release-grade SBOMs, signing and
-vulnerability/license reports belong to the release phase (TASKS T5.10).
+vulnerability/license reports are tracked in
+[#154](https://github.com/juliosaraiva/patrol-cd/issues/154) and [#97](https://github.com/juliosaraiva/patrol-cd/issues/97) (signing).
 
 ## Running components
 

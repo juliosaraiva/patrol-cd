@@ -18,6 +18,11 @@ Normative for `internal/apiserver`, `pkg/apiclient`, `internal/cli` and `ui/`. T
   `PermissionDenied` for both "not found" and "forbidden" on application gets; Patrol keeps
   that to avoid existence oracles).
 - Optimistic concurrency: updates accept `metadata.resourceVersion`; stale → 409 `conflict`.
+- Path parameters: a single-segment value is escaped as a whole (`/` → `%2F`), so it may contain
+  slashes (repository and cluster URLs). A value of exactly `/` is never routed: `http.ServeMux`
+  takes the lone `/` for a trailing slash. Under `/api/` the router answers 404 `not_found`
+  (`TestSlashOnlyPathValueIsNotRouted`, CI-F20); outside it (`/extensions/{extension}/...`) the
+  request falls through to the UI handler when the UI is served.
 - Lists: `?limit=&continue=` pagination (opaque token), `?selector=` label selector; response
   `{items: [...], metadata: {continue, resourceVersion}}`.
 - Applications in any namespace: `?appNamespace=` on application routes (default: control
