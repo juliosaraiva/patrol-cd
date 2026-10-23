@@ -96,7 +96,8 @@ breaking change) with a type from the table above. Reword offending commits
 
 | Setting | Why |
 |---------|-----|
-| Settings → Actions → General → *Allow GitHub Actions to create and approve pull requests* | `release-pr.yml` opens the pull request with the workflow token. Required. |
+| Settings → Actions → General → *Allow GitHub Actions to create and approve pull requests* | `release-pr.yml` opens the pull request with the workflow token. Required unless `RELEASE_TOKEN` is set; without either, the run fails with an error that names this setting. |
+| Label `release` | Put on the release pull request (`gh label create release`). When it is missing the pull request is opened without it and the run warns. |
 | Secret `RELEASE_TOKEN` (optional) | Pull requests opened with `GITHUB_TOKEN` do not start CI. A fine-grained token or GitHub App token with *contents* and *pull requests* write on this repository makes CI run on the release pull request. Without it, close and reopen the pull request (or push to it) to start CI. |
 | Variable `RELEASE_REGISTRY` (optional) | Where the image and chart go, `host[/namespace]`. Default `ghcr.io/<owner>`. |
 | Secret `RELEASE_REGISTRY_TOKEN` (optional) | Registry password when `RELEASE_REGISTRY` is not GHCR; for GHCR the workflow token (`packages: write`) is used. |
