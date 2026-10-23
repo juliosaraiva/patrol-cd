@@ -194,7 +194,9 @@ func TestLeaseFailoverEnvtest(t *testing.T) {
 	assert.NotContains(t, lease.Annotations, AnnotationShardHandoff)
 	assert.GreaterOrEqual(t, ptr.Deref(lease.Spec.LeaseTransitions, 0), int32(2))
 
-	// Graceful shutdown releases the Lease; the survivor takes it over.
+	// Graceful shutdown releases the Lease; the survivor takes it over. One read is enough:
+	// stop waits for Run's releaseAll, and the standby takes a free Lease only after it stayed
+	// free for a lease duration.
 	r1.stop()
 	lease, err = kube.CoordinationV1().Leases(ns).Get(context.Background(), LeaseName(1), metav1.GetOptions{})
 	require.NoError(t, err)
@@ -249,9 +251,15 @@ func TestDynamicDistributionEnvtest(t *testing.T) {
 	ownedEventually(t, r0, []int{0}, 10*time.Second)
 	ownedEventually(t, r1, []int{1}, 10*time.Second)
 	require.Eventually(t, func() bool { return assigner.Replicas() == 2 }, 5*time.Second, 50*time.Millisecond)
-	lease, err := kube.CoordinationV1().Leases(ns).Get(ctx, LeaseName(2), metav1.GetOptions{})
-	require.NoError(t, err)
-	assert.Nil(t, lease.Spec.HolderIdentity)
+	// The holder stops owning shard 2 before it clears the Lease
+	// (TestLeaseManagerReleaseStopsOwningFirst), so the Lease may still name it for a moment
+	// (CI-F19).
+	require.EventuallyWithT(t, func(c *assert.CollectT) {
+		lease, err := kube.CoordinationV1().Leases(ns).Get(ctx, LeaseName(2), metav1.GetOptions{})
+		if assert.NoError(c, err) {
+			assert.Nil(c, lease.Spec.HolderIdentity)
+		}
+	}, 5*time.Second, 50*time.Millisecond)
 
 	// Scaling to 0 fails readiness with upstream's message and keeps the last count.
 	sts, err = kube.AppsV1().StatefulSets(ns).Get(ctx, DefaultApplicationControllerName, metav1.GetOptions{})

@@ -352,6 +352,61 @@ func TestLeaseManagerReplicaCountChanges(t *testing.T) {
 	require.NoError(t, r2.m.Healthz())
 }
 
+// blockingReleaseClient holds the Update that clears a Lease's holder until release is closed.
+type blockingReleaseClient struct {
+	LeaseClient
+	blocked chan struct{} // closed when a release Update is waiting
+	release chan struct{}
+	once    sync.Once
+}
+
+func (c *blockingReleaseClient) Update(ctx context.Context, l *coordinationv1.Lease) (*coordinationv1.Lease, error) {
+	if l.Spec.HolderIdentity == nil {
+		c.once.Do(func() { close(c.blocked) })
+		<-c.release
+	}
+	return c.LeaseClient.Update(ctx, l)
+}
+
+// A replica stops processing a shard and stops reporting it as owned before it clears the
+// Lease holder, so no other replica can start the shard while it still runs here. A reader of
+// the Lease can therefore still see the old holder right after OwnedShards changed (CI-F19).
+func TestLeaseManagerReleaseStopsOwningFirst(t *testing.T) {
+	t.Parallel()
+	ctx := context.Background()
+	api := newFakeLeaseAPI()
+	clk := testingclock.NewFakeClock(time.Date(2026, 10, 16, 12, 0, 0, 0, time.UTC))
+	reps := &mutableReplicas{}
+	reps.n.Store(3)
+	bc := &blockingReleaseClient{blocked: make(chan struct{}), release: make(chan struct{})}
+	r2 := newTestReplica(t, api, clk, "patrol-controller-2", reps, func(o *LeaseManagerOptions) {
+		bc.LeaseClient = o.Client
+		o.Client = bc
+	})
+	r2.m.tick(ctx)
+	require.Equal(t, []string{"+2"}, r2.log.take())
+
+	reps.n.Store(2)
+	clk.Step(10 * time.Second)
+	done := make(chan struct{})
+	go func() {
+		defer close(done)
+		r2.m.tick(ctx)
+	}()
+	select {
+	case <-bc.blocked:
+	case <-time.After(10 * time.Second):
+		t.Fatal("the release Update was never sent")
+	}
+	assert.Empty(t, r2.m.OwnedShards())
+	assert.Equal(t, []string{"-2"}, r2.log.take(), "OnLost runs before the release Update")
+	assert.Equal(t, "patrol-controller-2", ptr.Deref(api.get(LeaseName(2)).Spec.HolderIdentity, ""))
+
+	close(bc.release)
+	<-done
+	assert.Nil(t, api.get(LeaseName(2)).Spec.HolderIdentity)
+}
+
 func TestLeaseManagerStandbyRaceHasOneWinner(t *testing.T) {
 	t.Parallel()
 	ctx := context.Background()
