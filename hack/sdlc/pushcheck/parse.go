@@ -7,6 +7,7 @@ import (
 	"path"
 	"path/filepath"
 	"regexp"
+	"slices"
 	"strings"
 	"unicode"
 
@@ -182,6 +183,7 @@ type walker struct {
 	// cannot see (a sourced file, an eval of a dynamic string); a later push is refused.
 	envUnknown string
 	cdpath     bool // CDPATH was set in the command: a relative cd may go elsewhere
+	homeSet    bool // HOME was set in the command: a word starting with ~ is not literal
 	seen       map[*syntax.CallExpr]bool
 }
 
@@ -636,6 +638,9 @@ func (w *walker) assignValue(name, value string, literal bool) {
 	if name == "CDPATH" || name == "cdpath" {
 		w.cdpath = true
 	}
+	if name == "HOME" {
+		w.homeSet = true
+	}
 	if name == "EDITOR" || name == "VISUAL" || name == "PAGER" {
 		if !literal || !safeCommand(value) {
 			w.block(name + " is shell code git runs when its own editor or pager setting is unset, and this value could run git; run the command without it")
@@ -860,6 +865,22 @@ func fields(words []*syntax.Word) (args []string, lit []bool) {
 	return args, lit
 }
 
+// fields expands a command's words as fields() does, except that once the command has set HOME, a
+// word starting with ~ is not literal: the shell expands it with the new HOME, not the hook's.
+func (w *walker) fields(words []*syntax.Word) (args []string, lit []bool) {
+	if !w.homeSet {
+		return fields(words)
+	}
+	for _, word := range words {
+		a, l := fields([]*syntax.Word{word})
+		if p, ok := word.Parts[0].(*syntax.Lit); ok && strings.HasPrefix(p.Value, "~") { // a word has a part
+			l = make([]bool, len(l))
+		}
+		args, lit = append(args, a...), append(lit, l...)
+	}
+	return args, lit
+}
+
 var home, _ = os.UserHomeDir()
 
 // zshCode lists zsh's special parameters whose values are shell code: assigning one defines a
@@ -884,7 +905,7 @@ func (w *walker) call(c *syntax.CallExpr, redirs []*syntax.Redirect) {
 	}
 	saved := w.cmdText
 	w.cmdText = wordsText(c.Args, redirs) // this command's own text for the conservative net
-	args, lit := fields(c.Args)
+	args, lit := w.fields(c.Args)
 	w.command(args, lit, redirs)
 	// The net under the walker, on the words and the heredoc or here-string bodies as bash expands
 	// them ($'\x2d…' included): a hook token is refused in any command, as main.run refuses it in the
@@ -1571,7 +1592,7 @@ func (w *walker) script(s string) {
 	}
 	inner := newWalker(w.dir, s)
 	// The shell inherits CDPATH and whatever a file sourced, or an eval run, earlier set.
-	inner.cdpath, inner.envUnknown = w.cdpath, w.envUnknown
+	inner.cdpath, inner.envUnknown, inner.homeSet = w.cdpath, w.envUnknown, w.homeSet
 	inner.run(f)
 	w.block(inner.blocked)
 	w.pushes = append(w.pushes, inner.pushes...)
@@ -1583,12 +1604,17 @@ func (w *walker) chdir(name string, args []string, lit []bool) {
 		w.dir = "" // -n, +N, -N
 		return
 	}
+	physical := false
 	for len(args) > 0 && lit[0] && strings.HasPrefix(args[0], "-") && args[0] != "-" {
 		if args[0] == "--" {
 			args, lit = args[1:], lit[1:]
 			break
 		}
-		args, lit = args[1:], lit[1:] // -L, -P, -e, -@
+		// -L, -P, -e, -@; the last of -L and -P wins
+		if i := strings.LastIndexAny(args[0], "LP"); i > 0 {
+			physical = args[0][i] == 'P'
+		}
+		args, lit = args[1:], lit[1:]
 	}
 	if len(args) != 1 || !lit[0] || args[0] == "-" {
 		w.dir = "" // $HOME, OLDPWD, a variable, or zsh's `cd OLD NEW`: unknown here
@@ -1598,6 +1624,10 @@ func (w *walker) chdir(name string, args []string, lit []bool) {
 		w.dir = "" // CDPATH may take a relative cd elsewhere
 		return
 	}
+	if physical {
+		w.dir = w.physicalFrom(w.dir, args[0])
+		return
+	}
 	w.dir = w.resolve(args[0])
 }
 
@@ -1605,14 +1635,36 @@ func (w *walker) resolve(dir string) string {
 	return w.resolveFrom(w.dir, dir)
 }
 
+// resolveFrom resolves dir from base as bash's logical cd does: lexically, `link/..` being base. A
+// base kept as written (with `..`, from cd -P) cannot be resolved that way, so the result is unknown.
 func (w *walker) resolveFrom(base, dir string) string {
 	if filepath.IsAbs(dir) {
 		return filepath.Clean(dir)
 	}
-	if base == "" {
+	if base == "" || hasDotDot(base) {
 		return ""
 	}
 	return filepath.Join(base, dir)
+}
+
+// physicalFrom resolves dir from base as the kernel does for git -C and cd -P: `..` after a symbolic
+// link is the parent of the link's target, so a path with `..` is kept as written, for gatePush's git
+// to resolve.
+func (w *walker) physicalFrom(base, dir string) string {
+	switch {
+	case !hasDotDot(dir) && !hasDotDot(base):
+		return w.resolveFrom(base, dir)
+	case filepath.IsAbs(dir):
+		return dir
+	case base == "":
+		return ""
+	}
+	return base + "/" + dir
+}
+
+// hasDotDot reports whether a path has a `..` element.
+func hasDotDot(p string) bool {
+	return slices.Contains(strings.Split(p, "/"), "..")
 }
 
 // gitGlobalWithValue lists git's global options that take the next argument as their value, so the
@@ -1668,7 +1720,7 @@ func (w *walker) git(args []string, lit []bool) {
 		switch name {
 		case "-C":
 			if litVal {
-				dir = w.resolveFrom(dir, value)
+				dir = w.physicalFrom(dir, value) // git's -C is a chdir(2)
 			} else {
 				dir = ""
 			}

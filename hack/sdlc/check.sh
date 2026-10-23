@@ -30,6 +30,9 @@ set -euo pipefail
 # be ignored and let a broken run record a pass. MAKEFILES would read a makefile before ours, whose
 # `:=` beats our `?=` (a tool replaced by a no-op).
 unset MAKEFLAGS MFLAGS MAKELEVEL GNUMAKEFLAGS MAKEFILES
+# A go.work in a parent directory, or GOWORK, would build and test against other modules than the
+# tree's go.mod and go.sum, as CI (which has none) never does.
+export GOWORK=off
 
 cd "$(git rev-parse --show-toplevel)"
 # shellcheck source=hack/sdlc/lib.sh

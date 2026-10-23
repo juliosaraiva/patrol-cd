@@ -14,6 +14,7 @@
 #
 # Usage: hack/sdlc/codeql.sh fetch DIR | install | analyze [LANG...]
 set -euo pipefail
+export GOWORK=off # the tree's go.mod, not a go.work in a parent directory (CI has none)
 
 cd "$(git rev-parse --show-toplevel)"
 

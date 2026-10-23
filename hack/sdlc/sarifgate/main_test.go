@@ -31,9 +31,10 @@ func TestReadSARIFResolvesRules(t *testing.T) {
 
 	rs, err = readSARIF("testdata/levels.sarif")
 	require.NoError(t, err)
-	require.Len(t, rs, 2)
+	require.Len(t, rs, 3)
 	assert.Equal(t, "warning", rs[0].Level, "the result's level wins over the rule's default (note)")
 	assert.Equal(t, "warning", rs[1].Level, "no level anywhere: SARIF's default")
+	assert.Equal(t, "error", rs[2].Level, "no level of its own: the driver rule's default")
 }
 
 func TestRun(t *testing.T) {
@@ -75,9 +76,10 @@ func TestRun(t *testing.T) {
 			sarifs:   []string{"testdata/sample.sarif", "testdata/levels.sarif"},
 			wantCode: 1,
 			want: []string{
-				"CodeQL gate: FAILED: 6 results, 4 blocking",
+				"CodeQL gate: FAILED: 7 results, 5 blocking",
 				"fail       warning x/note-by-default a.go:1",
 				"fail       warning x/no-default b.go:2",
+				"fail       error   x/error-by-default c.go:3",
 			},
 		},
 		{
@@ -92,8 +94,13 @@ func TestRun(t *testing.T) {
 			wantCode: 0,
 			want: []string{
 				"CodeQL gate: OK: 4 results, 0 blocking, 2 accepted in the baseline",
+				"accepted   error   go/path-injection internal/a/a.go:12",
 				"           accepted: the path is joined under a checked root",
+				"accepted   warning go/unhandled-writable-file-close internal/b/b.go:3",
+				"suppressed error   go/log-injection internal/d/d.go:40",
+				"info       note    go/useless-assignment internal/c/c.go:7",
 			},
+			notWant: []string{"unused baseline line"},
 		},
 		{
 			name: "a line for another file does not accept, and is reported as unused",
@@ -104,8 +111,11 @@ func TestRun(t *testing.T) {
 			wantCode: 1,
 			want: []string{
 				"1 blocking, 1 accepted",
+				"fail       error   go/path-injection internal/a/a.go:12",
+				"accepted   warning go/unhandled-writable-file-close internal/b/b.go:3",
 				"unused baseline line 1: go/path-injection internal/a/other.go aaa:1",
 			},
+			notWant: []string{"unused baseline line 2"},
 		},
 		{
 			name: "a line for another fingerprint does not accept",
@@ -184,6 +194,20 @@ func TestRun(t *testing.T) {
 			}
 		})
 	}
+}
+
+// A summary it cannot write, or a baseline it cannot read to the end, stops the gate.
+func TestRunWriteAndScanErrors(t *testing.T) {
+	t.Parallel()
+	var out, errOut bytes.Buffer
+	missingDir := filepath.Join(t.TempDir(), "missing", "summary.txt")
+	assert.Equal(t, 2, run([]string{"-summary", missingDir, "testdata/sample.sarif"}, &out, &errOut))
+	assert.Contains(t, errOut.String(), missingDir)
+
+	errOut.Reset()
+	long := writeBaseline(t, "go/path-injection\tinternal/a/a.go\taaa:1\t"+strings.Repeat("x", 70_000))
+	assert.Equal(t, 2, run([]string{"-baseline", long, "testdata/sample.sarif"}, &out, &errOut))
+	assert.Contains(t, errOut.String(), "token too long")
 }
 
 func TestRunNeedsInput(t *testing.T) {

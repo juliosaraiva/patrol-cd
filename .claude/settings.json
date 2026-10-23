@@ -33,7 +33,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "\"$CLAUDE_PROJECT_DIR\"/hack/sdlc/claude-format.sh",
+            "command": "f=\"$CLAUDE_PROJECT_DIR\"/hack/sdlc/claude-format.sh; [ ! -e \"$f\" ] || bash \"$f\"",
             "timeout": 60
           }
         ]

@@ -44,7 +44,8 @@ A documentation-only change (the rule of `hack/ci/classify-changes.sh`: `docs/`,
 
 The linters read no configuration from outside the tree (`golangci-lint run --no-config`,
 `shellcheck --norc` with `SHELLCHECK_OPTS` cleared), so a file in HOME or a parent directory cannot
-make a local run lenient where CI's is not; and the gate's scripts ignore replace refs
+make a local run lenient where CI's is not; Go runs with `GOWORK=off`, so a `go.work` in a parent
+directory cannot replace the tree's modules; and the gate's scripts ignore replace refs
 (`GIT_NO_REPLACE_OBJECTS`), which could make a commit read with another commit's tree.
 
 When every check passed on a **clean** tree, it writes a record for HEAD's tree
@@ -121,7 +122,14 @@ replace them.
 `hack/sdlc/gate.sh COMMIT` decides whether a commit may be pushed. It needs, for the commit's tree:
 
 - a passing check record, always;
-- a passing review record, unless the change since the merge base is documentation only.
+- a passing review record, unless the change since the merge base is documentation only (the rule
+  above, except that `docs/parity/` is not documentation here: a status file that marks a feature
+  complete needs its evidence reviewed).
+
+A change to the gate's own files (`.githooks/`, `hack/sdlc/`, `.claude/settings.json`) is judged by
+the gate of its base too (the merge base with `origin/main`, run from the base's files), so a gate
+the change breaks cannot pass the change; both hooks do this, each on its own. A push the base's gate
+refuses (because the change also changed what the records hold, say) is made by the owner.
 
 Two hooks run it:
 

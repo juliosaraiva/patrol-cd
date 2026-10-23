@@ -26,12 +26,13 @@ while IFS= read -r -d '' f; do
 	esac
 done < <(git ls-files -z --cached --others --exclude-standard)
 
+# ${a[@]+"${a[@]}"}: an empty array under set -u, which bash 3.2 (macOS) calls unbound.
 if [[ $list_only -eq 1 ]]; then
-	printf '%s\n' "${bash_files[@]}" "${sh_files[@]}" | sort
+	printf '%s\n' ${bash_files[@]+"${bash_files[@]}"} ${sh_files[@]+"${sh_files[@]}"} | sort
 	exit 0
 fi
 
-all=("${bash_files[@]}" "${sh_files[@]}")
+all=(${bash_files[@]+"${bash_files[@]}"} ${sh_files[@]+"${sh_files[@]}"})
 [[ ${#all[@]} -gt 0 ]] || {
 	echo "lint-shell: no shell scripts found" >&2
 	exit 1
@@ -48,11 +49,11 @@ unset SHELLCHECK_OPTS
 shellcheck --norc -x "${all[@]}"
 
 status=0
-for f in "${bash_files[@]}"; do
+for f in ${bash_files[@]+"${bash_files[@]}"}; do
 	bash -n "$f" || status=1
 done
 if command -v dash >/dev/null 2>&1; then
-	for f in "${sh_files[@]}"; do
+	for f in ${sh_files[@]+"${sh_files[@]}"}; do
 		dash -n "$f" || status=1
 	done
 else

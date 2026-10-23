@@ -53,7 +53,7 @@ if [[ ! -x $bin || -n $(find "$root/hack/sdlc/pushcheck" "$root/go.sum" -newer "
 	# other's partial output, and the final mv is a rename.
 	mkdir -p "$root/bin"
 	if tmp=$(mktemp -d "$bin.XXXXXX"); then
-		(cd "$root" && go build -o "$tmp/sdlc-pushcheck" ./hack/sdlc/pushcheck && mv -f "$tmp/sdlc-pushcheck" "$bin") >/dev/null 2>&1
+		(cd "$root" && GOWORK=off go build -o "$tmp/sdlc-pushcheck" ./hack/sdlc/pushcheck && mv -f "$tmp/sdlc-pushcheck" "$bin") >/dev/null 2>&1
 		rm -rf "${tmp:?}"
 	fi
 	if [[ ! -x $bin ]]; then

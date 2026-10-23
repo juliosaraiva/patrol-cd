@@ -12,10 +12,36 @@ if [[ ! -x hack/sdlc/gate.sh ]]; then
 	echo "sdlc pre-push: hack/sdlc/gate.sh is missing or not executable; restore it (git checkout -- hack/sdlc/gate.sh)" >&2
 	exit 1
 fi
+export GIT_NO_REPLACE_OBJECTS=1 # a replace ref must not change what counts as the change
+
+# base_gate COMMIT: a change to the gate's own files is judged by the gate of its base too (the merge
+# base with origin/main), so a gate the change breaks cannot pass the change; the base's gate asks for
+# the same records. It runs from the base's files, with this repository's git directory. A base
+# without a gate (from before it) has nothing to add. pushcheck (the Claude Code hook) does the same.
+base_gate() {
+	local commit=$1 base tmp common rc=0
+	if ! base=$(git merge-base "$commit" refs/remotes/origin/main); then
+		echo "sdlc pre-push: cannot find the base of $commit (its merge base with origin/main), whose gate would judge a change to the gate: fetch origin" >&2
+		return 1
+	fi
+	git cat-file -e "$base:hack/sdlc/gate.sh" 2>/dev/null || return 0
+	git diff --quiet "$base" "$commit" -- .githooks hack/sdlc .claude/settings.json && return 0
+	common=$(git rev-parse --path-format=absolute --git-common-dir)
+	tmp=$(mktemp -d)
+	git archive "$base" hack/sdlc | tar -xf - -C "$tmp"
+	(cd "$tmp" && GIT_DIR=$common GIT_WORK_TREE=$tmp hack/sdlc/gate.sh "$commit") || rc=1
+	rm -rf "${tmp:?}"
+	if [[ $rc -ne 0 ]]; then
+		echo "sdlc pre-push: $commit changes the gate's own files, so the gate of its base $base judged it too, and refused it" >&2
+	fi
+	return $rc
+}
+
 zero=0000000000000000000000000000000000000000
 status=0
 while read -r _local_ref local_sha _remote_ref _remote_sha; do
 	[[ $local_sha == "$zero" ]] && continue # a deletion
 	hack/sdlc/gate.sh "$local_sha" || status=1
+	base_gate "$local_sha" || status=1
 done
 exit $status

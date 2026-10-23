@@ -6,6 +6,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"strings"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
@@ -138,6 +139,9 @@ func TestGatePushOnlyFromThisRepository(t *testing.T) {
 	gitIn(t, work, "clone", "-q", "--bare", root, bare)
 	gitIn(t, work, "init", "-q", other)
 	require.NoError(t, os.Mkdir(plain, 0o755))
+	// A link in this clone into another repository: `link/..` is that repository to git and the kernel.
+	require.NoError(t, os.Mkdir(filepath.Join(other, "sub"), 0o755))
+	require.NoError(t, os.Symlink(filepath.Join(other, "sub"), filepath.Join(root, "link")))
 
 	const notHere, notEnabled = "which is not a work tree of", "git's pre-push hook is not enabled in"
 	for _, c := range []struct {
@@ -155,10 +159,15 @@ func TestGatePushOnlyFromThisRepository(t *testing.T) {
 		{other, push{Sources: []string{"HEAD"}}, notHere},
 		{filepath.Join(root, ".git"), push{Sources: []string{"main"}}, notHere},
 		{plain, push{Sources: []string{"HEAD"}}, notHere},
+		{root + "/link/..", push{Sources: []string{"HEAD"}}, notHere},
+		{root + "/link/../..", push{Sources: []string{"HEAD"}}, notHere},
 	} {
 		c.p.Dir = c.dir
 		assert.Contains(t, gatePush(c.p, root), c.want, c.dir)
 	}
+	// A dry run and deletions push no commit: nothing to gate in this clone, even with git's hook off.
+	assert.Empty(t, gatePush(push{Dir: root, Sources: []string{"main"}, DryRun: true}, root))
+	assert.Empty(t, gatePush(push{Dir: root, Deletes: true}, root))
 	assert.Contains(t, gatePush(push{Dir: root, Sources: []string{"main"}}, root), "(core.hooksPath is unset)")
 	gitIn(t, root, "config", "core.hooksPath", "/elsewhere")
 	assert.Contains(t, gatePush(push{Dir: root, Sources: []string{"main"}}, root), `(core.hooksPath is "/elsewhere")`)
@@ -173,6 +182,8 @@ func TestGatePushChecksTheGateFiles(t *testing.T) {
 	t.Parallel()
 	root := t.TempDir()
 	gitIn(t, root, "init", "-q", "-b", "main")
+	gitIn(t, root, "commit", "-q", "--allow-empty", "-m", "base, without a gate")
+	gitIn(t, root, "update-ref", "refs/remotes/origin/main", "HEAD")
 	gate, hook := filepath.Join(root, "hack", "sdlc", "gate.sh"), filepath.Join(root, ".githooks", "pre-push")
 	require.NoError(t, os.MkdirAll(filepath.Dir(gate), 0o755))
 	require.NoError(t, os.MkdirAll(filepath.Dir(hook), 0o755))
@@ -213,6 +224,109 @@ func TestGatePushChecksTheGateFiles(t *testing.T) {
 		gitIn(t, root, "update-index", "--no-"+mark, "hack/sdlc/gate.sh")
 	}
 	assert.Empty(t, gatePush(p, root))
+}
+
+// A change to the gate's own files is judged by its base's gate too, which a broken gate in the
+// change cannot pass; a change elsewhere, and a base without a gate, are judged by the tree's gate.
+func TestGatePushRunsTheBaseGate(t *testing.T) {
+	t.Parallel()
+	root := t.TempDir()
+	gitIn(t, root, "init", "-q", "-b", "main")
+	gate, hook := filepath.Join(root, "hack", "sdlc", "gate.sh"), filepath.Join(root, ".githooks", "pre-push")
+	require.NoError(t, os.MkdirAll(filepath.Dir(gate), 0o755))
+	require.NoError(t, os.MkdirAll(filepath.Dir(hook), 0o755))
+	// The base's gate notes the work tree it runs in, and refuses a commit whose subject is "refuse".
+	ran := filepath.Join(t.TempDir(), "ran")
+	script := "#!/bin/sh\ngit rev-parse --show-toplevel >>" + ran + "\n" +
+		"if [ \"$(git log -1 --format=%s \"$1\")\" = refuse ]; then echo \"gate refused $1\"; exit 1; fi\n"
+	require.NoError(t, os.WriteFile(gate, []byte(script), 0o755))
+	require.NoError(t, os.WriteFile(hook, []byte("#!/bin/sh\nexit 0\n"), 0o755))
+	gitIn(t, root, "add", "-A")
+	gitIn(t, root, "commit", "-q", "-m", "base gate")
+	gitIn(t, root, "update-ref", "refs/remotes/origin/main", "HEAD")
+	gitIn(t, root, "config", "core.hooksPath", ".githooks")
+	ranIn := func() []string {
+		b, _ := os.ReadFile(ran)
+		_ = os.Remove(ran)
+		return strings.Fields(string(b))
+	}
+	resolvedRoot, err := filepath.EvalSymlinks(root)
+	require.NoError(t, err)
+
+	// A change that breaks the gate (it passes everything), with a subject the base's gate refuses.
+	gitIn(t, root, "switch", "-q", "-c", "broken")
+	require.NoError(t, os.WriteFile(gate, []byte("#!/bin/sh\nexit 0\n"), 0o755))
+	gitIn(t, root, "commit", "-q", "-am", "refuse")
+	head, err := gitOut(root, "rev-parse", "HEAD")
+	require.NoError(t, err)
+	got := gatePush(push{Dir: root, Sources: []string{"HEAD"}}, root)
+	assert.Contains(t, got, "so the gate of its base")
+	assert.Contains(t, got, "gate refused "+head, "the base's gate judges the pushed commit")
+	where := ranIn()
+	require.Len(t, where, 1, "only the base's gate wrote, once")
+	assert.NotEqual(t, resolvedRoot, where[0], "the base's gate runs from its own files, not the work tree")
+
+	// A change elsewhere is the tree's gate's alone (the same script here, which notes the work tree).
+	gitIn(t, root, "switch", "-q", "-c", "elsewhere", "main")
+	require.NoError(t, os.WriteFile(filepath.Join(root, "README.md"), []byte("x\n"), 0o644))
+	gitIn(t, root, "add", "README.md")
+	gitIn(t, root, "commit", "-q", "-m", "fine")
+	assert.Empty(t, gatePush(push{Dir: root, Sources: []string{"HEAD"}}, root))
+	assert.Equal(t, []string{resolvedRoot}, ranIn(), "the base's gate did not run")
+
+	// Without origin/main there is no base to ask: refused.
+	gitIn(t, root, "update-ref", "-d", "refs/remotes/origin/main")
+	assert.Contains(t, gatePush(push{Dir: root, Sources: []string{"broken"}}, root), "cannot find the base of")
+}
+
+// When the base's gate cannot run, the push is refused, not waved through. (Not parallel: TMPDIR.)
+func TestGatePushBaseGateCannotRun(t *testing.T) {
+	root := t.TempDir()
+	gitIn(t, root, "init", "-q", "-b", "main")
+	gate, hook := filepath.Join(root, "hack", "sdlc", "gate.sh"), filepath.Join(root, ".githooks", "pre-push")
+	require.NoError(t, os.MkdirAll(filepath.Dir(gate), 0o755))
+	require.NoError(t, os.MkdirAll(filepath.Dir(hook), 0o755))
+	require.NoError(t, os.WriteFile(gate, []byte("#!/bin/sh\nexit 0\n"), 0o755))
+	require.NoError(t, os.WriteFile(hook, []byte("#!/bin/sh\nexit 0\n"), 0o755))
+	gitIn(t, root, "add", "-A")
+	gitIn(t, root, "commit", "-q", "-m", "base gate")
+	gitIn(t, root, "update-ref", "refs/remotes/origin/main", "HEAD")
+	gitIn(t, root, "config", "core.hooksPath", ".githooks")
+	require.NoError(t, os.WriteFile(gate, []byte("#!/bin/sh\nexit 0\n# changed\n"), 0o755))
+	gitIn(t, root, "commit", "-q", "-am", "change the gate")
+	t.Setenv("TMPDIR", filepath.Join(t.TempDir(), "missing"))
+	assert.Contains(t, gatePush(push{Dir: root, Sources: []string{"HEAD"}}, root), "cannot run the base's gate")
+}
+
+// Every pushed commit is gated, whatever its place among the sources.
+func TestGatePushGatesEverySource(t *testing.T) {
+	t.Parallel()
+	root := t.TempDir()
+	gitIn(t, root, "init", "-q", "-b", "main")
+	gitIn(t, root, "commit", "-q", "--allow-empty", "-m", "base, without a gate")
+	gitIn(t, root, "update-ref", "refs/remotes/origin/main", "HEAD")
+	gate, hook := filepath.Join(root, "hack", "sdlc", "gate.sh"), filepath.Join(root, ".githooks", "pre-push")
+	require.NoError(t, os.MkdirAll(filepath.Dir(gate), 0o755))
+	require.NoError(t, os.MkdirAll(filepath.Dir(hook), 0o755))
+	require.NoError(t, os.WriteFile(gate, []byte("#!/bin/sh\nif [ \"$(git log -1 --format=%s \"$1\")\" = other ]; then echo \"gate refused $1\"; exit 1; fi\n"), 0o755))
+	require.NoError(t, os.WriteFile(hook, []byte("#!/bin/sh\nexit 0\n"), 0o755))
+	gitIn(t, root, "add", "-A")
+	gitIn(t, root, "commit", "-q", "-m", "gate")
+	gitIn(t, root, "config", "core.hooksPath", ".githooks")
+	gitIn(t, root, "switch", "-q", "-c", "other")
+	gitIn(t, root, "commit", "-q", "--allow-empty", "-m", "other")
+	gitIn(t, root, "switch", "-q", "main")
+	other, err := gitOut(root, "rev-parse", "other")
+	require.NoError(t, err)
+
+	for _, sources := range [][]string{{"main", "other"}, {"other", "main"}} {
+		assert.Contains(t, gatePush(push{Dir: root, Sources: sources}, root), "gate refused "+other, sources)
+	}
+	a, err := findPushes("git push origin main other", root)
+	require.NoError(t, err)
+	require.Len(t, a.Pushes, 1)
+	assert.Contains(t, gatePush(a.Pushes[0], root), "gate refused "+other)
+	assert.Empty(t, gatePush(push{Dir: root, Sources: []string{"main"}}, root))
 }
 
 func TestHidesChanges(t *testing.T) {

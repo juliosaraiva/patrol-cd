@@ -107,6 +107,19 @@ func TestFindPushes(t *testing.T) {
 		{name: "push in a function", command: "f() { git push; }", want: []push{{Dir: "", Sources: head}}},
 		{name: "if without cd", command: "if make sdlc-gate; then git push; fi", want: []push{{Dir: "/repo", Sources: head}}},
 		{name: "chdir, zsh's synonym for cd", command: "chdir /other && git push origin b", want: []push{{Dir: "/other", Sources: []string{"b"}}}},
+		// git -C and cd -P resolve `..` physically (after a symbolic link, the target's parent): the path
+		// stays as written for gatePush's git to resolve. A logical cd resolves it lexically, as bash does.
+		{name: "git -C with .. stays as written", command: "git -C link/.. push origin a", want: []push{{Dir: "/repo/link/..", Sources: []string{"a"}}}},
+		{name: "git -C .. after a cd", command: "cd link && git -C .. push origin a", want: []push{{Dir: "/repo/link/..", Sources: []string{"a"}}}},
+		{name: "cd -P with ..", command: "cd -P link/.. && git push origin a", want: []push{{Dir: "/repo/link/..", Sources: []string{"a"}}}},
+		{name: "cd -LP: the last wins", command: "cd -LP link/.. && git push origin a", want: []push{{Dir: "/repo/link/..", Sources: []string{"a"}}}},
+		{name: "cd -PL: logical", command: "cd -PL link/.. && git push origin a", want: []push{{Dir: "/repo", Sources: []string{"a"}}}},
+		{name: "cd -P without ..", command: "cd -P /x && git push origin a", want: []push{{Dir: "/x", Sources: []string{"a"}}}},
+		{name: "a logical cd from a physical path is unknown", command: "cd -P link/.. && cd sub && git push origin a", want: []push{{Dir: "", Sources: []string{"a"}}}},
+		{name: "logical cd with ..", command: "cd link/.. && git push origin a", want: []push{{Dir: "/repo", Sources: []string{"a"}}}},
+		// The shell expands ~ with a HOME the command sets, not the hook's.
+		{name: "~ after HOME is set", command: "export HOME=/elsewhere && cd ~/r && git push origin a", want: []push{{Dir: "", Sources: []string{"a"}}}},
+		{name: "git -C ~ after HOME is set", command: "HOME=/elsewhere; git -C ~/r push origin a", want: []push{{Dir: "", Sources: []string{"a"}}}},
 		{name: "zsh's cdpath set in the command", command: "cdpath=(/tmp/other); cd sub && git push origin a", want: []push{{Dir: "", Sources: []string{"a"}}}},
 		{name: "CDPATH reaches a shell the command runs", command: "CDPATH=/tmp/other; bash -c 'cd sub && git push origin a'", want: []push{{Dir: "", Sources: []string{"a"}}}},
 		{name: "git -C", command: "git -C /x -c color.ui=never push origin HEAD", want: []push{{Dir: "/x", Sources: head}}},

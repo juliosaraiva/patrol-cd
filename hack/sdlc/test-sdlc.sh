@@ -40,6 +40,14 @@ ci_re=$(sed -n "s/^docs_re='\(.*\)'\$/\1/p" "$src/hack/ci/classify-changes.sh")
 # shellcheck disable=SC2016 # the pattern matches the literal text of lib.sh
 sdlc_re=$(sed -n 's/.*\[\[ -z \$f || \$f =~ \(.*\) \]\] || return 1/\1/p' "$src/hack/sdlc/lib.sh")
 check "docs rule agrees with classify-changes.sh" "$ci_re" "$sdlc_re"
+# ... but for docs/parity/, whose status files claim features complete: they need a review.
+docs_only() { # docs_only FILE...: 0 when the gate counts the files as documentation only
+	printf '%s\n' "$@" | (source "$src/hack/sdlc/lib.sh" && sdlc_docs_only) && echo 0 || echo 1
+}
+check "a guide is documentation" 0 "$(docs_only docs/guides/x.md README.md)"
+check "a parity status file is not documentation" 1 "$(docs_only docs/parity/status/x.yaml)"
+check "the parity matrix is not documentation" 1 "$(docs_only docs/guides/x.md docs/parity/matrix.md)"
+check "code is not documentation" 1 "$(docs_only main.go)"
 
 # CI's CodeQL bundle must be the one hack/sdlc/codeql.sh pins and checks: the workflow fetches it
 # with codeql.sh and hands that file to the action.
@@ -66,9 +74,27 @@ printf 'kill -9 $$\n' >"$work/p/hack/sdlc/claude-pre-push.sh"
 check "settings hook: the wrapper is killed" 2 "$(settings_hook "$work/p")"
 printf 'exit 1\n' >"$work/p/hack/sdlc/claude-pre-push.sh"
 check "settings hook: the wrapper fails" 2 "$(settings_hook "$work/p")"
+# The format hook after an edit runs the formatter where the checkout has it, and does nothing (no
+# hook error on every edit) where it does not.
+fmtcmd=$(jq -r '.hooks.PostToolUse[0].hooks[0].command' "$src/.claude/settings.json")
+format_hook() { # format_hook PROJECT_DIR: exit status of the settings' format hook command
+	local rc=0
+	echo '{}' | CLAUDE_PROJECT_DIR=$1 sh -c "$fmtcmd" >/dev/null 2>&1 || rc=$?
+	echo "$rc"
+}
+check "format hook: no formatter in the checkout" 0 "$(format_hook "$work/p")"
+printf 'echo formatted >"%s/formatted"\n' "$work" >"$work/p/hack/sdlc/claude-format.sh"
+check "format hook: runs the formatter, executable or not" 0 "$(format_hook "$work/p")"
+check "format hook: the formatter ran" formatted "$(cat "$work/formatted" 2>/dev/null)"
+
+# The Go checks build against the tree's go.mod, not a go.work in a parent directory or GOWORK.
+check "check.sh turns go.work off" 1 "$(grep -c '^export GOWORK=off' "$src/hack/sdlc/check.sh")"
+check "codeql.sh turns go.work off" 1 "$(grep -c '^export GOWORK=off' "$src/hack/sdlc/codeql.sh")"
+check "the wrapper builds pushcheck with go.work off" 1 "$(grep -c 'GOWORK=off go build' "$src/hack/sdlc/claude-pre-push.sh")"
 
 # The shell lint reads no shellcheck configuration from outside the tree: an rc file in HOME that
-# disables every check leaves a finding a finding.
+# disables every check, and SHELLCHECK_OPTS, leave a finding a finding. (The scratch repository has
+# no POSIX sh script, which bash 3.2's set -u must also handle.)
 if command -v shellcheck >/dev/null 2>&1; then
 	lint=$work/lint
 	git init -q "$lint"
@@ -79,8 +105,9 @@ if command -v shellcheck >/dev/null 2>&1; then
 	git -C "$lint" add -A
 	echo 'disable=all' >"$work/lint-home/.shellcheckrc"
 	rc=0
-	(cd "$lint" && HOME=$work/lint-home SHELLCHECK_OPTS='--exclude=SC2086' hack/ci/lint-shell.sh) >/dev/null 2>&1 || rc=$?
+	(cd "$lint" && HOME=$work/lint-home SHELLCHECK_OPTS='--exclude=SC2086' hack/ci/lint-shell.sh) >"$work/lint.out" 2>&1 || rc=$?
 	check "shell lint ignores a HOME rc file and SHELLCHECK_OPTS" 1 "$rc"
+	contains "shell lint reports the finding" "$work/lint.out" "SC2086"
 else
 	echo "test-sdlc: shellcheck not installed; skipping the shell lint configuration check"
 fi
@@ -309,6 +336,17 @@ check "hook: cd DIR && git push" 0 "$(hook "cd $repo && git push" "$work")"
 check "git hook lets the push through" 0 "$(gitpush -u origin change)"
 check "remote got the commit" "$(git rev-parse HEAD)" "$(remote_has change)"
 
+# Several refs in one push: each pushed commit is gated, whatever its place among them.
+git switch -q -c unrec
+echo unrecorded >>main.go
+git commit -qam "fix: unrecorded"
+git switch -q change
+check "hook gates every pushed ref" 2 "$(hook 'git push origin change unrec')"
+contains "reason names the unrecorded commit" "$work/hook.err" "push of $(git rev-parse --short unrec) refused"
+check "hook gates every pushed ref, in any order" 2 "$(hook 'git push origin unrec change')"
+check "git hook gates every pushed ref" 1 "$(gitpush origin change unrec)"
+check "remote did not get the unrecorded ref" none "$(remote_has unrec)"
+
 # Commit and push in one command: the Claude Code hook sees the recorded commit, but git's hook sees
 # the new one and refuses it.
 echo more >>main.go
@@ -341,6 +379,17 @@ dtree=$(git rev-parse 'HEAD^{tree}')
 check "docs without checks" 1 "$(gate)"
 printf 'tree=%s\nresult=pass\n' "$dtree" >"$state/checks/$dtree"
 check "docs with checks, no review" 0 "$(gate)"
+
+# A change that breaks the gate is judged by its base's gate too, which asks for the records of the
+# change's tree: both hooks refuse it, though the changed gate passes everything.
+git checkout -q -b weak main
+printf '#!/usr/bin/env bash\nexit 0\n' >hack/sdlc/gate.sh
+git commit -qam "fix(sdlc): a gate that passes everything"
+check "a broken gate: pushcheck asks the base's gate" 2 "$(hook 'git push origin weak')"
+contains "reason: the base's gate" "$work/hook.err" "so the gate of its base"
+check "a broken gate: git's hook asks the base's gate" 1 "$(gitpush origin weak)"
+contains "reason: git's hook names the base's gate" "$work/push.err" "judged it too"
+check "remote did not get the broken gate" none "$(remote_has weak)"
 
 # The review input names this tree and the changed files since origin/main, whatever
 # PATROL_SDLC_BASE says: a narrower review must not be recorded for the whole tree.

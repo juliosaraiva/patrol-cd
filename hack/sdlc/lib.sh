@@ -28,11 +28,13 @@ sdlc_changed() {
 }
 
 # sdlc_docs_only reads file names on stdin and succeeds when every one is documentation: the rule
-# of docs_re in hack/ci/classify-changes.sh (hack/sdlc/test-sdlc.sh checks that they agree). No
-# file at all also counts (there is nothing to review).
+# of docs_re in hack/ci/classify-changes.sh (hack/sdlc/test-sdlc.sh checks that they agree), except
+# docs/parity/, whose status files claim features complete: such a claim needs its evidence reviewed
+# (CLAUDE.md), so it is not documentation here. No file at all also counts (nothing to review).
 sdlc_docs_only() {
 	local f
 	while IFS= read -r f; do
+		[[ $f != docs/parity/* ]] || return 1
 		[[ -z $f || $f =~ ^(docs/|[^/]+\.md$|\.gitignore$) ]] || return 1
 	done
 	return 0

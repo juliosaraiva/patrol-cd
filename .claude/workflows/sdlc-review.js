@@ -71,7 +71,8 @@ if (input.docsOnly) {
   return { tree: input.tree, reviewers: [], blocking: [], minor: [], refuted: [], notes: 'documentation only' }
 }
 
-// Documentation: hack/sdlc/lib.sh sdlc_docs_only (the rule of hack/ci/classify-changes.sh).
+// Documentation: hack/sdlc/lib.sh sdlc_docs_only (the rule of hack/ci/classify-changes.sh; docs/parity/
+// is not documentation there, and the api-reviewer owns it here).
 const DOCS = /^(docs\/|[^/]+\.md$|\.gitignore$)/
 
 let selected = REVIEWERS.map(r => ({ ...r, files: input.files.filter(f => r.match.test(f)) })).filter(r => r.files.length > 0)

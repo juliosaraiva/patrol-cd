@@ -160,8 +160,61 @@ func gatePush(p push, root string) string {
 			}
 			problems = append(problems, msg)
 		}
+		if msg := baseGate(top, commit); msg != "" {
+			problems = append(problems, msg)
+		}
 	}
 	return strings.Join(problems, "\n")
+}
+
+// gateFiles are the paths whose change the gate of the change's base judges too: the gate cannot
+// pass a change to itself.
+var gateFiles = []string{".githooks", "hack/sdlc", ".claude/settings.json"}
+
+// baseGate runs the gate of commit's base (its merge base with origin/main, replace refs ignored)
+// on commit when the change edits the gate's own files, so a gate the change breaks cannot pass the
+// change: the base's gate asks for the same check and review records. It returns why that gate
+// refuses, or "" (also when the base has no gate yet). git's pre-push hook does the same on its own.
+func baseGate(top, commit string) string {
+	git := func(args ...string) (string, error) {
+		cmd := exec.Command("git", append([]string{"-C", top}, args...)...)
+		cmd.Env = append(os.Environ(), "GIT_NO_REPLACE_OBJECTS=1")
+		out, err := cmd.Output()
+		return strings.TrimSpace(string(out)), err
+	}
+	base, err := git("merge-base", commit, "refs/remotes/origin/main")
+	if err != nil {
+		return "cannot find the base of " + commit + " (its merge base with origin/main), whose gate would judge a change to the gate: fetch origin"
+	}
+	if _, err := git("cat-file", "-e", base+":hack/sdlc/gate.sh"); err != nil {
+		return "" // the base has no gate yet
+	}
+	if _, err := git(append([]string{"diff", "--quiet", base, commit, "--"}, gateFiles...)...); err == nil {
+		return "" // the gate's files are the base's
+	}
+	common, err := git("rev-parse", "--path-format=absolute", "--git-common-dir")
+	if err != nil {
+		return "cannot find the git directory of " + top + ": " + err.Error()
+	}
+	tmp, err := os.MkdirTemp("", "sdlc-base-gate-")
+	if err != nil {
+		return "cannot run the base's gate: " + err.Error()
+	}
+	defer func() { _ = os.RemoveAll(tmp) }()
+	// The base's hack/sdlc, run with this repository's git directory (its records and refs) and the
+	// extracted files as its work tree, so the base's gate sources the base's lib.sh.
+	extract := exec.Command("sh", "-c", `git -C "$1" archive "$2" hack/sdlc | tar -xf - -C "$3"`, "sh", top, base, tmp)
+	if out, err := extract.CombinedOutput(); err != nil {
+		return "cannot extract the gate of the base " + base + ": " + strings.TrimSpace(string(out))
+	}
+	run := exec.Command(filepath.Join(tmp, "hack", "sdlc", "gate.sh"), commit)
+	run.Dir = tmp
+	run.Env = append(os.Environ(), "GIT_DIR="+common, "GIT_WORK_TREE="+tmp, "GIT_NO_REPLACE_OBJECTS=1")
+	if out, err := run.CombinedOutput(); err != nil {
+		return "this change edits the gate's own files (" + strings.Join(gateFiles, ", ") + "), so the gate of its base " + base +
+			" judges it too, and refuses it:\n" + strings.TrimSpace(string(out))
+	}
+	return ""
 }
 
 // checkSubcommands refuses a git subcommand that is not a git command (builtin, in git's exec path

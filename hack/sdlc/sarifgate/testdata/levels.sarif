@@ -7,7 +7,8 @@
           "name": "CodeQL",
           "rules": [
             {"id": "x/note-by-default", "defaultConfiguration": {"level": "note"}},
-            {"id": "x/no-default"}
+            {"id": "x/no-default"},
+            {"id": "x/error-by-default", "defaultConfiguration": {"level": "error"}}
           ]
         }
       },
@@ -24,6 +25,12 @@
           "message": {"text": "No level anywhere: SARIF's default, warning."},
           "locations": [{"physicalLocation": {"artifactLocation": {"uri": "b.go"}, "region": {"startLine": 2}}}],
           "partialFingerprints": {"primaryLocationLineHash": "bbb:1"}
+        },
+        {
+          "ruleId": "x/error-by-default",
+          "message": {"text": "No level of its own: the driver rule's default, error."},
+          "locations": [{"physicalLocation": {"artifactLocation": {"uri": "c.go"}, "region": {"startLine": 3}}}],
+          "partialFingerprints": {"primaryLocationLineHash": "ccc:1"}
         }
       ]
     }
