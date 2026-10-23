@@ -20,20 +20,21 @@ guide is [docs/guides/claude-code-sdlc.md](../../guides/claude-code-sdlc.md).
 
 The machine was shared with up to 16 review and red-team agents during most runs.
 
-## Checks of the code at `ce9aae1` (the last code commit before this record's update)
+## Checks of the code at `0474798` (the last code commit before this record's update)
 
 | Command | Result |
 |---------|--------|
-| `go vet ./hack/sdlc/...`; `golangci-lint run ./hack/sdlc/...` | passed, 0 issues |
-| `shellcheck hack/sdlc/*.sh`; `actionlint .github/workflows/codeql.yml` | passed |
-| `go test -race -count=1 ./hack/sdlc/...` | passed: `pushcheck` and `sarifgate`, 469 tests (counted with `-json`) |
-| `bash hack/sdlc/test-sdlc.sh` (the gate end to end in scratch repositories with a bare remote) | passed: 116 passed, 0 failed |
-| Mutation sweep of `hack/sdlc/pushcheck` (a scratchpad script: each refusal, unknown-directory or environment site of `parse.go`, and each refusal return of `main.go`, disabled in turn through `go test -overlay`, the repository untouched) | 91 sites; 90 caught by a failing test; the survivor is a mutant identical to the original (`return ""` replaced by `return ""`). The first sweep, on `0b31e0f`, left 20 sites in `parse.go` and 5 in `main.go` uncaught; each got a test, and two that could not change the outcome were removed |
+| `go vet ./hack/sdlc/...`; `golangci-lint run --no-config ./hack/sdlc/...` | passed, 0 issues |
+| `shellcheck hack/sdlc/*.sh hack/ci/lint-shell.sh`; `make ci-shell`; `actionlint` | passed |
+| `go test -race -count=1 ./hack/sdlc/...` | passed: `pushcheck` and `sarifgate`, 503 tests (counted with `-json`) |
+| `bash hack/sdlc/test-sdlc.sh` (the gate end to end in scratch repositories with a bare remote) | passed: 120 passed, 0 failed |
+| Mutation sweep of `hack/sdlc/pushcheck` (a scratchpad script: each refusal, unknown-directory, environment and option-value site of `parse.go`, each `return true` of a predicate, and each refusal return of `main.go`, disabled in turn through `go test -overlay`, the repository untouched) | 115 sites; 114 caught by a failing test; the survivor is a mutant identical to the original (`return ""` replaced by `return ""`). The first sweep, on `0b31e0f`, covered refusal sites only and left 20 in `parse.go` and 5 in `main.go` uncaught; the eleventh review then found three more kinds of site, which the sweep now covers. Each uncaught site got a test, and four that could not change the outcome were removed |
+| A replace ref giving `origin/main` HEAD's tree, in a scratch repository (`replace-check.sh` in the scratchpad) | without `hack/sdlc/lib.sh` the changed files are `[]`; with it, `[main.go]` |
 | `PATH="$PWD/bin:$PATH" go test -race -count=1 ./internal/git/...` | passed on `c409428` (and `./internal/reposerver/...` on `6f9f985`); `internal/git` has not changed since |
 
 ## Agent review
 
-Ten runs of `.claude/workflows/sdlc-review.js` on successive trees, each verified finding fixed
+Eleven runs of `.claude/workflows/sdlc-review.js` on successive trees, each verified finding fixed
 before the next run:
 
 | Tree | Blocking (verified) | Minor | Refuted |
@@ -48,6 +49,7 @@ before the next run:
 | `fbdc7df` | 8 | 7 | 0 |
 | `bdae10c` | 16 | 8 | 0 |
 | `e69bdb2` | 3 | 7 | 0 |
+| `f794b5b` | 5 | 10 | 0 |
 
 Most findings were ways around the Claude Code hook (shell and git constructs it read differently
 from bash, zsh or git) and tests that could not fail. The seventh run's were six untested branches
@@ -76,8 +78,24 @@ a shell the command runs did not inherit an earlier `source` or dynamic `eval`; 
 and read a git error as clean; the wrapper and the settings' hook command let any status but 2 run
 the command (a killed binary, a wrapper that is not executable); CI downloaded the CodeQL bundle
 without checking its SHA-256; the text net's refusal named a Grep tool this Claude Code build lacks;
-and a test row that `filepath.Join` reduced to another. The review of the tree that contains this
-record runs after it is written; its result is in the pull request.
+and a test row that `filepath.Join` reduced to another.
+
+The eleventh run found 5 blocking findings. Two were gaps: the text check behind the walker's
+fail-closed refusals missed `git -C DIR push`, `git -c K=V push` and git called by its path, so a
+push behind a dynamic `eval` or a non-literal shell script written that way was allowed; and a
+linter configuration from outside the tree (an rc file in HOME or a parent directory, or an ignored
+dot file such as `.shellcheckrc`) could make `ci-static` pass where CI fails while the tree still
+counted as clean. Three were branches no test reached that the first sweep did not cover (a push's
+own refusal returned by the gate in this clone, a short option's attached value that is not
+literal, zsh's in-shell cd at the end of a function's pipeline). All were fixed, with the 10 minor
+findings: a wrapper or xargs with a non-literal command word before `push`; a cd in an `if` or
+`while` condition leaking into branches that run when it failed; editor and pager variables set
+from a value the hook does not read; the Go tests reading the developer's global git
+configuration; `git --help push`; the gate test not pinning the commit it checks; an unknown short
+push option and a subsection key under `diff.` untested; and replace refs or `git fast-import`
+making a change look like documentation only (the gate's scripts now ignore replace refs, and the
+hook refuses both commands). The review of the tree that contains this record runs after it is
+written; its result is in the pull request.
 
 ## Red team
 
