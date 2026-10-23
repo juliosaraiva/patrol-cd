@@ -7,28 +7,33 @@
 // $'…', braces); `cd DIR` and `git -C DIR` move the directory only where they certainly run; and
 // `bash -c '…'` and a heredoc or here-string given to a shell are parsed too.
 //
+// It follows the command a wrapper runs (timeout, nice, sudo, env, xargs, find -exec, kubectl/docker
+// exec -- ..., command, exec) into that command, and parses bash -c scripts, heredocs and
+// here-strings, eval, and git rebase -x / bisect run / submodule foreach. A git push found this way
+// is gated like a direct one.
+//
 // The authority is git's own pre-push hook (.githooks/pre-push), which sees the commits actually
 // pushed, also by a script or an alias; the wrapper requires it to be enabled before any command
 // runs. This hook gives early, clear refusals and keeps git's hook from being skipped. It refuses,
-// wherever the command runs:
-//   - what can point git at another repository or change its configuration, hooks or aliases:
-//     GIT_* variables outside a short safe list (inline, env, export, read, ...), git -c and
-//     git config writes of keys outside a short safe list, --git-dir, --work-tree, --bare and other
-//     global options before push, an alias for a push, a sourced file before a push;
-//   - a git push it cannot follow: inside $(...), eval, timeout, sudo, xargs, trap, an interpreter
-//     or another command that runs its arguments, a script piped to a shell, a non-literal command
-//     word, git option or shell script, a command that does not parse as bash.
+// wherever the command runs: what can point git at another repository or change its configuration,
+// hooks or aliases (GIT_* variables outside a short safe list, set but not merely printed; git -c and
+// git config writes of keys outside a short safe list; --git-dir, --work-tree, --bare and other
+// global options before push; an alias for a push; a sourced file before a push); a push it cannot
+// resolve (inside $(...), eval of a dynamic string, a non-literal command word, git option or shell
+// script, a command that does not parse as bash and names a push or a hook override); and a push that
+// cannot be gated per step (git rebase -x, submodule foreach).
 //
 // For a push from a clone of this project (or one of its worktrees) it also refuses --no-verify, an
 // abbreviated or unknown push option, a non-literal argument, a push from inside .git, from an
 // unknown directory or while core.hooksPath is not .githooks, and the forms the gate cannot check
 // ref by ref (--all, --mirror, --tags, ':'); then it runs that clone's hack/sdlc/gate.sh on each
-// pushed commit as it is now. Exit status 2 blocks the command and shows stderr to Claude Code; 0
-// lets it run.
+// pushed commit as it is now. A ref that does not resolve yet is left to git's hook. Exit status 2
+// blocks the command and shows stderr to Claude Code; 0 lets it run.
 //
-// What it cannot see: a command whose git invocation is assembled at run time (the command name or
-// subcommand built from variables or files) and the content of script files. git's own hook checks
-// those pushes; a script that disables it on purpose is out of reach, as the guide's Limits say.
+// What it cannot see: a git invocation assembled at run time (name or subcommand from variables,
+// files or $'…' escapes), the content of script files, code given to an interpreter (python -c, awk,
+// a command that is not a known wrapper), and commands on a remote host. git's own hook checks those
+// pushes; a program that disables it on purpose is out of reach, as the guide's Limits say.
 package main
 
 import (
@@ -150,7 +155,10 @@ func gatePush(p push, root string) string {
 	for _, src := range p.Sources {
 		commit, err := gitOut(top, "rev-parse", "--verify", "--quiet", src+"^{commit}")
 		if err != nil {
-			problems = append(problems, fmt.Sprintf("cannot resolve %q in %s", src, top))
+			// A ref that does not exist yet: a branch or tag created earlier in the same command line.
+			// core.hooksPath=.githooks is set (checked just above), so git's own pre-push hook gates
+			// whatever it ends up pointing at. Leave it to that hook, as for a commit made in the same
+			// command.
 			continue
 		}
 		cmd := exec.Command(gate, commit)

@@ -136,19 +136,21 @@ Two hooks run it:
     comments are not commands. `cd`, `pushd` and `git -C` move the directory only where they
     certainly run: inside a pipeline, a background job, a subshell or a function they do not reach
     the commands after them, and a `cd` that may or may not run (after `&&` or `||`, in an `if`,
-    `case`, loop or function) leaves the directory unknown. `bash -c '…'`, and a heredoc or
-    here-string given to `bash`, `sh`, `zsh`, `dash`, `ksh` or `mksh`, are parsed as scripts.
-  - **What it refuses wherever the command runs**, because it can keep git's hook from running or
-    run a push the hook cannot see: a `GIT_*` variable outside a short safe list (`GIT_DIR`,
-    `GIT_WORK_TREE`, `GIT_CONFIG_*` …, set inline, with `env`, `export`, `declare`, `read` or
-    `printf -v`); `git -c` and `git config` writes of keys outside a short safe list
-    (`core.hooksPath`, `alias.*`, `include.*`, `core.pager` …); `--git-dir`, `--work-tree`, `--bare`
-    and other global options before `push`; a configured alias that pushes; a file sourced before a
-    push; a push inside `$(…)`, behind `eval`, `timeout`, `sudo`, `xargs`, `trap`, an interpreter or
-    another command that runs its arguments, in a script piped to a shell, in `git rebase -x` or
-    `git submodule foreach`; a non-literal command word, git option or shell script next to a push;
-    and a command that does not parse as bash (the Bash tool may run zsh) when it mentions a push or
-    a hook override.
+    `case`, loop or function) leaves the directory unknown. It follows the command a wrapper runs
+    (`timeout`, `nice`, `sudo`, `nohup`, `env`, `xargs`, `find -exec`, `kubectl`/`docker exec -- …`,
+    `command`, `exec`, …) into that command, and parses `bash -c '…'`, a heredoc or here-string given
+    to `bash`/`sh`/`zsh`/`dash`/`ksh`/`mksh`, `eval` and `git rebase -x`/`bisect run`/`submodule
+    foreach`. A `git push` found this way is gated like a direct one; a push that cannot be gated per
+    step (`rebase -x`, `submodule foreach`) is refused.
+  - **What it refuses wherever the command runs**, because it can keep git's hook from running: a
+    `GIT_*` variable outside a short safe list (`GIT_DIR`, `GIT_WORK_TREE`, `GIT_CONFIG_*` …, set
+    inline, with `env`, `export`, `declare`, `read` or `printf -v` — but not merely printed); `git
+    -c` and `git config` writes of keys outside a short safe list (`core.hooksPath`, `alias.*`,
+    `include.*`, `core.pager` …); `--git-dir`, `--work-tree`, `--bare` and other global options
+    before `push`; a configured alias that pushes; a file sourced before a push; and a push it cannot
+    resolve — inside `$(…)`, behind `eval` with a dynamic string, through a non-literal command word,
+    git option or shell script, or in a command that does not parse as bash (the Bash tool may run
+    zsh) and names a push or a hook override.
   - **What it refuses for a push from a clone of this project** (any clone, and its worktrees): a
     push while that clone's `core.hooksPath` is not `.githooks`, from inside its `.git` directory, from
     an unknown directory, or from a branch without the gate; `--no-verify`; an abbreviated or unknown
@@ -156,9 +158,11 @@ Two hooks run it:
     forms the gate cannot check ref by ref: `--all`, `--branches`, `--mirror`, `--tags`, `:`.
 
   Then it runs that clone's gate on each pushed commit as it is before the command runs, which gives
-  an early, clear refusal; git's hook catches a commit the same command creates. Deletions, dry runs
-  and `git push -h` pass. Commands that do nothing of the above run untouched, whatever they say
-  about git push in quotes, heredocs or commit messages.
+  an early, clear refusal; git's hook catches a commit the same command creates, and a ref that does
+  not exist yet (a branch or tag created earlier in the command) is left to git's hook too. Deletions,
+  dry runs, `git push -h` and reads such as `git config --get` pass. Commands that do nothing of the
+  above run untouched, whatever they say about git push in a branch name, a path, a pattern, a commit
+  message or a variable.
 
 `make sdlc-gate` shows the decision for HEAD. A push the Claude Code hook refuses is made by the
 owner, by hand.
@@ -185,13 +189,15 @@ A second hook (`hack/sdlc/claude-format.sh`, `PostToolUse` for Edit, MultiEdit a
 
 - The records live in the clone's git directory: they show what ran on this machine, not on another
   one, and CI does not read them. CI runs its own checks.
-- The Claude Code hook sees the command line, not what it builds at run time or the files it runs:
-  a git command whose name or subcommand is assembled from variables or files, and the content of
-  script files, Makefiles and shell functions defined elsewhere. git's pre-push hook (required before
-  any command runs) checks the pushes they make; a script that disables git's hook on purpose gets
-  past both. The hooks keep a cooperative process honest and catch mistakes and shortcuts; they are
-  not a security boundary against someone who sets out to defeat them. The boundary is on GitHub: CI
-  and the branch rules of `main`.
+- The Claude Code hook sees the command line, not what it builds at run time or the files and
+  programs it runs: a git command whose name or subcommand is assembled from variables or `$'…'`
+  escapes; the content of script files, Makefiles and shell functions defined elsewhere; code given
+  to an interpreter (`python -c`, `perl -e`, `awk`, a custom command that is not a known wrapper); and
+  commands on a remote host (`ssh host …`). git's pre-push hook (required before any command runs)
+  checks the pushes they make; a script or program that disables git's hook on purpose gets past both.
+  The hooks keep a cooperative process honest and catch mistakes and shortcuts; they are not a
+  security boundary against someone who sets out to defeat them. The boundary is on GitHub: CI and the
+  branch rules of `main`.
 - The hooks come from the checked-out tree: while a commit from before the gate is checked out, they
   are not there to run.
 - The check record is keyed by the tree. Two of its checks also read history (commit subjects,

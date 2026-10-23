@@ -140,7 +140,10 @@ check "push in a substitution" 2 "$(hook 'out=$(git push origin change)')"
 # shellcheck disable=SC2016
 check "unknown directory" 2 "$(hook 'cd "$TMPDIR" && git push')"
 check "directory that does not exist" 2 "$(hook "cd $work/nowhere && git push")"
-check "unknown source" 2 "$(hook 'git push origin no-such-branch')"
+# A ref that does not resolve yet (a branch or tag created earlier in the same command) is left to
+# git's own pre-push hook, which sees what it ends up pointing at.
+check "unresolved source defers to git's hook" 0 "$(hook 'git push origin no-such-branch')"
+check "create a branch then push it" 0 "$(hook 'git switch -c fix/new && git push -u origin fix/new')"
 check "abbreviated --no-verify" 2 "$(hook 'git push --no-veri origin change')"
 check "alias defined with -c" 2 "$(hook "git -c alias.ship='push --no-verify' ship origin change")"
 check "configuration included with -c" 2 "$(hook 'git -c include.path=/x.cfg push origin change')"
