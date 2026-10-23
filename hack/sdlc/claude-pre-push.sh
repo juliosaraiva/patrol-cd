@@ -18,4 +18,4 @@ if [[ ! -x $bin || -n $(find "$root/hack/sdlc/pushcheck" "$root/go.sum" -newer "
 		exit 2
 	fi
 fi
-"$bin" <<<"$input"
+"$bin" "$root" <<<"$input"
