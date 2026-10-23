@@ -40,14 +40,15 @@ func TestRun(t *testing.T) {
 	t.Parallel()
 	tests := []struct {
 		name     string
+		sarifs   []string // default: testdata/sample.sarif
 		baseline []string
 		wantCode int
-		want     []string
+		want     []string // in this order
 		notWant  []string
 		wantErr  string
 	}{
 		{
-			name:     "no baseline: the error and the warning block",
+			name:     "no baseline: the error and the warning block, listed first",
 			wantCode: 1,
 			want: []string{
 				"CodeQL gate: FAILED: 4 results, 2 blocking, 0 accepted in the baseline, 1 suppressed in the source, 1 notes",
@@ -58,6 +59,16 @@ func TestRun(t *testing.T) {
 				"info       note    go/useless-assignment internal/c/c.go:7",
 			},
 			notWant: []string{"Second line."},
+		},
+		{
+			name:     "several SARIF files, one per language: all of them are gated",
+			sarifs:   []string{"testdata/sample.sarif", "testdata/levels.sarif"},
+			wantCode: 1,
+			want: []string{
+				"CodeQL gate: FAILED: 6 results, 4 blocking",
+				"fail       warning x/note-by-default a.go:1",
+				"fail       warning x/no-default b.go:2",
+			},
 		},
 		{
 			name: "both accepted",
@@ -133,12 +144,22 @@ func TestRun(t *testing.T) {
 				args = append(args, "-baseline", writeBaseline(t, tt.baseline...))
 			}
 			summary := filepath.Join(t.TempDir(), "summary.txt")
-			args = append(args, "-summary", summary, "testdata/sample.sarif")
+			sarifs := tt.sarifs
+			if sarifs == nil {
+				sarifs = []string{"testdata/sample.sarif"}
+			}
+			args = append(args, "-summary", summary)
+			args = append(args, sarifs...)
 			var out, errOut bytes.Buffer
 			code := run(args, &out, &errOut)
 			require.Equal(t, tt.wantCode, code, "stdout:\n%s\nstderr:\n%s", out.String(), errOut.String())
+			rest := out.String()
 			for _, w := range tt.want {
-				assert.Contains(t, out.String(), w)
+				i := strings.Index(rest, w)
+				if !assert.GreaterOrEqual(t, i, 0, "%q, after the lines before it, in:\n%s", w, out.String()) {
+					break
+				}
+				rest = rest[i+len(w):]
 			}
 			for _, w := range tt.notWant {
 				assert.NotContains(t, out.String(), w)
