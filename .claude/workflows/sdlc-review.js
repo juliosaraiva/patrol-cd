@@ -20,7 +20,9 @@ if (!input || !input.tree || !Array.isArray(input.files)) {
 const REVIEWERS = [
   { name: 'go-reviewer', match: /\.go$/ },
   { name: 'controller-reviewer', match: /^(api\/|internal\/(controller|appset|cache|sync|hydrator|commitserver|clusters|settings|project|tracking|compare|diff|health|server|notifications\/controller)\/).*\.go$/ },
-  { name: 'security-reviewer', match: /^(internal\/(apiserver|auth|rbac|reposerver|render|cmp|git|helm|oci|sandbox|webhook|lua|server|cli\/sso)\/|pkg\/|cmd\/|deploy\/|Dockerfile$|hack\/images\/|\.github\/)/ },
+  // Every non-test Go source of the product: credentials, egress, webhooks and untrusted input are
+  // spread over most packages, so the security reviewer sees them all rather than a list that drifts.
+  { name: 'security-reviewer', match: { test: f => (/^(internal|pkg|cmd)\/.*\.go$/.test(f) && !/_test\.go$/.test(f)) || /^(deploy\/|Dockerfile$|hack\/images\/|\.github\/)/.test(f) } },
   { name: 'test-reviewer', match: /(_test\.go$|^test\/|\/testdata\/|^hack\/ci\/|\.test\.tsx?$|^ui\/e2e\/)/ },
   { name: 'api-reviewer', match: /^(internal\/apiserver\/|pkg\/apiclient\/|api\/openapi\/|internal\/cli\/|cmd\/patrol\/|ui\/src\/api\/|docs\/parity\/)/ },
   { name: 'ui-reviewer', match: /^ui\// },
