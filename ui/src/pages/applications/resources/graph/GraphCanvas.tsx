@@ -23,13 +23,16 @@ export interface GraphCanvasProps {
 }
 
 const PAN_STEP = 80;
+const UNMEASURED: Size = { width: 0, height: 0 };
+const NOTHING_VISIBLE: ReturnType<typeof cullLayout> = { nodes: new Set(), edges: [] };
 
-function useElementSize(ref: React.RefObject<HTMLElement | null>): Size {
-  const [size, setSize] = useState<Size>({ width: 0, height: 0 });
+/** Client size of the element; undefined until it is measured, right after the first render. */
+function useElementSize(ref: React.RefObject<HTMLElement | null>): Size | undefined {
+  const [size, setSize] = useState<Size | undefined>(undefined);
   useLayoutEffect(() => {
     const el = ref.current;
     if (!el) return undefined;
-    const measure = () => setSize((prev) => (prev.width === el.clientWidth && prev.height === el.clientHeight ? prev : { width: el.clientWidth, height: el.clientHeight }));
+    const measure = () => setSize((prev) => (prev?.width === el.clientWidth && prev.height === el.clientHeight ? prev : { width: el.clientWidth, height: el.clientHeight }));
     measure();
     if (typeof ResizeObserver === 'undefined') return undefined;
     const observer = new ResizeObserver(measure);
@@ -61,7 +64,8 @@ function treeMeta(layout: LayoutResult) {
 export function GraphCanvas({ graph, label, selectedId, onActivate, onToggle, zoom = 1, onZoomChange }: GraphCanvasProps) {
   const helpId = useId();
   const viewportRef = useRef<HTMLDivElement>(null);
-  const size = useElementSize(viewportRef);
+  const measured = useElementSize(viewportRef);
+  const size = measured ?? UNMEASURED;
   const nodeById = useMemo(() => new Map(graph.nodes.map((n) => [n.id, n])), [graph]);
   const layout = useMemo(
     () => layoutGraph(graph.nodes.map((n) => ({ id: n.id, width: nodeWidth(n) })), graph.edges, graph.roots),
@@ -77,7 +81,11 @@ export function GraphCanvas({ graph, label, selectedId, onActivate, onToggle, zo
   viewRef.current = view;
 
   const active = activeId && layout.nodes.has(activeId) ? activeId : layout.order[0];
-  const culled = useMemo(() => cullLayout(layout, view, size), [layout, view, size]);
+  // Before the measurement (a layout effect, so before the first paint) only the tab stop and the
+  // selected node are drawn: culling needs the size, and mounting every node of a large graph for
+  // that one render costs seconds. A viewport that measures 0×0 (never laid out, e.g. jsdom)
+  // disables culling.
+  const culled = useMemo(() => (measured ? cullLayout(layout, view, measured) : NOTHING_VISIBLE), [layout, view, measured]);
   // The tab stop and the selected node stay mounted when panned out of view (focus survives).
   const renderIds = new Set(culled.nodes);
   if (active) renderIds.add(active);

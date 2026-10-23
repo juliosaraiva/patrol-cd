@@ -1,5 +1,7 @@
 import { render, screen, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
+import { flushSync } from 'react-dom';
+import { createRoot } from 'react-dom/client';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { largeTreeFixture } from '../../../../mocks/fixtures/apps-resources';
 import { buildResourceModel } from '../model/resources';
@@ -95,4 +97,69 @@ describe('GraphCanvas', () => {
     expect(onActivate).toHaveBeenCalledTimes(3);
     expect(onActivate.mock.calls[0]?.[0]).toMatchObject({ type: 'app', label: 'big' });
   });
+
+  it('draws only the tab stop before the viewport is measured, then only the nodes near it', () => {
+    const graph = bigGraph();
+    // The viewport is measured in a layout effect after the first commit: record what that commit drew.
+    const atMeasurement: Drawn[] = [];
+    vi.spyOn(HTMLElement.prototype, 'clientWidth', 'get').mockImplementation(() => {
+      atMeasurement.push(drawn());
+      return 1000;
+    });
+    render(<GraphCanvas graph={graph} label="Big tree" onActivate={() => undefined} />);
+    expect(atMeasurement[0]).toEqual({ nodes: 1, edges: 0 });
+    const after = drawn();
+    expect(after.nodes).toBeGreaterThan(1);
+    expect(after.nodes).toBeLessThan(100);
+    expect(after.edges).toBeGreaterThan(0);
+    expect(after.edges).toBeLessThan(100);
+  });
+
+  it('measures the viewport before the first paint', () => {
+    // render() mounts inside act(), which also runs passive effects. Mount outside act, as a browser
+    // does: when flushSync returns, React would yield to paint, so the DOM must already be culled.
+    const env = globalThis as typeof globalThis & { IS_REACT_ACT_ENVIRONMENT?: boolean };
+    const actEnvironment = env.IS_REACT_ACT_ENVIRONMENT;
+    env.IS_REACT_ACT_ENVIRONMENT = false;
+    const container = document.body.appendChild(document.createElement('div'));
+    const root = createRoot(container);
+    try {
+      flushSync(() => root.render(<GraphCanvas graph={bigGraph(200)} label="Big tree" onActivate={() => undefined} />));
+      const painted = drawn();
+      expect(painted.nodes).toBeGreaterThan(1);
+      expect(painted.nodes).toBeLessThan(100);
+    } finally {
+      root.unmount();
+      container.remove();
+      env.IS_REACT_ACT_ENVIRONMENT = actEnvironment;
+    }
+  });
+
+  it('draws every node when the viewport measures 0×0', () => {
+    const graph = bigGraph(40);
+    const atMeasurement: Drawn[] = [];
+    vi.spyOn(HTMLElement.prototype, 'clientWidth', 'get').mockImplementation(() => {
+      atMeasurement.push(drawn());
+      return 0;
+    });
+    vi.spyOn(HTMLElement.prototype, 'clientHeight', 'get').mockReturnValue(0);
+    render(<GraphCanvas graph={graph} label="Big tree" onActivate={() => undefined} />);
+    expect(atMeasurement[0]).toEqual({ nodes: 1, edges: 0 });
+    expect(within(screen.getByRole('tree', { name: 'Big tree' })).getAllByRole('treeitem')).toHaveLength(graph.nodes.length);
+    expect(drawn().edges).toBe(graph.edges.length);
+  });
 });
+
+interface Drawn {
+  nodes: number;
+  edges: number;
+}
+
+/** Nodes and edges currently in the canvas' SVG. */
+function drawn(): Drawn {
+  const svg = document.querySelector('svg[data-node-count]');
+  return {
+    nodes: svg?.querySelectorAll('[role="treeitem"]').length ?? 0,
+    edges: svg?.querySelectorAll(':scope > g > g[aria-hidden="true"] > path').length ?? 0,
+  };
+}
