@@ -20,19 +20,19 @@ guide is [docs/guides/claude-code-sdlc.md](../../guides/claude-code-sdlc.md).
 
 The machine was shared with up to 16 review and red-team agents during most runs.
 
-## Checks of the code at `c409428` (the last code commit before this record's update)
+## Checks of the code at `dd02f04` (the last code commit before this record's update)
 
 | Command | Result |
 |---------|--------|
-| `go vet ./hack/sdlc/... ./internal/git/...`; `golangci-lint run ./hack/sdlc/... ./internal/git/...` | passed, 0 issues |
-| `shellcheck hack/sdlc/*.sh .githooks/pre-push` | passed |
-| `go test -race -count=1 ./hack/sdlc/...` | passed: `pushcheck` and `sarifgate`, 411 tests (counted with `-json`) |
-| `bash hack/sdlc/test-sdlc.sh` (the gate end to end in scratch repositories with a bare remote) | passed: 106 passed, 0 failed |
-| `PATH="$PWD/bin:$PATH" go test -race -count=1 ./internal/git/...` | passed (and `./internal/reposerver/...` on `6f9f985`, which has the same `internal/git`) |
+| `go vet ./hack/sdlc/...`; `golangci-lint run ./hack/sdlc/...` | passed, 0 issues |
+| `shellcheck hack/sdlc/*.sh` | passed |
+| `go test -race -count=1 ./hack/sdlc/...` | passed: `pushcheck` and `sarifgate`, 437 tests (counted with `-json`) |
+| `bash hack/sdlc/test-sdlc.sh` (the gate end to end in scratch repositories with a bare remote) | passed: 109 passed, 0 failed |
+| `PATH="$PWD/bin:$PATH" go test -race -count=1 ./internal/git/...` | passed on `c409428` (and `./internal/reposerver/...` on `6f9f985`); `internal/git` has not changed since |
 
 ## Agent review
 
-Eight runs of `.claude/workflows/sdlc-review.js` on successive trees, each verified finding fixed
+Nine runs of `.claude/workflows/sdlc-review.js` on successive trees, each verified finding fixed
 before the next run:
 
 | Tree | Blocking (verified) | Minor | Refuted |
@@ -45,16 +45,26 @@ before the next run:
 | `b9bbfb2` | 11 | 7 | 0 |
 | `83ea66c` | 7 | 6 | 0 |
 | `fbdc7df` | 8 | 7 | 0 |
+| `bdae10c` | 16 | 8 | 0 |
 
 Most findings were ways around the Claude Code hook (shell and git constructs it read differently
 from bash, zsh or git) and tests that could not fail. The seventh run's were six untested branches
 and one bypass (a zsh function defined through `functions[…]=`). The eighth run's were six more
 spellings the walker misread (a quoted or escaped `export`, `=env`, a piped script with shell
 options, `rebase -x'…'`, `watch`, git's upload-pack and receive-pack commands) and two gaps in the
-gate scripts (a local branch named `origin/main`, ignored source files). Rather than model each new
-spelling, the hook now has a net under the walker: a command it does not model, whose own words
-name `--no-verify`, `core.hooksPath` or an unsafe `GIT_*` variable, is refused. The review of the
-tree that contains this record runs after it is written; its result is in the pull request.
+gate scripts (a local branch named `origin/main`, ignored source files). The ninth run, on a tree
+with a net under the walker that exempted git's own subcommands and data commands, found 16 more:
+ways through the exemptions, a push from another clone of the project, a nil heredoc body that
+crashed the parser, and more spellings (`chdir`, `EDITOR`, `send-email`'s command options).
+
+The counts did not converge, so the owner chose to narrow the hook instead of modelling each new
+spelling (`dd02f04`). The text net now refuses, in any command and with no exemptions, a command
+line that names `--no-verify` or an abbreviation of it, `core.hooksPath`, `.githooks`, a `GIT_*`
+variable outside the safe list or git's push plumbing, in its text and in each command's words as
+bash expands them; a push runs only from this clone or its worktrees; and the walker stays for
+early, clear refusals. The guide now says the hooks catch mistakes and shortcuts, and that branch
+protection (#220) is the boundary against deliberate evasion. The review of the tree that contains
+this record runs after it is written; its result is in the pull request.
 
 ## Red team
 
@@ -89,7 +99,10 @@ agents loaded the machine: `ci-static` passed (314 s), the commit-subject check 
 of all 102 packages passed (1790 s), and CodeQL of Go, the web UI and the workflows passed (638 s).
 It then stopped with `check.sh: line 172: syntax error`: the file had been edited while it ran, and
 bash reads a script as it goes. Nothing was recorded. check.sh is now one group that bash reads whole
-before running it. The run on the tree that contains this record is in the pull request.
+before running it. An eighth run, on `36cc2ff`, stopped in `ci-static` with `Error: parallel
+golangci-lint is running`: a review agent ran golangci-lint at the same time, and golangci-lint
+refuses to run twice at once. Check runs now wait until no review agents run. The run on the tree
+that contains this record is in the pull request.
 
 ## Findings outside the SDLC
 
@@ -122,4 +135,6 @@ remote instead.
   record run after it is written: a record cannot hold results about the tree it is part of. Both
   are reported in the pull request.
 - The Claude Code hook is not a security boundary (guide, Limits): it does not read the user's shell
-  aliases, functions or options, the content of scripts, or code given to an interpreter.
+  aliases, functions or options, the content of scripts, or code given to an interpreter, and a
+  token assembled at run time gets past its net. Branch protection on `main` (#220) is not on yet.
+- The red-team runs were on trees before the narrowing; none has run on `dd02f04`.
