@@ -67,10 +67,20 @@ if (input.docsOnly) {
   return { tree: input.tree, reviewers: [], blocking: [], minor: [], refuted: [], notes: 'documentation only' }
 }
 
+// Documentation: hack/sdlc/lib.sh sdlc_docs_only (the rule of hack/ci/classify-changes.sh).
+const DOCS = /^(docs\/|[^/]+\.md$|\.gitignore$)/
+
 let selected = REVIEWERS.map(r => ({ ...r, files: input.files.filter(f => r.match.test(f)) })).filter(r => r.files.length > 0)
+// Files no specialist owns and that are not documentation (go.mod, go.sum, tools/, examples/, linter
+// configuration...) go to the delivery reviewer, which covers how the project is built and checked.
+const unowned = input.files.filter(f => !DOCS.test(f) && !REVIEWERS.some(r => r.match.test(f)))
+if (unowned.length > 0) {
+  const delivery = selected.find(r => r.name === 'delivery-reviewer')
+  if (delivery) delivery.files = delivery.files.concat(unowned)
+  else selected.push({ name: 'delivery-reviewer', files: unowned })
+}
 if (selected.length === 0) {
-  // Not documentation, but nothing a specialist owns (examples/, scripts outside hack/...): one
-  // generalist pass.
+  // Not documentation by the rule above, yet nothing selected: one generalist pass over everything.
   selected = [{ name: 'go-reviewer', files: input.files }, { name: 'delivery-reviewer', files: input.files }]
 }
 log(`reviewers: ${selected.map(r => `${r.name} (${r.files.length})`).join(', ')}`)

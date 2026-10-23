@@ -15,7 +15,8 @@ Closes #
 
 ## Minor review findings not addressed
 
-<!-- One line each, or "none". -->
+<!-- One line each, or "none". This repository is public: a finding that is a vulnerability goes to a
+private report (SECURITY.md), never here. -->
 
 ## Not covered
 
