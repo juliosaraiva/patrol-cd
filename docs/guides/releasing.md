@@ -102,8 +102,9 @@ breaking change) with a type from the table above. Reword offending commits
 | Variable `RELEASE_REGISTRY` (optional) | Where the image and chart go, `host[/namespace]`. Default `ghcr.io/<owner>`. |
 | Secret `RELEASE_REGISTRY_TOKEN` (optional) | Registry password when `RELEASE_REGISTRY` is not GHCR; for GHCR the workflow token (`packages: write`) is used. |
 
-Packages pushed to GHCR from a private repository are private: grant pull access (or make the
-package public) before installing from them, or give the cluster an image pull secret.
+A package's visibility on GHCR is its own setting: after the first release, check it in the package's
+settings and make it public for anonymous pulls (a package kept private needs an image pull secret
+in the cluster).
 
 ## Locally
 

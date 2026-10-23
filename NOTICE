@@ -6,6 +6,12 @@ This product includes software developed as part of the Argo CD project
 
   - internal/lua/customizations/**  Lua health checks and resource actions derived from
     argo-cd v3.5.5 resource_customizations/ (commit a5038b0e2bbac1715754380ae0084df8e3d5b48c).
+  - internal/notifications/catalog/{triggers,templates}/**  notification triggers and templates
+    derived from argo-cd v3.5.5 notifications_catalog/ (same commit); the template context key
+    argocdUrl is renamed to patrolUrl. They are embedded in the patrolcd binary.
+  - internal/health/testdata/*.yaml except patrol-application-*.yaml  test fixtures copied from
+    argo-cd v3.5.5 gitops-engine/pkg/health/testdata/ and
+    gitops-engine/pkg/utils/kube/testdata/nginx.yaml (same commit).
 
 The container image built from the Dockerfile additionally bundles the following third-party
 software, unmodified, each under its own license. Versions and SHA-256 pins are in
