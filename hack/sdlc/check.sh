@@ -1,0 +1,157 @@
+#!/usr/bin/env bash
+# Deterministic checks of the change on the current branch, run before every push
+# (docs/guides/claude-code-sdlc.md). What runs depends on the files changed since the merge base
+# with origin/main:
+#
+#   always                 make ci-static (gofmt, go mod, build, vet, golangci-lint, generated files,
+#                          OpenAPI, parity, test rules, tier tests, SDLC script tests, shell,
+#                          actionlint, gitleaks) and make release-lint-commits (commit subjects)
+#   Go files               make ci-unit on the changed packages (-race, envtest, skip policy);
+#                          go.mod or go.sum: every package
+#   test/integration/      make ci-integration
+#   deploy/, test/deploy/  make ci-deploy
+#   hack/kind/, test/e2e/  make ci-scripts
+#   ui/                    make ci-ui
+#   Go, JS/TS, workflows   CodeQL: hack/sdlc/codeql.sh analyze for the languages that changed
+#
+# Documentation-only changes run the first row only. When every check passed on a clean tree, the
+# result is recorded for HEAD's tree in $(git rev-parse --git-common-dir)/patrol-sdlc/checks/; a push
+# needs that record (hack/sdlc/gate.sh). A dirty tree is checked but never recorded.
+#
+# Usage: hack/sdlc/check.sh [--no-codeql]
+#   --no-codeql  skip CodeQL (faster iteration; nothing is recorded)
+set -euo pipefail
+
+cd "$(git rev-parse --show-toplevel)"
+# shellcheck source=hack/sdlc/lib.sh
+source hack/sdlc/lib.sh
+
+codeql=1
+for arg in "$@"; do
+	case $arg in
+	--no-codeql) codeql=0 ;;
+	*)
+		echo "usage: hack/sdlc/check.sh [--no-codeql]" >&2
+		exit 2
+		;;
+	esac
+done
+
+head=$(git rev-parse HEAD)
+tree=$(git rev-parse 'HEAD^{tree}')
+base=$(sdlc_base HEAD)
+changed=()
+while IFS= read -r f; do changed+=("$f"); done < <(sdlc_changed "$base" HEAD)
+record=1
+if ! sdlc_clean; then
+	record=0
+	echo "sdlc-check: the working tree has uncommitted changes; checking it, but recording nothing (commit first)"
+fi
+[[ $codeql -eq 1 ]] || record=0
+
+echo "sdlc-check: HEAD $head (tree $tree), base $base, ${#changed[@]} changed files"
+
+ran=()
+step() {
+	local name=$1
+	shift
+	echo
+	echo "==> sdlc-check: $name"
+	local start=$SECONDS
+	if "$@"; then
+		ran+=("$name")
+		echo "<== sdlc-check: $name passed ($((SECONDS - start))s)"
+	else
+		echo "<== sdlc-check: $name FAILED ($((SECONDS - start))s)" >&2
+		exit 1
+	fi
+}
+
+any() { # any REGEX: succeeds when a changed file matches
+	local f
+	for f in ${changed[@]+"${changed[@]}"}; do
+		[[ $f =~ $1 ]] && return 0
+	done
+	return 1
+}
+
+step ci-static make --no-print-directory ci-static
+step commit-subjects make --no-print-directory release-lint-commits
+
+if printf '%s\n' ${changed[@]+"${changed[@]}"} | sdlc_docs_only; then
+	echo
+	echo "sdlc-check: documentation only; no tests, no CodeQL"
+else
+	# Go packages of the changed Go files (and of changed testdata), without the two suites that have
+	# their own targets.
+	pkgs=()
+	if any '^(go\.mod|go\.sum)$'; then
+		pkgs=(./...)
+	else
+		seen=$'\n'
+		for f in ${changed[@]+"${changed[@]}"}; do
+			[[ $f == *.go || $f == */testdata/* ]] || continue
+			d=${f%%/testdata/*}
+			[[ $d == "$f" ]] && d=$(dirname "$f")
+			[[ $d == test/integration* || $d == test/deploy* ]] && continue
+			compgen -G "$d/*.go" >/dev/null || continue
+			[[ $seen == *$'\n'"$d"$'\n'* ]] && continue
+			seen+="$d"$'\n'
+			pkgs+=("./$d")
+		done
+	fi
+	if [[ ${#pkgs[@]} -gt 0 ]]; then
+		step "go tests (${#pkgs[@]} packages)" make --no-print-directory ci-unit CI_UNIT_PKGS="${pkgs[*]}"
+	fi
+	if any '^test/integration/'; then
+		step integration make --no-print-directory ci-integration
+	fi
+	if any '^(deploy/|test/deploy/)'; then
+		step deploy make --no-print-directory ci-deploy
+	fi
+	if any '^(hack/kind/|test/e2e/)'; then
+		step kind-scripts make --no-print-directory ci-scripts
+	fi
+	if any '^ui/'; then
+		step ui make --no-print-directory ci-ui
+	fi
+	if [[ $codeql -eq 1 ]]; then
+		langs=()
+		any '\.go$|^go\.(mod|sum)$' && langs+=(go)
+		any '\.(ts|tsx|js|jsx|mjs|cjs)$|(^|/)package\.json$' && langs+=(javascript-typescript)
+		any '^\.github/(workflows|actions)/' && langs+=(actions)
+		if [[ ${#langs[@]} -gt 0 ]]; then
+			step "codeql (${langs[*]})" hack/sdlc/codeql.sh analyze "${langs[@]}"
+		else
+			echo
+			echo "sdlc-check: no Go, UI or workflow change; no CodeQL"
+		fi
+	else
+		echo
+		echo "sdlc-check: CodeQL skipped (--no-codeql)"
+	fi
+fi
+
+echo
+if [[ $record -eq 1 ]]; then
+	# Nothing may have changed while the checks ran.
+	if [[ $(git rev-parse 'HEAD^{tree}') != "$tree" ]] || ! sdlc_clean; then
+		echo "sdlc-check: the tree changed while the checks ran; nothing recorded" >&2
+		exit 1
+	fi
+	state=$(sdlc_state_dir)
+	{
+		echo "tree=$tree"
+		echo "head=$head"
+		echo "base=$base"
+		echo "result=pass"
+		printf 'checks=%s\n' "$(
+			IFS=,
+			echo "${ran[*]}"
+		)"
+		echo "time=$(date -u +%Y-%m-%dT%H:%M:%SZ)"
+	} >"$state/checks/$tree"
+	echo "sdlc-check: all checks passed; recorded for tree $tree"
+else
+	echo "sdlc-check: all checks passed; not recorded (dirty tree or --no-codeql)"
+fi

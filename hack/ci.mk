@@ -4,7 +4,8 @@
 # way. Guide: docs/guides/ci.md.
 #
 #   make ci-static       gofmt, go mod tidy, build, vet, golangci-lint, generated files, OpenAPI,
-#                        parity matrix, test report rules, shell scripts, workflow lint, secret scan (job "static")
+#                        parity matrix, test report rules, tier and SDLC gate tests, shell scripts, workflow lint,
+#                        secret scan (job "static")
 #   make ci-unit         go test -json (-race unless CI_RACE=0) over every package except test/integration and
 #                        test/deploy, then the skip/must-run report (job "unit")
 #   make ci-scripts      the kind scripts' offline tests (envtest, no Docker) (job "unit")
@@ -55,7 +56,7 @@ ACTIONLINT ?= actionlint
 ##@ CI
 
 .PHONY: ci-static
-ci-static: ci-gofmt ci-gomod ci-lint-go ci-generated ci-openapi ci-parity ci-rules ci-classify ci-shell ci-actionlint ci-gitleaks ## Everything the "static" job checks.
+ci-static: ci-gofmt ci-gomod ci-lint-go ci-generated ci-openapi ci-parity ci-rules ci-classify ci-sdlc ci-shell ci-actionlint ci-gitleaks ## Everything the "static" job checks.
 
 .PHONY: ci-gofmt
 ci-gofmt: ## Fail when a tracked Go file is not gofmt-formatted.
