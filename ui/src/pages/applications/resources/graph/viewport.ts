@@ -59,8 +59,8 @@ export function visibleRect(view: ViewTransform, viewport: Size, margin = 200) {
 }
 
 /**
- * Ids of nodes and indexes of edges intersecting the viewport. An unknown viewport size
- * (0×0, e.g. before the first measurement) disables culling.
+ * Ids of nodes and indexes of edges intersecting the viewport. A 0×0 viewport (never laid out,
+ * e.g. jsdom) disables culling.
  */
 export function cullLayout(layout: LayoutResult, view: ViewTransform, viewport: Size, margin = 200): { nodes: Set<string>; edges: number[] } {
   const nodes = new Set<string>();

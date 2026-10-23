@@ -95,4 +95,47 @@ describe('GraphCanvas', () => {
     expect(onActivate).toHaveBeenCalledTimes(3);
     expect(onActivate.mock.calls[0]?.[0]).toMatchObject({ type: 'app', label: 'big' });
   });
+
+  it('draws only the tab stop before the viewport is measured, then only the nodes near it', () => {
+    const graph = bigGraph();
+    // The viewport is measured in a layout effect after the first commit: record what that commit drew.
+    const atMeasurement: Drawn[] = [];
+    vi.spyOn(HTMLElement.prototype, 'clientWidth', 'get').mockImplementation(() => {
+      atMeasurement.push(drawn());
+      return 1000;
+    });
+    render(<GraphCanvas graph={graph} label="Big tree" onActivate={() => undefined} />);
+    expect(atMeasurement[0]).toEqual({ nodes: 1, edges: 0 });
+    const after = drawn();
+    expect(after.nodes).toBeGreaterThan(1);
+    expect(after.nodes).toBeLessThan(100);
+    expect(after.edges).toBeLessThan(100);
+  });
+
+  it('draws every node when the viewport measures 0×0', () => {
+    const graph = bigGraph(40);
+    const atMeasurement: Drawn[] = [];
+    vi.spyOn(HTMLElement.prototype, 'clientWidth', 'get').mockImplementation(() => {
+      atMeasurement.push(drawn());
+      return 0;
+    });
+    vi.spyOn(HTMLElement.prototype, 'clientHeight', 'get').mockReturnValue(0);
+    render(<GraphCanvas graph={graph} label="Big tree" onActivate={() => undefined} />);
+    expect(atMeasurement[0]).toEqual({ nodes: 1, edges: 0 });
+    expect(within(screen.getByRole('tree', { name: 'Big tree' })).getAllByRole('treeitem')).toHaveLength(graph.nodes.length);
+  });
 });
+
+interface Drawn {
+  nodes: number;
+  edges: number;
+}
+
+/** Nodes and edges currently in the canvas' SVG. */
+function drawn(): Drawn {
+  const svg = document.querySelector('svg[data-node-count]');
+  return {
+    nodes: svg?.querySelectorAll('[role="treeitem"]').length ?? 0,
+    edges: svg?.querySelectorAll(':scope > g > g[aria-hidden="true"] > path').length ?? 0,
+  };
+}
