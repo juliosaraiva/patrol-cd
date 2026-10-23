@@ -1,9 +1,9 @@
 #!/usr/bin/env bash
 # git pre-push hook (enable with `make sdlc-git-hooks`): every pushed commit must pass
 # hack/sdlc/gate.sh (docs/guides/claude-code-sdlc.md). This is the gate's authority: unlike the
-# Claude Code hook, it sees the commits actually being pushed. The Claude Code hook refuses pushes
-# while it is not enabled, and refuses --no-verify. A person can bypass it in an emergency with
-# `git push --no-verify`.
+# Claude Code hook, it sees the commits actually being pushed. The Claude Code hook refuses every
+# command while it is not enabled, and refuses --no-verify and what else would keep it from running.
+# A person can bypass it in an emergency with `git push --no-verify`.
 set -euo pipefail
 
 [[ -x hack/sdlc/gate.sh ]] || exit 0 # a branch from before the gate existed

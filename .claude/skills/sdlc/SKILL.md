@@ -15,7 +15,7 @@ steps below are not optional.
 
 2. **Branch** from an up-to-date `main`: `<type>/<short-topic>` (`fix/…`, `feat/…`, `docs/…`,
    `ci/…`, `test/…`, `chore/…`). Once per clone, `make sdlc-git-hooks` enables git's pre-push
-   hook; the Claude Code hook refuses pushes until it is enabled.
+   hook; the Claude Code hook refuses every other command until it is enabled.
 
 3. **Implement** following `CLAUDE.md` (conventions, ground rules). Go files are gofmt-formatted
    by a hook after each edit. Add or change tests with the behaviour; record executed checks in

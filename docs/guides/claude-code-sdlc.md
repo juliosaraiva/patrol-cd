@@ -124,20 +124,30 @@ Two hooks run it:
   alias or another tool are all checked. A person can bypass it in an emergency with
   `git push --no-verify`.
 - **the Claude Code hook** (`hack/sdlc/claude-pre-push.sh`, a `PreToolUse` hook for the Bash tool
-  in `.claude/settings.json`). A command without the word "push" passes at once. Any other command
-  goes to `hack/sdlc/pushcheck` (built into `bin/` on first use), which parses it as bash with
-  `mvdan.cc/sh`: text in quotes, heredoc bodies and comments are not commands, `cd DIR` and
-  `git -C DIR` change the directory, and `bash -c '…'` is parsed too. For a push from this
-  repository or one of its worktrees it refuses:
-  - any push while `core.hooksPath` is not `.githooks` (run `make sdlc-git-hooks` once);
-  - what would skip git's hook: `--no-verify`, `-c core.hooksPath=…`, `GIT_*` variables, `--git-dir`;
-  - pushes it cannot follow: inside `$(…)`, `eval`, `timeout`, `sudo`, `xargs` and similar wrappers,
-    a non-literal script, command word or directory, a directory that does not exist, and any
-    command that does not parse as bash (the Bash tool may run zsh);
+  in `.claude/settings.json`). While git's hook is not enabled it refuses every command but
+  `make sdlc-git-hooks`, so git's hook runs whatever Claude Code pushes. Then a command without the
+  word "push" passes at once. Any other command goes to `hack/sdlc/pushcheck` (built into `bin/` on
+  first use), which parses it as bash with `mvdan.cc/sh`: text in quotes, heredoc bodies and
+  comments are not commands, `cd DIR` and `git -C DIR` change the directory, and `bash -c '…'` and a
+  heredoc or here-string given to a shell are parsed too. It refuses, wherever the push runs:
+  - what keeps git's hook from running: `GIT_*` variables (inline, `env`, `export`), `--git-dir`,
+    `--work-tree`, `--bare` and other global options that move the repository, a push from inside a
+    `.git` directory, `-c alias.…`, and `git config` of `core.hooksPath` or an alias in a command
+    that mentions push;
+  - pushes it cannot follow: inside `$(…)`, `eval`, `timeout`, `sudo`, `xargs` and other commands
+    that run their arguments, a script piped to a shell, a non-literal script, command word, git
+    option or directory, a directory that does not exist, and any command that does not parse as
+    bash (the Bash tool may run zsh).
+
+  For a push from a clone of this project (any clone, and its worktrees) it also refuses:
+  - a push while that clone's `core.hooksPath` is not `.githooks`;
+  - `--no-verify`, `-c core.hooksPath=…`, an abbreviated or unknown `git push` option (git accepts
+    `--no-veri` for `--no-verify`) and a non-literal argument;
   - pushes the gate cannot check ref by ref: `--all`, `--branches`, `--mirror`, `--tags`, `:`.
 
-  Then it runs the gate on each pushed commit as it is before the command runs, which gives an early,
-  clear refusal; git's hook catches a commit the same command creates. Deletions and dry runs pass.
+  Then it runs that clone's gate on each pushed commit as it is before the command runs, which gives
+  an early, clear refusal; git's hook catches a commit the same command creates. Deletions, dry runs
+  and `git push -h` pass.
 
 `make sdlc-gate` shows the decision for HEAD. A push the Claude Code hook refuses is made by the
 owner, by hand.
@@ -164,10 +174,11 @@ A second hook (`hack/sdlc/claude-format.sh`, `PostToolUse` for Edit, MultiEdit a
 
 - The records live in the clone's git directory: they show what ran on this machine, not on another
   one, and CI does not read them. CI runs its own checks.
-- The Claude Code hook parses the command Claude Code runs; a push inside a script, a git alias or a
-  shell function defined elsewhere is not seen there, and git's pre-push hook (required) checks it
-  instead. Neither hook stops someone who disables them on purpose: they keep the process honest,
-  they are not a security boundary.
+- The Claude Code hook parses the command Claude Code runs; a push inside a script file, a git alias
+  or a shell function defined elsewhere is not seen there, and git's pre-push hook (required before
+  any command runs) checks it instead. A script that pushes with `--no-verify` or another hook
+  override gets past both. Neither hook stops someone who disables them on purpose: they keep the
+  process honest, they are not a security boundary.
 - The checks run the tests of the changed packages, not of the packages that import them; CI's full
   tier runs everything on every push to `main`.
 - CodeQL `security-extended` finds known vulnerability patterns; it does not prove their absence.

@@ -51,7 +51,7 @@ git init -q --bare -b main "$remote"
 repo=$work/repo
 git init -q -b main "$repo"
 mkdir -p "$repo/hack/sdlc" "$repo/hack/ci" "$repo/docs" "$repo/.githooks"
-cp "$src"/hack/sdlc/{lib.sh,gate.sh,record-review.sh,review-input.sh} "$repo/hack/sdlc/"
+cp "$src"/hack/sdlc/{lib.sh,gate.sh,record-review.sh,review-input.sh,claude-pre-push.sh} "$repo/hack/sdlc/"
 cp "$src/hack/ci/classify-changes.sh" "$repo/hack/ci/"
 cp "$src/.githooks/pre-push" "$repo/.githooks/"
 cd "$repo"
@@ -70,6 +70,12 @@ hook() { # hook COMMAND [CWD]: prints the exit status of the hook binary for thi
 	local rc=0
 	jq -n --arg c "$1" --arg d "${2:-$repo}" '{tool_name: "Bash", tool_input: {command: $c}, cwd: $d}' |
 		"$src/bin/sdlc-pushcheck" "$repo" >/dev/null 2>"$work/hook.err" || rc=$?
+	echo "$rc"
+}
+wrapper() { # wrapper COMMAND: exit status of the Claude Code hook script itself (commands without "push" only: it would build pushcheck)
+	local rc=0
+	jq -n --arg c "$1" --arg d "$repo" '{tool_name: "Bash", tool_input: {command: $c}, cwd: $d}' |
+		"$repo/hack/sdlc/claude-pre-push.sh" >/dev/null 2>"$work/hook.err" || rc=$?
 	echo "$rc"
 }
 gate() {
@@ -96,10 +102,21 @@ mkdir "$work/other"
 git init -q "$work/other"
 check "push from another repository" 0 "$(hook "git -C $work/other push")"
 
-# Without core.hooksPath the hook refuses every push from this repository.
-check "git hook not enabled" 2 "$(hook 'git push -u origin change')"
+# Without core.hooksPath the hook script refuses every command but the one that enables git's hook,
+# and pushcheck every push from this repository, dry runs and deletions included.
+check "git hook not enabled: any command" 2 "$(wrapper 'ls')"
 contains "reason: make sdlc-git-hooks" "$work/hook.err" "make sdlc-git-hooks"
+check "git hook not enabled: make sdlc-git-hooks runs" 0 "$(wrapper 'make sdlc-git-hooks')"
+check "git hook not enabled: push" 2 "$(hook 'git push -u origin change')"
+contains "reason: make sdlc-git-hooks" "$work/hook.err" "make sdlc-git-hooks"
+check "git hook not enabled: negated dry run" 2 "$(hook 'git push -n --no-dry-run origin change')"
+check "git hook not enabled: negated delete" 2 "$(hook 'git push -d --no-delete origin change')"
+check "git hook not enabled: heredoc to bash" 2 "$(hook "$(printf "bash <<'EOF'\ngit push origin change\nEOF")")"
+git clone -q "$remote" "$work/clone2"
+check "second clone without the git hook" 2 "$(hook 'git push origin HEAD:other' "$work/clone2")"
+contains "reason: make sdlc-git-hooks in the second clone" "$work/hook.err" "make sdlc-git-hooks"
 git config core.hooksPath .githooks
+check "git hook enabled: any command" 0 "$(wrapper 'ls')"
 
 # Forms the hook refuses whatever the records.
 check "--tags" 2 "$(hook 'git push --tags origin')"
@@ -112,6 +129,17 @@ check "push in a substitution" 2 "$(hook 'out=$(git push origin change)')"
 check "unknown directory" 2 "$(hook 'cd "$TMPDIR" && git push')"
 check "directory that does not exist" 2 "$(hook "cd $work/nowhere && git push")"
 check "unknown source" 2 "$(hook 'git push origin no-such-branch')"
+check "abbreviated --no-verify" 2 "$(hook 'git push --no-veri origin change')"
+check "alias defined with -c" 2 "$(hook "git -c alias.ship='push --no-verify' ship origin change")"
+
+# Forms that keep git's hook from running (the relative core.hooksPath has no hook outside the work
+# tree) are refused wherever they run.
+check "push from inside .git" 2 "$(hook 'git push origin change' "$repo/.git")"
+check "git -C .git push" 2 "$(hook 'git -C .git push origin change')"
+check "--git-dir from elsewhere" 2 "$(hook "git --git-dir=$repo/.git push origin change" "$work")"
+check "exported GIT_DIR" 2 "$(hook "export GIT_DIR=$repo/.git; cd $work && git push origin change")"
+check "git hook: push from inside .git skips it (why the above are refused)" 0 "$(git -C .git push -q origin change:from-git-dir 2>/dev/null && echo 0)"
+git push -q origin :from-git-dir
 
 # No records: the hook and git's hook both refuse.
 check "bare push" 2 "$(hook 'git push')"
@@ -120,6 +148,17 @@ check "git -C DIR push" 2 "$(hook "git -C $repo push origin HEAD" "$work")"
 check "cd DIR && git push" 2 "$(hook "cd $repo && git push origin change" "$work")"
 check "git hook refuses the push" 1 "$(gitpush origin change)"
 check "remote did not get it" none "$(remote_has change)"
+check "help is not a push" 0 "$(hook 'git push -h')"
+
+# A worktree of the clone shares its records and core.hooksPath.
+git worktree add -q -b wt "$work/wt"
+check "push from a worktree" 2 "$(hook 'git push origin wt' "$work/wt")"
+contains "reason names the worktree's tree" "$work/hook.err" "no passing deterministic checks for tree $tree"
+check "--no-verify from a worktree" 2 "$(hook 'git push --no-verify origin wt' "$work/wt")"
+rc=0
+git -C "$work/wt" push -q origin wt >/dev/null 2>&1 || rc=$?
+check "git hook refuses the worktree's push" 1 "$rc"
+check "remote did not get the worktree's branch" none "$(remote_has wt)"
 
 # Checks recorded, review missing, then failing, then passing.
 mkdir -p "$state/checks" "$state/reviews"
