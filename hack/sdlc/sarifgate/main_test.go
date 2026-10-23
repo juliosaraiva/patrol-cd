@@ -28,6 +28,12 @@ func TestReadSARIFResolvesRules(t *testing.T) {
 	assert.Equal(t, "warning", rs[1].Level, "the result's own level")
 	assert.Equal(t, "note", rs[2].Level)
 	assert.True(t, rs[3].Suppressed)
+
+	rs, err = readSARIF("testdata/levels.sarif")
+	require.NoError(t, err)
+	require.Len(t, rs, 2)
+	assert.Equal(t, "warning", rs[0].Level, "the result's level wins over the rule's default (note)")
+	assert.Equal(t, "warning", rs[1].Level, "no level anywhere: SARIF's default")
 }
 
 func TestRun(t *testing.T) {
@@ -38,6 +44,7 @@ func TestRun(t *testing.T) {
 		wantCode int
 		want     []string
 		notWant  []string
+		wantErr  string
 	}{
 		{
 			name:     "no baseline: the error and the warning block",
@@ -78,9 +85,44 @@ func TestRun(t *testing.T) {
 			},
 		},
 		{
-			name:     "a baseline line without a reason is rejected",
+			name: "a line for another fingerprint does not accept",
+			baseline: []string{
+				"go/path-injection\tinternal/a/a.go\tzzz:1\tanother alert in the same file",
+				"go/unhandled-writable-file-close\tinternal/b/b.go\tbbb:1\tread-only file",
+			},
+			wantCode: 1,
+			want:     []string{"1 blocking, 1 accepted", "unused baseline line 1: go/path-injection internal/a/a.go zzz:1"},
+		},
+		{
+			name: "a line for another rule does not accept",
+			baseline: []string{
+				"go/sql-injection\tinternal/a/a.go\taaa:1\tanother rule at the same place",
+				"go/unhandled-writable-file-close\tinternal/b/b.go\tbbb:1\tread-only file",
+			},
+			wantCode: 1,
+			want:     []string{"1 blocking, 1 accepted", "unused baseline line 1: go/sql-injection internal/a/a.go aaa:1"},
+		},
+		{
+			name: "an unused line is reported but does not fail the run",
+			baseline: []string{
+				"go/path-injection\tinternal/a/a.go\taaa:1\tjoined under a checked root",
+				"go/unhandled-writable-file-close\tinternal/b/b.go\tbbb:1\tread-only file",
+				"go/old-rule\tinternal/gone.go\tggg:1\tfixed since",
+			},
+			wantCode: 0,
+			want:     []string{"CodeQL gate: OK", "unused baseline line 3: go/old-rule internal/gone.go ggg:1"},
+		},
+		{
+			name:     "a baseline line with three columns is rejected",
 			baseline: []string{"go/path-injection\tinternal/a/a.go\taaa:1\t"},
 			wantCode: 2,
+			wantErr:  "want 4 non-empty tab-separated columns",
+		},
+		{
+			name:     "a baseline line with an empty column is rejected",
+			baseline: []string{"go/path-injection\t\taaa:1\tno path"},
+			wantCode: 2,
+			wantErr:  "want 4 non-empty tab-separated columns",
 		},
 	}
 	for _, tt := range tests {
@@ -101,6 +143,7 @@ func TestRun(t *testing.T) {
 			for _, w := range tt.notWant {
 				assert.NotContains(t, out.String(), w)
 			}
+			assert.Contains(t, errOut.String(), tt.wantErr)
 			if code != 2 {
 				written, err := os.ReadFile(summary)
 				require.NoError(t, err)

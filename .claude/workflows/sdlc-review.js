@@ -88,7 +88,7 @@ const results = await pipeline(
     return parallel(toVerify.map(f => () => agent(
       `${common}\n\nYou are the review-verifier. Read .claude/agents/review-verifier.md in the repository first and follow it exactly.\n\nThe ${r.name} reported this finding:\n${JSON.stringify(f, null, 1)}`,
       { label: `verify:${r.name}:${f.file}:${f.line}`, phase: 'Verify', schema: VERDICT },
-    ).then(v => ({ ...f, verdict: v })))).then(vs => ({
+    ).then(v => (v ? { ...f, verdict: v } : null)))).then(vs => ({
       reviewer: r.name,
       covered: out ? out.covered : 'the reviewer returned nothing',
       failed: !out,
