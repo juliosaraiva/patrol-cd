@@ -67,6 +67,9 @@ func TestFindPushes(t *testing.T) {
 		{name: "cd after &&", command: "false && cd /tmp; git push", want: []push{{Dir: "", Sources: head}}},
 		{name: "cd before || push leaves the dir unknown", command: "cd /tmp || git push", want: []push{{Dir: "", Sources: head}}},
 		{name: "cd || exit then push commits the cd", command: "cd /x || exit 1; git push", want: []push{{Dir: "/x", Sources: head}}},
+		{name: "CDPATH set in the command makes a relative cd unknown", command: "CDPATH=/tmp/other; cd sub && git push origin a", want: []push{{Dir: "", Sources: []string{"a"}}}},
+		{name: "watch runs its command through sh -c", command: "watch -n 5 'cd /elsewhere && git push origin main'", want: []push{{Dir: "/elsewhere", Sources: []string{"main"}}}},
+		{name: "watch -x runs an argv", command: "watch -x git push origin a", want: []push{{Dir: "/repo", Sources: []string{"a"}}}},
 		{name: "cd in an || successor then && push is unknown", command: "true || cd /x && git push origin a", want: []push{{Dir: "", Sources: []string{"a"}}}},
 		{name: "|| with no cd keeps the dir", command: "git fetch origin || true; git push -u origin HEAD", want: []push{{Dir: "/repo", Sources: head}}},
 		{name: "a push retried after ||", command: "git push 2>/dev/null || git push -u origin HEAD", want: []push{{Dir: "/repo", Sources: head}, {Dir: "/repo", Sources: head}}},
@@ -173,7 +176,7 @@ func TestFindPushesBlocked(t *testing.T) {
 		gitEnv     = "can point git at another repository or change its configuration"
 		config     = "is not on the hook's list of safe settings"
 		globalOpt  = "can point git at another repository or configuration, where the pre-push hook does not run"
-		runsStep   = "runs per step"
+		runsStep   = "git runs it as a command"
 		noVerify   = "--no-verify skips the pre-push hook"
 		givenTo    = "which the hook does not model"
 	)
@@ -332,6 +335,51 @@ func TestFindPushesBlocked(t *testing.T) {
 		{`eval "$(ssh-agent -s)" >/dev/null && git push origin HEAD`, "an eval of a dynamic string earlier in the command"},
 		{`env GIT_DIR="$X" git push origin a`, gitEnv},
 		{"git-config core.hooksPath /dev/null", config},
+		// Round 8: quoted or escaped declarations, =env, env options the walker does not model, sudo.
+		{`export "GIT_CONFIG_COUNT=1" "GIT_CONFIG_KEY_0=core.hooksPath" "GIT_CONFIG_VALUE_0=/dev/null"; ./release.sh`, gitEnv},
+		{`export 'GIT_DIR'=/x/.git; git push origin a`, gitEnv},
+		{`declare -x "GIT_DIR=/x/.git"; git push origin a`, gitEnv},
+		{`declare -n "r=GIT_DIR"; r=/x/.git; git push`, gitEnv},
+		{`export "GIT_$X"; git push`, "may be a GIT_* variable"},
+		{`\export GIT_CONFIG_COUNT=1 GIT_CONFIG_KEY_0=core.hooksPath GIT_CONFIG_VALUE_0=/dev/null; ./release.sh`, givenTo},
+		{"builtin export GIT_DIR=/x/.git; git push origin a", givenTo},
+		{"command export GIT_DIR=/x/.git; git push origin a", givenTo},
+		{"=env GIT_CONFIG_COUNT=1 GIT_CONFIG_KEY_0=core.hooksPath GIT_CONFIG_VALUE_0=/dev/null bash -c 'git push origin main'", gitEnv},
+		{"env -P /usr/bin:/bin GIT_CONFIG_COUNT=1 ./release.sh", givenTo},
+		{"sudo GIT_CONFIG_COUNT=1 make release", givenTo},
+		// A script piped to a shell with options, or from another producer; watch; runners' options.
+		{"echo 'git push --no-verify origin main' | bash -e", noVerify},
+		{"echo 'git push --no-verify origin main' | bash -s --", noVerify},
+		{"printf 'git push origin main' | bash", "a script piped to a shell"},
+		{"echo 'git push origin main' | tee /dev/null | bash", "a script piped to a shell"},
+		{"watch 'git push --no-verify origin main'", noVerify},
+		{"watch -d 'git push --no-verify origin main'", noVerify},
+		{"git rebase -x'git push --no-verify origin main' HEAD~1", runsStep},
+		{"git rebase --exe='git push origin main' HEAD~1", runsStep},
+		{"git rebase -ix 'git push origin main' HEAD~1", runsStep},
+		{"git difftool -y -x'git push origin a' HEAD~1", runsStep},
+		{"git fetch --upload-pack='git push --no-verify origin HEAD:main; git-upload-pack' /tmp/any.git", runsStep},
+		{"git clone -u 'git push origin main; git-upload-pack' /tmp/r.git d", runsStep},
+		{"git ls-remote --upload-pack='git push origin main' /tmp/r.git", runsStep},
+		{"git archive --remote=/tmp/r.git --exec='git push origin main' HEAD", runsStep},
+		{"git grep -O'git push origin main' x", runsStep},
+		{"git push --receive-pack='git -C /some/clone push origin main; git-receive-pack' /tmp/r.git main", runsStep},
+		{`git fetch --upload-pack="$X" origin`, "that the hook cannot read"},
+		// The remote-tracking ref the gate measures a change from.
+		{"git update-ref refs/remotes/origin/main HEAD", "can move origin/main"},
+		{"git fetch . HEAD:refs/remotes/origin/main", "can move origin/main"},
+		{"git remote set-url origin /tmp/self", "can move origin/main"},
+		// GIT_EDITOR and its kin are shell code git runs.
+		{`GIT_EDITOR='sh -c "gi""t pu""sh origin main"' git commit --amend`, gitEnv},
+		{`GIT_EDITOR='g\it pu\sh origin main; :' git commit --amend`, gitEnv},
+		{"env GIT_PAGER='git push origin main' git log", gitEnv},
+		// The net: shell code or a program that gets a hook token, which the walker cannot follow.
+		{"emulate sh -c 'git push --no-verify origin main'", givenTo},
+		{"source /dev/stdin <<< 'git push --no-verify origin main'", givenTo},
+		{`python3 -c "import subprocess; subprocess.run(['git','push','--no-verify'])"`, givenTo},
+		{"go test ./x -run 'Blocked/--no-verify'", givenTo},
+		{"docker run --rm -e GIT_PUSH_OPTION=1 alpine echo push", givenTo},
+		{"$GP --no-verify origin main", givenTo},
 	} {
 		t.Run(tt.command, func(t *testing.T) {
 			t.Parallel()
@@ -411,16 +459,29 @@ func TestFindPushesAllowed(t *testing.T) {
 		"env -C /tmp cat testdata/git_push.json",
 		"env -C ui pnpm test; grep -rn \"git push --no-verify\" docs",
 		"PATROL_SDLC_BASE=HEAD~1 make sdlc-check",
-		"docker run --rm -e GIT_PUSH_OPTION=1 alpine echo push",
+		"docker run --rm alpine echo push",
 		// --no-verify as data, or for a git command other than push.
 		"grep -rn -- --no-verify docs",
 		"man git push | col -b | grep -n -A3 'no-verify'",
 		"echo --no-verify; printf '%s\\n' --no-verify",
-		"go test ./hack/sdlc/pushcheck -run 'TestFindPushesBlocked/--no-verify'",
 		"git commit --no-verify -m 'chore: x'",
 		"alias ll='ls -la'",
 		"trap 'rm -rf \"$tmp\"' EXIT; go test ./hack/sdlc/...",
 		"hash -r",
+		`export "GOFLAGS=-count=1" "GIT_PAGER=cat" && go test ./...`,
+		"git fetch origin",
+		"git clone --depth 1 https://github.com/x/y d",
+		"git grep -O main",
+		"git ls-remote origin",
+		"git rebase -i --autosquash origin/main",
+		"GIT_EDITOR=true git commit --amend --no-edit",
+		"sudo -u ci make test",
+		"echo 'ls' | bash -e",
+		"watch -n 5 git status",
+		"grep -rn GIT_DIR docs | head",
+		"printenv GIT_DIR",
+		"unset GIT_DIR GIT_WORK_TREE",
+		"gh pr create --title x --body 'never run git push --no-verify or set core.hooksPath'",
 		`GIT_SEQUENCE_EDITOR="sed -i '' '2,\$s/^pick/squash/'" git rebase -i HEAD~3`,
 		"test/e2e/fixtures/git-server/rootfs/usr/local/bin/git-seed",
 	} {

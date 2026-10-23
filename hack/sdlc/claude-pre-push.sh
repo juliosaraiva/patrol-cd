@@ -9,13 +9,18 @@
 # hack/sdlc/pushcheck, which parses it as bash (so a "git push" in quoted text or a heredoc is not a
 # push) and runs the gate. The binary is built into bin/ on first use and rebuilt when its sources or
 # go.sum change; while a change does not build, the last binary that did is used, and without one,
-# commands that mention git are refused and the others run, so the build can be fixed. The browser
-# pane's preview_start runs the command a .claude/launch.json configuration names; that command is
-# checked the same way. Exit 2 blocks the command and shows stderr to Claude Code.
+# commands that mention git or what would skip its hook are refused and the others run, so the build
+# can be fixed. The browser pane's preview_start runs the command a .claude/launch.json configuration
+# names; that command is checked the same way (which needs jq). Exit 2 blocks the command and shows
+# stderr to Claude Code.
 set -uo pipefail
 
 input=$(cat)
 root=$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)
+if ! command -v jq >/dev/null 2>&1 && [[ $input == *Claude_Browser__preview_start* ]]; then
+	echo "sdlc pre-push hook: jq is not installed, so the command preview_start would run cannot be read and checked; install jq" >&2
+	exit 2
+fi
 command=$(jq -r '.tool_input.command // empty' <<<"$input" 2>/dev/null) || command=""
 if [[ $(jq -r '.tool_name // empty' <<<"$input" 2>/dev/null) == *Claude_Browser__preview_start ]]; then
 	name=$(jq -r '.tool_input.name // empty' <<<"$input" 2>/dev/null)
@@ -40,9 +45,10 @@ fi
 bin=$root/bin/sdlc-pushcheck
 if [[ ! -x $bin || -n $(find "$root/hack/sdlc/pushcheck" "$root/go.sum" -newer "$bin" -print 2>/dev/null | head -n 1) ]]; then
 	if ! (cd "$root" && go build -o "$bin.tmp" ./hack/sdlc/pushcheck && mv -f "$bin.tmp" "$bin") >/dev/null 2>&1 && [[ ! -x $bin ]]; then
-		plain=${command//[\"\'\\]/}
-		if [[ $plain == *git* || $plain == *GIT_* ]]; then
-			echo "sdlc pre-push hook: cannot build hack/sdlc/pushcheck, so this command, which mentions git, cannot be checked; fix the build first" >&2
+		# Lower case, without quotes and backslashes: git, GIT_*, any abbreviation of --no-verify, hooksPath.
+		plain=$(printf '%s' "${command//[\"\'\\]/}" | tr '[:upper:]' '[:lower:]')
+		if [[ $plain == *git* || $plain == *no-v* || $plain == *hookspath* ]]; then
+			echo "sdlc pre-push hook: cannot build hack/sdlc/pushcheck, so this command, which mentions git or what would skip git's hook, cannot be checked; fix the build first" >&2
 			exit 2
 		fi
 		exit 0

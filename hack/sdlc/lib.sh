@@ -12,9 +12,10 @@ sdlc_state_dir() {
 }
 
 # sdlc_base COMMIT prints the commit a change is measured from: the merge base of COMMIT and the
-# upstream main branch (PATROL_SDLC_BASE overrides origin/main).
+# upstream main branch, named in full so that a local branch or tag called origin/main cannot stand
+# in for it (PATROL_SDLC_BASE overrides it; the gate and the review input unset that).
 sdlc_base() {
-	git merge-base "$1" "${PATROL_SDLC_BASE:-origin/main}"
+	git merge-base "$1" "${PATROL_SDLC_BASE:-refs/remotes/origin/main}"
 }
 
 # sdlc_changed BASE COMMIT prints the files that differ between BASE and COMMIT, one per line.
@@ -46,8 +47,18 @@ sdlc_weakened() {
 	[[ -z $(go env GOFLAGS 2>/dev/null) ]] || printf '%s\n' "GOFLAGS (go env)"
 }
 
-# sdlc_clean succeeds when the working tree has no tracked changes and no untracked files that git
-# does not ignore: only then is HEAD's tree what the checks saw.
+# sdlc_ignored prints the ignored files and directories the checks could read although HEAD's tree
+# lacks them: a .gitignore pattern such as kubeconfig* or coverage.* can hide a source file. The
+# build's outputs and caches (bin/, dist/, ui/dist/, node_modules/, test reports, *.test, *.out ...)
+# and dot directories at the top (tool state, which go and the UI build do not read) do not count.
+sdlc_ignored() {
+	git ls-files --others --ignored --exclude-standard --directory --no-empty-directory |
+		grep -Ev '^(\.|bin/|dist/|ui/dist/|test/e2e/artifacts/)|(^|/)(node_modules|coverage|test-results|playwright-report)/|(^|/)(\.DS_Store|\.env(\..*)?)$|\.(test|out|swp|tsbuildinfo)$' || true
+}
+
+# sdlc_clean succeeds when the working tree has no tracked changes, no untracked files that git
+# does not ignore, and no ignored files the checks could read (sdlc_ignored): only then is HEAD's
+# tree what the checks saw.
 sdlc_clean() {
-	[[ -z $(git status --porcelain --untracked-files=normal) ]]
+	[[ -z $(git status --porcelain --untracked-files=normal) && -z $(sdlc_ignored) ]]
 }

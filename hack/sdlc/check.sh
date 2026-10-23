@@ -23,6 +23,9 @@
 #   --no-codeql  skip CodeQL (faster iteration; nothing is recorded)
 set -euo pipefail
 
+# The whole script is one group, read before it runs: a run takes most of an hour, and bash reads
+# a script as it goes, so an edit to this file during a run would otherwise run a mix of the two.
+{
 # Drop any inherited make flags: `-i`/`-k` would make failing recipes (gofmt, vet, the test suite)
 # be ignored and let a broken run record a pass. MAKEFILES would read a makefile before ours, whose
 # `:=` beats our `?=` (a tool replaced by a no-op).
@@ -97,7 +100,7 @@ any() { # any REGEX: succeeds when a changed file matches
 }
 
 step ci-static make --no-print-directory ci-static
-step commit-subjects make --no-print-directory release-lint-commits
+step commit-subjects make --no-print-directory release-lint-commits RELEASE_RANGE=refs/remotes/origin/main..HEAD
 
 if printf '%s\n' ${changed[@]+"${changed[@]}"} | sdlc_docs_only; then
 	echo
@@ -193,3 +196,5 @@ if [[ $record -eq 1 ]]; then
 else
 	echo "sdlc-check: all checks passed; not recorded (dirty tree or --no-codeql)"
 fi
+exit
+}

@@ -17,21 +17,24 @@
 // pushed, also by a script; the wrapper requires it to be enabled before any command runs. This
 // hook gives early, clear refusals and keeps git's hook from being skipped. It refuses, wherever
 // the command runs: a push that skips git's hook (--no-verify, an abbreviation of it, an argument
-// that is not literal, and a --no-verify given to a command it does not model, which a shell alias
-// or function could hand to git); what can point git at another repository or change its
-// configuration or hooks (GIT_* variables outside a short safe list, set but not merely printed;
-// git -c and git config writes of keys outside a short safe list; --git-dir, --work-tree, --bare and
-// other global options before push; a sourced file before a push); a git subcommand that is not a
-// git command (an alias, which the command could redefine on the way); a push from an unknown
-// directory or from inside .git; a push it cannot resolve (inside $(...), eval of a dynamic string,
-// a non-literal command word, git option or shell script, a command that does not parse as bash and
-// names git); and a push that cannot be gated per step (git rebase -x, submodule foreach).
+// that is not literal); any command but git's own and the data commands whose words name a hook
+// token (--no-verify, core.hooksPath, an unsafe GIT_* variable), since a program, shell code or a
+// shell alias could hand it to git (the net under the walker); what can point git at another
+// repository or change its configuration or hooks (GIT_* variables outside a short safe list, set
+// but not merely printed; git -c and git config writes of keys outside a short safe list;
+// --git-dir, --work-tree, --bare and other global options before push; a sourced file or a dynamic
+// eval before a push; a write to refs/remotes/); a git subcommand that is not a git command (an
+// alias, which the command could redefine on the way); a push from an unknown directory or from
+// inside .git; a push it cannot resolve (inside $(...), eval of a dynamic string, a non-literal
+// command word, git option or shell script, a command that does not parse as bash and names git);
+// and a push in a command git runs for a subcommand (rebase -x, submodule foreach, upload-pack).
 //
 // For a push from a repository that holds this project (a clone, worktree, bare or partial clone)
 // it also refuses an unknown push option, a push from a bare repository or while core.hooksPath is
 // not .githooks, and the forms the gate cannot check ref by ref (--all, --mirror, --tags, ':'); then
-// it runs that clone's hack/sdlc/gate.sh on each pushed commit as it is now. A ref that does not resolve yet is left to git's hook. Exit status 2
-// blocks the command and shows stderr to Claude Code; 0 lets it run.
+// it runs that clone's hack/sdlc/gate.sh on each pushed commit as it is now. A ref that does not
+// resolve yet is left to git's hook. Exit status 2 blocks the command and shows stderr to Claude
+// Code; 0 lets it run.
 //
 // What it cannot see: a git invocation assembled at run time (name or subcommand from variables,
 // files or $'…' escapes), the content of script files, code given to an interpreter (python -c, awk,

@@ -236,6 +236,14 @@ contains "reason says review missing" "$work/gate.err" "agent review for tree $t
 # The gate measures from origin/main whatever PATROL_SDLC_BASE says, so a self-referencing base
 # cannot make the diff empty and skip the review.
 check "gate ignores PATROL_SDLC_BASE" 1 "$(PATROL_SDLC_BASE=$(git rev-parse HEAD) gate)"
+# Nor can a local branch or tag named origin/main stand in for the remote-tracking ref.
+git branch origin/main HEAD 2>/dev/null
+git tag origin/main HEAD 2>/dev/null
+check "gate ignores a local branch and tag named origin/main" 1 "$(gate)"
+contains "reason says review missing, not documentation only" "$work/gate.err" "agent review for tree $tree: missing"
+git branch -q -D origin/main
+git tag -d origin/main >/dev/null
+check "hook refuses moving origin/main" 2 "$(hook 'git update-ref refs/remotes/origin/main HEAD')"
 echo "# review" >"$work/report.md"
 # record-review refuses a tree with no prepared review input (the diff review-input.sh writes).
 rc=0
@@ -295,6 +303,17 @@ check "review input tree" "$newtree" "$(jq -r .tree <<<"$input")"
 check "review input files" "main.go" "$(jq -r '.files | join(",")' <<<"$input")"
 check "review input docsOnly" false "$(jq -r .docsOnly <<<"$input")"
 if [[ -s $(jq -r .diffFile <<<"$input") ]]; then check "review input diff written" yes yes; else check "review input diff written" yes no; fi
+
+# An ignored file the checks could read (a .gitignore pattern such as kubeconfig* hiding a source
+# file) leaves the tree unclean, so nothing is recorded for a tree that lacks it; build outputs don't.
+echo 'kubeconfig*' >>.git/info/exclude
+touch kubeconfig.go
+# shellcheck source=hack/sdlc/lib.sh
+check "an ignored source file is not clean" 1 "$(source hack/sdlc/lib.sh && sdlc_clean && echo 0 || echo 1)"
+rm kubeconfig.go
+touch bin/tool.out
+# shellcheck source=hack/sdlc/lib.sh
+check "ignored build outputs are clean" 0 "$(source hack/sdlc/lib.sh && sdlc_clean && echo 0 || echo 1)"
 
 # check.sh records nothing when the environment can weaken a check (sdlc_weakened).
 printf 'GOLANGCI_LINT ?= golangci-lint\n' >"$work/w.mk"

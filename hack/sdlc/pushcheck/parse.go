@@ -107,15 +107,15 @@ func (w *walker) run(f *syntax.File) {
 			w.calls = append(w.calls, probe.calls...)
 		case *syntax.ParamExp:
 			if n.Exp != nil && (n.Exp.Op == syntax.AssignUnset || n.Exp.Op == syntax.AssignUnsetOrNull) && n.Param != nil {
-				w.assign(n.Param.Value, nil, false)
+				w.assign(n.Param.Value, nil)
 			}
 		case *syntax.BinaryArithm:
 			if arithAssign[n.Op] {
-				w.assign(arithName(n.X), nil, false)
+				w.assign(arithName(n.X), nil)
 			}
 		case *syntax.UnaryArithm:
 			if n.Op == syntax.Inc || n.Op == syntax.Dec {
-				w.assign(arithName(n.X), nil, false)
+				w.assign(arithName(n.X), nil)
 			}
 		}
 		return true
@@ -145,6 +145,7 @@ type walker struct {
 	// envUnknown says why git's environment and the directory may have changed in ways the walker
 	// cannot see (a sourced file, an eval of a dynamic string); a later push is refused.
 	envUnknown string
+	cdpath     bool // CDPATH was set in the command: a relative cd may go elsewhere
 	seen       map[*syntax.CallExpr]bool
 }
 
@@ -243,19 +244,8 @@ func pipedScript(c *syntax.BinaryCmd) (string, bool) {
 	if c.Op != syntax.Pipe && c.Op != syntax.PipeAll {
 		return "", false
 	}
-	right, ok := c.Y.Cmd.(*syntax.CallExpr)
-	if !ok || len(right.Args) == 0 {
+	if !pipesToShell(c) {
 		return "", false
-	}
-	if name, ok := literalWord(right.Args[0]); !ok || !shells[path.Base(name)] {
-		return "", false
-	}
-	for _, a := range right.Args[1:] { // a -c script, a script file, or an option: handled elsewhere
-		if v, ok := literalWord(a); !ok || (v != "-" && v != "-s" && strings.HasPrefix(v, "-")) {
-			return "", false
-		} else if !strings.HasPrefix(v, "-") {
-			return "", false
-		}
 	}
 	left, ok := c.X.Cmd.(*syntax.CallExpr)
 	if !ok || len(left.Args) == 0 {
@@ -280,6 +270,57 @@ func pipedScript(c *syntax.BinaryCmd) (string, bool) {
 		}
 	}
 	return "", false
+}
+
+// pipesToShell reports whether a pipeline's last element is a shell that reads its script from the
+// pipe.
+func pipesToShell(c *syntax.BinaryCmd) bool {
+	if c.Op != syntax.Pipe && c.Op != syntax.PipeAll {
+		return false
+	}
+	right, ok := c.Y.Cmd.(*syntax.CallExpr)
+	if !ok || len(right.Args) == 0 {
+		return false
+	}
+	if name, ok := literalWord(right.Args[0]); !ok || !shells[path.Base(name)] {
+		return false
+	}
+	args, lit := fields(right.Args[1:])
+	return readsStdin(args, lit)
+}
+
+// readsStdin reports whether a shell given these arguments reads its script from standard input:
+// with -s, or with no -c and no script operand (/dev/stdin counts as none), whatever its other
+// options.
+func readsStdin(args []string, lit []bool) bool {
+	stdin := false
+	operand := func(a string) bool { return stdin || a == "/dev/stdin" || a == "/dev/fd/0" }
+	for i := 0; i < len(args); i++ {
+		a := args[i]
+		switch {
+		case !lit[i]:
+			return false
+		case a == "--" || a == "-":
+			return i+1 >= len(args) || (lit[i+1] && operand(args[i+1]))
+		case shellWithValue[a]:
+			i++
+		case strings.HasPrefix(a, "--"):
+		case len(a) > 1 && (a[0] == '-' || a[0] == '+'):
+			for _, ch := range a[1:] {
+				switch ch {
+				case 'c':
+					return false
+				case 's':
+					stdin = true
+				case 'o', 'O':
+					i++ // each takes the next argument as its value
+				}
+			}
+		default:
+			return operand(a)
+		}
+	}
+	return true
 }
 
 func bodyOf(r *syntax.Redirect) *syntax.Word {
@@ -386,6 +427,11 @@ func (w *walker) cmd(s *syntax.Stmt) {
 			// shell a script the walker can read; parse it.
 			if s, ok := pipedScript(c); ok {
 				w.script(s)
+			} else if pipesToShell(c) {
+				// Another producer (printf, echo -e, a chain through tee): refuse a push in its text.
+				var b bytes.Buffer
+				_ = syntax.NewPrinter().Print(&b, c.X)
+				w.blockText(b.String(), "a script piped to a shell")
 			}
 			saved := w.dir
 			w.stmt(c.X)
@@ -405,7 +451,7 @@ func (w *walker) cmd(s *syntax.Stmt) {
 	case *syntax.IfClause, *syntax.CaseClause, *syntax.WhileClause, *syntax.ForClause:
 		if fc, ok := c.(*syntax.ForClause); ok {
 			if it, ok := fc.Loop.(*syntax.WordIter); ok && it.Name != nil {
-				w.assign(it.Name.Value, nil, true)
+				w.assign(it.Name.Value, nil)
 			}
 		}
 		if w.changesDir(c) {
@@ -461,8 +507,30 @@ func (w *walker) decl(c *syntax.DeclClause) {
 	exportMode := variant == "export" || variant == "readonly"
 	printMode, nameref := false, false
 	for _, a := range c.Args {
-		if a.Name == nil { // an option: -p, -x, -g, ...
-			if v, ok := literalWord(a.Value); ok && strings.HasPrefix(v, "-") {
+		if a.Name == nil { // an option (-p, -x, -g, ...), or a quoted operand ("NAME=VALUE", 'NAME')
+			v, ok := literalWord(a.Value)
+			switch {
+			case ok && strings.Contains(v, "=") && !strings.HasPrefix(v, "-"):
+				name, value, _ := strings.Cut(v, "=")
+				w.assignValue(name, value, true)
+				if nameref {
+					w.assignValue(value, "", true)
+				}
+				continue
+			case ok && !strings.HasPrefix(v, "-"):
+				if exportMode && !printMode {
+					w.assignValue(v, "", true)
+				}
+				continue
+			case !ok:
+				if name, _, found := strings.Cut(literalPrefix(a.Value), "="); found {
+					w.assignValue(name, "", false)
+				} else if strings.Contains(wordsText([]*syntax.Word{a.Value}, nil), "GIT_") {
+					w.block("a variable set from a word the hook cannot read may be a GIT_* variable; run the command without it")
+				}
+				continue
+			}
+			if strings.HasPrefix(v, "-") {
 				// -p/-f/-F only print, but only for declare/typeset/local; bash's `export -p NAME=v`
 				// and `readonly -p NAME=v` still set the named variable.
 				if !exportMode && strings.ContainsAny(strings.TrimPrefix(v, "-"), "pfF") {
@@ -479,15 +547,15 @@ func (w *walker) decl(c *syntax.DeclClause) {
 		}
 		if nameref && a.Value != nil {
 			if target, ok := literalWord(a.Value); ok {
-				w.assign(target, nil, false)
+				w.assign(target, nil)
 			}
 		}
 		switch {
 		case a.Value != nil || !a.Naked: // declare GIT_DIR=x, or declare GIT_DIR= (empty): a set
-			w.assign(a.Name.Value, a.Value, false)
+			w.assign(a.Name.Value, a.Value)
 		case printMode: // declare -p GIT_DIR: a listing, sets nothing
 		case exportMode: // export GIT_DIR: an existing value takes effect for child git
-			w.assign(a.Name.Value, nil, true)
+			w.assign(a.Name.Value, nil)
 		}
 	}
 }
@@ -504,29 +572,50 @@ var safeGitEnv = map[string]bool{"GIT_TERMINAL_PROMPT": true, "GIT_AUTHOR_NAME":
 // value (including empty) that does not mention git.
 var gitEnvCommands = map[string]bool{"GIT_PAGER": true, "GIT_EDITOR": true, "GIT_SEQUENCE_EDITOR": true}
 
-// assign checks a variable assignment. value is nil for a naked `export NAME` (naked true), for an
-// empty `NAME=` (naked false), or when the value is not at hand. A GIT_* assignment that could point
-// git elsewhere is refused. (PATROL_SDLC_BASE is not: the gate and the review input ignore it.)
-func (w *walker) assign(name string, value *syntax.Word, naked bool) {
+// assign checks a variable assignment. value is nil for a naked `export NAME`, an empty `NAME=`, or
+// when the value is not at hand.
+func (w *walker) assign(name string, value *syntax.Word) {
+	text, literal := "", true
+	if value != nil {
+		text, literal = literalWord(value)
+	}
+	w.assignValue(name, text, literal)
+}
+
+// assignValue checks NAME=VALUE. A GIT_* variable outside the safe list is refused (PATROL_SDLC_BASE
+// is not: the gate and the review input ignore it); GIT_PAGER, GIT_EDITOR and GIT_SEQUENCE_EDITOR
+// pass with a literal value that is safe shell code (safeCommand), since git runs it through sh.
+// CDPATH set in the command makes a later relative cd's directory unknown.
+func (w *walker) assignValue(name, value string, literal bool) {
+	if name == "CDPATH" || name == "cdpath" {
+		w.cdpath = true
+	}
 	if !strings.HasPrefix(name, "GIT_") || safeGitEnv[name] || strings.HasPrefix(name, "GIT_TRACE") {
 		return
 	}
-	if gitEnvCommands[name] {
-		if value == nil { // empty value disables the pager/editor
-			return
-		}
-		if v, ok := literalWord(value); ok && !strings.Contains(v, "git") && !strings.Contains(v, "push") {
-			return
-		}
+	if gitEnvCommands[name] && literal && safeCommand(value) {
+		return
 	}
-	_ = naked
 	w.block(name + " can point git at another repository or change its configuration, hooks or the commands it runs, also for a push in a script; run the command without it")
+}
+
+// safeCommand reports whether shell code git runs (an editor, a pager) may be set in a command:
+// empty, or code that names neither git nor a hook override and in which the walker finds no push.
+func safeCommand(code string) bool {
+	if code == "" {
+		return true
+	}
+	if mentionsGit(code) {
+		return false
+	}
+	a, err := findPushes(code, "")
+	return err == nil && len(a.Pushes) == 0 && a.Blocked == ""
 }
 
 // assignWord checks an assignment written as one NAME=VALUE word (an env prefix).
 func (w *walker) assignWord(assign string) {
-	name, _, _ := strings.Cut(assign, "=")
-	w.assign(name, nil, false)
+	name, value, _ := strings.Cut(assign, "=")
+	w.assignValue(name, value, true)
 }
 
 // changesDir reports whether node runs a command that can change this shell's directory: cd and
@@ -731,7 +820,7 @@ func (w *walker) call(c *syntax.CallExpr, redirs []*syntax.Redirect) {
 		if a.Name == nil {
 			continue
 		}
-		w.assign(a.Name.Value, a.Value, a.Naked && a.Value == nil)
+		w.assign(a.Name.Value, a.Value)
 		if zshCode[a.Name.Value] {
 			code, ok := literalWord(a.Value)
 			if !ok || a.Array != nil {
@@ -745,7 +834,93 @@ func (w *walker) call(c *syntax.CallExpr, redirs []*syntax.Redirect) {
 	w.cmdText = wordsText(c.Args, redirs) // this command's own text for the conservative net
 	args, lit := fields(c.Args)
 	w.command(args, lit, redirs)
+	if name := netHead(args, lit); name != "" {
+		if token := hookToken(w.cmdText); token != "" {
+			w.block(token + " in the words of " + name + ", which the hook does not model: a program, shell code, a shell alias or function, or an option it does not know could hand it to git and keep git's pre-push hook from running; " + runAlone)
+		}
+	}
 	w.cmdText = saved
+}
+
+// netExempt lists the commands whose words are data (patterns, text, files, a message) and never
+// reach git as options or variables: the net under the walker does not read them.
+var netExempt = map[string]bool{"echo": true, "printf": true, "printenv": true, "unset": true, "gh": true}
+
+var (
+	noVerifyToken = regexp.MustCompile(`(?i)no-verify|--no-v(e(r(i(f)?)?)?)?([^a-z]|$)`)
+	gitVarToken   = regexp.MustCompile(`(?:^|[^A-Za-z0-9_])(GIT_[A-Z0-9_]+)`)
+)
+
+// hookToken returns what in text could keep git's pre-push hook from running: --no-verify or an
+// abbreviation git accepts for it, core.hooksPath, or a GIT_* variable outside the safe list.
+func hookToken(text string) string {
+	n := normalize(text)
+	if noVerifyToken.MatchString(n) {
+		return "--no-verify"
+	}
+	if strings.Contains(strings.ToLower(n), "hookspath") {
+		return "core.hooksPath"
+	}
+	for _, m := range gitVarToken.FindAllStringSubmatch(n, -1) {
+		if v := m[1]; !safeGitEnv[v] && !gitEnvCommands[v] && !strings.HasPrefix(v, "GIT_TRACE") {
+			return v
+		}
+	}
+	return ""
+}
+
+// netHead names the command the net under the walker reads, past precommand words, env and the
+// wrappers, or returns "" for one whose words are data: echo, printf, grep and the other data
+// commands, and git's own subcommands but those that run a command (whose arguments the walker
+// models exactly). The net refuses any other command whose own words hold a hook token: the
+// walker cannot know what a program, shell code, a shell alias or function, or an option it does
+// not model does with --no-verify, core.hooksPath or GIT_DIR.
+func netHead(args []string, lit []bool) string {
+	args, lit = stripBraces(args, lit)
+	envValue := map[string]bool{"-u": true, "--unset": true, "-C": true, "--chdir": true, "-S": true, "--split-string": true, "-P": true}
+peel:
+	for len(args) > 0 && lit[0] {
+		base := path.Base(strings.TrimPrefix(args[0], "="))
+		switch skip, isWrapper := wrapperSkip[base]; {
+		case precommand[base]:
+			args, lit = args[1:], lit[1:]
+		case base == "env":
+			args, lit = skipOptions(args[1:], lit[1:], envValue, 0)
+			for len(args) > 0 && lit[0] && envName.MatchString(args[0]) {
+				args, lit = args[1:], lit[1:]
+			}
+		case isWrapper:
+			args, lit = skipOptions(args[1:], lit[1:], skip.value, skip.operands)
+		case base == "xargs" || base == "parallel":
+			args, lit = skipOptions(args[1:], lit[1:], xargsValue[base], 0)
+		default:
+			break peel
+		}
+	}
+	if len(args) == 0 {
+		return ""
+	}
+	if !lit[0] {
+		return "a command word that is not literal"
+	}
+	name := path.Base(strings.TrimPrefix(args[0], "="))
+	sub, dashed := strings.CutPrefix(name, "git-")
+	switch {
+	case netExempt[name] || dataCommands[name] || pureOutput[name]:
+		return ""
+	case name == "git":
+		i := gitSubcommand(args[1:], lit[1:])
+		if i < 0 || !lit[1+i] {
+			return "" // git's global options are checked by git()
+		}
+		sub = args[1+i]
+	case !dashed:
+		return name
+	}
+	if sub != "push" && (gitRunners[sub] || cmdOptions[sub] != nil) { // push's own words: pushArgs
+		return "git " + sub
+	}
+	return ""
 }
 
 // definition checks code the command defines to run later under a name (an alias, or a zsh function
@@ -770,12 +945,12 @@ func (w *walker) command(args []string, lit []bool, redirs []*syntax.Redirect) {
 	}()
 prefix:
 	for len(args) > 0 && lit[0] {
-		switch path.Base(args[0]) {
+		switch path.Base(strings.TrimPrefix(args[0], "=")) { // zsh's =cmd is the path of cmd
 		case "command", "exec", "builtin", "noglob", "nocorrect", "-":
 			// They run the rest as a command; zsh's noglob/nocorrect/- are precommand modifiers. With
 			// an option (exec -a NAME, command -p), the grammar varies and -v/-V only print, so fall
 			// back to a conservative text check. (noglob/nocorrect/- take no options.)
-			base := path.Base(args[0])
+			base := path.Base(strings.TrimPrefix(args[0], "="))
 			if (base == "command" || base == "exec" || base == "builtin") && len(args) > 1 && lit[1] && strings.HasPrefix(args[1], "-") {
 				w.blockText(w.cmdText, base+" with options")
 				return
@@ -834,7 +1009,7 @@ prefix:
 		return
 	}
 	name := path.Base(strings.TrimPrefix(args[0], "=")) // zsh =cmd expands to the path of cmd
-	if sub, ok := strings.CutPrefix(name, "git-"); ok && (sub == "push" || sub == "config" || gitPushLike[sub] || gitRunners[sub]) {
+	if sub, ok := strings.CutPrefix(name, "git-"); ok && (sub == "push" || sub == "config" || gitPushLike[sub] || gitRunners[sub] || cmdOptions[sub] != nil) {
 		// git's dashed subcommand binaries: git-push is `git push`, so analyse it as git <sub>. Any
 		// other git-* program (git-seed, git-lfs) is run by its own name, never as an alias, so it is
 		// an ordinary command.
@@ -914,24 +1089,15 @@ prefix:
 		w.execRunner(args, lit)
 	case name == "find":
 		w.findExec(args, lit)
+	case name == "watch":
+		w.watch(args[1:], lit[1:])
 	default:
 		// An unrecognized command: it is not a known runner, so its arguments are usually data. But a
 		// git push plainly in its arguments (a custom runner, ssh, a tool not modelled) is refused, as
-		// the contract promises for "another command that runs its arguments". So is a --no-verify
-		// or core.hooksPath given to it: a shell alias or function (the Bash tool loads the user's,
-		// such as oh-my-zsh's gp='git push') may hand it to git.
-		if dataCommands[name] {
-			return
-		}
-		if argvHasGitPush(args, lit) {
+		// the contract promises for "another command that runs its arguments". (A --no-verify or
+		// core.hooksPath given to it is refused by the net in call().)
+		if !dataCommands[name] && argvHasGitPush(args, lit) {
 			w.block("a git push run through " + name + " cannot be checked; " + runAlone)
-			return
-		}
-		for i, a := range args[1:] {
-			if lit[i+1] && (skipsHook(a) || strings.EqualFold(strings.SplitN(a, "=", 2)[0], "core.hooksPath")) {
-				w.block(a + " given to " + name + ", which the hook does not model (a shell alias or function may pass it to git, skipping its pre-push hook); " + runAlone)
-				return
-			}
 		}
 	}
 }
@@ -1007,7 +1173,6 @@ var wrapperSkip = map[string]struct {
 	"doas":       {map[string]bool{"-u": true, "-C": true}, 0},
 	"chrt":       {map[string]bool{"-T": true, "-P": true}, 0},
 	"time":       {map[string]bool{"-o": true, "-f": true, "--format": true}, 0},
-	"watch":      {map[string]bool{"-n": true, "--interval": true, "-d": true}, 0},
 	"stdstub":    {nil, 0},
 }
 
@@ -1066,6 +1231,40 @@ func (w *walker) execRunner(args []string, lit []bool) {
 	if argvHasGitPush(args, lit) {
 		w.block("a git push run through " + path.Base(args[0]) + " cannot be checked; " + runAlone)
 	}
+}
+
+// watch runs its command again and again: through `sh -c` with its operands joined, or, with
+// -x/--exec, as an argv.
+func (w *walker) watch(args []string, lit []bool) {
+	execArgv := false
+	i := 0
+	for ; i < len(args) && lit[i] && strings.HasPrefix(args[i], "-") && args[i] != "-"; i++ {
+		a := args[i]
+		if a == "--" {
+			i++
+			break
+		}
+		if a == "--exec" || (!strings.HasPrefix(a, "--") && strings.Contains(a, "x")) {
+			execArgv = true
+		}
+		if a == "-n" || a == "--interval" || a == "-q" || a == "--equexit" {
+			i++ // the option's value is the next argument
+		}
+	}
+	if i >= len(args) {
+		return
+	}
+	if execArgv {
+		w.inChild(w.dir, args[i:], lit[i:], nil)
+		return
+	}
+	for _, l := range lit[i:] {
+		if !l {
+			w.blockText(w.cmdText, "watch")
+			return
+		}
+	}
+	w.script(strings.Join(args[i:], " "))
 }
 
 // findExec parses the command of a find -exec ... ; or +, which runs from the current directory,
@@ -1178,7 +1377,7 @@ func (w *walker) setter(name string, args []string, lit []bool) {
 		a := args[i]
 		if strings.HasPrefix(a, "-") && a != "--" {
 			if (a == "-a" || a == "-A") && i+1 < len(args) && lit[i+1] {
-				w.assign(args[i+1], nil, true)
+				w.assign(args[i+1], nil)
 				i++
 			} else if value[a] && i+1 < len(args) {
 				i++
@@ -1190,11 +1389,11 @@ func (w *walker) setter(name string, args []string, lit []bool) {
 		}
 		if name == "getopts" { // getopts OPTSTRING NAME: the second operand
 			if i+1 < len(args) && lit[i+1] {
-				w.assign(args[i+1], nil, true)
+				w.assign(args[i+1], nil)
 			}
 			return
 		}
-		w.assign(a, nil, true) // a plain NAME operand
+		w.assign(a, nil) // a plain NAME operand
 	}
 }
 
@@ -1203,7 +1402,7 @@ func (w *walker) printf(args []string, lit []bool) {
 	for i := 0; i+1 < len(args); i++ {
 		if lit[i] && args[i] == "-v" {
 			if lit[i+1] {
-				w.assign(args[i+1], nil, true)
+				w.assign(args[i+1], nil)
 			}
 			return
 		}
@@ -1315,17 +1514,19 @@ func heredocText(r *syntax.Redirect, body *syntax.Word) (string, bool) {
 
 // script parses the text a shell runs as a script.
 func (w *walker) script(s string) {
-	inner, err := findPushes(s, w.dir)
-	switch {
-	case err != nil:
+	f, err := parseBash(s)
+	if err != nil {
 		if mentionsGitPush(s) {
 			w.block("cannot parse the shell script around git push; " + runAlone)
 		}
-	default:
-		w.block(inner.Blocked)
-		w.pushes = append(w.pushes, inner.Pushes...)
-		w.calls = append(w.calls, inner.Calls...)
+		return
 	}
+	inner := newWalker(w.dir, s)
+	inner.cdpath = w.cdpath
+	inner.run(f)
+	w.block(inner.blocked)
+	w.pushes = append(w.pushes, inner.pushes...)
+	w.calls = append(w.calls, inner.calls...)
 }
 
 func (w *walker) chdir(name string, args []string, lit []bool) {
@@ -1344,7 +1545,7 @@ func (w *walker) chdir(name string, args []string, lit []bool) {
 		w.dir = "" // $HOME, OLDPWD, a variable, or zsh's `cd OLD NEW`: unknown here
 		return
 	}
-	if !filepath.IsAbs(args[0]) && os.Getenv("CDPATH") != "" {
+	if !filepath.IsAbs(args[0]) && (os.Getenv("CDPATH") != "" || w.cdpath) {
 		w.dir = "" // CDPATH may take a relative cd elsewhere
 		return
 	}
@@ -1456,8 +1657,13 @@ func (w *walker) git(args []string, lit []bool) {
 	if unsafe != "" {
 		dir = "" // the repository is not the directory's
 	}
+	if how := remoteRefWrite(sub, rest, restLit); how != "" {
+		w.block(how + " can move origin/main, which the gate measures a change from; fetch with git's own refspecs, in a command of its own")
+		return
+	}
 	switch {
 	case sub == "push":
+		w.gitRunner(sub, rest, restLit) // --receive-pack and --exec run a command
 	case gitPushLike[sub]:
 		w.block("git " + sub + " pushes without running git's pre-push hook; use `git push`")
 		return
@@ -1468,6 +1674,9 @@ func (w *walker) git(args []string, lit []bool) {
 		w.gitRunner(sub, rest, restLit)
 		return
 	default:
+		if cmdOptions[sub] != nil {
+			w.gitRunner(sub, rest, restLit)
+		}
 		w.calls = append(w.calls, sub)
 		return
 	}
@@ -1488,9 +1697,98 @@ func (w *walker) git(args []string, lit []bool) {
 	}
 }
 
-// gitRunner refuses a push in the command-carrying argument of a git subcommand that runs one:
-// rebase -x/--exec, bisect run, submodule foreach, difftool/mergetool -x/--extcmd. Such a push runs
-// per rebase step or per submodule, which the gate cannot check; refs and paths are data.
+// cmdOption is an option of a git subcommand whose value git runs as a shell command.
+type cmdOption struct {
+	long     string // --exec
+	short    byte   // 'x', or 0
+	optional bool   // the value can only be attached: -O<cmd>, --open-files-in-pager=<cmd>
+}
+
+// cmdOptions lists, per git subcommand, the options whose value git runs through the shell: per
+// rebase step or changed file (rebase, difftool, filter-branch), to reach the other side of a
+// local transport (upload-pack for fetch, pull, clone and ls-remote; receive-pack for push;
+// archive's exec), or as a pager (grep -O).
+var cmdOptions = map[string][]cmdOption{
+	"rebase":   {{long: "--exec", short: 'x'}},
+	"difftool": {{long: "--extcmd", short: 'x'}},
+	"filter-branch": {{long: "--tree-filter"}, {long: "--index-filter"}, {long: "--parent-filter"},
+		{long: "--msg-filter"}, {long: "--commit-filter"}, {long: "--tag-name-filter"}, {long: "--env-filter"}},
+	"fetch":     {{long: "--upload-pack"}},
+	"pull":      {{long: "--upload-pack"}},
+	"clone":     {{long: "--upload-pack", short: 'u'}},
+	"ls-remote": {{long: "--upload-pack", short: 'u'}},
+	"push":      {{long: "--receive-pack"}, {long: "--exec"}},
+	"archive":   {{long: "--exec"}},
+	"grep":      {{long: "--open-files-in-pager", short: 'O', optional: true}},
+}
+
+// optionValues returns the values args give opts, read the way git's parse-options reads them: a
+// short option's value attached (-xCMD) or next (-x CMD), also after bundled flags (-ixCMD); a long
+// one as --name=value or --name value, in any abbreviation of two letters or more (--ex for
+// --exec). unreadable is set when such a value is not literal.
+func optionValues(args []string, lit []bool, opts []cmdOption) (values []string, unreadable bool) {
+	next := func(j int, optional bool) int {
+		switch {
+		case optional || j+1 >= len(args):
+		case lit[j+1]:
+			values = append(values, args[j+1])
+			return j + 1
+		default:
+			unreadable = true
+			return j + 1
+		}
+		return j
+	}
+	for j := 0; j < len(args); j++ {
+		a := args[j]
+		if lit[j] && a == "--" {
+			break
+		}
+		if !strings.HasPrefix(a, "-") || a == "-" {
+			continue
+		}
+		if strings.HasPrefix(a, "--") {
+			name, value, hasEq := strings.Cut(a, "=")
+			for _, o := range opts {
+				if len(name) < len("--xy") || !strings.HasPrefix(o.long, name) {
+					continue
+				}
+				switch {
+				case hasEq && lit[j]:
+					values = append(values, value)
+				case hasEq || !lit[j]:
+					unreadable = true
+				default:
+					j = next(j, o.optional)
+				}
+				break
+			}
+			continue
+		}
+	cluster: // -abc: flags, then perhaps one of opts with its value
+		for k := 1; k < len(a); k++ {
+			for _, o := range opts {
+				if o.short == 0 || a[k] != o.short {
+					continue
+				}
+				switch rest := a[k+1:]; {
+				case !lit[j]:
+					unreadable = true
+				case rest != "":
+					values = append(values, rest)
+				default:
+					j = next(j, o.optional)
+				}
+				break cluster
+			}
+		}
+	}
+	return values, unreadable
+}
+
+// gitRunner refuses a push in a command a git subcommand runs: the value of a command-carrying
+// option (cmdOptions), bisect run, for-each-repo and submodule foreach. git runs it per step, per
+// file or per repository, or to reach the other side of a transport, out of the gate's reach.
 func (w *walker) gitRunner(sub string, args []string, lit []bool) {
 	how := "git " + sub
 	// carries runs probe on a fresh walker; a push or refusal it finds refuses the whole command.
@@ -1499,37 +1797,19 @@ func (w *walker) gitRunner(sub string, args []string, lit []bool) {
 		probe(s)
 		w.calls = append(w.calls, s.calls...)
 		if len(s.pushes) > 0 || s.blocked != "" {
-			w.block("a git push through " + how + " cannot be checked (it runs per step); " + runAlone)
+			w.block("a git push through " + how + " cannot be checked (git runs it as a command, per step, file or repository); " + runAlone)
 		}
 	}
-	// filterOpts carry a command (or shell snippet) per subcommand.
-	filterOpts := map[string]map[string]bool{
-		"rebase":        {"-x": true, "--exec": true},
-		"difftool":      {"-x": true, "--extcmd": true},
-		"mergetool":     {"--tool": false},
-		"filter-branch": {"--tree-filter": true, "--index-filter": true, "--parent-filter": true, "--msg-filter": true, "--commit-filter": true, "--tag-name-filter": true, "--env-filter": true},
+	if opts := cmdOptions[sub]; opts != nil {
+		values, unreadable := optionValues(args, lit, opts)
+		for _, v := range values {
+			carries(func(s *walker) { s.script(v) })
+		}
+		if unreadable {
+			w.block("a command given to " + how + " that the hook cannot read can run a git push; " + runAlone)
+		}
 	}
 	switch sub {
-	case "rebase", "difftool", "filter-branch":
-		opts := filterOpts[sub]
-		for i := 0; i < len(args); i++ {
-			if !lit[i] {
-				continue
-			}
-			name, value, hasEq := strings.Cut(args[i], "=")
-			if !opts[name] {
-				continue
-			}
-			switch {
-			case hasEq:
-				carries(func(s *walker) { s.script(value) })
-			case i+1 < len(args) && lit[i+1]:
-				carries(func(s *walker) { s.script(args[i+1]) })
-				i++
-			case i+1 < len(args):
-				w.blockText(w.cmdText, how)
-			}
-		}
 	case "bisect":
 		if len(args) > 0 && lit[0] && args[0] == "run" {
 			carries(func(s *walker) { s.command(args[1:], lit[1:], nil) })
@@ -1557,6 +1837,26 @@ func (w *walker) gitRunner(sub string, args []string, lit []bool) {
 			return
 		}
 	}
+}
+
+// remoteRefWrite reports how a git command writes the remote-tracking ref the gate measures from
+// (refs/remotes/origin/main): update-ref or symbolic-ref of a refs/remotes/ ref, a fetch or pull
+// refspec into refs/remotes/, or `git remote set-url`, which changes what a later fetch brings.
+func remoteRefWrite(sub string, args []string, lit []bool) string {
+	for i, a := range args {
+		if !lit[i] {
+			continue
+		}
+		switch {
+		case (sub == "update-ref" || sub == "symbolic-ref") && (strings.HasPrefix(a, "refs/remotes/") || a == "--stdin"):
+			return "git " + sub + " " + a
+		case (sub == "fetch" || sub == "pull") && strings.Contains(a, ":refs/remotes/"):
+			return "git " + sub + " " + a
+		case sub == "remote" && (a == "set-url" || a == "rename"):
+			return "git remote " + a
+		}
+	}
+	return ""
 }
 
 // safeConfig lists the configuration keys (lower case) that `git -c` and `git config` may set in a
