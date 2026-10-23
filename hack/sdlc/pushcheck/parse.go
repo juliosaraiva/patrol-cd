@@ -165,7 +165,9 @@ func wordsText(words []*syntax.Word, redirs []*syntax.Redirect) string {
 	for _, r := range redirs {
 		switch r.Op {
 		case syntax.Hdoc, syntax.DashHdoc:
-			_ = p.Print(&b, r.Hdoc)
+			if r.Hdoc != nil { // nil for an empty heredoc
+				_ = p.Print(&b, r.Hdoc)
+			}
 		case syntax.WordHdoc:
 			_ = p.Print(&b, r.Word)
 		}
@@ -584,11 +586,18 @@ func (w *walker) assign(name string, value *syntax.Word) {
 
 // assignValue checks NAME=VALUE. A GIT_* variable outside the safe list is refused (PATROL_SDLC_BASE
 // is not: the gate and the review input ignore it); GIT_PAGER, GIT_EDITOR and GIT_SEQUENCE_EDITOR
-// pass with a literal value that is safe shell code (safeCommand), since git runs it through sh.
-// CDPATH set in the command makes a later relative cd's directory unknown.
+// pass with a literal value that is safe shell code (safeCommand), since git runs it through sh, and
+// so do EDITOR, VISUAL and PAGER, which git falls back to. CDPATH set in the command makes a later
+// relative cd's directory unknown.
 func (w *walker) assignValue(name, value string, literal bool) {
 	if name == "CDPATH" || name == "cdpath" {
 		w.cdpath = true
+	}
+	if name == "EDITOR" || name == "VISUAL" || name == "PAGER" {
+		if !literal || !safeCommand(value) {
+			w.block(name + " is shell code git runs when its own editor or pager setting is unset, and this value could run git; run the command without it")
+		}
+		return
 	}
 	if !strings.HasPrefix(name, "GIT_") || safeGitEnv[name] || strings.HasPrefix(name, "GIT_TRACE") {
 		return
@@ -648,7 +657,7 @@ func (w *walker) changesDir(node syntax.Node) bool {
 			}
 			if len(args) > 0 && lit[0] {
 				switch path.Base(strings.TrimPrefix(args[0], "=")) {
-				case "cd", "pushd", "popd", "source", ".", "eval", "trap":
+				case "cd", "chdir", "pushd", "popd", "source", ".", "eval", "trap":
 					found = true
 				}
 			}
@@ -834,32 +843,46 @@ func (w *walker) call(c *syntax.CallExpr, redirs []*syntax.Redirect) {
 	w.cmdText = wordsText(c.Args, redirs) // this command's own text for the conservative net
 	args, lit := fields(c.Args)
 	w.command(args, lit, redirs)
-	if name := netHead(args, lit); name != "" {
-		if token := hookToken(w.cmdText); token != "" {
-			w.block(token + " in the words of " + name + ", which the hook does not model: a program, shell code, a shell alias or function, or an option it does not know could hand it to git and keep git's pre-push hook from running; " + runAlone)
+	// The net under the walker, on the words and the heredoc or here-string bodies as bash expands
+	// them ($'\x2d…' included): a hook token is refused in any command, as main.run refuses it in the
+	// command line's text.
+	expanded := strings.Join(args, " ")
+	for _, r := range redirs {
+		switch r.Op {
+		case syntax.Hdoc, syntax.DashHdoc, syntax.WordHdoc:
+			if s, ok := heredocText(r, bodyOf(r)); ok {
+				expanded += "\n" + s
+			}
 		}
+	}
+	if token := hookToken(expanded); token != "" {
+		w.block(tokenRefusal(token))
 	}
 	w.cmdText = saved
 }
 
-// netExempt lists the commands whose words are data (patterns, text, files, a message) and never
-// reach git as options or variables: the net under the walker does not read them.
-var netExempt = map[string]bool{"echo": true, "printf": true, "printenv": true, "unset": true, "gh": true}
-
 var (
 	noVerifyToken = regexp.MustCompile(`(?i)no-verify|--no-v(e(r(i(f)?)?)?)?([^a-z]|$)`)
 	gitVarToken   = regexp.MustCompile(`(?:^|[^A-Za-z0-9_])(GIT_[A-Z0-9_]+)`)
+	plumbingToken = regexp.MustCompile(`(?i)(send|receive|upload)-pack|http-push`)
 )
 
-// hookToken returns what in text could keep git's pre-push hook from running: --no-verify or an
-// abbreviation git accepts for it, core.hooksPath, or a GIT_* variable outside the safe list.
+// hookToken returns what in text could keep git's pre-push hook from running, or "": --no-verify or
+// an abbreviation git accepts for it, core.hooksPath, the .githooks directory, a GIT_* variable
+// outside the safe list, or git's plumbing that pushes, or serves a push, without the hook.
 func hookToken(text string) string {
 	n := normalize(text)
-	if noVerifyToken.MatchString(n) {
+	lower := strings.ToLower(n)
+	switch {
+	case noVerifyToken.MatchString(n):
 		return "--no-verify"
-	}
-	if strings.Contains(strings.ToLower(n), "hookspath") {
+	case strings.Contains(lower, "hookspath"):
 		return "core.hooksPath"
+	case strings.Contains(lower, ".githooks"):
+		return ".githooks"
+	}
+	if m := plumbingToken.FindString(n); m != "" {
+		return m
 	}
 	for _, m := range gitVarToken.FindAllStringSubmatch(n, -1) {
 		if v := m[1]; !safeGitEnv[v] && !gitEnvCommands[v] && !strings.HasPrefix(v, "GIT_TRACE") {
@@ -869,58 +892,9 @@ func hookToken(text string) string {
 	return ""
 }
 
-// netHead names the command the net under the walker reads, past precommand words, env and the
-// wrappers, or returns "" for one whose words are data: echo, printf, grep and the other data
-// commands, and git's own subcommands but those that run a command (whose arguments the walker
-// models exactly). The net refuses any other command whose own words hold a hook token: the
-// walker cannot know what a program, shell code, a shell alias or function, or an option it does
-// not model does with --no-verify, core.hooksPath or GIT_DIR.
-func netHead(args []string, lit []bool) string {
-	args, lit = stripBraces(args, lit)
-	envValue := map[string]bool{"-u": true, "--unset": true, "-C": true, "--chdir": true, "-S": true, "--split-string": true, "-P": true}
-peel:
-	for len(args) > 0 && lit[0] {
-		base := path.Base(strings.TrimPrefix(args[0], "="))
-		switch skip, isWrapper := wrapperSkip[base]; {
-		case precommand[base]:
-			args, lit = args[1:], lit[1:]
-		case base == "env":
-			args, lit = skipOptions(args[1:], lit[1:], envValue, 0)
-			for len(args) > 0 && lit[0] && envName.MatchString(args[0]) {
-				args, lit = args[1:], lit[1:]
-			}
-		case isWrapper:
-			args, lit = skipOptions(args[1:], lit[1:], skip.value, skip.operands)
-		case base == "xargs" || base == "parallel":
-			args, lit = skipOptions(args[1:], lit[1:], xargsValue[base], 0)
-		default:
-			break peel
-		}
-	}
-	if len(args) == 0 {
-		return ""
-	}
-	if !lit[0] {
-		return "a command word that is not literal"
-	}
-	name := path.Base(strings.TrimPrefix(args[0], "="))
-	sub, dashed := strings.CutPrefix(name, "git-")
-	switch {
-	case netExempt[name] || dataCommands[name] || pureOutput[name]:
-		return ""
-	case name == "git":
-		i := gitSubcommand(args[1:], lit[1:])
-		if i < 0 || !lit[1+i] {
-			return "" // git's global options are checked by git()
-		}
-		sub = args[1+i]
-	case !dashed:
-		return name
-	}
-	if sub != "push" && (gitRunners[sub] || cmdOptions[sub] != nil) { // push's own words: pushArgs
-		return "git " + sub
-	}
-	return ""
+// tokenRefusal is the refusal of a command line that names a hook token, in its text or its words.
+func tokenRefusal(token string) string {
+	return token + " in a command line could keep git's pre-push hook from running (a program, shell code, a shell alias or an option the hook does not model can hand it to git), so the hook refuses it in any command; write text that names it with the Edit or Write tools or into a file (git commit -F FILE, gh … --body-file FILE), and search with the Grep tool"
 }
 
 // definition checks code the command defines to run later under a name (an alias, or a zsh function
@@ -1020,7 +994,7 @@ prefix:
 	switch {
 	case w.autoCD(args, lit):
 		w.chdir("cd", args, lit)
-	case name == "cd" || name == "pushd":
+	case name == "cd" || name == "chdir" || name == "pushd": // chdir: zsh's synonym for cd
 		w.chdir(name, args[1:], lit[1:])
 	case name == "popd":
 		w.dir = ""
@@ -1494,6 +1468,9 @@ options:
 
 // heredocText returns the script a heredoc or here-string gives a shell, when it has no expansions.
 func heredocText(r *syntax.Redirect, body *syntax.Word) (string, bool) {
+	if body == nil { // an empty heredoc
+		return "", true
+	}
 	if r.Op == syntax.WordHdoc {
 		return literalWord(body)
 	}
@@ -1712,14 +1689,16 @@ var cmdOptions = map[string][]cmdOption{
 	"rebase":   {{long: "--exec", short: 'x'}},
 	"difftool": {{long: "--extcmd", short: 'x'}},
 	"filter-branch": {{long: "--tree-filter"}, {long: "--index-filter"}, {long: "--parent-filter"},
-		{long: "--msg-filter"}, {long: "--commit-filter"}, {long: "--tag-name-filter"}, {long: "--env-filter"}},
-	"fetch":     {{long: "--upload-pack"}},
-	"pull":      {{long: "--upload-pack"}},
-	"clone":     {{long: "--upload-pack", short: 'u'}},
-	"ls-remote": {{long: "--upload-pack", short: 'u'}},
-	"push":      {{long: "--receive-pack"}, {long: "--exec"}},
-	"archive":   {{long: "--exec"}},
-	"grep":      {{long: "--open-files-in-pager", short: 'O', optional: true}},
+		{long: "--msg-filter"}, {long: "--commit-filter"}, {long: "--tag-name-filter"}, {long: "--env-filter"},
+		{long: "--setup"}},
+	"send-email": {{long: "--sendmail-cmd"}, {long: "--to-cmd"}, {long: "--cc-cmd"}, {long: "--header-cmd"}},
+	"fetch":      {{long: "--upload-pack"}},
+	"pull":       {{long: "--upload-pack"}},
+	"clone":      {{long: "--upload-pack", short: 'u'}},
+	"ls-remote":  {{long: "--upload-pack", short: 'u'}},
+	"push":       {{long: "--receive-pack"}, {long: "--exec"}},
+	"archive":    {{long: "--exec"}},
+	"grep":       {{long: "--open-files-in-pager", short: 'O', optional: true}},
 }
 
 // optionValues returns the values args give opts, read the way git's parse-options reads them: a
@@ -1840,19 +1819,22 @@ func (w *walker) gitRunner(sub string, args []string, lit []bool) {
 }
 
 // remoteRefWrite reports how a git command writes the remote-tracking ref the gate measures from
-// (refs/remotes/origin/main): update-ref or symbolic-ref of a refs/remotes/ ref, a fetch or pull
-// refspec into refs/remotes/, or `git remote set-url`, which changes what a later fetch brings.
+// (refs/remotes/origin/main): update-ref or symbolic-ref of a remotes/ ref, a fetch or pull refspec
+// into remotes/ (git also reads a short `remotes/origin/main` destination as that ref), or a `git
+// remote` subcommand that changes a remote (add, remove, rename, set-url, set-branches), which
+// changes what a later fetch brings.
 func remoteRefWrite(sub string, args []string, lit []bool) string {
 	for i, a := range args {
 		if !lit[i] {
 			continue
 		}
+		_, dst, isRefspec := strings.Cut(a, ":")
 		switch {
-		case (sub == "update-ref" || sub == "symbolic-ref") && (strings.HasPrefix(a, "refs/remotes/") || a == "--stdin"):
+		case (sub == "update-ref" || sub == "symbolic-ref") && (strings.Contains(a, "remotes/") || a == "--stdin"):
 			return "git " + sub + " " + a
-		case (sub == "fetch" || sub == "pull") && strings.Contains(a, ":refs/remotes/"):
+		case (sub == "fetch" || sub == "pull") && isRefspec && strings.Contains(dst, "remotes/"):
 			return "git " + sub + " " + a
-		case sub == "remote" && (a == "set-url" || a == "rename"):
+		case sub == "remote" && (a == "add" || a == "remove" || a == "rm" || a == "rename" || a == "set-url" || a == "set-branches"):
 			return "git remote " + a
 		}
 	}

@@ -57,8 +57,11 @@ sdlc_ignored() {
 }
 
 # sdlc_clean succeeds when the working tree has no tracked changes, no untracked files that git
-# does not ignore, and no ignored files the checks could read (sdlc_ignored): only then is HEAD's
-# tree what the checks saw.
+# does not ignore, no ignored files the checks could read (sdlc_ignored), and no tracked file whose
+# changes git status does not show (marked assume-unchanged or skip-worktree: a lower-case or S tag
+# in git ls-files -v): only then is HEAD's tree what the checks saw.
 sdlc_clean() {
-	[[ -z $(git status --porcelain --untracked-files=normal) && -z $(sdlc_ignored) ]]
+	# grep reads all of git's output (no -q), so pipefail cannot see git die of SIGPIPE.
+	[[ -z $(git status --porcelain --untracked-files=normal) && -z $(sdlc_ignored) ]] &&
+		! git ls-files -v | grep -E '^([a-z]|S) ' >/dev/null
 }

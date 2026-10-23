@@ -84,6 +84,9 @@ func TestFindPushes(t *testing.T) {
 		{name: "cd in a function", command: "f() { cd /tmp; }; f; git push", want: []push{{Dir: "", Sources: head}}},
 		{name: "push in a function", command: "f() { git push; }", want: []push{{Dir: "", Sources: head}}},
 		{name: "if without cd", command: "if make sdlc-gate; then git push; fi", want: []push{{Dir: "/repo", Sources: head}}},
+		{name: "chdir, zsh's synonym for cd", command: "chdir /other && git push origin b", want: []push{{Dir: "/other", Sources: []string{"b"}}}},
+		{name: "zsh's cdpath set in the command", command: "cdpath=(/tmp/other); cd sub && git push origin a", want: []push{{Dir: "", Sources: []string{"a"}}}},
+		{name: "CDPATH reaches a shell the command runs", command: "CDPATH=/tmp/other; bash -c 'cd sub && git push origin a'", want: []push{{Dir: "", Sources: []string{"a"}}}},
 		{name: "git -C", command: "git -C /x -c color.ui=never push origin HEAD", want: []push{{Dir: "/x", Sources: head}}},
 		{name: "git -C with a directory that is not literal", command: `git -C "$D" push origin main`, want: []push{{Dir: "", Sources: []string{"main"}}}},
 		{name: "two pushes", command: "git push origin a; git -C /b push", want: []push{{Dir: "/repo", Sources: []string{"a"}}, {Dir: "/b", Sources: head}}},
@@ -151,7 +154,6 @@ func TestFindPushes(t *testing.T) {
 		{name: "--all", command: "git push --all origin", want: []push{refusedAll("--all")}},
 		{name: "matching refspec", command: "git push origin +:", want: []push{{Dir: "/repo", Sources: head,
 			Refused: "the matching refspec ':' pushes refs the gate cannot check one by one; push branches by name"}}},
-		{name: "--no-verify then --verify", command: "git push --no-verify --verify origin a", want: []push{{Dir: "/repo", Sources: []string{"a"}}}},
 		{name: "noglob precommand", command: "noglob git push origin a", want: []push{{Dir: "/repo", Sources: []string{"a"}}}},
 		{name: "zsh =cmd", command: "=git push origin a", want: []push{{Dir: "/repo", Sources: []string{"a"}}}},
 		{name: "setsid wrapper", command: "setsid git push origin a", want: []push{{Dir: "/repo", Sources: []string{"a"}}}},
@@ -178,7 +180,7 @@ func TestFindPushesBlocked(t *testing.T) {
 		globalOpt  = "can point git at another repository or configuration, where the pre-push hook does not run"
 		runsStep   = "git runs it as a command"
 		noVerify   = "--no-verify skips the pre-push hook"
-		givenTo    = "which the hook does not model"
+		givenTo    = tokenNet // the net under the walker: a hook token in a command's expanded words
 	)
 	for _, tt := range []struct{ command, reason string }{
 		// Pushes the walker cannot follow.
@@ -234,7 +236,7 @@ func TestFindPushesBlocked(t *testing.T) {
 		{"git config --add include.path /x.cfg", config},
 		{"git config --edit", config},
 		// Regressions the fourth review caught: runners, trap, xargs-stdin, dynamic eval, export -p.
-		{"echo --no-verify | xargs git push origin main", "through xargs"},
+		{"echo x | xargs git push origin main", "through xargs"},
 		{"echo a | xargs git push origin", "through xargs"},
 		{`eval "$E git push --no-verify origin main"`, "through eval"},
 		{"export -p GIT_DIR=/x/.git; cd /tmp && git push origin a", gitEnv},
@@ -279,11 +281,11 @@ func TestFindPushesBlocked(t *testing.T) {
 		{"bash <<'EOF'\ncd /y\ngit push --no-verify origin d\nEOF", noVerify},
 		{"echo 'cd .;git push --no-verify origin main' | bash", noVerify},
 		// xargs options with an attached value only, and a git whose subcommand comes from input.
-		{"echo --no-verify | xargs -i git push {} origin main", "through xargs"},
-		{"echo '--no-verify main' | xargs -l git push origin", "through xargs"},
+		{"echo x | xargs -i git push {} origin main", "through xargs"},
+		{"echo main | xargs -l git push origin", "through xargs"},
 		{"echo x | xargs -e git push origin", "through xargs"},
-		{"echo --no-verify | xargs --replace git push {} origin main", "through xargs"},
-		{"echo push --no-verify origin main | xargs git -C .", "through xargs"},
+		{"echo x | xargs --replace git push {} origin main", "through xargs"},
+		{"echo push origin main | xargs git -C .", "through xargs"},
 		{"parallel ::: 'git push --no-verify origin a'", "through parallel"},
 		// Assignments made inside words, arithmetic, let and namerefs.
 		{"set -a; : ${GIT_DIR:=/x/.git}; git push origin wip", gitEnv},
@@ -312,10 +314,10 @@ func TestFindPushesBlocked(t *testing.T) {
 		{"git config diff.external x", config},
 		{"git -c merge.tool=x mergetool", config},
 		// xargs options that take only an attached value, with git's subcommand from standard input.
-		{"echo push --no-verify origin main | xargs -e git", "through xargs"},
-		{"echo push --no-verify origin main | xargs -l git", "through xargs"},
-		{"echo push --no-verify origin main | xargs -i git", "through xargs"},
-		{"echo push --no-verify origin main | xargs --replace git", "through xargs"},
+		{"echo push origin main | xargs -e git", "through xargs"},
+		{"echo push origin main | xargs -l git", "through xargs"},
+		{"echo push origin main | xargs -i git", "through xargs"},
+		{"echo push origin main | xargs --replace git", "through xargs"},
 		{"git difftool -y -x 'git push --no-verify origin a' HEAD~1", "git difftool"},
 		{"git difftool --extcmd='git push origin a' HEAD~1", "git difftool"},
 		{"docker exec c git push --no-verify origin main", "run through docker"},
@@ -365,14 +367,29 @@ func TestFindPushesBlocked(t *testing.T) {
 		{"git grep -O'git push origin main' x", runsStep},
 		{"git push --receive-pack='git -C /some/clone push origin main; git-receive-pack' /tmp/r.git main", runsStep},
 		{`git fetch --upload-pack="$X" origin`, "that the hook cannot read"},
+		{`git fetch --upload-pack "$X" origin`, "that the hook cannot read"},
+		{"git push --exec='git push origin main' /tmp/r.git main", runsStep},
+		{"git send-email --sendmail-cmd='git push origin main' x.patch", runsStep},
+		{"git send-email --to-cmd 'git push origin main' x.patch", runsStep},
+		{"git filter-branch --setup 'git push origin main' HEAD", runsStep},
 		// The remote-tracking ref the gate measures a change from.
 		{"git update-ref refs/remotes/origin/main HEAD", "can move origin/main"},
+		{"git update-ref --stdin < refs.txt", "can move origin/main"},
+		{"git symbolic-ref refs/remotes/origin/HEAD refs/remotes/origin/x", "can move origin/main"},
 		{"git fetch . HEAD:refs/remotes/origin/main", "can move origin/main"},
+		{"git fetch . HEAD:remotes/origin/main", "can move origin/main"},
+		{"git pull origin main:remotes/origin/main", "can move origin/main"},
 		{"git remote set-url origin /tmp/self", "can move origin/main"},
-		// GIT_EDITOR and its kin are shell code git runs.
+		{"git remote add up /tmp/self", "can move origin/main"},
+		{"git remote rename origin old", "can move origin/main"},
+		{"git remote remove origin", "can move origin/main"},
+		// GIT_EDITOR and its kin are shell code git runs, and so are EDITOR, VISUAL and PAGER.
 		{`GIT_EDITOR='sh -c "gi""t pu""sh origin main"' git commit --amend`, gitEnv},
 		{`GIT_EDITOR='g\it pu\sh origin main; :' git commit --amend`, gitEnv},
 		{"env GIT_PAGER='git push origin main' git log", gitEnv},
+		{"EDITOR='git push origin main' git commit --amend", "shell code git runs"},
+		{`VISUAL="$X" git commit`, "shell code git runs"},
+		{"export PAGER='sh -c \"git push origin main\"'; git log", "shell code git runs"},
 		// The net: shell code or a program that gets a hook token, which the walker cannot follow.
 		{"emulate sh -c 'git push --no-verify origin main'", givenTo},
 		{"source /dev/stdin <<< 'git push --no-verify origin main'", givenTo},
@@ -380,6 +397,12 @@ func TestFindPushesBlocked(t *testing.T) {
 		{"go test ./x -run 'Blocked/--no-verify'", givenTo},
 		{"docker run --rm -e GIT_PUSH_OPTION=1 alpine echo push", givenTo},
 		{"$GP --no-verify origin main", givenTo},
+		// Tokens bash spells out of escapes, which only the expanded words show.
+		{`git push $'\x2d-no-verify' origin main`, noVerify},
+		{`source /dev/stdin <<< $'git push \x2d-no-verify origin main'`, givenTo},
+		{`export $'\x47IT_DIR=/x/.git'; git push origin a`, gitEnv},
+		{`git commit -m $'\x47IT_DIR'`, givenTo},
+		{`echo $'core.hooks\x50ath'`, givenTo},
 	} {
 		t.Run(tt.command, func(t *testing.T) {
 			t.Parallel()
@@ -414,7 +437,6 @@ func TestFindPushesAllowed(t *testing.T) {
 		"timeout 60 git log --oneline -5 -- hack/sdlc/pushcheck",
 		// Interpreters: their code is out of the hook's reach (git's own hook gates any push).
 		"awk '/push:/,/pull_request:/' .github/workflows/ci.yml",
-		"awk 'NR<=20' .githooks/pre-push",
 		"awk '/git push/ {print NR}' docs/guides/claude-code-sdlc.md",
 		"perl -0pi -e 's/git push origin main/git push -u origin HEAD/g' docs/guides/claude-code-sdlc.md",
 		"perl -ne 'print if /pushurl/' .git/config",
@@ -424,16 +446,12 @@ func TestFindPushesAllowed(t *testing.T) {
 		"kubectl -n patrol-cd exec deploy/patrol-cd-repo-server -- git -C /tmp/_patrol-repo log --oneline --grep push",
 		"env -u GOFLAGS go test ./hack/sdlc/pushcheck/...",
 		"git status --short && env -u GOFLAGS go test ./hack/sdlc/pushcheck/...",
-		// printf, declare -p and read with GIT_* names as data, not as variables set.
-		"printf '%s\\n' 'GIT_DIR=/tmp/x git push origin main'",
-		"printf 'GIT_DIR=%s\\n' \"${GIT_DIR-}\"",
-		"printf '| %s | %s |\\n' GIT_TAG \"$(git describe --tags --always)\"",
-		"declare -p GIT_DIR GIT_WORK_TREE 2>/dev/null || echo unset",
-		"typeset -p GIT_DIR 2>/dev/null",
+		// The GIT_* variables on the safe list, set or printed.
 		"GIT_PAGER= git log -3",
 		"GIT_PAGER=cat git log -3",
+		"printf '%s\\n' \"$GIT_AUTHOR_NAME\" \"${GIT_TERMINAL_PROMPT-}\"",
 		// git config reads, and git -c with a safe key, including a dynamic value.
-		"for k in user.name core.hooksPath; do echo \"$k=$(git config \"$k\")\"; done",
+		"for k in user.name user.email; do echo \"$k=$(git config \"$k\")\"; done",
 		"git config remote.origin.url",
 		"git -c safe.directory=\"$PWD\" status",
 		"git -c user.email=\"$EMAIL\" commit -q -m 'chore: x'",
@@ -442,9 +460,8 @@ func TestFindPushesAllowed(t *testing.T) {
 		"git -c core.quotePath=false diff --name-only",
 		// Other ordinary commands with the word push in them.
 		`grep -rn "git push" docs`,
-		`gh pr create --title "x" --body "run git push --no-verify? no"`,
+		`gh pr create --title "x" --body "run git push? no"`,
 		"GIT_EDITOR=true git rebase --continue",
-		"git config --get core.hooksPath",
 		"git stash push -m wip",
 		"git log --grep push",
 		"git switch -c fix/new-branch",
@@ -452,22 +469,20 @@ func TestFindPushesAllowed(t *testing.T) {
 		"cd /Users/x/patrol-cd || exit 1; git status",
 		"git config user.email \"$EMAIL\"",
 		"git config --local user.name \"$(id -un)\"",
-		"declare -p GIT_DIR GIT_WORK_TREE",
 		// The fifth review's false refusals, each fixed: GIT_ is case-sensitive in the text net, the
-		// net reads one command's words (not its siblings'), PATROL_SDLC_* is an ordinary variable,
-		// and an exec runner without -- is refused only on a plain git push.
+		// fallback net reads one command's words (not its siblings'), PATROL_SDLC_* is an ordinary
+		// variable, and an exec runner without -- is refused only on a plain git push.
 		"env -C /tmp cat testdata/git_push.json",
-		"env -C ui pnpm test; grep -rn \"git push --no-verify\" docs",
+		"env -C ui pnpm test; grep -rn \"git push\" docs",
 		"PATROL_SDLC_BASE=HEAD~1 make sdlc-check",
 		"docker run --rm alpine echo push",
-		// --no-verify as data, or for a git command other than push.
-		"grep -rn -- --no-verify docs",
-		"man git push | col -b | grep -n -A3 'no-verify'",
-		"echo --no-verify; printf '%s\\n' --no-verify",
-		"git commit --no-verify -m 'chore: x'",
 		"alias ll='ls -la'",
 		"trap 'rm -rf \"$tmp\"' EXIT; go test ./hack/sdlc/...",
 		"hash -r",
+		// An empty heredoc (mvdan.cc/sh leaves its body nil).
+		"cat <<EOF > notes.txt\nEOF",
+		"cat <<'EOF' | bash\nEOF",
+		"bash <<EOF\nEOF",
 		`export "GOFLAGS=-count=1" "GIT_PAGER=cat" && go test ./...`,
 		"git fetch origin",
 		"git clone --depth 1 https://github.com/x/y d",
@@ -478,15 +493,19 @@ func TestFindPushesAllowed(t *testing.T) {
 		"sudo -u ci make test",
 		"echo 'ls' | bash -e",
 		"watch -n 5 git status",
-		"grep -rn GIT_DIR docs | head",
-		"printenv GIT_DIR",
-		"unset GIT_DIR GIT_WORK_TREE",
-		"gh pr create --title x --body 'never run git push --no-verify or set core.hooksPath'",
 		`GIT_SEQUENCE_EDITOR="sed -i '' '2,\$s/^pick/squash/'" git rebase -i HEAD~3`,
 		"test/e2e/fixtures/git-server/rootfs/usr/local/bin/git-seed",
+		"chdir ui && pnpm test",
+		"EDITOR=vim VISUAL='code --wait' PAGER=less git log -1",
+		"git remote -v && git remote show origin",
+		"git fetch origin main",
+		"git fetch origin main:refs/heads/main-copy",
+		"git update-ref refs/heads/scratch HEAD",
+		"git symbolic-ref --short HEAD",
 	} {
 		t.Run(command, func(t *testing.T) {
 			t.Parallel()
+			assert.Empty(t, hookToken(command), "the text net (main.run) must let it through")
 			got, err := findPushes(command, "/repo")
 			require.NoError(t, err)
 			assert.Empty(t, got.Blocked, "pushes: %+v", got.Pushes)
@@ -560,6 +579,38 @@ func TestFindPushesAutoCD(t *testing.T) {
 		assert.Empty(t, got.Blocked, tt.command)
 		assert.Equal(t, []push{{Dir: tt.dir, Sources: []string{"a"}}}, got.Pushes, tt.command)
 	}
+}
+
+// A shell reads its script from standard input with -s, or with no -c and no script operand.
+func TestReadsStdin(t *testing.T) {
+	t.Parallel()
+	for _, tt := range []struct {
+		args []string
+		want bool
+	}{
+		{nil, true},
+		{[]string{"-e"}, true},
+		{[]string{"-o", "pipefail"}, true},
+		{[]string{"-eo", "pipefail", "-x"}, true},
+		{[]string{"--norc"}, true},
+		{[]string{"-s", "--"}, true},
+		{[]string{"-s", "arg"}, true},
+		{[]string{"-"}, true},
+		{[]string{"/dev/stdin"}, true},
+		{[]string{"--", "/dev/fd/0"}, true},
+		{[]string{"-c", "ls"}, false},
+		{[]string{"-ec", "ls"}, false},
+		{[]string{"script.sh"}, false},
+		{[]string{"--", "script.sh"}, false},
+		{[]string{"-e", "script.sh"}, false},
+	} {
+		lit := make([]bool, len(tt.args))
+		for i := range lit {
+			lit[i] = true
+		}
+		assert.Equal(t, tt.want, readsStdin(tt.args, lit), "%q", tt.args)
+	}
+	assert.False(t, readsStdin([]string{"x"}, []bool{false}), "an argument that is not literal")
 }
 
 func TestFindPushesInvalidBash(t *testing.T) {

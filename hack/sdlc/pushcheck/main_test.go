@@ -12,6 +12,9 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
+// tokenNet is part of the text net's refusal (tokenRefusal).
+const tokenNet = "in a command line could keep git's pre-push hook from running"
+
 // The hook fails closed: a command it cannot parse or follow is refused when it involves a push.
 // (Pushes it can follow are checked end to end by hack/sdlc/test-sdlc.sh.)
 func TestRunFailsClosed(t *testing.T) {
@@ -25,15 +28,25 @@ func TestRunFailsClosed(t *testing.T) {
 		{name: "not a push", command: "echo hi", want: 0},
 		{name: "unparseable without git", command: "echo 'push unterminated", want: 0},
 		{name: "unparseable, git without push", command: "x=gi; ${=x}t status; git log", want: 2, reason: "cannot parse the command as bash"},
-		{name: "unparseable, git and push split by quotes", command: "git p''ush --no-verify origin main; echo \"oops", want: 2, reason: "cannot parse the command as bash"},
-		{name: "unparseable, a hook override", command: "GIT_CONFIG_COUNT=1 make release; echo \"oops", want: 2, reason: "cannot parse the command as bash"},
+		{name: "unparseable, git and push split by quotes", command: "git p''ush origin main; echo \"oops", want: 2, reason: "cannot parse the command as bash"},
 		{name: "a push before a syntax error runs anyway", command: "git push origin main\necho \"oops", want: 2, reason: "cannot parse the command as bash"},
 		{name: "zsh syntax", command: "print -l ${(f)x}; git push origin main", want: 2, reason: "cannot parse the command as bash"},
 		{name: "push in a substitution", command: "out=$(git push 2>&1)", want: 2, reason: "command or process substitution"},
 		{name: "bash -c script that does not parse", command: `bash -c 'git push "unterminated'`, want: 2, reason: "cannot parse the shell script"},
-		{name: "GIT_* variable outside the repository", command: "export GIT_DIR=/x/.git; cd / && git push origin main", want: 2, reason: "GIT_DIR can point git"},
 		{name: "--git-dir outside the repository", command: "cd / && git --git-dir=/x/.git push origin main", want: 2, reason: "git --git-dir can point git"},
 		{name: "push from an unknown directory", command: `git -C "$D" push origin main`, want: 2, reason: "cannot tell which directory"},
+		{name: "push from another repository", command: "cd / && git push origin main", want: 2, reason: "which is not a work tree of"},
+		// The text net: a hook token anywhere in the command line, whatever the shell does with it and
+		// whether or not it parses.
+		{name: "--no-verify in a commit message", command: "git commit -m 'never use --no-verify'", want: 2, reason: tokenNet},
+		{name: "--no-verify in a command that does not parse", command: "git p''ush --no-verify origin main; echo \"oops", want: 2, reason: tokenNet},
+		{name: "a hook override in a command that does not parse", command: "GIT_CONFIG_COUNT=1 make release; echo \"oops", want: 2, reason: tokenNet},
+		{name: "a GIT_* variable set before a push", command: "export GIT_DIR=/x/.git; cd / && git push origin main", want: 2, reason: tokenNet},
+		{name: "an abbreviation in a heredoc", command: "python3 - <<'EOF'\nprint('--no-veri')\nEOF", want: 2, reason: tokenNet},
+		{name: "core.hooksPath in any case", command: "grep -rn CORE.HOOKSPATH docs", want: 2, reason: tokenNet},
+		{name: "the hook's directory", command: "chmod -x .githooks/pre-push", want: 2, reason: tokenNet},
+		{name: "push plumbing", command: "git send-pack origin HEAD", want: 2, reason: tokenNet},
+		{name: "a safe GIT_* variable", command: "GIT_AUTHOR_NAME=x GIT_EDITOR=true git commit --amend --no-edit", want: 0},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
@@ -106,46 +119,67 @@ func TestCheckSubcommands(t *testing.T) {
 	assert.Contains(t, checkSubcommands([]string{"status", "a", "b", "a"}, root), "git a, git b:", "each alias named once")
 }
 
-// A repository holding this project is recognised by a pushed commit carrying the gate, or by the
-// project's first commit; another repository is not.
-func TestHoldsProject(t *testing.T) {
+// A push runs only in this repository's work trees: root and its worktrees reach the gate; a second
+// clone, a bare one, another repository, a .git directory or a plain directory are refused, dry runs
+// and deletions too.
+func TestGatePushOnlyFromThisRepository(t *testing.T) {
 	t.Parallel()
 	root := t.TempDir()
 	gitIn(t, root, "init", "-q", "-b", "main")
 	gitIn(t, root, "commit", "-q", "--allow-empty", "-m", "first")
-	require.NoError(t, os.MkdirAll(filepath.Join(root, "hack", "sdlc"), 0o755))
-	require.NoError(t, os.WriteFile(filepath.Join(root, "hack", "sdlc", "gate.sh"), []byte("#!/bin/sh\n"), 0o755))
-	gitIn(t, root, "add", "-A")
-	gitIn(t, root, "commit", "-q", "-m", "gate")
-
 	work := t.TempDir()
-	bare := filepath.Join(work, "bare.git")
+	worktree := filepath.Join(work, "wt")
+	gitIn(t, root, "worktree", "add", "-q", "-b", "wt", worktree)
+	clone, bare, other, plain := filepath.Join(work, "clone"), filepath.Join(work, "bare.git"), filepath.Join(work, "other"), filepath.Join(work, "plain")
+	gitIn(t, work, "clone", "-q", root, clone)
 	gitIn(t, work, "clone", "-q", "--bare", root, bare)
-	assert.True(t, holdsProject(bare, []string{"HEAD"}, root), "a bare clone, by the gate in HEAD")
-	assert.True(t, holdsProject(bare, []string{"no-such-ref"}, root), "a bare clone, by the first commit")
-
-	shallow := filepath.Join(work, "shallow.git")
-	gitIn(t, work, "clone", "-q", "--bare", "--depth", "1", "file://"+root, shallow)
-	assert.True(t, holdsProject(shallow, []string{"HEAD"}, root), "a shallow clone without the first commit, by the gate")
-
-	other := filepath.Join(work, "other")
 	gitIn(t, work, "init", "-q", other)
-	gitIn(t, other, "commit", "-q", "--allow-empty", "-m", "unrelated")
-	assert.False(t, holdsProject(other, []string{"HEAD"}, root), "an unrelated repository")
+	require.NoError(t, os.Mkdir(plain, 0o755))
+
+	const notHere, notEnabled = "which is not a work tree of", "git's pre-push hook is not enabled"
+	for _, c := range []struct {
+		dir  string
+		p    push
+		want string
+	}{
+		{root, push{Sources: []string{"main"}}, notEnabled},
+		{filepath.Join(root, ".git", ".."), push{Sources: []string{"main"}}, notEnabled},
+		{worktree, push{Sources: []string{"wt"}}, notEnabled},
+		{clone, push{Sources: []string{"main"}}, notHere},
+		{clone, push{Sources: []string{"main"}, DryRun: true}, notHere},
+		{clone, push{Deletes: true}, notHere},
+		{bare, push{Sources: []string{"main"}}, notHere},
+		{other, push{Sources: []string{"HEAD"}}, notHere},
+		{filepath.Join(root, ".git"), push{Sources: []string{"main"}}, notHere},
+		{plain, push{Sources: []string{"HEAD"}}, notHere},
+	} {
+		c.p.Dir = c.dir
+		assert.Contains(t, gatePush(c.p, root), c.want, c.dir)
+	}
 }
 
-// A push from a bare clone of the project is refused; one from an unrelated bare repository is not.
-func TestGatePushBareClone(t *testing.T) {
+// With git's hook enabled, the gate's own files must be committed and the hook executable before
+// the gate runs; then its verdict decides.
+func TestGatePushChecksTheGateFiles(t *testing.T) {
 	t.Parallel()
 	root := t.TempDir()
 	gitIn(t, root, "init", "-q", "-b", "main")
-	gitIn(t, root, "commit", "-q", "--allow-empty", "-m", "first")
-	bare := filepath.Join(t.TempDir(), "bare.git")
-	gitIn(t, root, "clone", "-q", "--bare", root, bare)
-	assert.Contains(t, gatePush(push{Dir: bare, Sources: []string{"main"}}, root), "a bare repository holding this project's commits")
-	assert.Empty(t, gatePush(push{Dir: bare, Sources: []string{"main"}, DryRun: true}, root), "a dry run pushes nothing")
+	gate, hook := filepath.Join(root, "hack", "sdlc", "gate.sh"), filepath.Join(root, ".githooks", "pre-push")
+	require.NoError(t, os.MkdirAll(filepath.Dir(gate), 0o755))
+	require.NoError(t, os.MkdirAll(filepath.Dir(hook), 0o755))
+	require.NoError(t, os.WriteFile(gate, []byte("#!/bin/sh\necho \"gate saw $1\"\nexit 1\n"), 0o755))
+	require.NoError(t, os.WriteFile(hook, []byte("#!/bin/sh\nexit 0\n"), 0o755))
+	gitIn(t, root, "add", "-A")
+	gitIn(t, root, "commit", "-q", "-m", "gate")
+	gitIn(t, root, "config", "core.hooksPath", ".githooks")
+	p := push{Dir: root, Sources: []string{"main"}}
 
-	other := filepath.Join(t.TempDir(), "other.git")
-	gitIn(t, root, "init", "-q", "--bare", other)
-	assert.Empty(t, gatePush(push{Dir: other, Sources: []string{"main"}}, root))
+	assert.Contains(t, gatePush(p, root), "gate saw ", "the gate runs on the pushed commit and refuses it")
+	require.NoError(t, os.Chmod(hook, 0o644))
+	assert.Contains(t, gatePush(p, root), "missing or not executable")
+	require.NoError(t, os.Chmod(hook, 0o755))
+	require.NoError(t, os.WriteFile(gate, []byte("#!/bin/sh\nexit 0\n"), 0o755))
+	assert.Contains(t, gatePush(p, root), "uncommitted changes", "an edited gate does not decide")
+	gitIn(t, root, "commit", "-q", "-am", "gate passes")
+	assert.Empty(t, gatePush(p, root))
 }

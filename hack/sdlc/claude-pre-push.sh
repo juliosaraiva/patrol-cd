@@ -11,8 +11,9 @@
 # go.sum change; while a change does not build, the last binary that did is used, and without one,
 # commands that mention git or what would skip its hook are refused and the others run, so the build
 # can be fixed. The browser pane's preview_start runs the command a .claude/launch.json configuration
-# names; that command is checked the same way (which needs jq). Exit 2 blocks the command and shows
-# stderr to Claude Code.
+# names; that command is checked the same way (which needs jq). Without jq the whole hook input
+# stands in for the command, so `make sdlc-git-hooks` must then be run outside Claude Code. Exit 2
+# blocks the command and shows stderr to Claude Code.
 set -uo pipefail
 
 input=$(cat)
@@ -21,7 +22,11 @@ if ! command -v jq >/dev/null 2>&1 && [[ $input == *Claude_Browser__preview_star
 	echo "sdlc pre-push hook: jq is not installed, so the command preview_start would run cannot be read and checked; install jq" >&2
 	exit 2
 fi
-command=$(jq -r '.tool_input.command // empty' <<<"$input" 2>/dev/null) || command=""
+if command -v jq >/dev/null 2>&1; then
+	command=$(jq -r '.tool_input.command // empty' <<<"$input" 2>/dev/null) || command=""
+else
+	command=$input # the whole input stands in for the command: the checks below read more, never less
+fi
 if [[ $(jq -r '.tool_name // empty' <<<"$input" 2>/dev/null) == *Claude_Browser__preview_start ]]; then
 	name=$(jq -r '.tool_input.name // empty' <<<"$input" 2>/dev/null)
 	if [[ -n $name ]]; then

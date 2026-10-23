@@ -114,7 +114,10 @@ check "deletion" 0 "$(hook 'git push origin --delete old')"
 check "dry run" 0 "$(hook 'git push --dry-run origin change')"
 mkdir "$work/other"
 git init -q "$work/other"
-check "push from another repository" 0 "$(hook "git -C $work/other push")"
+# From Claude Code a push runs only in this clone and its worktrees: another repository may not run
+# git's hook.
+check "push from another repository" 2 "$(hook "git -C $work/other push")"
+contains "reason: not a work tree of this clone" "$work/hook.err" "which is not a work tree of $repo"
 
 # Without core.hooksPath the hook script refuses every command but the one that enables git's hook,
 # and pushcheck every push from this repository, dry runs and deletions included.
@@ -127,21 +130,20 @@ contains "reason: make sdlc-git-hooks" "$work/hook.err" "make sdlc-git-hooks"
 check "git hook not enabled: negated dry run" 2 "$(hook 'git push -n --no-dry-run origin change')"
 check "git hook not enabled: negated delete" 2 "$(hook 'git push -d --no-delete origin change')"
 check "git hook not enabled: heredoc to bash" 2 "$(hook "$(printf "bash <<'EOF'\ngit push origin change\nEOF")")"
+# Other clones of this project, with or without a work tree, are other repositories too.
 git clone -q "$remote" "$work/clone2"
-check "second clone without the git hook" 2 "$(hook 'git push origin HEAD:other' "$work/clone2")"
-contains "reason: make sdlc-git-hooks in the second clone" "$work/hook.err" "make sdlc-git-hooks"
-# Clones without a work tree of the gate are this project too: git's hook would not run there.
+check "second clone" 2 "$(hook 'git push origin HEAD:other' "$work/clone2")"
+contains "reason: a second clone" "$work/hook.err" "which is not a work tree of $repo"
 git clone -q --bare "$remote" "$work/bare.git"
 check "bare clone" 2 "$(hook 'git push origin main:other' "$work/bare.git")"
-contains "reason: bare clone of this project" "$work/hook.err" "a bare repository holding this project's commits"
+contains "reason: a bare clone" "$work/hook.err" "which is not a work tree of $repo"
 git clone -q --no-checkout "$remote" "$work/nocheckout"
-git -C "$work/nocheckout" config core.hooksPath .githooks
 check "clone without a checkout" 2 "$(hook 'git push origin main:other' "$work/nocheckout")"
-contains "reason: no gate in the work tree" "$work/hook.err" "has no hack/sdlc/gate.sh"
+contains "reason: a clone without a checkout" "$work/hook.err" "which is not a work tree of $repo"
 git config core.hooksPath .githooks
 check "git hook enabled: any command" 0 "$(wrapper 'ls')"
 check "git hook enabled: the wrapper runs pushcheck on every command" 2 "$(wrapper "git p''ush --no-verify origin change")"
-contains "reason: --no-verify" "$work/hook.err" "--no-verify skips the pre-push hook"
+contains "reason: the text net" "$work/hook.err" "in a command line could keep git's pre-push hook from running"
 # preview_start runs the command of a .claude/launch.json configuration: the wrapper checks it.
 mkdir -p .claude
 cat >.claude/launch.json <<'EOF'
@@ -314,6 +316,15 @@ rm kubeconfig.go
 touch bin/tool.out
 # shellcheck source=hack/sdlc/lib.sh
 check "ignored build outputs are clean" 0 "$(source hack/sdlc/lib.sh && sdlc_clean && echo 0 || echo 1)"
+# A tracked file git status is told not to look at hides its changes, so it leaves the tree unclean.
+git update-index --skip-worktree main.go
+# shellcheck source=hack/sdlc/lib.sh
+check "a skip-worktree file is not clean" 1 "$(source hack/sdlc/lib.sh && sdlc_clean && echo 0 || echo 1)"
+git update-index --no-skip-worktree main.go
+git update-index --assume-unchanged main.go
+# shellcheck source=hack/sdlc/lib.sh
+check "an assume-unchanged file is not clean" 1 "$(source hack/sdlc/lib.sh && sdlc_clean && echo 0 || echo 1)"
+git update-index --no-assume-unchanged main.go
 
 # check.sh records nothing when the environment can weaken a check (sdlc_weakened).
 printf 'GOLANGCI_LINT ?= golangci-lint\n' >"$work/w.mk"
