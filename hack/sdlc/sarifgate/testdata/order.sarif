@@ -1,0 +1,13 @@
+{
+  "version": "2.1.0",
+  "runs": [
+    {
+      "tool": {"driver": {"name": "CodeQL", "rules": [{"id": "x/r", "defaultConfiguration": {"level": "warning"}}]}},
+      "results": [
+        {"ruleId": "x/r", "message": {"text": "m"}, "locations": [{"physicalLocation": {"artifactLocation": {"uri": "b.go"}, "region": {"startLine": 5}}}], "partialFingerprints": {"primaryLocationLineHash": "b5:1"}},
+        {"ruleId": "x/r", "message": {"text": "m"}, "locations": [{"physicalLocation": {"artifactLocation": {"uri": "a.go"}, "region": {"startLine": 9}}}], "partialFingerprints": {"primaryLocationLineHash": "a9:1"}},
+        {"ruleId": "x/r", "message": {"text": "m"}, "locations": [{"physicalLocation": {"artifactLocation": {"uri": "a.go"}, "region": {"startLine": 2}}}], "partialFingerprints": {"primaryLocationLineHash": "a2:1"}}
+      ]
+    }
+  ]
+}

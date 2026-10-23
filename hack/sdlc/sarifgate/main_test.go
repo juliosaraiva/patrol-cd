@@ -61,6 +61,16 @@ func TestRun(t *testing.T) {
 			notWant: []string{"Second line."},
 		},
 		{
+			name:     "within a state, by path, then line",
+			sarifs:   []string{"testdata/order.sarif"},
+			wantCode: 1,
+			want: []string{
+				"fail       warning x/r a.go:2",
+				"fail       warning x/r a.go:9",
+				"fail       warning x/r b.go:5",
+			},
+		},
+		{
 			name:     "several SARIF files, one per language: all of them are gated",
 			sarifs:   []string{"testdata/sample.sarif", "testdata/levels.sarif"},
 			wantCode: 1,
@@ -74,6 +84,8 @@ func TestRun(t *testing.T) {
 			name: "both accepted",
 			baseline: []string{
 				"# accepted alerts",
+				"",
+				"   ",
 				"go/path-injection\tinternal/a/a.go\taaa:1\tthe path is joined under a checked root",
 				"go/unhandled-writable-file-close\tinternal/b/b.go\tbbb:1\tread-only file",
 			},
@@ -179,4 +191,18 @@ func TestRunNeedsInput(t *testing.T) {
 	var out, errOut bytes.Buffer
 	assert.Equal(t, 2, run(nil, &out, &errOut))
 	assert.Equal(t, 2, run([]string{"testdata/missing.sarif"}, &out, &errOut))
+	assert.Contains(t, errOut.String(), "testdata/missing.sarif")
+}
+
+// A SARIF file that does not parse stops the gate; it never counts as zero results.
+func TestRunMalformedSARIF(t *testing.T) {
+	t.Parallel()
+	for _, content := range []string{`{"version": "2.1.0", "runs": [`, `not json`} {
+		p := filepath.Join(t.TempDir(), "broken.sarif")
+		require.NoError(t, os.WriteFile(p, []byte(content), 0o644))
+		var out, errOut bytes.Buffer
+		assert.Equal(t, 2, run([]string{"testdata/sample.sarif", p}, &out, &errOut), "stdout:\n%s", out.String())
+		assert.Contains(t, errOut.String(), p)
+		assert.NotContains(t, out.String(), "CodeQL gate: OK")
+	}
 }
