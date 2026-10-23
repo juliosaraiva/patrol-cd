@@ -1,0 +1,11 @@
+# CodeQL configuration shared by .github/workflows/codeql.yml and the local runs of
+# hack/sdlc/codeql.sh (docs/guides/claude-code-sdlc.md). The query suite (security-extended) is set
+# where the analysis runs. paths-ignore applies to the languages analyzed without a build
+# (javascript-typescript, actions): build output, dependencies and the local tool directories.
+name: Patrol CD
+paths-ignore:
+  - "**/node_modules"
+  - "**/dist"
+  - bin
+  - .cache
+  - tools

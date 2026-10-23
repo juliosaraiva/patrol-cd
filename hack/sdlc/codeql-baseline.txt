@@ -1,0 +1,8 @@
+# CodeQL alerts accepted for the pre-push gate (hack/sdlc/codeql.sh analyze, hack/sdlc/sarifgate).
+# Prefer fixing an alert; accept one only when it is a false positive or a deliberate design, and
+# say why. One alert per line, tab separated:
+#
+#   rule-id <TAB> path <TAB> primaryLocationLineHash <TAB> reason
+#
+# sarifgate prints the rule, path and fingerprint of every blocking alert. On GitHub, dismiss the
+# same alert in code scanning with the same reason.

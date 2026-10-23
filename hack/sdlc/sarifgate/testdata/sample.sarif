@@ -1,0 +1,49 @@
+{
+  "version": "2.1.0",
+  "runs": [
+    {
+      "tool": {
+        "driver": {"name": "CodeQL", "rules": []},
+        "extensions": [
+          {
+            "name": "codeql/go-queries",
+            "rules": [
+              {"id": "go/path-injection", "defaultConfiguration": {"level": "error"}, "properties": {"security-severity": "7.5"}},
+              {"id": "go/log-injection", "defaultConfiguration": {"level": "error"}, "properties": {"security-severity": "7.8"}},
+              {"id": "go/unhandled-writable-file-close", "defaultConfiguration": {"level": "warning"}},
+              {"id": "go/useless-assignment", "defaultConfiguration": {"level": "note"}}
+            ]
+          }
+        ]
+      },
+      "results": [
+        {
+          "ruleId": "go/path-injection",
+          "message": {"text": "This path depends on a user-provided value.\nSecond line."},
+          "locations": [{"physicalLocation": {"artifactLocation": {"uri": "internal/a/a.go"}, "region": {"startLine": 12}}}],
+          "partialFingerprints": {"primaryLocationLineHash": "aaa:1"}
+        },
+        {
+          "ruleId": "go/unhandled-writable-file-close",
+          "level": "warning",
+          "message": {"text": "File handle may be writable."},
+          "locations": [{"physicalLocation": {"artifactLocation": {"uri": "internal/b/b.go"}, "region": {"startLine": 3}}}],
+          "partialFingerprints": {"primaryLocationLineHash": "bbb:1"}
+        },
+        {
+          "ruleId": "go/useless-assignment",
+          "message": {"text": "This definition is never used."},
+          "locations": [{"physicalLocation": {"artifactLocation": {"uri": "internal/c/c.go"}, "region": {"startLine": 7}}}],
+          "partialFingerprints": {"primaryLocationLineHash": "ccc:1"}
+        },
+        {
+          "ruleId": "go/log-injection",
+          "message": {"text": "Log entry depends on a user-provided value."},
+          "locations": [{"physicalLocation": {"artifactLocation": {"uri": "internal/d/d.go"}, "region": {"startLine": 40}}}],
+          "partialFingerprints": {"primaryLocationLineHash": "ddd:1"},
+          "suppressions": [{"kind": "inSource"}]
+        }
+      ]
+    }
+  ]
+}
