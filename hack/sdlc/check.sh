@@ -6,8 +6,9 @@
 #   always                 make ci-static (gofmt, go mod, build, vet, golangci-lint, generated files,
 #                          OpenAPI, parity, test rules, tier tests, SDLC script tests, shell,
 #                          actionlint, gitleaks) and make release-lint-commits (commit subjects)
-#   Go files               make ci-unit on the changed packages (-race, envtest, skip policy);
-#                          go.mod or go.sum: every package
+#   Go files, Go data      make ci-unit on the changed packages, a data file counting for the
+#                          nearest package above it (-race, envtest, skip policy); go.mod or
+#                          go.sum: every package
 #   test/integration/      make ci-integration
 #   deploy/, test/deploy/  make ci-deploy
 #   hack/kind/, test/e2e/  make ci-scripts
@@ -89,9 +90,10 @@ if printf '%s\n' ${changed[@]+"${changed[@]}"} | sdlc_docs_only; then
 	echo
 	echo "sdlc-check: documentation only; no tests, no CodeQL"
 else
-	# Go packages of the changed files: Go files, testdata, and any other file next to Go sources
-	# (embedded data); without the two suites that have their own targets, and only packages go can
-	# load (hack/deps holds a single `//go:build tools` file).
+	# Go packages of the changed files: for each file, the nearest directory at or above it that holds
+	# Go sources (testdata and embedded data such as internal/lua/customizations/*/*/health.lua belong
+	# to the package above them); without the two suites that have their own targets, and only
+	# packages go can load (hack/deps holds a single `//go:build tools` file).
 	pkgs=()
 	if any '^(go\.mod|go\.sum)$'; then
 		pkgs=(./...)
@@ -101,8 +103,10 @@ else
 		for f in ${changed[@]+"${changed[@]}"}; do
 			d=${f%%/testdata/*}
 			[[ $d == "$f" ]] && d=$(dirname "$f")
-			[[ $d == test/integration* || $d == test/deploy* ]] && continue
-			compgen -G "$d/*.go" >/dev/null || continue
+			while [[ $d != . ]] && ! compgen -G "$d/*.go" >/dev/null; do
+				d=$(dirname "$d")
+			done
+			[[ $d == . || $d == test/integration* || $d == test/deploy* ]] && continue
 			[[ $seen == *$'\n'"$d"$'\n'* ]] && continue
 			seen+="$d"$'\n'
 			dirs+=("./$d")
