@@ -41,10 +41,31 @@ ci_re=$(sed -n "s/^docs_re='\(.*\)'\$/\1/p" "$src/hack/ci/classify-changes.sh")
 sdlc_re=$(sed -n 's/.*\[\[ -z \$f || \$f =~ \(.*\) \]\] || return 1/\1/p' "$src/hack/sdlc/lib.sh")
 check "docs rule agrees with classify-changes.sh" "$ci_re" "$sdlc_re"
 
-# CI's CodeQL bundle must be the one hack/sdlc/codeql.sh pins.
-check "CodeQL bundle of CI is codeql.sh's" \
-	"$(sed -n 's/^version=//p' "$src/hack/sdlc/codeql.sh")" \
-	"$(sed -n 's|.*tools: https://github.com/github/codeql-action/releases/download/codeql-bundle-v\([0-9.]*\)/.*|\1|p' "$src/.github/workflows/codeql.yml")"
+# CI's CodeQL bundle must be the one hack/sdlc/codeql.sh pins and checks: the workflow fetches it
+# with codeql.sh and hands that file to the action.
+# shellcheck disable=SC2016 # the pattern matches the literal text of the workflow
+check "CodeQL bundle of CI is fetched by codeql.sh" 1 \
+	"$(grep -cF 'run: hack/sdlc/codeql.sh fetch "$RUNNER_TEMP/codeql"' "$src/.github/workflows/codeql.yml")"
+check "CodeQL bundle of CI is codeql.sh's Linux asset" \
+	"$(sed -n "s/^[[:space:]]*asset='\(codeql-bundle-linux64[^']*\)'/\1/p" "$src/hack/sdlc/codeql.sh")" \
+	"$(sed -n 's|^[[:space:]]*tools: \${{ runner.temp }}/codeql/\(.*\)$|\1|p' "$src/.github/workflows/codeql.yml")"
+
+# The hook command in .claude/settings.json blocks when the wrapper cannot run or dies (Claude Code
+# blocks only on status 2), and lets commands run in a checkout without it (from before the gate).
+hookcmd=$(jq -r '.hooks.PreToolUse[0].hooks[0].command' "$src/.claude/settings.json")
+settings_hook() { # settings_hook PROJECT_DIR: exit status of the settings' hook command
+	local rc=0
+	echo '{}' | CLAUDE_PROJECT_DIR=$1 sh -c "$hookcmd" >/dev/null 2>&1 || rc=$?
+	echo "$rc"
+}
+mkdir -p "$work/p/hack/sdlc"
+check "settings hook: no wrapper in the checkout" 0 "$(settings_hook "$work/p")"
+printf 'exit 0\n' >"$work/p/hack/sdlc/claude-pre-push.sh"
+check "settings hook: the wrapper passes, executable or not" 0 "$(settings_hook "$work/p")"
+printf 'kill -9 $$\n' >"$work/p/hack/sdlc/claude-pre-push.sh"
+check "settings hook: the wrapper is killed" 2 "$(settings_hook "$work/p")"
+printf 'exit 1\n' >"$work/p/hack/sdlc/claude-pre-push.sh"
+check "settings hook: the wrapper fails" 2 "$(settings_hook "$work/p")"
 
 # Build the hook's binary (the wrapper builds it on first use).
 (cd "$src" && go build -o bin/sdlc-pushcheck ./hack/sdlc/pushcheck)
@@ -142,6 +163,12 @@ check "clone without a checkout" 2 "$(hook 'git push origin main:other' "$work/n
 contains "reason: a clone without a checkout" "$work/hook.err" "which is not a work tree of $repo"
 git config core.hooksPath .githooks
 check "git hook enabled: any command" 0 "$(wrapper 'ls')"
+# A pushcheck binary that dies refuses the command instead of letting it run unchecked.
+cp bin/sdlc-pushcheck "$work/pushcheck.good"
+printf '#!/bin/sh\nkill -9 $$\n' >bin/sdlc-pushcheck
+check "a killed pushcheck refuses" 2 "$(wrapper 'ls')"
+contains "reason: a killed pushcheck" "$work/hook.err" "stopped with status 137"
+cp "$work/pushcheck.good" bin/sdlc-pushcheck
 check "git hook enabled: the wrapper runs pushcheck on every command" 2 "$(wrapper "git p''ush --no-verify origin change")"
 contains "reason: the text net" "$work/hook.err" "in a command line could keep git's pre-push hook from running"
 # preview_start runs the command of a .claude/launch.json configuration: the wrapper checks it.

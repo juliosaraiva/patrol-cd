@@ -49,7 +49,14 @@ fi
 
 bin=$root/bin/sdlc-pushcheck
 if [[ ! -x $bin || -n $(find "$root/hack/sdlc/pushcheck" "$root/go.sum" -newer "$bin" -print 2>/dev/null | head -n 1) ]]; then
-	if ! (cd "$root" && go build -o "$bin.tmp" ./hack/sdlc/pushcheck && mv -f "$bin.tmp" "$bin") >/dev/null 2>&1 && [[ ! -x $bin ]]; then
+	# Build in a directory of its own next to the binary, so parallel hook runs never move each
+	# other's partial output, and the final mv is a rename.
+	mkdir -p "$root/bin"
+	if tmp=$(mktemp -d "$bin.XXXXXX"); then
+		(cd "$root" && go build -o "$tmp/sdlc-pushcheck" ./hack/sdlc/pushcheck && mv -f "$tmp/sdlc-pushcheck" "$bin") >/dev/null 2>&1
+		rm -rf "${tmp:?}"
+	fi
+	if [[ ! -x $bin ]]; then
 		# Lower case, without quotes and backslashes: git, GIT_*, any abbreviation of --no-verify, hooksPath.
 		plain=$(printf '%s' "${command//[\"\'\\]/}" | tr '[:upper:]' '[:lower:]')
 		if [[ $plain == *git* || $plain == *no-v* || $plain == *hookspath* ]]; then
@@ -60,3 +67,11 @@ if [[ ! -x $bin || -n $(find "$root/hack/sdlc/pushcheck" "$root/go.sum" -newer "
 	fi
 fi
 "$bin" "$root" <<<"$input"
+rc=$?
+# Claude Code blocks a command only on status 2: any other failure (a killed or corrupt binary) must
+# not let the command run unchecked.
+if [[ $rc -ne 0 && $rc -ne 2 ]]; then
+	echo "sdlc pre-push hook: $bin stopped with status $rc, so the command was not checked and is refused; delete the binary to have it rebuilt" >&2
+	exit 2
+fi
+exit "$rc"

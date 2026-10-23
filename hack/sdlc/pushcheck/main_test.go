@@ -47,6 +47,7 @@ func TestRunFailsClosed(t *testing.T) {
 		{name: "the hook's directory", command: "chmod -x .githooks/pre-push", want: 2, reason: tokenNet},
 		{name: "push plumbing", command: "git send-pack origin HEAD", want: 2, reason: tokenNet},
 		{name: "a safe GIT_* variable", command: "GIT_AUTHOR_NAME=x GIT_EDITOR=true git commit --amend --no-edit", want: 0},
+		{name: "a git alias", command: "git ship origin main", want: 2, reason: "git ship: not a git command but an alias"},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
@@ -117,6 +118,8 @@ func TestCheckSubcommands(t *testing.T) {
 	require.NoError(t, os.WriteFile(filepath.Join(root, "bin", "git-projtool"), []byte("#!/bin/sh\n"), 0o755))
 	assert.Empty(t, checkSubcommands([]string{"projtool"}, root))
 	assert.Contains(t, checkSubcommands([]string{"status", "a", "b", "a"}, root), "git a, git b:", "each alias named once")
+	assert.Contains(t, checkSubcommands([]string{"status"}, filepath.Join(root, "nonexistent")), "cannot list git's commands",
+		"a git that cannot list its commands refuses")
 }
 
 // A push runs only in this repository's work trees: root and its worktrees reach the gate; a second
@@ -136,14 +139,14 @@ func TestGatePushOnlyFromThisRepository(t *testing.T) {
 	gitIn(t, work, "init", "-q", other)
 	require.NoError(t, os.Mkdir(plain, 0o755))
 
-	const notHere, notEnabled = "which is not a work tree of", "git's pre-push hook is not enabled"
+	const notHere, notEnabled = "which is not a work tree of", "git's pre-push hook is not enabled in"
 	for _, c := range []struct {
 		dir  string
 		p    push
 		want string
 	}{
 		{root, push{Sources: []string{"main"}}, notEnabled},
-		{filepath.Join(root, ".git", ".."), push{Sources: []string{"main"}}, notEnabled},
+		{root + "/.git/..", push{Sources: []string{"main"}}, notEnabled}, // through the git directory, not cleaned
 		{worktree, push{Sources: []string{"wt"}}, notEnabled},
 		{clone, push{Sources: []string{"main"}}, notHere},
 		{clone, push{Sources: []string{"main"}, DryRun: true}, notHere},
@@ -156,6 +159,12 @@ func TestGatePushOnlyFromThisRepository(t *testing.T) {
 		c.p.Dir = c.dir
 		assert.Contains(t, gatePush(c.p, root), c.want, c.dir)
 	}
+	assert.Contains(t, gatePush(push{Dir: root, Sources: []string{"main"}}, root), "(core.hooksPath is unset)")
+	gitIn(t, root, "config", "core.hooksPath", "/elsewhere")
+	assert.Contains(t, gatePush(push{Dir: root, Sources: []string{"main"}}, root), `(core.hooksPath is "/elsewhere")`)
+	// With git's hook enabled, a branch from before the gate has no gate to run.
+	gitIn(t, root, "config", "core.hooksPath", ".githooks")
+	assert.Contains(t, gatePush(push{Dir: root, Sources: []string{"main"}}, root), "has no hack/sdlc/gate.sh")
 }
 
 // With git's hook enabled, the gate's own files must be committed and the hook executable before
@@ -182,4 +191,20 @@ func TestGatePushChecksTheGateFiles(t *testing.T) {
 	assert.Contains(t, gatePush(p, root), "uncommitted changes", "an edited gate does not decide")
 	gitIn(t, root, "commit", "-q", "-am", "gate passes")
 	assert.Empty(t, gatePush(p, root))
+	// An edit git status is told not to show does not decide either.
+	for _, mark := range []string{"assume-unchanged", "skip-worktree"} {
+		gitIn(t, root, "update-index", "--"+mark, "hack/sdlc/gate.sh")
+		assert.Contains(t, gatePush(p, root), "assume-unchanged or skip-worktree", mark)
+		gitIn(t, root, "update-index", "--no-"+mark, "hack/sdlc/gate.sh")
+	}
+	assert.Empty(t, gatePush(p, root))
+}
+
+func TestHidesChanges(t *testing.T) {
+	t.Parallel()
+	assert.False(t, hidesChanges(""))
+	assert.False(t, hidesChanges("H hack/sdlc/gate.sh\nH hack/sdlc/lib.sh"))
+	assert.True(t, hidesChanges("H hack/sdlc/gate.sh\nh hack/sdlc/lib.sh"), "assume-unchanged")
+	assert.True(t, hidesChanges("S hack/sdlc/gate.sh"), "skip-worktree")
+	assert.True(t, hidesChanges("s hack/sdlc/gate.sh"), "both")
 }

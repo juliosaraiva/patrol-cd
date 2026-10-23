@@ -62,7 +62,8 @@ would need a GitHub Code Security license.
 
 - **Bundle.** `hack/sdlc/codeql.sh install` (`make codeql-install`) downloads CodeQL 2.27.3 into
   `bin/codeql-2.27.3/` and checks its SHA-256 against the pin in the script and the publisher's
-  checksum file. macOS and Linux x86-64 only (CodeQL ships no Linux arm64 bundle); about 2 GB
+  checksum file (a release asset can be replaced under its tag); `hack/sdlc/codeql.sh fetch DIR`
+  downloads and checks the tarball only, as CI does. macOS and Linux x86-64 only (CodeQL ships no Linux arm64 bundle); about 2 GB
   unpacked; needs `zstd`.
 - **Analysis.** `hack/sdlc/codeql.sh analyze [go] [javascript-typescript] [actions]` (`make codeql`,
   `CODEQL_LANGUAGES=go make codeql`) builds a database per language (Go by tracing `go build ./...`;
@@ -74,7 +75,8 @@ would need a GitHub Code Security license.
   but do not fail. A baseline line names the rule, the file, CodeQL's line-independent fingerprint
   and the reason. Prefer fixing: accept an alert only when it is a false positive or a deliberate
   design, and dismiss it on GitHub with the same reason.
-- **On GitHub.** `.github/workflows/codeql.yml` runs the same bundle, suite and configuration on
+- **On GitHub.** `.github/workflows/codeql.yml` fetches the same bundle with `codeql.sh fetch`
+  (checked against the same SHA-256) and runs it with the same suite and configuration on
   pull requests (not documentation-only ones), on pushes to `main` and every Monday, and uploads the
   results to code scanning (Security tab), where new alerts show on the pull request.
 
@@ -128,7 +130,11 @@ Two hooks run it:
   pane's `preview_start`, whose command is the `.claude/launch.json` configuration it names). While
   git's hook is not enabled it refuses every command but `make sdlc-git-hooks`, so git's hook runs
   whatever Claude Code pushes. Then every command goes to `hack/sdlc/pushcheck` (built into `bin/` on
-  first use). Its job is to keep git's hook from being skipped by mistake or by a shortcut, and to
+  first use). Claude Code blocks a command only when a hook exits with status 2, so any other failure
+  is turned into 2: the wrapper's, when the binary dies, and the settings' hook command's, which runs
+  the wrapper with `bash` (an executable bit does not matter) and lets commands run only where the
+  checkout has no wrapper (a commit from before the gate). Its job is to keep git's hook from being
+  skipped by mistake or by a shortcut, and to
   refuse early, with a reason, a push the gate would refuse. It is not a boundary against someone who
   sets out to defeat it (see Limits). It works in three layers.
 
@@ -142,9 +148,10 @@ Two hooks run it:
      line as written, and each command's words and heredoc bodies as bash expands them, so
      `$'\x2d-no-verify'` counts too. The hook cannot tell what a program, shell code, a shell alias or
      function (oh-my-zsh's `gp='git push'`) or an option it does not model does with such a token, so
-     it does not try: text that only mentions one (a commit message, a pull request body, a search) is
-     written with the Edit or Write tools or into a file (`git commit -F FILE`,
-     `gh pr create --body-file FILE`), and searched with the Grep tool.
+     it does not try: text that only mentions one (a commit message, a pull request body) is written
+     with the Edit or Write tools or into a file (`git commit -F FILE`,
+     `gh pr create --body-file FILE`), and a search for one uses Claude Code's Grep tool where it has
+     one, or a quoted pattern that does not spell the token out (`grep -rn 'hooks[P]ath'`).
   2. **The walker** parses the command as bash with `mvdan.cc/sh` to find each `git push` and the
      directory it runs in, and gives a clear reason for what it refuses.
   3. **Where a push may run.** From Claude Code a push runs only in this clone or one of its
@@ -267,7 +274,10 @@ A second hook (`hack/sdlc/claude-format.sh`, `PostToolUse` for Edit, MultiEdit a
   the change, and a change that then looks like documentation only skips the review.
 - The text net also refuses harmless commands: a commit message or pull request body that names a
   token, a search for one, `go test -run` with one in a test name. Write those with the Edit or Write
-  tools or into a file, and search with the Grep tool.
+  tools or into a file, and search as the text net's refusal says.
+- A hook that runs past its timeout (120 s; a first build of `hack/sdlc/pushcheck` that downloads
+  modules can) may let the command run, as Claude Code treats a timeout as a hook error rather than
+  a refusal; git's own hook still gates a push.
 - `preview_start` is checked only with `jq` installed; without it the call is refused, and the whole
   hook input stands in for a Bash command (so `make sdlc-git-hooks` must then run outside Claude
   Code).

@@ -416,9 +416,10 @@ func (w *walker) cmd(s *syntax.Stmt) {
 				if changed && (i > 0 || anyNonExitOr(segments)) {
 					unknownAfter = true // a cd that might be skipped: unknown for what follows the chain
 				}
-				if changed && (poisoned || seg.stmt.Negated) {
-					poisoned = true // a negated cd inverts success, so its directory is uncertain
-					w.dir = ""
+				if changed && seg.stmt.Negated {
+					// A negated cd inverts success, so its directory is uncertain: the next segment, or
+					// the end of the chain, clears it.
+					poisoned = true
 				}
 			}
 			if unknownAfter || poisoned {
@@ -894,7 +895,7 @@ func hookToken(text string) string {
 
 // tokenRefusal is the refusal of a command line that names a hook token, in its text or its words.
 func tokenRefusal(token string) string {
-	return token + " in a command line could keep git's pre-push hook from running (a program, shell code, a shell alias or an option the hook does not model can hand it to git), so the hook refuses it in any command; write text that names it with the Edit or Write tools or into a file (git commit -F FILE, gh … --body-file FILE), and search with the Grep tool"
+	return token + " in a command line could keep git's pre-push hook from running (a program, shell code, a shell alias or an option the hook does not model can hand it to git), so the hook refuses it in any command; write text that names it with the Edit or Write tools or into a file (git commit -F FILE, gh … --body-file FILE), and search with Claude Code's Grep tool where it has one, or with a quoted pattern that does not spell the token out (grep -rn 'hooks[P]ath')"
 }
 
 // definition checks code the command defines to run later under a name (an alias, or a zsh function
@@ -1143,11 +1144,13 @@ var wrapperSkip = map[string]struct {
 	"nohup":      {nil, 0},
 	"setsid":     {nil, 0},
 	"caffeinate": {map[string]bool{"-t": true, "-w": true}, 0},
-	"sudo":       {map[string]bool{"-u": true, "-g": true, "-U": true, "-C": true, "-h": true, "-p": true, "-r": true, "-t": true, "-A": true, "-D": true, "-R": true}, 0},
-	"doas":       {map[string]bool{"-u": true, "-C": true}, 0},
-	"chrt":       {map[string]bool{"-T": true, "-P": true}, 0},
-	"time":       {map[string]bool{"-o": true, "-f": true, "--format": true}, 0},
-	"stdstub":    {nil, 0},
+	"sudo": {map[string]bool{"-u": true, "-g": true, "-U": true, "-C": true, "-h": true, "-p": true, "-r": true, "-t": true, "-D": true, "-R": true,
+		"--user": true, "--group": true, "--other-user": true, "--close-from": true, "--host": true, "--prompt": true, "--role": true,
+		"--type": true, "--chdir": true, "--chroot": true}, 0},
+	"doas":    {map[string]bool{"-u": true, "-C": true}, 0},
+	"chrt":    {map[string]bool{"-T": true, "-P": true}, 0},
+	"time":    {map[string]bool{"-o": true, "-f": true, "--format": true}, 0},
+	"stdstub": {nil, 0},
 }
 
 // skipOptions drops leading -options (and the value of those in value), then n operands.
@@ -1181,7 +1184,25 @@ func (w *walker) wrapped(name string, args []string, lit []bool, redirs []*synta
 		w.blockText(w.cmdText, name)
 		return
 	}
-	w.inChild(w.dir, inner, innerLit, redirs)
+	dir := w.dir
+	if name == "sudo" && sudoMoves(args[1:len(args)-len(inner)]) {
+		dir = "" // the command runs in another directory or root
+	}
+	w.inChild(dir, inner, innerLit, redirs)
+}
+
+// sudoMoves reports whether sudo's options run the command elsewhere: -D/--chdir, -R/--chroot, or
+// -i/--login (the target user's home).
+func sudoMoves(opts []string) bool {
+	for _, o := range opts {
+		switch {
+		case strings.HasPrefix(o, "--chdir"), strings.HasPrefix(o, "--chroot"), o == "--login":
+			return true
+		case len(o) > 1 && o[0] == '-' && o[1] != '-' && strings.ContainsAny(o[1:], "DRi"):
+			return true
+		}
+	}
+	return false
 }
 
 // execRunner parses the command run after a `--` (kubectl exec POD -- CMD); without one, only a
@@ -1499,7 +1520,8 @@ func (w *walker) script(s string) {
 		return
 	}
 	inner := newWalker(w.dir, s)
-	inner.cdpath = w.cdpath
+	// The shell inherits CDPATH and whatever a file sourced, or an eval run, earlier set.
+	inner.cdpath, inner.envUnknown = w.cdpath, w.envUnknown
 	inner.run(f)
 	w.block(inner.blocked)
 	w.pushes = append(w.pushes, inner.pushes...)
@@ -1616,11 +1638,7 @@ func (w *walker) git(args []string, lit []bool) {
 	if i >= len(args) {
 		return
 	}
-	sub, rest, restLit := args[i], args[i+1:], lit[i+1:]
-	if !lit[i] {
-		w.block("a git subcommand that is not literal cannot be checked; " + runAlone)
-		return
-	}
+	sub, rest, restLit := args[i], args[i+1:], lit[i+1:] // literal: the loop refused it otherwise
 	if unknownOpt && sub != "push" {
 		// An unmodelled global option may have swallowed the real subcommand; if a push is anywhere
 		// after it, fail closed.

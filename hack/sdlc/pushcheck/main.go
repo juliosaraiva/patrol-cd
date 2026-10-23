@@ -133,8 +133,12 @@ func gatePush(p push, root string) string {
 	if fi, err := os.Stat(filepath.Join(top, ".githooks", "pre-push")); err != nil || fi.Mode()&0o111 == 0 {
 		return "git's pre-push hook in " + top + " is missing or not executable, so git would push without it: restore it before pushing"
 	}
-	if changed, _ := gitOut(top, "status", "--porcelain", "--", ".githooks", "hack/sdlc"); changed != "" {
-		return "the gate's own files in " + top + " (git's hook, hack/sdlc) have uncommitted changes: commit or restore them before pushing"
+	// The gate's own files must be as committed: no change git status shows, and none it hides (a
+	// file marked assume-unchanged or skip-worktree: a lower-case or S tag in git ls-files -v).
+	status, errStatus := gitOut(top, "status", "--porcelain", "--", ".githooks", "hack/sdlc")
+	tags, errTags := gitOut(top, "ls-files", "-v", "--", ".githooks", "hack/sdlc")
+	if errStatus != nil || errTags != nil || status != "" || hidesChanges(tags) {
+		return "the gate's own files in " + top + " (git's hook, hack/sdlc) have uncommitted changes, are marked assume-unchanged or skip-worktree, or git cannot list them: commit or restore them, and clear the marks, before pushing"
 	}
 	var problems []string
 	for _, src := range p.Sources {
@@ -190,6 +194,17 @@ func checkSubcommands(calls []string, root string) string {
 		return ""
 	}
 	return "git " + strings.Join(aliases, ", git ") + ": not a git command but an alias (or a typo); the command could change what an alias runs, so run the git command it stands for"
+}
+
+// hidesChanges reports whether git ls-files -v output tags a file assume-unchanged (lower case) or
+// skip-worktree (S): git status does not show such a file's changes.
+func hidesChanges(tags string) bool {
+	for _, line := range strings.Split(tags, "\n") {
+		if line != "" && (line[0] == 'S' || (line[0] >= 'a' && line[0] <= 'z')) {
+			return true
+		}
+	}
+	return false
 }
 
 // sameRepository reports whether two work trees share a git directory (a clone and its worktrees).

@@ -3,14 +3,16 @@
 # Apache-2.0, which the CodeQL CLI license allows (the same analysis runs on GitHub in
 # .github/workflows/codeql.yml).
 #
-#   install              download the pinned CodeQL bundle into bin/codeql-<version>/, after
-#                        checking its SHA-256 against the pin below and the publisher's checksum file
+#   fetch DIR            download the pinned CodeQL bundle for this platform into DIR, after checking
+#                        its SHA-256 against the pin below and the publisher's checksum file, and
+#                        print its path (CI passes it to github/codeql-action/init)
+#   install              fetch the bundle and unpack it into bin/codeql-<version>/
 #   analyze [LANG...]    build a database per language and run its security-extended suite, then
 #                        gate the results with hack/sdlc/sarifgate (accepted alerts:
 #                        hack/sdlc/codeql-baseline.txt). LANG: go, javascript-typescript, actions
 #                        (default: all three). Output: dist/codeql/<lang>.sarif, dist/codeql/summary.txt
 #
-# Usage: hack/sdlc/codeql.sh install | analyze [LANG...]
+# Usage: hack/sdlc/codeql.sh fetch DIR | install | analyze [LANG...]
 set -euo pipefail
 
 cd "$(git rev-parse --show-toplevel)"
@@ -35,6 +37,21 @@ dir=bin/codeql-$version
 codeql=$dir/codeql/codeql
 out=dist/codeql
 
+# fetch DIR downloads the pinned bundle into DIR and checks its SHA-256 against the pin and the
+# publisher's checksum file (a release asset can be replaced under its tag); it prints the path.
+fetch() {
+	local d=$1 got
+	echo "codeql: downloading CodeQL $version ($asset)" >&2
+	curl -fsSL --retry 3 -o "$d/$asset" "$url"
+	curl -fsSL --retry 3 -o "$d/sums" "$url.checksum.txt"
+	got=$(shasum -a 256 "$d/$asset" | cut -d' ' -f1)
+	if [[ $got != "$sha256" ]] || ! grep -q "^$sha256  $asset\$" "$d/sums"; then
+		echo "codeql: checksum mismatch for $asset: got $got, pinned $sha256, publisher's file: $(cat "$d/sums")" >&2
+		exit 1
+	fi
+	printf '%s\n' "$d/$asset"
+}
+
 install() {
 	[[ -x $codeql ]] && return 0
 	command -v zstd >/dev/null 2>&1 || {
@@ -43,15 +60,7 @@ install() {
 	}
 	tmp=$(mktemp -d) # global: the EXIT trap runs after this function returned
 	trap 'rm -rf "$tmp"' EXIT
-	echo "codeql: downloading CodeQL $version ($asset)"
-	curl -fsSL --retry 3 -o "$tmp/$asset" "$url"
-	curl -fsSL --retry 3 -o "$tmp/sums" "$url.checksum.txt"
-	local got
-	got=$(shasum -a 256 "$tmp/$asset" | cut -d' ' -f1)
-	if [[ $got != "$sha256" ]] || ! grep -q "^$sha256  $asset\$" "$tmp/sums"; then
-		echo "codeql: checksum mismatch for $asset: got $got, pinned $sha256, publisher's file: $(cat "$tmp/sums")" >&2
-		exit 1
-	fi
+	fetch "$tmp" >/dev/null
 	mkdir -p "$tmp/x"
 	zstd -dc "$tmp/$asset" | tar -xf - -C "$tmp/x"
 	rm -rf "$dir"
@@ -103,13 +112,21 @@ analyze() {
 }
 
 case ${1:-} in
+fetch)
+	[[ $# -eq 2 ]] || {
+		echo "usage: hack/sdlc/codeql.sh fetch DIR" >&2
+		exit 2
+	}
+	mkdir -p "$2"
+	fetch "$2"
+	;;
 install) install ;;
 analyze)
 	shift
 	analyze "$@"
 	;;
 *)
-	echo "usage: hack/sdlc/codeql.sh install | analyze [go|javascript-typescript|actions...]" >&2
+	echo "usage: hack/sdlc/codeql.sh fetch DIR | install | analyze [go|javascript-typescript|actions...]" >&2
 	exit 2
 	;;
 esac
