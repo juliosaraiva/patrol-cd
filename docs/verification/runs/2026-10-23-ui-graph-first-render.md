@@ -73,3 +73,20 @@ finding, two minor findings in the new tests, both fixed:
 change, not merged when this was recorded, gives them `{ timeout: 60_000 }` (`BIG_GRAPH_TIMEOUT`).
 With this change they took 0.3–2.9 s at load average 110–180 (1.6 s and 1.3 s in the full run), so
 that timeout can be removed once both changes are on the same branch.
+
+## Pre-push checks
+
+This branch is based on `main`, which does not have `hack/sdlc` yet (it is on `feat/claude-code-sdlc`).
+The steps `make sdlc-check` runs for a `ui/` change were therefore run by hand on tree `485fbb6`
+(head `03f3cf0`), from the repository root with `bin/` on `PATH`. Nothing was recorded for the push
+gate.
+
+| Command | Exit | Result |
+|---------|------|--------|
+| `make ci-static` (load 138) | 0 | 348 s; gitleaks: `no leaks found` |
+| `make release-lint-commits` | 0 | |
+| `make ci-ui` (load 132–150) | 2 | `Tests 2 failed \| 913 passed (915)`; all 7 GraphCanvas tests passed. Two tests that do not reach `GraphCanvas` timed out at the 10 s default: `PreviewPanel.test.tsx` "pages the changed Applications as collapsed rows…" (10018 ms) and `ApplicationCreateForm.test.tsx` "explains half-finished YAML edits inline…" (10371 ms). The issue #86 record (finding 5) lists both as load-bound; its branch gives `PreviewPanel.test.tsx` a 30 s timeout |
+| `pnpm exec vitest run --no-cache src/pages/applicationsets/PreviewPanel.test.tsx src/pages/create/ApplicationCreateForm.test.tsx` (in `ui/`, load 74) | 0 | `Tests 18 passed (18)`: the two tests 1644 ms and 1099 ms |
+| `make ci-ui` again (load 74–163) | 0 | `gen:api:check`, typecheck, lint, `Test Files 76 passed (76)`, `Tests 915 passed (915)`, build `✓ built in 5.88s` |
+| CodeQL 2.27.3 `database create --language=javascript-typescript --build-mode=none` with `.github/codeql/codeql-config.yml`, `database analyze` with `javascript-security-extended.qls`, then `go run ./hack/sdlc/sarifgate -baseline hack/sdlc/codeql-baseline.txt` (config, gate and baseline from `feat/claude-code-sdlc`) | 0 | `CodeQL gate: OK: 3 results, 0 blocking, 3 accepted in the baseline`; the 3 are the existing test-file results in `Clusters.test.tsx` and `RepoCredsPage.test.tsx` |
+| Review workflow on tree `485fbb6` (ui-reviewer, test-reviewer) | | no findings |
