@@ -20,19 +20,20 @@ guide is [docs/guides/claude-code-sdlc.md](../../guides/claude-code-sdlc.md).
 
 The machine was shared with up to 16 review and red-team agents during most runs.
 
-## Checks of the code at `dd02f04` (the last code commit before this record's update)
+## Checks of the code at `ce9aae1` (the last code commit before this record's update)
 
 | Command | Result |
 |---------|--------|
 | `go vet ./hack/sdlc/...`; `golangci-lint run ./hack/sdlc/...` | passed, 0 issues |
-| `shellcheck hack/sdlc/*.sh` | passed |
-| `go test -race -count=1 ./hack/sdlc/...` | passed: `pushcheck` and `sarifgate`, 437 tests (counted with `-json`) |
-| `bash hack/sdlc/test-sdlc.sh` (the gate end to end in scratch repositories with a bare remote) | passed: 109 passed, 0 failed |
+| `shellcheck hack/sdlc/*.sh`; `actionlint .github/workflows/codeql.yml` | passed |
+| `go test -race -count=1 ./hack/sdlc/...` | passed: `pushcheck` and `sarifgate`, 469 tests (counted with `-json`) |
+| `bash hack/sdlc/test-sdlc.sh` (the gate end to end in scratch repositories with a bare remote) | passed: 116 passed, 0 failed |
+| Mutation sweep of `hack/sdlc/pushcheck` (a scratchpad script: each refusal, unknown-directory or environment site of `parse.go`, and each refusal return of `main.go`, disabled in turn through `go test -overlay`, the repository untouched) | 91 sites; 90 caught by a failing test; the survivor is a mutant identical to the original (`return ""` replaced by `return ""`). The first sweep, on `0b31e0f`, left 20 sites in `parse.go` and 5 in `main.go` uncaught; each got a test, and two that could not change the outcome were removed |
 | `PATH="$PWD/bin:$PATH" go test -race -count=1 ./internal/git/...` | passed on `c409428` (and `./internal/reposerver/...` on `6f9f985`); `internal/git` has not changed since |
 
 ## Agent review
 
-Nine runs of `.claude/workflows/sdlc-review.js` on successive trees, each verified finding fixed
+Ten runs of `.claude/workflows/sdlc-review.js` on successive trees, each verified finding fixed
 before the next run:
 
 | Tree | Blocking (verified) | Minor | Refuted |
@@ -46,6 +47,7 @@ before the next run:
 | `83ea66c` | 7 | 6 | 0 |
 | `fbdc7df` | 8 | 7 | 0 |
 | `bdae10c` | 16 | 8 | 0 |
+| `e69bdb2` | 3 | 7 | 0 |
 
 Most findings were ways around the Claude Code hook (shell and git constructs it read differently
 from bash, zsh or git) and tests that could not fail. The seventh run's were six untested branches
@@ -63,8 +65,19 @@ line that names `--no-verify` or an abbreviation of it, `core.hooksPath`, `.gith
 variable outside the safe list or git's push plumbing, in its text and in each command's words as
 bash expands them; a push runs only from this clone or its worktrees; and the walker stays for
 early, clear refusals. The guide now says the hooks catch mistakes and shortcuts, and that branch
-protection (#220) is the boundary against deliberate evasion. The review of the tree that contains
-this record runs after it is written; its result is in the pull request.
+protection (#220) is the boundary against deliberate evasion.
+
+The tenth run, on the narrowed hook, found 3 blocking findings, all tests that could not fail:
+rows for `pushd -n` and `popd` that passed whatever the walker did, and no test of seven fail-closed
+refusals or of a refusal inside a command substitution. Rather than fix only those, a mutation sweep
+(above) found every refusal no test caught; all now have one. Its 7 minor findings were fixed too:
+a shell the command runs did not inherit an earlier `source` or dynamic `eval`; sudo's `-A`, `-D`,
+`--chdir`, `-R` and `-i`; the gate-files check missed files marked assume-unchanged or skip-worktree
+and read a git error as clean; the wrapper and the settings' hook command let any status but 2 run
+the command (a killed binary, a wrapper that is not executable); CI downloaded the CodeQL bundle
+without checking its SHA-256; the text net's refusal named a Grep tool this Claude Code build lacks;
+and a test row that `filepath.Join` reduced to another. The review of the tree that contains this
+record runs after it is written; its result is in the pull request.
 
 ## Red team
 
@@ -137,4 +150,6 @@ remote instead.
 - The Claude Code hook is not a security boundary (guide, Limits): it does not read the user's shell
   aliases, functions or options, the content of scripts, or code given to an interpreter, and a
   token assembled at run time gets past its net. Branch protection on `main` (#220) is not on yet.
-- The red-team runs were on trees before the narrowing; none has run on `dd02f04`.
+- The red-team runs were on trees before the narrowing; none has run since.
+- The mutation sweep disables refusal sites only; it does not show that the walker allows every
+  ordinary command (the allowed-command tests do that for the commands they list).
