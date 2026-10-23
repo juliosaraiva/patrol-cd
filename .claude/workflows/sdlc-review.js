@@ -62,7 +62,9 @@ const VERDICT = {
   required: ['real', 'severity', 'reason'],
 }
 
-const common = `Repository: ${input.repo} (Patrol CD). Change under review: ${input.base}..${input.head} (tree ${input.tree}); the full diff is in ${input.diffFile}. Read-only: never edit files in the repository, never commit, push, or run gh commands with side effects. Throwaway tests go through \`go test -overlay\` from a temporary directory.`
+const common = `Repository: ${input.repo} (Patrol CD). Change under review: ${input.base}..${input.head} (tree ${input.tree}); the full diff is in ${input.diffFile}.
+
+Read-only review. Do NOT edit files in the repository, commit, or run gh with side effects. NEVER run \`git push\`, \`git send-pack\`, or any command that could push \`${input.repo}\` — not even to demonstrate a finding, and not with --dry-run; this repository's own hooks are active and a demo that falls through to a real \`git push\` is a serious error. To reproduce a push-related finding, build a throwaway bare remote and clone under a temp directory and push only there, or use \`go test -overlay\` from a temp directory. Never run a command built from an untrusted string against the real repository.`
 
 if (input.docsOnly) {
   log('documentation-only change: no agent review needed')

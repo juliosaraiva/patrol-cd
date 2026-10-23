@@ -192,12 +192,26 @@ func checkAliases(calls []gitCall, root string) string {
 			continue
 		}
 		seen[c] = true
-		v, err := gitOut(c.Dir, "config", "--get", "alias."+c.Sub)
-		if err != nil || v == "" {
-			continue
-		}
-		if n := strings.ToLower(normalize(v)); strings.Contains(n, "push") || hookText.MatchString(n) {
-			return fmt.Sprintf("git %s is an alias (%q) that pushes or changes git's hooks; run the git command itself", c.Sub, v)
+		// Follow the alias chain: `alias.p = ship` and `alias.ship = !git push` must both be found. A
+		// value starting with `!` is a shell command (no further alias lookup); otherwise its first
+		// word may itself be an alias. A depth limit stops a cycle.
+		sub := c.Sub
+		for depth := 0; depth < 10; depth++ {
+			v, err := gitOut(c.Dir, "config", "--get", "alias."+sub)
+			if err != nil || v == "" {
+				break
+			}
+			if n := strings.ToLower(normalize(v)); strings.Contains(n, "push") || hookText.MatchString(n) {
+				return fmt.Sprintf("git %s is an alias (%q) that pushes or changes git's hooks; run the git command itself", c.Sub, v)
+			}
+			if strings.HasPrefix(strings.TrimSpace(v), "!") {
+				break // a shell command, not another git subcommand
+			}
+			next := strings.Fields(v)
+			if len(next) == 0 || next[0] == sub {
+				break
+			}
+			sub = next[0]
 		}
 	}
 	return ""

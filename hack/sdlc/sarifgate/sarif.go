@@ -9,7 +9,8 @@ import (
 
 // The subset of SARIF 2.1.0 that CodeQL writes and the gate needs.
 type sarifLog struct {
-	Runs []sarifRun `json:"runs"`
+	Version string     `json:"version"`
+	Runs    []sarifRun `json:"runs"`
 }
 
 type sarifRun struct {
@@ -78,6 +79,20 @@ func readSARIF(path string) ([]result, error) {
 	var log sarifLog
 	if err := json.Unmarshal(data, &log); err != nil {
 		return nil, fmt.Errorf("%s: %w", path, err)
+	}
+	// A valid but empty or run-less document is not a clean result: it means the analysis did not
+	// produce the SARIF the gate expects, so fail rather than report zero alerts.
+	if log.Version != "2.1.0" {
+		return nil, fmt.Errorf("%s: SARIF version is %q, want 2.1.0", path, log.Version)
+	}
+	driver := false
+	for _, run := range log.Runs {
+		if run.Tool.Driver.Name != "" {
+			driver = true
+		}
+	}
+	if !driver {
+		return nil, fmt.Errorf("%s: no run with a tool.driver.name; the analysis produced no usable SARIF", path)
 	}
 	var out []result
 	for _, run := range log.Runs {

@@ -219,6 +219,12 @@ check "hook runs before the commit exists" 0 "$(hook 'git commit -qam "fix: more
 git commit -qam "fix: more"
 check "git hook refuses the new commit" 1 "$(gitpush origin change)"
 check "remote kept the checked commit" "$(git rev-parse HEAD~1)" "$(remote_has change)"
+
+# git's hook fails closed when gate.sh is missing or not executable, rather than letting the push by.
+chmod -x hack/sdlc/gate.sh
+check "git hook fails closed without an executable gate.sh" 1 "$(gitpush origin change)"
+contains "reason: restore gate.sh" "$work/push.err" "hack/sdlc/gate.sh is missing or not executable"
+chmod +x hack/sdlc/gate.sh
 rc=0
 hack/sdlc/record-review.sh --tree "$tree" --blocking 0 --report "$work/report.md" >/dev/null 2>&1 || rc=$?
 check "review of an old tree is refused" 1 "$rc"

@@ -144,13 +144,15 @@ Two hooks run it:
     step (`rebase -x`, `submodule foreach`) is refused.
   - **What it refuses wherever the command runs**, because it can keep git's hook from running: a
     `GIT_*` variable outside a short safe list (`GIT_DIR`, `GIT_WORK_TREE`, `GIT_CONFIG_*` …, set
-    inline, with `env`, `export`, `declare`, `read` or `printf -v` — but not merely printed); `git
-    -c` and `git config` writes of keys outside a short safe list (`core.hooksPath`, `alias.*`,
-    `include.*`, `core.pager` …); `--git-dir`, `--work-tree`, `--bare` and other global options
-    before `push`; a configured alias that pushes; a file sourced before a push; and a push it cannot
-    resolve — inside `$(…)`, behind `eval` with a dynamic string, through a non-literal command word,
-    git option or shell script, or in a command that does not parse as bash (the Bash tool may run
-    zsh) and names a push or a hook override.
+    inline, with `env` — including after `--` — `export`/`readonly`, `declare`, `read` or `printf
+    -v`, but not merely printed); `git -c`, `git --config-env` and `git config` writes of keys
+    outside a short safe list (`core.hooksPath`, `alias.*`, `include.*`, `core.pager`,
+    `diff.<driver>.command` …); `--git-dir`, `--work-tree`, `--bare`, `--shallow-file` and other
+    global options before `push`; `git send-pack` and `git http-push`, which push without the hook; a
+    configured alias that pushes (following alias chains); a file sourced before a push; and a push
+    it cannot resolve — inside `$(…)`, behind `eval` with a dynamic string, through a non-literal
+    command word, git option or shell script, or in a command that does not parse as bash (the Bash
+    tool may run zsh) and names a push or a hook override.
   - **What it refuses for a push from a clone of this project** (any clone, and its worktrees): a
     push while that clone's `core.hooksPath` is not `.githooks`, from inside its `.git` directory, from
     an unknown directory, or from a branch without the gate; `--no-verify`; an abbreviated or unknown
@@ -191,13 +193,16 @@ A second hook (`hack/sdlc/claude-format.sh`, `PostToolUse` for Edit, MultiEdit a
   one, and CI does not read them. CI runs its own checks.
 - The Claude Code hook sees the command line, not what it builds at run time or the files and
   programs it runs: a git command whose name or subcommand is assembled from variables or `$'…'`
-  escapes; the content of script files, Makefiles and shell functions defined elsewhere; code given
-  to an interpreter (`python -c`, `perl -e`, `awk`, a custom command that is not a known wrapper); and
-  commands on a remote host (`ssh host …`). git's pre-push hook (required before any command runs)
-  checks the pushes they make; a script or program that disables git's hook on purpose gets past both.
-  The hooks keep a cooperative process honest and catch mistakes and shortcuts; they are not a
-  security boundary against someone who sets out to defeat them. The boundary is on GitHub: CI and the
-  branch rules of `main`.
+  escapes; the content of script files, Makefiles and shell functions or aliases defined elsewhere
+  (`alias gp='git push …'` then `gp`, or zsh AUTO_CD turning a bare directory into a `cd`); code
+  given to an interpreter (`python -c`, `perl -e`, `awk`, a custom command that is not a known
+  wrapper); a non-literal script piped to a shell; and commands on a remote host (`ssh host …`).
+  git's pre-push hook (required before any command runs) checks the pushes they make; a script or
+  program that disables git's hook on purpose gets past both. The hooks keep a cooperative process
+  honest and catch mistakes and shortcuts; they are **not a security boundary** against someone who
+  sets out to defeat them. The real boundary is on GitHub: CI, CodeQL, and the branch protection of
+  `main` (required pull request, review and checks — see repository settings), which no local push
+  can bypass.
 - The hooks come from the checked-out tree: while a commit from before the gate is checked out, they
   are not there to run.
 - The check record is keyed by the tree. Two of its checks also read history (commit subjects,

@@ -6,7 +6,12 @@
 # A person can bypass it in an emergency with `git push --no-verify`.
 set -euo pipefail
 
-[[ -x hack/sdlc/gate.sh ]] || exit 0 # a branch from before the gate existed
+# This hook and hack/sdlc/gate.sh were added together, so if the hook runs the gate must be present.
+# Fail closed if it was removed or made non-executable (restore it with git checkout).
+if [[ ! -x hack/sdlc/gate.sh ]]; then
+	echo "sdlc pre-push: hack/sdlc/gate.sh is missing or not executable; restore it (git checkout -- hack/sdlc/gate.sh)" >&2
+	exit 1
+fi
 zero=0000000000000000000000000000000000000000
 status=0
 while read -r _local_ref local_sha _remote_ref _remote_sha; do

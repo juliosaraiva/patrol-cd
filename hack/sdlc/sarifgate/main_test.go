@@ -197,7 +197,7 @@ func TestRunNeedsInput(t *testing.T) {
 // A SARIF file that does not parse stops the gate; it never counts as zero results.
 func TestRunMalformedSARIF(t *testing.T) {
 	t.Parallel()
-	for _, content := range []string{`{"version": "2.1.0", "runs": [`, `not json`} {
+	for _, content := range []string{`{"version": "2.1.0", "runs": [`, `not json`, `{}`, `{"version":"2.1.0","runs":[]}`, `{"version":"2.1.0","runs":[{"tool":{"driver":{}}}]}`} {
 		p := filepath.Join(t.TempDir(), "broken.sarif")
 		require.NoError(t, os.WriteFile(p, []byte(content), 0o644))
 		var out, errOut bytes.Buffer

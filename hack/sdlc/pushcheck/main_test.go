@@ -3,6 +3,8 @@ package main
 import (
 	"bytes"
 	"encoding/json"
+	"os"
+	"os/exec"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
@@ -51,4 +53,42 @@ func TestRunTerminalDirectory(t *testing.T) {
 	var stderr bytes.Buffer
 	assert.Equal(t, 2, run(bytes.NewReader(in), &stderr, t.TempDir()))
 	assert.Contains(t, stderr.String(), "/nonexistent-session-dir/sub, which is not a directory here")
+}
+
+// checkAliases must refuse a git subcommand that is a configured alias for a push or a hook change,
+// following alias chains, and allow an ordinary alias.
+func TestCheckAliases(t *testing.T) {
+	t.Parallel()
+	root := t.TempDir()
+	run := func(args ...string) {
+		t.Helper()
+		cmd := exec.Command("git", append([]string{"-C", root}, args...)...)
+		cmd.Env = append(os.Environ(), "GIT_CONFIG_GLOBAL=/dev/null", "GIT_CONFIG_SYSTEM=/dev/null")
+		require.NoError(t, cmd.Run(), "git %v", args)
+	}
+	run("init", "-q")
+	run("config", "alias.ship", "!git push --no-verify origin main")
+	run("config", "alias.off", "config core.hooksPath /dev/null")
+	run("config", "alias.p", "ship") // a chain: p -> ship -> push
+	run("config", "alias.lg", "log --oneline")
+
+	for _, c := range []struct {
+		sub  string
+		want string
+	}{
+		{"ship", "that pushes or changes git's hooks"},
+		{"off", "that pushes or changes git's hooks"},
+		{"p", "that pushes or changes git's hooks"}, // followed through the chain
+		{"lg", ""},
+		{"status", ""}, // not an alias
+	} {
+		got := checkAliases([]gitCall{{Dir: root, Sub: c.sub}}, root)
+		if c.want == "" {
+			assert.Empty(t, got, "alias %q", c.sub)
+		} else {
+			assert.Contains(t, got, c.want, "alias %q", c.sub)
+		}
+	}
+	// A call with an empty Dir is resolved against root.
+	assert.Contains(t, checkAliases([]gitCall{{Sub: "ship"}}, root), "alias", "empty Dir resolves to root")
 }
