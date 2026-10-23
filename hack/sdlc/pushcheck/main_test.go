@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"os"
 	"os/exec"
+	"path/filepath"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
@@ -23,6 +24,7 @@ func TestRunFailsClosed(t *testing.T) {
 	}{
 		{name: "not a push", command: "echo hi", want: 0},
 		{name: "unparseable without git", command: "echo 'push unterminated", want: 0},
+		{name: "unparseable, git without push", command: "x=gi; ${=x}t status; git log", want: 2, reason: "cannot parse the command as bash"},
 		{name: "unparseable, git and push split by quotes", command: "git p''ush --no-verify origin main; echo \"oops", want: 2, reason: "cannot parse the command as bash"},
 		{name: "unparseable, a hook override", command: "GIT_CONFIG_COUNT=1 make release; echo \"oops", want: 2, reason: "cannot parse the command as bash"},
 		{name: "a push before a syntax error runs anyway", command: "git push origin main\necho \"oops", want: 2, reason: "cannot parse the command as bash"},
@@ -45,50 +47,101 @@ func TestRunFailsClosed(t *testing.T) {
 	}
 }
 
-// The terminal tool gives its own directory, relative to the session's.
+// The terminal tool gives its own directory: relative to the session's, absolute, or under ~.
 func TestRunTerminalDirectory(t *testing.T) {
 	t.Parallel()
-	in, err := json.Marshal(map[string]any{"cwd": "/nonexistent-session-dir", "tool_input": map[string]string{"command": "git push origin main", "cwd": "sub"}})
+	home, err := os.UserHomeDir()
 	require.NoError(t, err)
-	var stderr bytes.Buffer
-	assert.Equal(t, 2, run(bytes.NewReader(in), &stderr, t.TempDir()))
-	assert.Contains(t, stderr.String(), "/nonexistent-session-dir/sub, which is not a directory here")
+	for _, tt := range []struct{ cwd, want string }{
+		{"sub", "/nonexistent-session-dir/sub"},
+		{"/nonexistent-abs", "/nonexistent-abs"},
+		{"~/nonexistent-x", filepath.Join(home, "nonexistent-x")},
+	} {
+		in, err := json.Marshal(map[string]any{"cwd": "/nonexistent-session-dir", "tool_input": map[string]string{"command": "git push origin main", "cwd": tt.cwd}})
+		require.NoError(t, err)
+		var stderr bytes.Buffer
+		assert.Equal(t, 2, run(bytes.NewReader(in), &stderr, t.TempDir()), tt.cwd)
+		assert.Contains(t, stderr.String(), tt.want+", which is not a directory here", tt.cwd)
+	}
 }
 
-// checkAliases must refuse a git subcommand that is a configured alias for a push or a hook change,
-// following alias chains, and allow an ordinary alias.
-func TestCheckAliases(t *testing.T) {
+// gitIn runs git in dir with no global or system configuration.
+func gitIn(t *testing.T, dir string, args ...string) {
+	t.Helper()
+	cmd := exec.Command("git", append([]string{"-C", dir}, args...)...)
+	cmd.Env = append(os.Environ(), "GIT_CONFIG_GLOBAL=/dev/null", "GIT_CONFIG_SYSTEM=/dev/null",
+		"GIT_AUTHOR_NAME=t", "GIT_AUTHOR_EMAIL=t@example.invalid", "GIT_COMMITTER_NAME=t", "GIT_COMMITTER_EMAIL=t@example.invalid")
+	out, err := cmd.CombinedOutput()
+	require.NoError(t, err, "git %v: %s", args, out)
+}
+
+// checkSubcommands refuses any git subcommand that is not a git command, configured as an alias or
+// not (the command could define it on the way), and allows git's own commands.
+func TestCheckSubcommands(t *testing.T) {
 	t.Parallel()
 	root := t.TempDir()
-	run := func(args ...string) {
-		t.Helper()
-		cmd := exec.Command("git", append([]string{"-C", root}, args...)...)
-		cmd.Env = append(os.Environ(), "GIT_CONFIG_GLOBAL=/dev/null", "GIT_CONFIG_SYSTEM=/dev/null")
-		require.NoError(t, cmd.Run(), "git %v", args)
-	}
-	run("init", "-q")
-	run("config", "alias.ship", "!git push --no-verify origin main")
-	run("config", "alias.off", "config core.hooksPath /dev/null")
-	run("config", "alias.p", "ship") // a chain: p -> ship -> push
-	run("config", "alias.lg", "log --oneline")
-
-	for _, c := range []struct {
-		sub  string
-		want string
-	}{
-		{"ship", "that pushes or changes git's hooks"},
-		{"off", "that pushes or changes git's hooks"},
-		{"p", "that pushes or changes git's hooks"}, // followed through the chain
-		{"lg", ""},
-		{"status", ""}, // not an alias
+	gitIn(t, root, "init", "-q")
+	gitIn(t, root, "config", "alias.ship", "!git push --no-verify origin main")
+	gitIn(t, root, "config", "alias.lg", "log --oneline")
+	for _, c := range []struct{ sub, want string }{
+		{"ship", "git ship: not a git command but an alias"},
+		{"lg", "git lg: not a git command but an alias"},  // a harmless alias, as the command could redefine it
+		{"undefined", "git undefined: not a git command"}, // an alias the command may write into a config file
+		{"status", ""},
+		{"rev-parse", ""},
+		{"log", ""},
 	} {
-		got := checkAliases([]gitCall{{Dir: root, Sub: c.sub}}, root)
+		got := checkSubcommands([]string{c.sub}, root)
 		if c.want == "" {
-			assert.Empty(t, got, "alias %q", c.sub)
+			assert.Empty(t, got, c.sub)
 		} else {
-			assert.Contains(t, got, c.want, "alias %q", c.sub)
+			assert.Contains(t, got, c.want, c.sub)
 		}
 	}
-	// A call with an empty Dir is resolved against root.
-	assert.Contains(t, checkAliases([]gitCall{{Sub: "ship"}}, root), "alias", "empty Dir resolves to root")
+	assert.Empty(t, checkSubcommands(nil, root))
+	assert.Contains(t, checkSubcommands([]string{"status", "a", "b", "a"}, root), "git a, git b:", "each alias named once")
+}
+
+// A repository holding this project is recognised by a pushed commit carrying the gate, or by the
+// project's first commit; another repository is not.
+func TestHoldsProject(t *testing.T) {
+	t.Parallel()
+	root := t.TempDir()
+	gitIn(t, root, "init", "-q", "-b", "main")
+	gitIn(t, root, "commit", "-q", "--allow-empty", "-m", "first")
+	require.NoError(t, os.MkdirAll(filepath.Join(root, "hack", "sdlc"), 0o755))
+	require.NoError(t, os.WriteFile(filepath.Join(root, "hack", "sdlc", "gate.sh"), []byte("#!/bin/sh\n"), 0o755))
+	gitIn(t, root, "add", "-A")
+	gitIn(t, root, "commit", "-q", "-m", "gate")
+
+	work := t.TempDir()
+	bare := filepath.Join(work, "bare.git")
+	gitIn(t, work, "clone", "-q", "--bare", root, bare)
+	assert.True(t, holdsProject(bare, []string{"HEAD"}, root), "a bare clone, by the gate in HEAD")
+	assert.True(t, holdsProject(bare, []string{"no-such-ref"}, root), "a bare clone, by the first commit")
+
+	shallow := filepath.Join(work, "shallow.git")
+	gitIn(t, work, "clone", "-q", "--bare", "--depth", "1", "file://"+root, shallow)
+	assert.True(t, holdsProject(shallow, []string{"HEAD"}, root), "a shallow clone without the first commit, by the gate")
+
+	other := filepath.Join(work, "other")
+	gitIn(t, work, "init", "-q", other)
+	gitIn(t, other, "commit", "-q", "--allow-empty", "-m", "unrelated")
+	assert.False(t, holdsProject(other, []string{"HEAD"}, root), "an unrelated repository")
+}
+
+// A push from a bare clone of the project is refused; one from an unrelated bare repository is not.
+func TestGatePushBareClone(t *testing.T) {
+	t.Parallel()
+	root := t.TempDir()
+	gitIn(t, root, "init", "-q", "-b", "main")
+	gitIn(t, root, "commit", "-q", "--allow-empty", "-m", "first")
+	bare := filepath.Join(t.TempDir(), "bare.git")
+	gitIn(t, root, "clone", "-q", "--bare", root, bare)
+	assert.Contains(t, gatePush(push{Dir: bare, Sources: []string{"main"}}, root), "a bare repository holding this project's commits")
+	assert.Empty(t, gatePush(push{Dir: bare, Sources: []string{"main"}, DryRun: true}, root), "a dry run pushes nothing")
+
+	other := filepath.Join(t.TempDir(), "other.git")
+	gitIn(t, root, "init", "-q", "--bare", other)
+	assert.Empty(t, gatePush(push{Dir: other, Sources: []string{"main"}}, root))
 }

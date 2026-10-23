@@ -205,4 +205,12 @@ func TestRunMalformedSARIF(t *testing.T) {
 		assert.Contains(t, errOut.String(), p)
 		assert.NotContains(t, out.String(), "CodeQL gate: OK")
 	}
+	// A run with a driver but another or no SARIF version is refused for its version.
+	for _, content := range []string{`{"version":"2.0.0","runs":[{"tool":{"driver":{"name":"CodeQL"}}}]}`, `{"runs":[{"tool":{"driver":{"name":"CodeQL"}}}]}`} {
+		p := filepath.Join(t.TempDir(), "version.sarif")
+		require.NoError(t, os.WriteFile(p, []byte(content), 0o644))
+		var out, errOut bytes.Buffer
+		assert.Equal(t, 2, run([]string{p}, &out, &errOut), "stdout:\n%s", out.String())
+		assert.Contains(t, errOut.String(), "want 2.1.0")
+	}
 }

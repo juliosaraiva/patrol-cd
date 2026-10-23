@@ -16,7 +16,6 @@ work=$(mktemp -d)
 trap 'rm -rf "$work"' EXIT
 export GIT_CONFIG_GLOBAL=/dev/null GIT_CONFIG_SYSTEM=/dev/null
 export GIT_AUTHOR_NAME=t GIT_AUTHOR_EMAIL=t@example.invalid GIT_COMMITTER_NAME=t GIT_COMMITTER_EMAIL=t@example.invalid
-export PATROL_SDLC_BASE=main
 
 passed=0
 failed=0
@@ -125,6 +124,14 @@ check "git hook not enabled: heredoc to bash" 2 "$(hook "$(printf "bash <<'EOF'\
 git clone -q "$remote" "$work/clone2"
 check "second clone without the git hook" 2 "$(hook 'git push origin HEAD:other' "$work/clone2")"
 contains "reason: make sdlc-git-hooks in the second clone" "$work/hook.err" "make sdlc-git-hooks"
+# Clones without a work tree of the gate are this project too: git's hook would not run there.
+git clone -q --bare "$remote" "$work/bare.git"
+check "bare clone" 2 "$(hook 'git push origin main:other' "$work/bare.git")"
+contains "reason: bare clone of this project" "$work/hook.err" "a bare repository holding this project's commits"
+git clone -q --no-checkout "$remote" "$work/nocheckout"
+git -C "$work/nocheckout" config core.hooksPath .githooks
+check "clone without a checkout" 2 "$(hook 'git push origin main:other' "$work/nocheckout")"
+contains "reason: no gate in the work tree" "$work/hook.err" "has no hack/sdlc/gate.sh"
 git config core.hooksPath .githooks
 check "git hook enabled: any command" 0 "$(wrapper 'ls')"
 check "git hook enabled: the wrapper runs pushcheck on every command" 2 "$(wrapper "git p''ush --no-verify origin change")"
@@ -149,8 +156,14 @@ check "alias defined with -c" 2 "$(hook "git -c alias.ship='push --no-verify' sh
 check "configuration included with -c" 2 "$(hook 'git -c include.path=/x.cfg push origin change')"
 git config alias.ship 'push --no-verify'
 check "configured alias for a push" 2 "$(hook 'git ship origin change')"
-contains "reason: alias" "$work/hook.err" "git ship is an alias"
+contains "reason: alias" "$work/hook.err" "git ship: not a git command but an alias"
 git config --unset alias.ship
+# An alias the command itself writes into git's configuration on the way.
+check "alias written by the command" 2 "$(hook "printf '[alias]\\n\\tship = push --no-verify\\n' >>.git/config && git ship origin change")"
+# shellcheck disable=SC2016 # the command text holds an unexpanded variable on purpose
+check "alias from another HOME" 2 "$(hook 'HOME=$PWD/h git ship origin change')"
+# A shell alias or function (the Bash tool loads the user's, such as gp='git push') handed --no-verify.
+check "--no-verify to a shell alias" 2 "$(hook 'gp --no-verify origin change')"
 
 # Forms that keep git's hook from running (the relative core.hooksPath has no hook outside the work
 # tree) are refused wherever they run.
@@ -158,6 +171,9 @@ check "push from inside .git" 2 "$(hook 'git push origin change' "$repo/.git")"
 check "git -C .git push" 2 "$(hook 'git -C .git push origin change')"
 check "--git-dir from elsewhere" 2 "$(hook "git --git-dir=$repo/.git push origin change" "$work")"
 check "exported GIT_DIR" 2 "$(hook "export GIT_DIR=$repo/.git; cd $work && git push origin change")"
+# --no-verify is refused wherever the hook thinks the push runs: a cd that fails leaves the shell here.
+check "--no-verify after a cd that may fail" 2 "$(hook "cd $work/other; git push --no-verify origin change")"
+check "--no-verify from another repository" 2 "$(hook "git -C $work/other push --no-verify")"
 check "git hook: push from inside .git skips it (why the above are refused)" 0 "$(git -C .git push -q origin change:from-git-dir 2>/dev/null && echo 0)"
 git push -q origin :from-git-dir
 
@@ -166,6 +182,8 @@ check "bare push" 2 "$(hook 'git push')"
 contains "reason names the tree" "$work/hook.err" "no passing deterministic checks for tree $tree"
 check "git -C DIR push" 2 "$(hook "git -C $repo push origin HEAD" "$work")"
 check "cd DIR && git push" 2 "$(hook "cd $repo && git push origin change" "$work")"
+check "cd DIR; git push: the cd may fail" 2 "$(hook "cd $repo; git push origin change" "$work")"
+contains "reason: a cd that may fail" "$work/hook.err" "a cd that may fail without stopping the command"
 check "git hook refuses the push" 1 "$(gitpush origin change)"
 check "remote did not get it" none "$(remote_has change)"
 check "help is not a push" 0 "$(hook 'git push -h')"
@@ -174,7 +192,7 @@ check "help is not a push" 0 "$(hook 'git push -h')"
 old=$(git commit-tree "$(git hash-object -t tree /dev/null)" -m "chore: before the gate")
 git worktree add -q -b old "$work/old" "$old"
 check "push from a branch without the gate" 2 "$(hook 'git push origin old' "$work/old")"
-contains "reason: rebase it on main" "$work/hook.err" "rebase it on main"
+contains "reason: check out a branch based on main" "$work/hook.err" "check out a branch based on main"
 
 # A worktree of the clone shares its records and core.hooksPath.
 git worktree add -q -b wt "$work/wt"
@@ -245,9 +263,10 @@ check "docs without checks" 1 "$(gate)"
 printf 'tree=%s\nresult=pass\n' "$dtree" >"$state/checks/$dtree"
 check "docs with checks, no review" 0 "$(gate)"
 
-# The review input names this tree and the changed files.
+# The review input names this tree and the changed files since origin/main, whatever
+# PATROL_SDLC_BASE says: a narrower review must not be recorded for the whole tree.
 git checkout -q change
-input=$(hack/sdlc/review-input.sh)
+input=$(PATROL_SDLC_BASE=HEAD hack/sdlc/review-input.sh)
 check "review input tree" "$newtree" "$(jq -r .tree <<<"$input")"
 check "review input files" "main.go" "$(jq -r '.files | join(",")' <<<"$input")"
 check "review input docsOnly" false "$(jq -r .docsOnly <<<"$input")"

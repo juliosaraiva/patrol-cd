@@ -10,24 +10,27 @@
 // It follows the command a wrapper runs (timeout, nice, sudo, env, xargs, find -exec, kubectl/docker
 // exec -- ..., command, exec) into that command, and parses bash -c scripts, heredocs and
 // here-strings, eval, and git rebase -x / bisect run / submodule foreach. A git push found this way
-// is gated like a direct one.
+// is gated like a direct one. The Bash tool may run zsh, so zsh's spellings that bash reads
+// differently ({git …} without spaces, $=x, the - precommand) are read the zsh way.
 //
 // The authority is git's own pre-push hook (.githooks/pre-push), which sees the commits actually
-// pushed, also by a script or an alias; the wrapper requires it to be enabled before any command
-// runs. This hook gives early, clear refusals and keeps git's hook from being skipped. It refuses,
-// wherever the command runs: what can point git at another repository or change its configuration,
-// hooks or aliases (GIT_* variables outside a short safe list, set but not merely printed; git -c and
-// git config writes of keys outside a short safe list; --git-dir, --work-tree, --bare and other
-// global options before push; an alias for a push; a sourced file before a push); a push it cannot
-// resolve (inside $(...), eval of a dynamic string, a non-literal command word, git option or shell
-// script, a command that does not parse as bash and names a push or a hook override); and a push that
-// cannot be gated per step (git rebase -x, submodule foreach).
+// pushed, also by a script; the wrapper requires it to be enabled before any command runs. This
+// hook gives early, clear refusals and keeps git's hook from being skipped. It refuses, wherever
+// the command runs: a push that skips git's hook (--no-verify, an abbreviation of it, an argument
+// that is not literal, and a --no-verify given to a command it does not model, which a shell alias
+// or function could hand to git); what can point git at another repository or change its
+// configuration or hooks (GIT_* variables outside a short safe list, set but not merely printed;
+// git -c and git config writes of keys outside a short safe list; --git-dir, --work-tree, --bare and
+// other global options before push; a sourced file before a push); a git subcommand that is not a
+// git command (an alias, which the command could redefine on the way); a push from an unknown
+// directory or from inside .git; a push it cannot resolve (inside $(...), eval of a dynamic string,
+// a non-literal command word, git option or shell script, a command that does not parse as bash and
+// names git); and a push that cannot be gated per step (git rebase -x, submodule foreach).
 //
-// For a push from a clone of this project (or one of its worktrees) it also refuses --no-verify, an
-// abbreviated or unknown push option, a non-literal argument, a push from inside .git, from an
-// unknown directory or while core.hooksPath is not .githooks, and the forms the gate cannot check
-// ref by ref (--all, --mirror, --tags, ':'); then it runs that clone's hack/sdlc/gate.sh on each
-// pushed commit as it is now. A ref that does not resolve yet is left to git's hook. Exit status 2
+// For a push from a repository that holds this project (a clone, worktree, bare or partial clone)
+// it also refuses an unknown push option, a push from a bare repository or while core.hooksPath is
+// not .githooks, and the forms the gate cannot check ref by ref (--all, --mirror, --tags, ':'); then
+// it runs that clone's hack/sdlc/gate.sh on each pushed commit as it is now. A ref that does not resolve yet is left to git's hook. Exit status 2
 // blocks the command and shows stderr to Claude Code; 0 lets it run.
 //
 // What it cannot see: a git invocation assembled at run time (name or subcommand from variables,
@@ -43,7 +46,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
-	"regexp"
+	"slices"
 	"strings"
 )
 
@@ -54,9 +57,6 @@ type hookInput struct {
 		Cwd     string `json:"cwd"` // the terminal tool's directory, relative to the session's
 	} `json:"tool_input"`
 }
-
-// hookText is what a command that does not parse may not mention, besides git and push.
-var hookText = regexp.MustCompile(`(?i)hookspath|no-verify|GIT_[A-Z]`)
 
 func main() {
 	if len(os.Args) != 2 {
@@ -91,8 +91,8 @@ func run(stdin io.Reader, stderr io.Writer, root string) int {
 	}
 	a, err := findPushes(cmd, cwd)
 	if err != nil {
-		if mentionsGitPush(cmd) || hookText.MatchString(normalize(cmd)) {
-			return refuse("cannot parse the command as bash (the Bash tool may run another shell, such as zsh), so what it does with git cannot be checked; " + runAlone)
+		if mentionsGit(cmd) {
+			return refuse("cannot parse the command as bash (the Bash tool may run another shell, such as zsh), so what it does with git cannot be checked; run git in a command bash can parse")
 		}
 		return 0
 	}
@@ -100,7 +100,7 @@ func run(stdin io.Reader, stderr io.Writer, root string) int {
 		return refuse(a.Blocked)
 	}
 	var problems []string
-	if msg := checkAliases(a.Calls, root); msg != "" {
+	if msg := checkSubcommands(a.Calls, root); msg != "" {
 		problems = append(problems, msg)
 	}
 	for _, p := range a.Pushes {
@@ -117,7 +117,7 @@ func run(stdin io.Reader, stderr io.Writer, root string) int {
 // gatePush returns why p may not run, or "" when it may.
 func gatePush(p push, root string) string {
 	if p.Dir == "" {
-		return "cannot tell which directory `git push` runs in (a variable, `cd -`, `popd` or `~user`); cd to the repository with a literal path"
+		return "cannot tell which directory `git push` runs in (a cd that may fail without stopping the command, a variable, `cd -`, `popd` or `~user`); use `cd DIR && git push …` with a literal path, or `git -C DIR push …`"
 	}
 	if fi, err := os.Stat(p.Dir); err != nil || !fi.IsDir() {
 		return fmt.Sprintf("`git push` would run in %s, which is not a directory here; cd to the repository with a literal path", p.Dir)
@@ -129,7 +129,10 @@ func gatePush(p push, root string) string {
 	switch where {
 	case "true\nfalse": // a work tree
 	case "false\ntrue":
-		return "" // a bare repository: not a clone of this project
+		if p.DryRun || len(p.Sources) == 0 || !holdsProject(p.Dir, p.Sources, root) {
+			return "" // another bare repository, or nothing pushed
+		}
+		return "`git push` would run in " + p.Dir + ", a bare repository holding this project's commits, where git's pre-push hook does not run; push from a clone's work tree"
 	default:
 		// Inside a .git directory git finds no work tree, and the relative core.hooksPath no hook.
 		return "`git push` would run inside a git directory (" + p.Dir + "), where git's pre-push hook does not run; push from the work tree"
@@ -141,7 +144,7 @@ func gatePush(p push, root string) string {
 	// Every clone of this project is gated (its own records), and this repository on any branch.
 	gate := filepath.Join(top, "hack", "sdlc", "gate.sh")
 	_, noGate := os.Stat(gate)
-	if noGate != nil && !sameRepository(top, root) {
+	if noGate != nil && !sameRepository(top, root) && !holdsProject(top, p.Sources, root) {
 		return "" // another repository: not this gate's business
 	}
 	if p.Refused != "" {
@@ -154,7 +157,7 @@ func gatePush(p push, root string) string {
 		return "git's pre-push hook is not enabled in " + top + " (core.hooksPath is " + quoteOrUnset(hp) + "): run `make sdlc-git-hooks` once, then push again"
 	}
 	if noGate != nil {
-		return top + " has no hack/sdlc/gate.sh (a branch from before the SDLC gate?): rebase it on main"
+		return top + " has no hack/sdlc/gate.sh (a branch from before the SDLC gate, or a clone without a checkout?): check out a branch based on main"
 	}
 	var problems []string
 	for _, src := range p.Sources {
@@ -180,41 +183,53 @@ func gatePush(p push, root string) string {
 	return strings.Join(problems, "\n")
 }
 
-// checkAliases refuses a git subcommand that is an alias for a push or for a change of git's hooks,
-// configured before the command (an alias the command itself defines is refused by the parser).
-func checkAliases(calls []gitCall, root string) string {
-	seen := map[gitCall]bool{}
+// checkSubcommands refuses a git subcommand that is not a git command (builtin, in git's exec path
+// or a git-* program on PATH): an alias. Its definition can come from anywhere git reads
+// configuration, which the command itself can change on the way (a config file it writes, HOME,
+// XDG_CONFIG_HOME, an include), so what it runs, perhaps `push --no-verify`, cannot be known here.
+func checkSubcommands(calls []string, root string) string {
+	if len(calls) == 0 {
+		return ""
+	}
+	list, err := gitOut(root, "--list-cmds=builtins,main,others")
+	if err != nil {
+		return "cannot list git's commands (git --list-cmds) to tell them from aliases: " + err.Error()
+	}
+	known := map[string]bool{}
+	for _, c := range strings.Fields(list) {
+		known[c] = true
+	}
+	var aliases []string
 	for _, c := range calls {
-		if c.Dir == "" {
-			c.Dir = root
-		}
-		if seen[c] {
-			continue
-		}
-		seen[c] = true
-		// Follow the alias chain: `alias.p = ship` and `alias.ship = !git push` must both be found. A
-		// value starting with `!` is a shell command (no further alias lookup); otherwise its first
-		// word may itself be an alias. A depth limit stops a cycle.
-		sub := c.Sub
-		for depth := 0; depth < 10; depth++ {
-			v, err := gitOut(c.Dir, "config", "--get", "alias."+sub)
-			if err != nil || v == "" {
-				break
-			}
-			if n := strings.ToLower(normalize(v)); strings.Contains(n, "push") || hookText.MatchString(n) {
-				return fmt.Sprintf("git %s is an alias (%q) that pushes or changes git's hooks; run the git command itself", c.Sub, v)
-			}
-			if strings.HasPrefix(strings.TrimSpace(v), "!") {
-				break // a shell command, not another git subcommand
-			}
-			next := strings.Fields(v)
-			if len(next) == 0 || next[0] == sub {
-				break
-			}
-			sub = next[0]
+		if !known[c] && !slices.Contains(aliases, c) {
+			aliases = append(aliases, c)
 		}
 	}
-	return ""
+	if len(aliases) == 0 {
+		return ""
+	}
+	return "git " + strings.Join(aliases, ", git ") + ": not a git command but an alias (or a typo); the command could change what an alias runs, so run the git command it stands for"
+}
+
+// holdsProject reports whether the repository at dir holds this project: a pushed commit carries
+// hack/sdlc/gate.sh, or the repository has one of root's first commits. A bare clone, a clone
+// without a checkout, or a repository that fetched the project count; another repository does not.
+func holdsProject(dir string, sources []string, root string) bool {
+	for _, src := range sources {
+		if _, err := gitOut(dir, "cat-file", "-e", src+":hack/sdlc/gate.sh"); err == nil {
+			return true
+		}
+	}
+	firsts, err := gitOut(root, "rev-list", "--max-parents=0", "HEAD")
+	if err != nil {
+		return false
+	}
+	for _, c := range strings.Fields(firsts) {
+		if _, err := gitOut(dir, "cat-file", "-e", c+"^{commit}"); err == nil {
+			return true
+		}
+	}
+	return false
 }
 
 // sameRepository reports whether two work trees share a git directory (a clone and its worktrees).

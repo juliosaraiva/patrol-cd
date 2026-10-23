@@ -3,6 +3,7 @@ package main
 import (
 	"bytes"
 	"os"
+	"os/exec"
 	"path"
 	"path/filepath"
 	"regexp"
@@ -22,19 +23,13 @@ type push struct {
 	Refused string // a form the gate cannot check; refused for a push from a clone of this project
 }
 
-// gitCall is a git subcommand other than push, which may be an alias.
-type gitCall struct {
-	Dir string // "" when unknown
-	Sub string
-}
-
 // analysis is what findPushes learned about a command.
 type analysis struct {
 	Pushes []push
-	Calls  []gitCall
+	Calls  []string // git subcommands other than push; one that is not a git command is an alias
 	// Blocked says why the whole command is refused, wherever it runs: a git push the walker cannot
-	// follow, or something that can point git at another repository, change its configuration,
-	// hooks or aliases.
+	// follow, one that skips git's pre-push hook, or something that can point git at another
+	// repository, change its configuration, hooks or aliases.
 	Blocked string
 }
 
@@ -61,6 +56,21 @@ func mentionsGitPush(s string) bool {
 	return gitPushTokens.MatchString(n) || (strings.Contains(n, "push") && hookEvasion.MatchString(n))
 }
 
+// gitWord matches git as a word, for a command that does not parse.
+var gitWord = regexp.MustCompile(`(^|[^A-Za-z0-9_.-])git([^A-Za-z0-9_]|$)`)
+
+// mentionsGit reports whether s names git as a word, or anything that would skip git's hook.
+func mentionsGit(s string) bool {
+	n := normalize(s)
+	return gitWord.MatchString(n) || hookEvasion.MatchString(n)
+}
+
+// skipsHook reports whether a literal argument is --no-verify or an abbreviation git accepts for it.
+func skipsHook(a string) bool {
+	name, _, _ := strings.Cut(a, "=")
+	return len(name) >= len("--no-v") && strings.HasPrefix("--no-verify", name)
+}
+
 // findPushes parses command as bash and returns what it does with git, starting in cwd.
 func findPushes(command, cwd string) (analysis, error) {
 	f, err := syntax.NewParser(syntax.Variant(syntax.LangBash)).Parse(strings.NewReader(command), "")
@@ -73,21 +83,51 @@ func findPushes(command, cwd string) (analysis, error) {
 }
 
 // run walks a parsed program on this walker: the statements, then the command and process
-// substitutions the statement walk does not reach (a git push there is refused).
+// substitutions the statement walk does not reach (a git push there is refused), and the
+// assignments made inside words and arithmetic (${NAME:=value}, $((NAME=1)), let NAME=1).
 func (w *walker) run(f *syntax.File) {
 	w.stmts(f.Stmts)
 	syntax.Walk(f, func(n syntax.Node) bool {
-		if c, ok := n.(*syntax.CallExpr); ok && !w.seen[c] {
+		switch n := n.(type) {
+		case *syntax.CallExpr:
+			if w.seen[n] {
+				break
+			}
 			probe := newWalker(w.dir, w.src)
-			probe.call(c, nil)
+			probe.call(n, nil)
 			if len(probe.pushes) > 0 {
 				w.block("a git push inside a command or process substitution cannot be checked; " + runAlone)
 			}
 			w.block(probe.blocked)
 			w.calls = append(w.calls, probe.calls...)
+		case *syntax.ParamExp:
+			if n.Exp != nil && (n.Exp.Op == syntax.AssignUnset || n.Exp.Op == syntax.AssignUnsetOrNull) && n.Param != nil {
+				w.assign(n.Param.Value, nil, false)
+			}
+		case *syntax.BinaryArithm:
+			if arithAssign[n.Op] {
+				w.assign(arithName(n.X), nil, false)
+			}
+		case *syntax.UnaryArithm:
+			if n.Op == syntax.Inc || n.Op == syntax.Dec {
+				w.assign(arithName(n.X), nil, false)
+			}
 		}
 		return true
 	})
+}
+
+var arithAssign = map[syntax.BinAritOperator]bool{syntax.Assgn: true, syntax.AddAssgn: true, syntax.SubAssgn: true,
+	syntax.MulAssgn: true, syntax.QuoAssgn: true, syntax.RemAssgn: true, syntax.AndAssgn: true, syntax.OrAssgn: true,
+	syntax.XorAssgn: true, syntax.ShlAssgn: true, syntax.ShrAssgn: true, syntax.AndBoolAssgn: true,
+	syntax.OrBoolAssgn: true, syntax.XorBoolAssgn: true, syntax.PowAssgn: true}
+
+// arithName returns the variable an arithmetic assignment sets, or "".
+func arithName(x syntax.ArithmExpr) string {
+	if word, ok := x.(*syntax.Word); ok {
+		return word.Lit()
+	}
+	return ""
 }
 
 type walker struct {
@@ -95,7 +135,7 @@ type walker struct {
 	src     string // the whole command
 	cmdText string // the text of the command currently being dispatched (its own words, not siblings)
 	pushes  []push
-	calls   []gitCall
+	calls   []string
 	blocked string
 	sourced bool // a file was sourced: it can change the directory and git's environment
 	seen    map[*syntax.CallExpr]bool
@@ -139,10 +179,37 @@ func (w *walker) blockText(text, how string) {
 	}
 }
 
+// stmts walks a statement list. A cd that may fail without stopping the list (not guarded by
+// `|| exit`) leaves the directory unknown for the statements after it, which run in either
+// directory. The last statement's cd is left to the caller: its status is the list's.
 func (w *walker) stmts(list []*syntax.Stmt) {
-	for _, s := range list {
+	for i, s := range list {
+		before := w.dir
 		w.stmt(s)
+		if i < len(list)-1 && w.dir != before && !exitGuarded(s) {
+			w.dir = ""
+		}
 	}
+}
+
+// exitGuarded reports whether s is a chain ending in `|| exit` with no other ||: whatever step of
+// it fails, the script exits, so reaching the next statement means every cd in it worked.
+func exitGuarded(s *syntax.Stmt) bool {
+	c, ok := s.Cmd.(*syntax.BinaryCmd)
+	if !ok || s.Negated || (c.Op != syntax.AndStmt && c.Op != syntax.OrStmt) {
+		return false
+	}
+	segs := flattenChain(c)
+	last := segs[len(segs)-1]
+	if last.op != syntax.OrStmt || !isExit(last.stmt) {
+		return false
+	}
+	for _, seg := range segs[1 : len(segs)-1] {
+		if seg.op == syntax.OrStmt || seg.stmt.Negated {
+			return false
+		}
+	}
+	return !segs[0].stmt.Negated
 }
 
 // chainSeg is one statement of an && / || chain with the operator that precedes it (0 for the first).
@@ -215,18 +282,24 @@ func bodyOf(r *syntax.Redirect) *syntax.Word {
 	return r.Hdoc
 }
 
-// isExit reports whether a statement ends the script: exit, return, or a call to a fatal helper.
+// isExit reports whether a statement ends the script: `exit`, or a `{ …; exit; }` group. (return
+// outside a function, and a helper such as die that may be undefined, let the script go on.)
 func isExit(s *syntax.Stmt) bool {
-	c, ok := s.Cmd.(*syntax.CallExpr)
-	if !ok || len(c.Args) == 0 {
-		return false
+	switch c := s.Cmd.(type) {
+	case *syntax.CallExpr:
+		if len(c.Args) == 0 {
+			return false
+		}
+		name, ok := literalWord(c.Args[0])
+		return ok && name == "exit"
+	case *syntax.Block:
+		return len(c.Stmts) > 0 && isExit(c.Stmts[len(c.Stmts)-1])
 	}
-	name, ok := literalWord(c.Args[0])
-	return ok && (name == "exit" || name == "return" || path.Base(name) == "die")
+	return false
 }
 
-// anyNonExitOr reports whether a chain has an || whose successor is not exit/return, so a cd in the
-// first segment might be skipped.
+// anyNonExitOr reports whether a chain has an || whose successor is not exit, so a cd in the first
+// segment might be skipped.
 func anyNonExitOr(segs []chainSeg) bool {
 	for _, s := range segs {
 		if s.op == syntax.OrStmt && !isExit(s.stmt) {
@@ -263,11 +336,18 @@ func (w *walker) cmd(s *syntax.Stmt) {
 		case syntax.AndStmt, syntax.OrStmt:
 			// An && / || chain. The directory is carried forward only through a pure && prefix whose
 			// segments certainly run: `cd ui && test && cd .. && git push` resolves the push's
-			// directory. The first || whose successor is not exit/return, a cd that is not in that
-			// prefix, or a negated segment that changes the directory, all mean a cd might be skipped
-			// or rolled back, so the directory is unknown from there on and after the chain. `cd /x ||
-			// exit; …` keeps the cd, because reaching past the exit means it succeeded.
+			// directory. The first || whose successor is not exit, a cd that is not in that prefix,
+			// or a negated segment that changes the directory, all mean a cd might be skipped or
+			// rolled back, so the directory is unknown from there on and after the chain. `cd /x ||
+			// exit; …` keeps the cd, because reaching past the exit means it succeeded. A chain
+			// with no cd at all (`git fetch || true`) leaves the directory as it is.
 			segments := flattenChain(c)
+			if !w.changesDir(c) {
+				for _, seg := range segments {
+					w.stmt(seg.stmt)
+				}
+				return
+			}
 			unknownAfter := false
 			poisoned := false // once set, the directory is unknown for the rest of the chain
 			for i, seg := range segments {
@@ -305,7 +385,7 @@ func (w *walker) cmd(s *syntax.Stmt) {
 			w.dir = saved
 			w.stmt(c.Y)
 			w.dir = saved
-			if changesDir(c.Y) {
+			if w.changesDir(c.Y) {
 				w.dir = "" // zsh runs the last element in the current shell, so its cd can leak out
 			}
 		}
@@ -321,7 +401,7 @@ func (w *walker) cmd(s *syntax.Stmt) {
 				w.assign(it.Name.Value, nil, true)
 			}
 		}
-		if changesDir(c) {
+		if w.changesDir(c) {
 			w.dir = ""
 			defer func() { w.dir = "" }()
 		}
@@ -361,7 +441,7 @@ func (w *walker) cmd(s *syntax.Stmt) {
 		w.dir = ""
 		w.stmt(c.Body)
 		w.dir = saved
-		if changesDir(c.Body) {
+		if w.changesDir(c.Body) {
 			w.dir = ""
 		}
 	}
@@ -372,7 +452,7 @@ func (w *walker) cmd(s *syntax.Stmt) {
 func (w *walker) decl(c *syntax.DeclClause) {
 	variant := c.Variant.Value
 	exportMode := variant == "export" || variant == "readonly"
-	printMode := false
+	printMode, nameref := false, false
 	for _, a := range c.Args {
 		if a.Name == nil { // an option: -p, -x, -g, ...
 			if v, ok := literalWord(a.Value); ok && strings.HasPrefix(v, "-") {
@@ -384,8 +464,16 @@ func (w *walker) decl(c *syntax.DeclClause) {
 				if strings.Contains(v, "x") {
 					exportMode = true
 				}
+				if !exportMode && strings.Contains(v, "n") { // declare -n REF=NAME: REF sets NAME
+					nameref = true
+				}
 			}
 			continue
+		}
+		if nameref && a.Value != nil {
+			if target, ok := literalWord(a.Value); ok {
+				w.assign(target, nil, false)
+			}
 		}
 		switch {
 		case a.Value != nil || !a.Naked: // declare GIT_DIR=x, or declare GIT_DIR= (empty): a set
@@ -409,12 +497,10 @@ var safeGitEnv = map[string]bool{"GIT_TERMINAL_PROMPT": true, "GIT_AUTHOR_NAME":
 // value (including empty) that does not mention git.
 var gitEnvCommands = map[string]bool{"GIT_PAGER": true, "GIT_EDITOR": true, "GIT_SEQUENCE_EDITOR": true}
 
-// assign checks a variable assignment. value is nil for a naked `export NAME` (naked true) or for an
-// empty `NAME=` (naked false). A GIT_* assignment that could point git elsewhere is refused, as is a
-// PATROL_SDLC_* override that would change which base the gate measures against.
+// assign checks a variable assignment. value is nil for a naked `export NAME` (naked true), for an
+// empty `NAME=` (naked false), or when the value is not at hand. A GIT_* assignment that could point
+// git elsewhere is refused. (PATROL_SDLC_BASE is not: the gate and the review input ignore it.)
 func (w *walker) assign(name string, value *syntax.Word, naked bool) {
-	// PATROL_SDLC_BASE only changes what hack/sdlc/check.sh measures locally; the gate (gate.sh)
-	// unsets it, so it is not refused here — it is a normal variable for local iteration.
 	if !strings.HasPrefix(name, "GIT_") || safeGitEnv[name] || strings.HasPrefix(name, "GIT_TRACE") {
 		return
 	}
@@ -436,50 +522,110 @@ func (w *walker) assignWord(assign string) {
 	w.assign(name, nil, false)
 }
 
-// changesDir reports whether node runs a command that can change the directory.
-func changesDir(node syntax.Node) bool {
+// changesDir reports whether node runs a command that can change this shell's directory: cd and
+// its kin, or a directory name that zsh's AUTO_CD runs as a cd, where they run in this shell. A
+// subshell, command or process substitution, background job or pipeline element before the last
+// cannot. A command word that is not literal counts as no cd, as at top level (a cd assembled at
+// run time is out of the hook's reach).
+func (w *walker) changesDir(node syntax.Node) bool {
 	found := false
 	syntax.Walk(node, func(n syntax.Node) bool {
-		if c, ok := n.(*syntax.CallExpr); ok && len(c.Args) > 0 {
-			i := 0
-			for i < len(c.Args) { // skip command/builtin/exec/noglog precommand words
-				w, ok := literalWord(c.Args[i])
-				if ok && (path.Base(w) == "command" || path.Base(w) == "builtin" || path.Base(w) == "exec") {
-					i++
-					continue
+		if found {
+			return false
+		}
+		switch n := n.(type) {
+		case *syntax.Subshell, *syntax.CmdSubst, *syntax.ProcSubst:
+			return false
+		case *syntax.Stmt:
+			return !n.Background && !n.Coprocess
+		case *syntax.BinaryCmd:
+			if n.Op == syntax.Pipe || n.Op == syntax.PipeAll {
+				found = w.changesDir(n.Y) // zsh runs the last element in this shell
+				return false
+			}
+		case *syntax.CallExpr:
+			args, lit := fields(n.Args)
+			args, lit = stripBraces(args, lit)
+			found = w.autoCD(args, lit)
+			for len(args) > 1 && lit[0] && (precommand[path.Base(args[0])]) {
+				args, lit = args[1:], lit[1:]
+			}
+			if len(args) > 0 && lit[0] {
+				switch path.Base(strings.TrimPrefix(args[0], "=")) {
+				case "cd", "pushd", "popd", "source", ".", "eval", "trap":
+					found = true
 				}
-				break
 			}
-			name, ok := literalWord(c.Args[min(i, len(c.Args)-1)])
-			switch path.Base(strings.TrimPrefix(name, "=")) {
-			case "cd", "pushd", "popd", "source", ".", "eval", "trap":
-				found = true
-			}
-			found = found || !ok
 		}
 		return !found
 	})
 	return found
 }
 
+// autoCD reports whether zsh's AUTO_CD (on in the Bash tool's zsh) runs a command of one word as
+// `cd WORD`: the word is no command but a directory, here or wherever the unknown directory is.
+func (w *walker) autoCD(args []string, lit []bool) bool {
+	if len(args) != 1 || !lit[0] || args[0] == "" {
+		return false
+	}
+	if _, err := exec.LookPath(args[0]); err == nil {
+		return false
+	}
+	d := w.resolve(args[0])
+	if d == "" {
+		return true // relative to a directory already unknown
+	}
+	fi, err := os.Stat(d)
+	return err == nil && fi.IsDir()
+}
+
+// precommand lists the words that run the rest of the command in this shell (zsh's - included).
+var precommand = map[string]bool{"command": true, "builtin": true, "exec": true, "noglob": true, "nocorrect": true, "-": true}
+
+// stripBraces removes the braces of a zsh brace group written without spaces, `{git push …}`,
+// which bash would read as a command named `{git`.
+func stripBraces(args []string, lit []bool) ([]string, []bool) {
+	if len(args) == 0 || !lit[0] || !strings.HasPrefix(args[0], "{") {
+		return args, lit
+	}
+	n := len(args[0]) - len(strings.TrimLeft(args[0], "{"))
+	args = append([]string{args[0][n:]}, args[1:]...)
+	lit = append([]bool(nil), lit...)
+	if last := len(args) - 1; lit[last] {
+		trimmed := args[last]
+		for k := 0; k < n && strings.HasSuffix(trimmed, "}"); k++ {
+			trimmed = strings.TrimSuffix(trimmed, "}")
+		}
+		args[last] = trimmed
+		if trimmed == "" && last > 0 { // `}` stood alone
+			args, lit = args[:last], lit[:last]
+		}
+	}
+	if args[0] == "" { // `{` stood alone
+		args, lit = args[1:], lit[1:]
+	}
+	return args, lit
+}
+
 // expandLiteral returns the fields bash makes of word when they do not depend on the environment,
 // the filesystem or another command: quote removal, escapes, $'…', brace expansion and ~. ok is
-// false for a word with a parameter, command, arithmetic or process substitution, or an unquoted
-// glob.
+// false for a word with a parameter, command, arithmetic or process substitution, an unquoted glob,
+// a $ that bash leaves as text (zsh expands `$=x`, `$^x` and `$~x`), or ~+ / ~- (the directories).
 func expandLiteral(word *syntax.Word) ([]string, bool) {
 	if word == nil {
 		return nil, false
 	}
-	for _, part := range word.Parts {
+	for i, part := range word.Parts {
 		switch p := part.(type) {
 		case *syntax.Lit:
-			if pattern.HasMeta(p.Value, 0) {
+			if pattern.HasMeta(p.Value, 0) || strings.Contains(p.Value, "$") ||
+				(i == 0 && (strings.HasPrefix(p.Value, "~+") || strings.HasPrefix(p.Value, "~-"))) {
 				return nil, false
 			}
 		case *syntax.SglQuoted:
 		case *syntax.DblQuoted:
 			for _, q := range p.Parts {
-				if _, ok := q.(*syntax.Lit); !ok {
+				if lit, ok := q.(*syntax.Lit); !ok || strings.Contains(lit.Value, "$") {
 					return nil, false
 				}
 			}
@@ -513,6 +659,9 @@ func literalPrefix(word *syntax.Word) string {
 			if pattern.HasMeta(p.Value, 0) {
 				return b.String()
 			}
+			if before, _, found := strings.Cut(p.Value, "$"); found {
+				return b.String() + before
+			}
 			b.WriteString(p.Value)
 		case *syntax.SglQuoted:
 			b.WriteString(p.Value)
@@ -521,6 +670,9 @@ func literalPrefix(word *syntax.Word) string {
 				lit, ok := q.(*syntax.Lit)
 				if !ok {
 					return b.String()
+				}
+				if before, _, found := strings.Cut(lit.Value, "$"); found {
+					return b.String() + before
 				}
 				b.WriteString(lit.Value)
 			}
@@ -563,13 +715,21 @@ func (w *walker) call(c *syntax.CallExpr, redirs []*syntax.Redirect) {
 
 // command dispatches an already-expanded argv.
 func (w *walker) command(args []string, lit []bool, redirs []*syntax.Redirect) {
+	args, lit = stripBraces(args, lit)
+	// env runs the rest as a child process, whose cd cannot move this shell.
+	dir, sourced, child := w.dir, w.sourced, false
+	defer func() {
+		if child {
+			w.dir, w.sourced = dir, sourced
+		}
+	}()
 prefix:
 	for len(args) > 0 && lit[0] {
 		switch path.Base(args[0]) {
-		case "command", "exec", "builtin", "noglob", "nocorrect":
-			// They run the rest as a command; zsh's noglob/nocorrect are precommand modifiers. With an
-			// option (exec -a NAME, command -p), the grammar varies and -v/-V only print, so fall back
-			// to a conservative text check. (noglob/nocorrect take no options.)
+		case "command", "exec", "builtin", "noglob", "nocorrect", "-":
+			// They run the rest as a command; zsh's noglob/nocorrect/- are precommand modifiers. With
+			// an option (exec -a NAME, command -p), the grammar varies and -v/-V only print, so fall
+			// back to a conservative text check. (noglob/nocorrect/- take no options.)
 			base := path.Base(args[0])
 			if (base == "command" || base == "exec" || base == "builtin") && len(args) > 1 && lit[1] && strings.HasPrefix(args[1], "-") {
 				w.blockText(w.cmdText, base+" with options")
@@ -577,6 +737,7 @@ prefix:
 			}
 			args, lit = args[1:], lit[1:]
 		case "env":
+			child = true
 			args, lit = args[1:], lit[1:]
 		envOpts:
 			for len(args) > 0 && lit[0] {
@@ -627,6 +788,8 @@ prefix:
 	}
 	_, isWrapper := wrapperSkip[name]
 	switch {
+	case w.autoCD(args, lit):
+		w.chdir("cd", args, lit)
 	case name == "cd" || name == "pushd":
 		w.chdir(name, args[1:], lit[1:])
 	case name == "popd":
@@ -674,11 +837,38 @@ prefix:
 	default:
 		// An unrecognized command: it is not a known runner, so its arguments are usually data. But a
 		// git push plainly in its arguments (a custom runner, ssh, a tool not modelled) is refused, as
-		// the contract promises for "another command that runs its arguments".
+		// the contract promises for "another command that runs its arguments". So is a --no-verify
+		// or core.hooksPath given to it: a shell alias or function (the Bash tool loads the user's,
+		// such as oh-my-zsh's gp='git push') may hand it to git.
+		if dataCommands[name] {
+			return
+		}
 		if argvHasGitPush(args, lit) {
 			w.block("a git push run through " + name + " cannot be checked; " + runAlone)
+			return
+		}
+		for i, a := range args[1:] {
+			if lit[i+1] && (skipsHook(a) || strings.EqualFold(strings.SplitN(a, "=", 2)[0], "core.hooksPath")) {
+				w.block(a + " given to " + name + ", which the hook does not model (a shell alias or function may pass it to git, skipping its pre-push hook); " + runAlone)
+				return
+			}
 		}
 	}
+}
+
+// dataCommands read their arguments as data (patterns, text, files) and never run them, so a git
+// push or a --no-verify among them is not handed to git.
+var dataCommands = map[string]bool{"grep": true, "egrep": true, "fgrep": true, "rg": true, "ag": true, "ack": true,
+	"ugrep": true, "sed": true, "awk": true, "gawk": true, "jq": true, "yq": true, "sort": true, "uniq": true, "wc": true,
+	"head": true, "tail": true, "cut": true, "tr": true, "diff": true, "tee": true, "less": true, "more": true,
+	"man": true, "ls": true, "print": true}
+
+// inChild walks the command a child process runs, from dir: its cd and source do not reach this shell.
+func (w *walker) inChild(dir string, args []string, lit []bool, redirs []*syntax.Redirect) {
+	savedDir, sourced := w.dir, w.sourced
+	w.dir = dir
+	w.command(args, lit, redirs)
+	w.dir, w.sourced = savedDir, sourced
 }
 
 // argvHasGitPush reports whether argv holds a literal `git` whose subcommand (after git's global
@@ -769,7 +959,7 @@ func (w *walker) wrapped(name string, args []string, lit []bool, redirs []*synta
 		w.blockText(w.cmdText, name)
 		return
 	}
-	w.command(inner, innerLit, redirs)
+	w.inChild(w.dir, inner, innerLit, redirs)
 }
 
 // execRunner parses the command run after a `--` (kubectl exec POD -- CMD); without one, only a
@@ -779,7 +969,7 @@ func (w *walker) execRunner(args []string, lit []bool) {
 	for i := 1; i < len(args); i++ {
 		if lit[i] && args[i] == "--" {
 			if i+1 < len(args) {
-				w.command(args[i+1:], lit[i+1:], nil)
+				w.inChild(w.dir, args[i+1:], lit[i+1:], nil)
 			}
 			return
 		}
@@ -789,7 +979,8 @@ func (w *walker) execRunner(args []string, lit []bool) {
 	}
 }
 
-// findExec parses the command of a find -exec / -execdir ... ; or +.
+// findExec parses the command of a find -exec ... ; or +, which runs from the current directory,
+// and of -execdir, which runs from each file's directory (unknown here).
 func (w *walker) findExec(args []string, lit []bool) {
 	for i := 1; i < len(args); i++ {
 		if !lit[i] || (args[i] != "-exec" && args[i] != "-execdir") {
@@ -800,7 +991,11 @@ func (w *walker) findExec(args []string, lit []bool) {
 			end++
 		}
 		if end > i+1 {
-			w.command(args[i+1:end], lit[i+1:end], nil)
+			dir := w.dir
+			if args[i] == "-execdir" {
+				dir = ""
+			}
+			w.inChild(dir, args[i+1:end], lit[i+1:end], nil)
 		}
 		i = end
 	}
@@ -827,14 +1022,30 @@ func (w *walker) eval(args []string, lit []bool) {
 	w.run(f) // the same walker: eval runs in the current shell, so its cd and source carry back
 }
 
+// xargsValue lists the options that take the next argument as their value: xargs' (GNU and BSD;
+// GNU's -i, -l and -e take only an attached value, so they are flags) and GNU parallel's common ones.
+var xargsValue = map[string]map[string]bool{
+	"xargs": {"-n": true, "--max-args": true, "-L": true, "-P": true, "--max-procs": true, "-s": true,
+		"--max-chars": true, "-I": true, "-E": true, "-d": true, "--delimiter": true, "-a": true, "--arg-file": true,
+		"--process-slot-var": true, "-J": true, "-R": true, "-S": true},
+	"parallel": {"-n": true, "--max-args": true, "-L": true, "-l": true, "-P": true, "-j": true, "--jobs": true,
+		"-N": true, "-I": true, "-i": true, "--replace": true, "-E": true, "-e": true, "--eof": true, "-d": true,
+		"--delimiter": true, "-a": true, "--arg-file": true, "-S": true, "--sshlogin": true},
+}
+
 // xargs parses the command xargs or parallel builds. It appends standard input to that command, so
-// a git push there (the input adds refs and could add --no-verify), a bare `git` (its subcommand
-// would come from input) and a non-literal command word are all refused.
+// a git push there (the input adds refs and could add --no-verify), a git with no subcommand (it
+// would come from input) and a non-literal command word are all refused. parallel also runs its
+// ::: arguments as commands, so a git push anywhere in its words is refused.
 func (w *walker) xargs(name string, args []string, lit []bool) {
-	value := map[string]bool{"-n": true, "--max-args": true, "-L": true, "-l": true, "-P": true, "--max-procs": true,
-		"-s": true, "--max-chars": true, "-I": true, "-i": true, "--replace": true, "-E": true, "-e": true, "--eof": true,
-		"-d": true, "--delimiter": true, "-a": true, "--arg-file": true, "-j": true, "-N": true}
-	inner, innerLit := skipOptions(args, lit, value, 0)
+	refuse := func() {
+		w.block("a git push through " + name + " cannot be checked (it appends arguments from standard input); " + runAlone)
+	}
+	if argvHasGitPush(args, lit) || (name == "parallel" && mentionsGitPush(w.cmdText)) {
+		refuse() // whatever options were misread on the way
+		return
+	}
+	inner, innerLit := skipOptions(args, lit, xargsValue[name], 0)
 	if len(inner) == 0 {
 		return // the default command is echo
 	}
@@ -842,19 +1053,29 @@ func (w *walker) xargs(name string, args []string, lit []bool) {
 		w.blockText(w.cmdText, name)
 		return
 	}
-	// Run the command on a fresh walker: a push there (including a bare `git`, whose subcommand the
-	// input would supply) refuses the whole command, since the input adds arguments the gate cannot
-	// see; any other command (git branch, git add, grep) is allowed.
+	// Run the command on a fresh walker: a push there refuses the whole command, since the input
+	// adds arguments the gate cannot see; any other command (git branch, git add, grep) is allowed.
 	s := newWalker(w.dir, w.src)
-	if path.Base(inner[0]) == "git" && len(inner) == 1 {
-		s.pushes = append(s.pushes, push{})
-	} else {
-		s.command(inner, innerLit, nil)
-	}
+	s.command(inner, innerLit, nil)
 	w.calls = append(w.calls, s.calls...)
-	if len(s.pushes) > 0 || s.blocked != "" {
-		w.block("a git push through " + name + " cannot be checked (it appends arguments from standard input); " + runAlone)
+	if len(s.pushes) > 0 || s.blocked != "" || (path.Base(inner[0]) == "git" && gitSubcommand(inner[1:], innerLit[1:]) < 0) {
+		refuse()
 	}
+}
+
+// gitSubcommand returns the index of git's subcommand in args (git's arguments), past its global
+// options, or -1 when there is none.
+func gitSubcommand(args []string, lit []bool) int {
+	for j := 0; j < len(args); j++ {
+		if !lit[j] || !strings.HasPrefix(args[j], "-") {
+			return j
+		}
+		name, _, hasValue := strings.Cut(args[j], "=")
+		if gitGlobalWithValue[name] && !hasValue {
+			j++ // its value is the next argument
+		}
+	}
+	return -1
 }
 
 // setter checks the variable names a read, mapfile, readarray or getopts sets.
@@ -1030,8 +1251,8 @@ func (w *walker) chdir(name string, args []string, lit []bool) {
 		}
 		args, lit = args[1:], lit[1:] // -L, -P, -e, -@
 	}
-	if len(args) == 0 || !lit[0] || args[0] == "-" {
-		w.dir = "" // $HOME, OLDPWD or a variable: unknown here
+	if len(args) != 1 || !lit[0] || args[0] == "-" {
+		w.dir = "" // $HOME, OLDPWD, a variable, or zsh's `cd OLD NEW`: unknown here
 		return
 	}
 	if !filepath.IsAbs(args[0]) && os.Getenv("CDPATH") != "" {
@@ -1158,7 +1379,7 @@ func (w *walker) git(args []string, lit []bool) {
 		w.gitRunner(sub, rest, restLit)
 		return
 	default:
-		w.calls = append(w.calls, gitCall{Dir: dir, Sub: sub})
+		w.calls = append(w.calls, sub)
 		return
 	}
 	if unsafe != "" {
@@ -1169,7 +1390,11 @@ func (w *walker) git(args []string, lit []bool) {
 		w.block("a file sourced earlier in the command can change the directory and git's environment; " + runAlone)
 		return
 	}
-	if p, ok := pushArgs(dir, rest, restLit); ok {
+	p, skip, ok := pushArgs(dir, rest, restLit)
+	switch {
+	case skip != "":
+		w.block(skip) // wherever it runs: a push that skips git's hook is never gated
+	case ok:
 		w.pushes = append(w.pushes, p)
 	}
 }
@@ -1387,22 +1612,25 @@ var pushLong = map[string]int{
 
 var noNegation = map[string]bool{"--verify": true, "--no-verify": true, "--ipv4": true, "--ipv6": true}
 
-// pushArgs reads the arguments after `git push`. ok is false when git would not push (-h, --help).
-func pushArgs(dir string, args []string, lit []bool) (push, bool) {
-	p := push{Dir: dir}
+// pushArgs reads the arguments after `git push`. skip says why the push may skip git's pre-push
+// hook (--no-verify, an abbreviation of it, or an argument that is not literal and could be one),
+// which refuses it wherever it runs. ok is false when git would not push (-h, --help).
+func pushArgs(dir string, args []string, lit []bool) (p push, skip string, ok bool) {
+	p = push{Dir: dir}
 	refuse := func(msg string) {
 		if p.Refused == "" {
 			p.Refused = msg
 		}
 	}
-	var deleteFlag, deleteRefspec, noVerify bool
+	var deleteFlag, deleteRefspec, noVerify, nonLiteral bool
+	abbrev := ""
 	every := map[string]bool{} // --all, --branches, --mirror, --tags: the last of each wins
 	positional := 0
 	options := true
 	for j := 0; j < len(args); j++ {
 		a := args[j]
 		if !lit[j] {
-			refuse("`git push` has an argument that is not literal: it could be an option, or a ref the gate cannot resolve; " + runAlone)
+			nonLiteral = true
 			continue
 		}
 		switch {
@@ -1410,7 +1638,7 @@ func pushArgs(dir string, args []string, lit []bool) (push, bool) {
 			options = false
 			continue
 		case options && (a == "--help" || strings.HasPrefix(a, "--git-completion-helper")):
-			return push{}, false
+			return push{}, "", false
 		case options && strings.HasPrefix(a, "--"):
 			name, _, hasValue := strings.Cut(a, "=")
 			kind, known := pushLong[name]
@@ -1420,8 +1648,12 @@ func pushArgs(dir string, args []string, lit []bool) (push, bool) {
 					name, kind, on, known = base, optFlag, false, true
 				}
 			}
+			if !known && skipsHook(name) {
+				abbrev = name
+				continue
+			}
 			if !known {
-				refuse("unknown or abbreviated git push option " + name + " (git accepts abbreviations, such as one of --no-verify); spell options out in full")
+				refuse("unknown or abbreviated git push option " + name + "; spell options out in full")
 				continue
 			}
 			switch name {
@@ -1449,7 +1681,7 @@ func pushArgs(dir string, args []string, lit []bool) (push, bool) {
 				case 'n':
 					p.DryRun = true
 				case 'h':
-					return push{}, false
+					return push{}, "", false
 				case 'o':
 					if k == len(a)-1 {
 						j++ // the value is the next argument
@@ -1487,8 +1719,13 @@ func pushArgs(dir string, args []string, lit []bool) (push, bool) {
 		}
 		p.Sources = append(p.Sources, src)
 	}
-	if noVerify {
-		refuse("--no-verify skips the pre-push hook")
+	switch {
+	case noVerify:
+		skip = "--no-verify skips the pre-push hook; push without it"
+	case abbrev != "":
+		skip = abbrev + " is git's abbreviation of --no-verify, which skips the pre-push hook; push without it"
+	case nonLiteral:
+		skip = "`git push` has an argument that is not literal: it could be --no-verify, or a ref the gate cannot resolve; " + runAlone
 	}
 	for _, name := range []string{"--all", "--branches", "--mirror", "--tags"} {
 		if every[name] {
@@ -1502,5 +1739,5 @@ func pushArgs(dir string, args []string, lit []bool) (push, bool) {
 	case len(p.Sources) == 0 && !p.Deletes:
 		p.Sources = []string{"HEAD"}
 	}
-	return p, true
+	return p, skip, true
 }

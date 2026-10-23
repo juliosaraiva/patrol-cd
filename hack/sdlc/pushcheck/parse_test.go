@@ -39,8 +39,10 @@ func TestFindPushes(t *testing.T) {
 		{name: "escape inside the subcommand", command: `git pu\sh origin a`, want: []push{{Dir: "/repo", Sources: []string{"a"}}}},
 		{name: "ANSI-C quoting", command: `git $'push' origin a`, want: []push{{Dir: "/repo", Sources: []string{"a"}}}},
 		{name: "escaped command word", command: `\git push origin a`, want: []push{{Dir: "/repo", Sources: []string{"a"}}}},
-		{name: "brace expansion makes several arguments", command: "git push {--no-verify,origin} main", want: []push{{Dir: "/repo", Sources: []string{"main"},
-			Refused: "--no-verify skips the pre-push hook"}}},
+		{name: "brace expansion makes several arguments", command: "git push {origin,main}", want: []push{{Dir: "/repo", Sources: []string{"main"}}}},
+		{name: "zsh brace group without spaces", command: "{git push origin a}", want: []push{{Dir: "/repo", Sources: []string{"a"}}}},
+		{name: "zsh brace group keeps a ref's braces", command: "{git push origin HEAD@{1}:refs/heads/x}", want: []push{{Dir: "/repo", Sources: []string{"HEAD@{1}"}}}},
+		{name: "zsh - precommand", command: "- git push origin a", want: []push{{Dir: "/repo", Sources: []string{"a"}}}},
 
 		// git push tag forms.
 		{name: "push a tag by the tag keyword", command: "git push origin tag v0.1.0", want: []push{{Dir: "/repo", Sources: []string{"refs/tags/v0.1.0"}}}},
@@ -49,7 +51,12 @@ func TestFindPushes(t *testing.T) {
 
 		// Directory: only what certainly runs moves it.
 		{name: "cd then push", command: "cd /other && git push origin b", want: []push{{Dir: "/other", Sources: []string{"b"}}}},
-		{name: "relative cd", command: "cd sub; git push", want: []push{{Dir: "/repo/sub", Sources: head}}},
+		{name: "relative cd", command: "cd sub && git push", want: []push{{Dir: "/repo/sub", Sources: head}}},
+		{name: "cd then ; push is unknown: the cd may fail", command: "cd sub; git push", want: []push{{Dir: "", Sources: head}}},
+		{name: "cd with two operands (zsh cd OLD NEW) is unknown", command: "cd /tmp x && git push", want: []push{{Dir: "", Sources: head}}},
+		{name: "a guarded cd, then an unguarded one", command: "cd /x || exit 1; cd sub; git push", want: []push{{Dir: "", Sources: head}}},
+		{name: "cd || { …; exit; } keeps the cd", command: "cd /x || { echo no >&2; exit 1; }; git push", want: []push{{Dir: "/x", Sources: head}}},
+		{name: "cd in a ; list inside bash -c", command: "bash -c 'cd /y; git push origin d'", want: []push{{Dir: "", Sources: []string{"d"}}}},
 		{name: "home cd", command: "cd ~/w && git push", want: []push{{Dir: filepath.Join(home, "w"), Sources: head}}},
 		{name: "pushd -n does not move", command: "pushd -n /p; git push", want: []push{{Dir: "", Sources: head}}},
 		{name: "popd", command: "pushd /p; popd; git push", want: []push{{Dir: "", Sources: head}}},
@@ -60,6 +67,15 @@ func TestFindPushes(t *testing.T) {
 		{name: "cd after &&", command: "false && cd /tmp; git push", want: []push{{Dir: "", Sources: head}}},
 		{name: "cd before || push leaves the dir unknown", command: "cd /tmp || git push", want: []push{{Dir: "", Sources: head}}},
 		{name: "cd || exit then push commits the cd", command: "cd /x || exit 1; git push", want: []push{{Dir: "/x", Sources: head}}},
+		{name: "cd in an || successor then && push is unknown", command: "true || cd /x && git push origin a", want: []push{{Dir: "", Sources: []string{"a"}}}},
+		{name: "|| with no cd keeps the dir", command: "git fetch origin || true; git push -u origin HEAD", want: []push{{Dir: "/repo", Sources: head}}},
+		{name: "a push retried after ||", command: "git push 2>/dev/null || git push -u origin HEAD", want: []push{{Dir: "/repo", Sources: head}, {Dir: "/repo", Sources: head}}},
+		{name: "|| { …; exit 1; } with no cd", command: "make sdlc-check || { echo failed >&2; exit 1; }\ngit push origin a", want: []push{{Dir: "/repo", Sources: []string{"a"}}}},
+		{name: "cd in a subshell inside an if", command: "if [ -d ui ]; then (cd ui && ls); fi; git push -u origin HEAD", want: []push{{Dir: "/repo", Sources: head}}},
+		{name: "cd in a substitution of a for list", command: `for p in $(cd internal && ls); do echo "$p"; done; git push origin a`, want: []push{{Dir: "/repo", Sources: []string{"a"}}}},
+		{name: "function whose body is a subshell", command: "t() ( cd ui && pnpm test ); t && git push origin a", want: []push{{Dir: "/repo", Sources: []string{"a"}}}},
+		{name: "function running its arguments", command: "retry() { for i in 1 2 3; do \"$@\" && return 0; sleep 5; done; return 1; }\nretry git fetch origin && git push origin a",
+			want: []push{{Dir: "/repo", Sources: []string{"a"}}}},
 		{name: "cd chain with a return to the repo", command: "cd ui && echo ok && cd .. && git push -u origin f", want: []push{{Dir: "/repo", Sources: []string{"f"}}}},
 		{name: "cd in an if", command: "if false; then cd /tmp; fi; git push", want: []push{{Dir: "", Sources: head}}},
 		{name: "cd in a function", command: "f() { cd /tmp; }; f; git push", want: []push{{Dir: "", Sources: head}}},
@@ -72,10 +88,12 @@ func TestFindPushes(t *testing.T) {
 		// Commands that run a git push as a command: detected and gated, not refused outright.
 		{name: "exec", command: "exec git push", want: []push{{Dir: "/repo", Sources: head}}},
 		{name: "eval of a literal script", command: "eval 'git push origin main'", want: []push{{Dir: "/repo", Sources: []string{"main"}}}},
-		{name: "eval carries its cd", command: "eval 'cd /x'; git push origin a", want: []push{{Dir: "/x", Sources: []string{"a"}}}},
+		{name: "eval carries its cd", command: "eval 'cd /x' && git push origin a", want: []push{{Dir: "/x", Sources: []string{"a"}}}},
+		{name: "eval's cd may fail before a ;", command: "eval 'cd /x'; git push origin a", want: []push{{Dir: "", Sources: []string{"a"}}}},
 		{name: "trap with a leading --", command: "trap -- 'git push origin a' EXIT", want: []push{{Dir: "/repo", Sources: []string{"a"}}}},
 		{name: "git-push dashed binary", command: "git-push origin a", want: []push{{Dir: "/repo", Sources: []string{"a"}}}},
-		{name: "cd || die then push commits the cd", command: "cd /x || die; git push", want: []push{{Dir: "/x", Sources: head}}},
+		{name: "cd || die leaves the dir unknown (die may be undefined)", command: "cd /x || die; git push", want: []push{{Dir: "", Sources: head}}},
+		{name: "cd || return leaves the dir unknown (return at top level goes on)", command: "cd /x || return; git push", want: []push{{Dir: "", Sources: head}}},
 		{name: "mixed chain leaves the dir unknown", command: "cd /x || echo failed && git push origin a", want: []push{{Dir: "", Sources: []string{"a"}}}},
 		{name: "push after a failed-branch cd is unknown", command: "cd /x && false || git push origin b", want: []push{{Dir: "", Sources: []string{"b"}}}},
 		{name: "negated cd leaves the dir unknown", command: "! cd /x && git push origin a", want: []push{{Dir: "", Sources: []string{"a"}}}},
@@ -87,19 +105,24 @@ func TestFindPushes(t *testing.T) {
 		{name: "sudo wraps a push", command: "sudo -u ci git push origin a", want: []push{{Dir: "/repo", Sources: []string{"a"}}}},
 		{name: "env unset then push", command: "env -i git push origin a", want: []push{{Dir: "/repo", Sources: []string{"a"}}}},
 		{name: "find -exec a push", command: "find . -maxdepth 0 -exec git push origin a ;", want: []push{{Dir: "/repo", Sources: []string{"a"}}}},
+		{name: "find -execdir runs from each file's directory", command: "find . -name x -execdir git push origin a ;", want: []push{{Dir: "", Sources: []string{"a"}}}},
 		{name: "kubectl exec a push", command: "kubectl exec pod -- git push origin a", want: []push{{Dir: "/repo", Sources: []string{"a"}}}},
+		// A cd run by a child process (env, a wrapper, find -exec, kubectl exec) does not move the shell.
+		{name: "env cd", command: "env cd /tmp && git push origin a", want: []push{{Dir: "/repo", Sources: []string{"a"}}}},
+		{name: "sudo cd", command: "sudo cd /tmp; git push origin a", want: []push{{Dir: "/repo", Sources: []string{"a"}}}},
+		{name: "nohup cd", command: "nohup cd /tmp; git push origin a", want: []push{{Dir: "/repo", Sources: []string{"a"}}}},
+		{name: "find -exec cd", command: "find . -maxdepth 0 -exec cd /tmp ';' ; git push origin a", want: []push{{Dir: "/repo", Sources: []string{"a"}}}},
+		{name: "kubectl exec cd", command: "kubectl exec p -- cd /tmp; git push origin a", want: []push{{Dir: "/repo", Sources: []string{"a"}}}},
 		{name: "in a while loop", command: "while false; do git push; done", want: []push{{Dir: "/repo", Sources: head}}},
 		{name: "in a case", command: "case x in x) git push;; esac", want: []push{{Dir: "/repo", Sources: head}}},
 		{name: "bash -c", command: `bash -lc 'cd /y && git push origin d'`, want: []push{{Dir: "/y", Sources: []string{"d"}}}},
 		{name: "bash -co VALUE", command: `bash -co pipefail 'git push origin d'`, want: []push{{Dir: "/repo", Sources: []string{"d"}}}},
-		{name: "heredoc to a shell", command: "bash <<'EOF'\ncd /y\ngit push --no-verify origin d\nEOF", want: []push{{Dir: "/y", Sources: []string{"d"},
-			Refused: "--no-verify skips the pre-push hook"}}},
+		{name: "heredoc to a shell", command: "bash <<'EOF'\ncd /y && git push origin d\nEOF", want: []push{{Dir: "/y", Sources: []string{"d"}}}},
 		{name: "heredoc after -eo VALUE", command: "bash -eo pipefail <<'EOF'\ngit push origin d\nEOF", want: []push{{Dir: "/repo", Sources: []string{"d"}}}},
 		{name: "here-string to a shell", command: `sh <<< 'git push origin d'`, want: []push{{Dir: "/repo", Sources: []string{"d"}}}},
 		{name: "echo piped to a shell", command: "echo 'git push origin a' | sh", want: []push{{Dir: "/repo", Sources: []string{"a"}}}},
 		{name: "cat heredoc piped to a shell", command: "cat <<'EOF' | bash\ngit push origin a\nEOF", want: []push{{Dir: "/repo", Sources: []string{"a"}}}},
-		{name: "echo of a --no-verify push piped to a shell", command: "echo 'cd .;git push --no-verify origin main' | bash", want: []push{{Dir: "/repo", Sources: []string{"main"},
-			Refused: "--no-verify skips the pre-push hook"}}},
+		{name: "echo of a push piped to a shell", command: "echo 'cd /y && git push origin main' | bash", want: []push{{Dir: "/y", Sources: []string{"main"}}}},
 
 		// git push options.
 		{name: "delete flag", command: "git push --delete origin old other", want: []push{{Dir: "/repo", Deletes: true}}},
@@ -112,19 +135,18 @@ func TestFindPushes(t *testing.T) {
 		{name: "--signed takes no next argument", command: "git push --signed origin z", want: []push{{Dir: "/repo", Sources: []string{"z"}}}},
 		{name: "short value in the same word", command: "git push -fuoci.skip origin z", want: []push{{Dir: "/repo", Sources: []string{"z"}}}},
 		{name: "help", command: "git push -h; git push --help", want: nil},
-		{name: "abbreviated --no-verify", command: "git push --no-veri origin a", want: []push{{Dir: "/repo", Sources: []string{"a"},
-			Refused: "unknown or abbreviated git push option --no-veri (git accepts abbreviations, such as one of --no-verify); spell options out in full"}}},
-		{name: "argument that is not literal", command: `git push origin "$BRANCH"`, want: []push{{Dir: "/repo", Sources: head,
-			Refused: "`git push` has an argument that is not literal: it could be an option, or a ref the gate cannot resolve; " + runAlone}}},
+		{name: "unknown option", command: "git push --frobnicate origin a", want: []push{{Dir: "/repo", Sources: []string{"a"},
+			Refused: "unknown or abbreviated git push option --frobnicate; spell options out in full"}}},
+		{name: "glob refspec", command: "git push origin 'refs/heads/*:refs/heads/*'", want: []push{{Dir: "/repo", Sources: head,
+			Refused: "a glob refspec pushes refs the gate cannot check one by one; push branches by name"}}},
 		{name: "--tags", command: "git push --tags origin", want: []push{refusedAll("--tags")}},
 		{name: "--all", command: "git push --all origin", want: []push{refusedAll("--all")}},
 		{name: "matching refspec", command: "git push origin +:", want: []push{{Dir: "/repo", Sources: head,
 			Refused: "the matching refspec ':' pushes refs the gate cannot check one by one; push branches by name"}}},
-		{name: "--no-verify", command: "git push --no-verify origin a", want: []push{{Dir: "/repo", Sources: []string{"a"}, Refused: "--no-verify skips the pre-push hook"}}},
-		{name: "trap action is parsed", command: "trap 'git push --no-verify origin a' EXIT", want: []push{{Dir: "/repo", Sources: []string{"a"}, Refused: "--no-verify skips the pre-push hook"}}},
-		{name: "noglob precommand", command: "noglob git push --no-verify origin a", want: []push{{Dir: "/repo", Sources: []string{"a"}, Refused: "--no-verify skips the pre-push hook"}}},
-		{name: "zsh =cmd", command: "=git push --no-verify origin a", want: []push{{Dir: "/repo", Sources: []string{"a"}, Refused: "--no-verify skips the pre-push hook"}}},
-		{name: "setsid wrapper", command: "setsid git push --no-verify origin a", want: []push{{Dir: "/repo", Sources: []string{"a"}, Refused: "--no-verify skips the pre-push hook"}}},
+		{name: "--no-verify then --verify", command: "git push --no-verify --verify origin a", want: []push{{Dir: "/repo", Sources: []string{"a"}}}},
+		{name: "noglob precommand", command: "noglob git push origin a", want: []push{{Dir: "/repo", Sources: []string{"a"}}}},
+		{name: "zsh =cmd", command: "=git push origin a", want: []push{{Dir: "/repo", Sources: []string{"a"}}}},
+		{name: "setsid wrapper", command: "setsid git push origin a", want: []push{{Dir: "/repo", Sources: []string{"a"}}}},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
@@ -137,7 +159,8 @@ func TestFindPushes(t *testing.T) {
 	}
 }
 
-// Commands refused as a whole, wherever they run, with the reason.
+// Commands refused as a whole, wherever they run, with the reason. (A push's own Refused, which
+// only counts for a clone of this project, does not count here.)
 func TestFindPushesBlocked(t *testing.T) {
 	t.Parallel()
 	const (
@@ -146,6 +169,8 @@ func TestFindPushesBlocked(t *testing.T) {
 		config     = "is not on the hook's list of safe settings"
 		globalOpt  = "can point git at another repository or configuration, where the pre-push hook does not run"
 		runsStep   = "runs per step"
+		noVerify   = "--no-verify skips the pre-push hook"
+		givenTo    = "which the hook does not model"
 	)
 	for _, tt := range []struct{ command, reason string }{
 		// Pushes the walker cannot follow.
@@ -219,30 +244,65 @@ func TestFindPushesBlocked(t *testing.T) {
 		{`git -c "$K=!git push" ship origin a`, "key the hook cannot read"},
 		{"env -- GIT_CONFIG_COUNT=1 GIT_CONFIG_KEY_0=alias.ship GIT_CONFIG_VALUE_0=push git ship", gitEnv},
 		{"fd PATTERN -x git -c x.y=z push --no-verify origin main", "run through fd"},
-		{"git push -u origin tag --no-verify t1", "--no-verify"},
-		{"git push -u origin tag --no-veri t1", "abbreviated"},
+		{"git push -u origin tag --no-verify t1", noVerify},
+		{"git push -u origin tag --no-veri t1", "abbreviation of --no-verify"},
 		{"git send-pack origin HEAD:refs/heads/tmp", "send-pack"},
 		{"git http-push origin HEAD", "http-push"},
 		{"/opt/homebrew/libexec/git-core/git-push --no-verify origin main", "--no-verify"},
 		{"echo a | parallel git push origin", "through parallel"},
 		{"readonly -p GIT_DIR=/x/.git; git push origin a", gitEnv},
-		{"git push origin 'refs/heads/*:refs/heads/*'", "glob refspec"},
 		{"true || cd /x && git push --no-verify origin a", "--no-verify"},
 		{`G=git; eval "$G push --no-verify origin main"`, "eval"},
 		{"eval 'cd /x && git push --no-verify origin a'", "--no-verify"},
 		{"eval '. ./env.sh'; git push origin a", "sourced earlier"},
+		// Round 6: a push that skips git's hook is refused wherever the walker thinks it runs.
+		{"git push --no-verify origin a", noVerify},
+		{"git push {--no-verify,origin} main", noVerify},
+		{"git push --no-veri origin a", "abbreviation of --no-verify"},
+		{`git push origin "$BRANCH"`, "not literal: it could be --no-verify"},
+		{"cd /var/root; git push --no-verify origin main", noVerify},
+		{"cd /tmp x; git push --no-verify origin main", noVerify},
+		{"env cd /tmp; git push --no-verify origin main", noVerify},
+		{"cd /var/root || die; git push --no-verify origin main", noVerify},
+		{"noglob git push --no-verify origin a", noVerify},
+		{"=git push --no-verify origin a", noVerify},
+		{"setsid git push --no-verify origin a", noVerify},
+		{"trap 'git push --no-verify origin a' EXIT", noVerify},
+		{"bash <<'EOF'\ncd /y\ngit push --no-verify origin d\nEOF", noVerify},
+		{"echo 'cd .;git push --no-verify origin main' | bash", noVerify},
+		// xargs options with an attached value only, and a git whose subcommand comes from input.
+		{"echo --no-verify | xargs -i git push {} origin main", "through xargs"},
+		{"echo '--no-verify main' | xargs -l git push origin", "through xargs"},
+		{"echo x | xargs -e git push origin", "through xargs"},
+		{"echo --no-verify | xargs --replace git push {} origin main", "through xargs"},
+		{"echo push --no-verify origin main | xargs git -C .", "through xargs"},
+		{"parallel ::: 'git push --no-verify origin a'", "through parallel"},
+		// Assignments made inside words, arithmetic, let and namerefs.
+		{"set -a; : ${GIT_DIR:=/x/.git}; git push origin wip", gitEnv},
+		{": ${GIT_DIR=/x/.git}; git push origin a", gitEnv},
+		{"(( GIT_DIR=5 )); git push", gitEnv},
+		{"let GIT_DIR=5; git push", gitEnv},
+		{"declare -n r=GIT_DIR; r=/x/.git; git push", gitEnv},
+		// zsh spellings bash reads differently.
+		{"{git push --no-verify origin a}", noVerify},
+		{"{git -c core.hooksPath=/dev/null push origin a}", config},
+		{"x='push --no-verify'; git $=x origin a", notLiteral},
+		{"x=(push --no-verify); git $^x origin a", notLiteral},
+		{"y='-c core.hooksPath=/dev/null push'; git $=y origin a", notLiteral},
+		{"git $~x origin a", notLiteral},
+		// --no-verify or core.hooksPath handed to a command the hook does not model: a shell alias or
+		// function (oh-my-zsh's gp='git push', ggp) may pass it to git.
+		{"gp --no-verify origin main", givenTo},
+		{"ggp --no-verify", givenTo},
+		{"_ gp --no-verify origin main", givenTo},
+		{"gp --no-veri origin main", givenTo},
+		{"gcfg core.hooksPath /dev/null", givenTo},
 	} {
 		t.Run(tt.command, func(t *testing.T) {
 			t.Parallel()
 			got, err := findPushes(tt.command, "/repo")
 			require.NoError(t, err)
-			refused := got.Blocked
-			for _, p := range got.Pushes {
-				if p.Refused != "" {
-					refused += "\n" + p.Refused
-				}
-			}
-			assert.Contains(t, refused, tt.reason, "the command must be refused; pushes: %+v blocked: %q", got.Pushes, got.Blocked)
+			assert.Contains(t, got.Blocked, tt.reason, "the command must be refused as a whole; pushes: %+v", got.Pushes)
 		})
 	}
 }
@@ -310,6 +370,19 @@ func TestFindPushesAllowed(t *testing.T) {
 		"git config user.email \"$EMAIL\"",
 		"git config --local user.name \"$(id -un)\"",
 		"declare -p GIT_DIR GIT_WORK_TREE",
+		// The fifth review's false refusals, each fixed: GIT_ is case-sensitive in the text net, the
+		// net reads one command's words (not its siblings'), PATROL_SDLC_* is an ordinary variable,
+		// and an exec runner without -- is refused only on a plain git push.
+		"env -C /tmp cat testdata/git_push.json",
+		"env -C ui pnpm test; grep -rn \"git push --no-verify\" docs",
+		"PATROL_SDLC_BASE=HEAD~1 make sdlc-check",
+		"docker run --rm -e GIT_PUSH_OPTION=1 alpine echo push",
+		// --no-verify as data, or for a git command other than push.
+		"grep -rn -- --no-verify docs",
+		"man git push | col -b | grep -n -A3 'no-verify'",
+		"echo --no-verify; printf '%s\\n' --no-verify",
+		"go test ./hack/sdlc/pushcheck -run 'TestFindPushesBlocked/--no-verify'",
+		"git commit --no-verify -m 'chore: x'",
 	} {
 		t.Run(command, func(t *testing.T) {
 			t.Parallel()
@@ -323,9 +396,31 @@ func TestFindPushesAllowed(t *testing.T) {
 
 func TestFindPushesCalls(t *testing.T) {
 	t.Parallel()
-	got, err := findPushes("git status; cd /x && git ship origin a; git --git-dir=/y lg", "/repo")
+	got, err := findPushes("git status; cd /x && git ship origin a; git --git-dir=/y lg; echo a | xargs git ls", "/repo")
 	require.NoError(t, err)
-	assert.Equal(t, []gitCall{{Dir: "/repo", Sub: "status"}, {Dir: "/x", Sub: "ship"}, {Dir: "", Sub: "lg"}}, got.Calls)
+	assert.Equal(t, []string{"status", "ship", "lg", "ls"}, got.Calls)
+}
+
+// zsh's AUTO_CD (on in the Bash tool's zsh) runs a lone directory name as a cd.
+func TestFindPushesAutoCD(t *testing.T) {
+	t.Parallel()
+	root := t.TempDir()
+	require.NoError(t, os.Mkdir(filepath.Join(root, "sub"), 0o755))
+	for _, tt := range []struct{ command, dir string }{
+		{"sub && git push origin a", filepath.Join(root, "sub")},
+		{"./sub && git push origin a", filepath.Join(root, "sub")},
+		{"sub; git push origin a", ""},             // the cd may fail
+		{"sub || true; git push origin a", ""},     // a chain with an AUTO_CD counts as a cd
+		{"nosuchdir && git push origin a", root},   // no such directory: an unknown command
+		{"sub x && git push origin a", root},       // with an argument it is a command, not a cd
+		{"(sub && true); git push origin a", root}, // in a subshell
+		{"if true; then sub; fi; git push origin a", ""},
+	} {
+		got, err := findPushes(tt.command, root)
+		require.NoError(t, err)
+		assert.Empty(t, got.Blocked, tt.command)
+		assert.Equal(t, []push{{Dir: tt.dir, Sources: []string{"a"}}}, got.Pushes, tt.command)
+	}
 }
 
 func TestFindPushesInvalidBash(t *testing.T) {

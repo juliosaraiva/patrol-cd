@@ -7,6 +7,9 @@
 # Usage: hack/sdlc/review-input.sh
 set -euo pipefail
 
+# The review is recorded for the whole tree, so it covers the whole change since origin/main, as
+# hack/sdlc/gate.sh measures it: PATROL_SDLC_BASE (local iteration of check.sh) may not narrow it.
+unset PATROL_SDLC_BASE
 cd "$(git rev-parse --show-toplevel)"
 # shellcheck source=hack/sdlc/lib.sh
 source hack/sdlc/lib.sh

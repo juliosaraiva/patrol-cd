@@ -10,6 +10,7 @@
 
 .PHONY: sdlc-check
 sdlc-check: ## Deterministic checks of the branch (CI static checks, tests of what changed, CodeQL); records a pass.
+	$(if $(filter-out --no-codeql,$(SDLC_CHECK_FLAGS)),$(error SDLC_CHECK_FLAGS may only be --no-codeql))
 	hack/sdlc/check.sh $(SDLC_CHECK_FLAGS)
 
 .PHONY: sdlc-gate
@@ -18,6 +19,7 @@ sdlc-gate: ## Whether HEAD may be pushed: passing checks and, unless documentati
 
 .PHONY: codeql
 codeql: ## CodeQL (security-extended) of Go, web UI and workflows; set CODEQL_LANGUAGES to narrow it.
+	$(if $(filter-out go javascript-typescript actions,$(CODEQL_LANGUAGES)),$(error CODEQL_LANGUAGES takes go, javascript-typescript and actions))
 	hack/sdlc/codeql.sh analyze $(CODEQL_LANGUAGES)
 
 .PHONY: codeql-install
