@@ -106,7 +106,40 @@ func skipsHook(a string) bool {
 
 // parseBash parses a script as bash.
 func parseBash(script string) (*syntax.File, error) {
-	return syntax.NewParser(syntax.Variant(syntax.LangBash)).Parse(strings.NewReader(script), "")
+	f, err := syntax.NewParser(syntax.Variant(syntax.LangBash)).Parse(strings.NewReader(script), "")
+	if err != nil {
+		return nil, err
+	}
+	syntax.Walk(f, func(n syntax.Node) bool {
+		if s, ok := n.(*syntax.Stmt); ok {
+			hoistFuncChain(s)
+		}
+		return true
+	})
+	return f, nil
+}
+
+// hoistFuncChain undoes a reading of mvdan.cc/sh: `f() { …; } && cmd` (or ||, |, |&) parses as a
+// function whose body is the whole chain, where the shell defines f with the first element as its
+// body and runs the rest of the chain after the definition, in this shell.
+func hoistFuncChain(s *syntax.Stmt) {
+	fd, ok := s.Cmd.(*syntax.FuncDecl)
+	if !ok || fd.Body == nil {
+		return
+	}
+	chain, ok := fd.Body.Cmd.(*syntax.BinaryCmd)
+	if !ok {
+		return
+	}
+	body := fd.Body
+	def := *fd
+	def.Body = chain.X
+	// parseBash's walk reaches first next and splits it too (f() { …; } | cmd && cmd).
+	first := &syntax.Stmt{Position: s.Position, Cmd: &def}
+	s.Cmd = &syntax.BinaryCmd{OpPos: chain.OpPos, Op: chain.Op, X: first, Y: chain.Y}
+	s.Negated = s.Negated != body.Negated
+	s.Background, s.Coprocess = s.Background || body.Background, s.Coprocess || body.Coprocess
+	s.Redirs = append(s.Redirs, body.Redirs...)
 }
 
 // findPushes parses command as bash and returns what it does with git, starting in cwd.
@@ -125,19 +158,13 @@ func findPushes(command, cwd string) (analysis, error) {
 // assignments made inside words and arithmetic (${NAME:=value}, $((NAME=1)), let NAME=1).
 func (w *walker) run(f *syntax.File) {
 	// A function counts as defined only where its definition certainly runs in this shell: a
-	// statement of its own at the top (not in a subshell, a branch, a chain, the background or eval).
+	// statement of its own at the top (not in a subshell, a branch, a chain or pipeline, the
+	// background or eval).
 	if w.inEval == 0 {
 		for _, s := range f.Stmts {
-			fd, ok := s.Cmd.(*syntax.FuncDecl)
-			if !ok || s.Background || s.Coprocess {
-				continue
+			if fd, ok := s.Cmd.(*syntax.FuncDecl); ok && !s.Background && !s.Coprocess {
+				w.topFuncs[fd] = true
 			}
-			// mvdan.cc/sh reads `f() {…} | cmd` as a function whose body is the pipeline; the shell
-			// runs the definition in a pipeline subshell, so it defines nothing here.
-			if b, ok := fd.Body.Cmd.(*syntax.BinaryCmd); ok && (b.Op == syntax.Pipe || b.Op == syntax.PipeAll) {
-				continue
-			}
-			w.topFuncs[fd] = true
 		}
 	}
 	w.stmts(f.Stmts)
@@ -215,6 +242,7 @@ type walker struct {
 	cdFuncs    map[string]bool           // functions defined where the definition may not run, whose body may cd
 	topFuncs   map[*syntax.FuncDecl]bool // definitions that certainly run in this shell
 	inEval     int                       // inside eval, whose definitions may sit in a branch
+	program    bool                      // the command runs as a program (a wrapper's), which no function shadows
 	seen       map[*syntax.CallExpr]bool
 }
 
@@ -225,10 +253,20 @@ func newWalker(dir, src string) *walker {
 }
 
 // child is a walker for code that runs in a child of this shell (a substitution, a shell the command
-// runs), from dir: it inherits CDPATH, HOME and whatever a sourced file or an eval set before it.
+// runs), from dir: it inherits CDPATH, HOME and whatever a sourced file or an eval set before it. A
+// function this shell defines may reach the child (a subshell, bash's export -f) or not, so one
+// whose body may cd may run there and cd.
 func (w *walker) child(dir, src string) *walker {
 	c := newWalker(dir, src)
 	c.cdpath, c.envUnknown, c.homeSet = w.cdpath, w.envUnknown, w.homeSet
+	for name := range w.cdFuncs {
+		c.cdFuncs[name] = true
+	}
+	for name := range w.funcs {
+		if w.unknownWord(name) {
+			c.cdFuncs[name] = true
+		}
+	}
 	return c
 }
 
@@ -581,6 +619,11 @@ func (w *walker) cmd(s *syntax.Stmt) {
 			if modeledNames[n.Value] {
 				w.block("the command defines a function named " + n.Value + ", which the hook reads as the builtin or program of that name; " + runAlone)
 			}
+			if mayCD && hookFunction(n.Value) {
+				// The shell calls it on its own (before each command, on each cd, on a signal), so it may
+				// move the directory between any two commands from here on.
+				w.envUnknown = "the function " + n.Value + ", which the shell runs on its own and which may cd,"
+			}
 			switch {
 			case w.topFuncs[c]:
 				w.funcs[n.Value] = c.Body
@@ -593,6 +636,17 @@ func (w *walker) cmd(s *syntax.Stmt) {
 		w.stmt(c.Body)
 		w.dir = saved
 	}
+}
+
+// hookFunction reports whether the shell calls a function of this name on its own: zsh's hook
+// functions and TRAPNAL signal and DEBUG/ZERR/EXIT traps, and the handlers of a command not found.
+func hookFunction(name string) bool {
+	switch name {
+	case "chpwd", "precmd", "preexec", "periodic", "zshexit", "zshaddhistory", "command_not_found_handler",
+		"command_not_found_handle":
+		return true
+	}
+	return strings.HasPrefix(name, "TRAP") && len(name) > len("TRAP")
 }
 
 // decl handles declare, typeset, local, export and readonly. A GIT_* variable it sets, or marks for
@@ -646,6 +700,8 @@ func (w *walker) decl(c *syntax.DeclClause) {
 			}
 		}
 		switch {
+		case zshCode[a.Name.Value] && (a.Value != nil || a.Array != nil || !a.Naked):
+			w.zshCodeAssign(a) // typeset functions[cd]=…
 		case a.Value != nil || !a.Naked: // declare GIT_DIR=x, or declare GIT_DIR= (empty): a set
 			w.assignExpr(a)
 		case printMode: // declare -p GIT_DIR: a listing, sets nothing
@@ -695,6 +751,12 @@ func (w *walker) assignExpr(a *syntax.Assign) {
 // so do EDITOR, VISUAL and PAGER, which git falls back to. CDPATH set in the command makes a later
 // relative cd's directory unknown.
 func (w *walker) assignValue(name, value string, literal bool) {
+	if param, _, _ := strings.Cut(name, "["); zshCode[param] {
+		// Reached only by an assignment the hook does not read as written (read -A, printf -v, set -A,
+		// a for loop, arithmetic): code or a key it cannot check.
+		w.block("zsh's " + param + " parameter set by a command the hook does not read defines code it cannot check; " + runAlone)
+		return
+	}
 	if name == "CDPATH" || name == "cdpath" {
 		w.cdpath = true
 	}
@@ -964,31 +1026,50 @@ func (w *walker) fields(words []*syntax.Word) (args []string, lit []bool) {
 
 var home, _ = os.UserHomeDir()
 
-// zshCode lists zsh's special parameters whose values are shell code: assigning one defines a
-// function or an alias (functions[gp]='git push --no-verify "$@"').
+// zshCode lists zsh's special parameters whose values are shell code or the names of functions the
+// shell runs: assigning one defines a function or an alias (functions[gp]='git push --no-verify
+// "$@"'), or makes zsh call a function on each cd or before each command (chpwd_functions+=(f)).
 var zshCode = map[string]bool{"functions": true, "dis_functions": true, "aliases": true, "dis_aliases": true,
-	"galiases": true, "dis_galiases": true, "saliases": true, "dis_saliases": true}
+	"galiases": true, "dis_galiases": true, "saliases": true, "dis_saliases": true, "chpwd_functions": true,
+	"precmd_functions": true, "preexec_functions": true, "periodic_functions": true, "zshexit_functions": true,
+	"zshaddhistory_functions": true}
+
+// zshCodeAssign checks an assignment to one of zsh's code parameters (zshCode) as written:
+// PARAM[KEY]=CODE or PARAM=CODE with a literal KEY that is not a name the walker models and literal
+// CODE that passes definition. Anything else is refused.
+func (w *walker) zshCodeAssign(a *syntax.Assign) {
+	param := a.Name.Value
+	if a.Index != nil { // functions[NAME]=…: the key names the function or alias
+		key, ok := a.Index.(*syntax.Word)
+		name := ""
+		if ok {
+			name, ok = literalWord(key)
+		}
+		if !ok {
+			w.block("zsh's " + param + " parameter set under a key the hook cannot read can redefine cd or git; " + runAlone)
+			return
+		}
+		if modeledNames[name] {
+			w.block("the command defines " + name + " through zsh's " + param + ", which the hook reads as the builtin or program of that name; " + runAlone)
+			return
+		}
+	}
+	code, ok := literalWord(a.Value)
+	if !ok || a.Array != nil {
+		w.block("zsh's " + param + " parameter set from a value the hook cannot read defines code it cannot check; " + runAlone)
+		return
+	}
+	w.definition("zsh's "+param+" parameter", code)
+}
 
 func (w *walker) call(c *syntax.CallExpr, redirs []*syntax.Redirect) {
 	for _, a := range c.Assigns {
-		if a.Name == nil {
-			continue
-		}
-		w.assignExpr(a)
-		if zshCode[a.Name.Value] {
-			if a.Index != nil { // functions[NAME]=…: the key names the function or alias
-				var key bytes.Buffer
-				_ = syntax.NewPrinter().Print(&key, a.Index)
-				if k := strings.Trim(normalize(key.String()), " "); modeledNames[k] {
-					w.block("the command defines " + k + " through zsh's " + a.Name.Value + ", which the hook reads as the builtin or program of that name; " + runAlone)
-				}
-			}
-			code, ok := literalWord(a.Value)
-			if !ok || a.Array != nil {
-				w.block("zsh's " + a.Name.Value + " parameter set from a value the hook cannot read defines code it cannot check; " + runAlone)
-				continue
-			}
-			w.definition("zsh's "+a.Name.Value+" parameter", code)
+		switch {
+		case a.Name == nil:
+		case zshCode[a.Name.Value]:
+			w.zshCodeAssign(a)
+		default:
+			w.assignExpr(a)
 		}
 	}
 	saved := w.cmdText
@@ -1073,6 +1154,7 @@ func (w *walker) command(args []string, lit []bool, redirs []*syntax.Redirect) {
 			w.dir, w.envUnknown = dir, envUnknown
 		}
 	}()
+	program := w.program // command, builtin, exec and env skip the shell's functions
 prefix:
 	for len(args) > 0 && lit[0] {
 		switch path.Base(strings.TrimPrefix(args[0], "=")) { // zsh's =cmd is the path of cmd
@@ -1085,9 +1167,10 @@ prefix:
 				w.blockText(w.cmdText, base+" with options")
 				return
 			}
+			program = program || base == "command" || base == "exec" || base == "builtin"
 			args, lit = args[1:], lit[1:]
 		case "env":
-			child = true
+			child, program = true, true
 			args, lit = args[1:], lit[1:]
 		envOpts:
 			for len(args) > 0 {
@@ -1132,6 +1215,23 @@ prefix:
 	if !lit[0] {
 		w.dynamicWord(args, lit)
 		return
+	}
+	if fn := args[0]; !program {
+		// A function the command defines runs instead of the builtin or program of its name: its body
+		// was walked where it was defined, so only its cd matters here, and a push in its arguments,
+		// which it may hand to git or a shell ("$@").
+		if w.cdFuncs[fn] {
+			w.dir = "" // a function that may be defined, and may cd, may run instead
+		}
+		if _, ok := w.funcs[fn]; ok {
+			if argvHasGitPush(args, lit) || mentionsGitPush(w.cmdText) {
+				w.block("a git push run through " + fn + " cannot be checked; " + runAlone)
+			}
+			if w.unknownWord(fn) {
+				w.dir = ""
+			}
+			return
+		}
 	}
 	name := path.Base(strings.TrimPrefix(args[0], "=")) // zsh =cmd expands to the path of cmd
 	if sub, ok := strings.CutPrefix(name, "git-"); ok && (sub == "push" || sub == "config" || gitPushLike[sub] || gitRunners[sub] || cmdOptions[sub] != nil) {
@@ -1181,13 +1281,14 @@ prefix:
 			if l[0] {
 				// The action runs later, on exit or a signal (DEBUG: before each command), from
 				// wherever the shell is then: a push in it runs from an unknown directory, and a cd in
-				// it leaves the directory unknown from here on.
+				// it may move the directory between any two commands from here on, so a later push is
+				// refused.
 				saved := w.dir
 				w.dir = ""
 				w.script(a[0])
 				w.dir = saved
 				if f, err := parseBash(a[0]); err != nil || w.changesDir(f) {
-					w.dir = ""
+					w.envUnknown = "a trap action that may cd, set earlier in the command,"
 				}
 			} else {
 				w.blockText(w.cmdText, "trap")
@@ -1197,15 +1298,43 @@ prefix:
 		for i, a := range args[1:] {
 			switch {
 			case !lit[i+1]:
-				if mentionsGit(w.cmdText) {
-					w.block("an alias defined from a value the hook cannot read can run git; " + runAlone)
-				}
+				w.block("an alias defined from a word the hook cannot read can redefine cd or run git; " + runAlone)
 			case strings.Contains(a, "=") && !strings.HasPrefix(a, "-") && !strings.HasPrefix(a, "+"):
 				aliasName, value, _ := strings.Cut(a, "=")
 				if modeledNames[aliasName] {
 					w.block("the command defines an alias named " + aliasName + ", which the hook reads as the builtin or program of that name; " + runAlone)
 				}
 				w.definition("alias "+aliasName, value)
+			}
+		}
+	case name == "set": // zsh: set -A NAME VALUE… (or +A) assigns the array NAME
+		for i := 1; i < len(args); i++ {
+			a := args[i]
+			if !lit[i] || len(a) < 2 || a == "--" || (a[0] != '-' && a[0] != '+') {
+				break
+			}
+			if strings.Contains(a[1:], "o") { // -o NAME: an option's name
+				i++
+				continue
+			}
+			if strings.Contains(a[1:], "A") && i+1 < len(args) {
+				if !lit[i+1] {
+					w.block("set -A assigns an array the hook cannot name; " + runAlone)
+				} else {
+					w.assign(args[i+1], nil)
+				}
+				break
+			}
+		}
+	case name == "enable" || name == "disable" || name == "functions" || name == "autoload" || name == "add-zsh-hook":
+		// They can turn a builtin off (disable cd, bash's enable -n cd), load one (enable -f), define
+		// a function under another name (zsh's functions -c f cd, autoload cd) or have the shell call
+		// one on each cd or before each command (add-zsh-hook): refuse one aimed at a name the walker
+		// models, at a hook, or at a word it cannot read.
+		for i, a := range args[1:] {
+			if name == "add-zsh-hook" || !lit[i+1] || modeledNames[a] || hookFunction(a) {
+				w.block(name + " can change what a command or a hook of the shell runs, which the hook cannot follow; " + runAlone)
+				break
 			}
 		}
 	case name == "hash": // hash -p PATH NAME, zsh's hash NAME=PATH: the name runs another program
@@ -1322,10 +1451,10 @@ func (w *walker) dynamicWord(args []string, lit []bool) {
 
 // inChild walks the command a child process runs, from dir: its cd and source do not reach this shell.
 func (w *walker) inChild(dir string, args []string, lit []bool, redirs []*syntax.Redirect) {
-	savedDir, envUnknown := w.dir, w.envUnknown
-	w.dir = dir
+	savedDir, envUnknown, program := w.dir, w.envUnknown, w.program
+	w.dir, w.program = dir, true // a wrapper execs a program: the shell's functions do not apply
 	w.command(args, lit, redirs)
-	w.dir, w.envUnknown = savedDir, envUnknown
+	w.dir, w.envUnknown, w.program = savedDir, envUnknown, program
 }
 
 // argvHasGitPush reports whether argv holds a literal `git` whose subcommand (after git's global

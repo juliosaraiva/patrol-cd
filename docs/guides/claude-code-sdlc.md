@@ -93,7 +93,8 @@ would need a GitHub Code Security license.
 `/review-change` (or asking Claude Code to review the branch) runs the saved workflow
 `.claude/workflows/sdlc-review.js` on the branch's diff:
 
-1. `hack/sdlc/review-input.sh` names the tree, the base, the changed files and writes the diff.
+1. `hack/sdlc/review-input.sh` names the tree, the base, the changed files and writes the diff, as
+   committed: no attribute (`-diff`, `binary`) or textconv driver replaces a file's content in it.
 2. The workflow picks reviewers by path. Each reviewer is an agent whose instructions are in
    `.claude/agents/`; they read the diff and the code around it, may run targeted tests, and never
    edit the tree.
@@ -210,7 +211,13 @@ Two hooks run it:
     (zoxide's `z`, oh-my-zsh's `...` and `take`), so the directory after it is unknown. A function
     the command defines counts only where its definition certainly runs in this shell (a statement
     of its own, not in a subshell, branch, chain, pipeline, the background or `eval`), and a call of
-    it may cd wherever its body, or a function it calls, may. It follows
+    it may cd wherever its body, or a function it calls, may; it runs instead of the builtin or
+    program of its name (`echo`, `true`, `nohup` …), except after `command`, `builtin`, `exec` or
+    `env` and in a wrapper, which run programs, and a push in a call's arguments is refused (the
+    function may hand them to git or a shell). A definition that may not run, and whose body may
+    cd, leaves its name unknown; a function whose body may cd may also run in a shell the command
+    starts (a subshell, bash's `export -f`). A definition chained with `&&`, `||` or a pipe
+    (`f() { …; } && cd /x`) is one element of the chain; the rest runs in this shell. It follows
     the command a wrapper runs (`timeout`, `nice`, `sudo`, `nohup`, `env`, `xargs`, `find -exec`,
     `kubectl`/`docker exec -- …`, `command`, `exec`, …) into that command, and parses `bash -c '…'`,
     a heredoc or here-string given to `bash`/`sh`/`zsh`/`dash`/`ksh`/`mksh`, a literal script piped
@@ -218,7 +225,10 @@ Two hooks run it:
     or its argv with `-x`), and the commands git runs for a subcommand (below). A `git push` found
     this way is gated like a direct one. A function body or `trap` action runs later, from wherever
     the shell is then: a push in it runs from an unknown directory, and a `cd` in it leaves the
-    directory unknown after each call of the function (from the trap on, for a trap). zsh runs an
+    directory unknown after each call of the function. A `trap` action, or a function the shell
+    calls on its own (zsh's `chpwd`, `precmd`, `preexec`, `periodic`, `TRAPDEBUG` and the other
+    `TRAP…` functions, a command-not-found handler), that may cd can move the directory between any
+    two commands, so a push after it is refused. zsh runs an
     anonymous function at once, in this shell, and the walker follows it there (`() {cd /x}`,
     `() cmd`); the spaced form `() { …; }` does not parse as bash, so a command with it is refused.
   - **What it refuses wherever the command runs**, because it can point git elsewhere, run a push the
@@ -251,9 +261,14 @@ Two hooks run it:
       by its own name, and git run in a container by `kubectl`/`docker exec`, are not alias lookups
       here;
     - a shell alias or zsh function the command defines (`alias`, zsh's
-      `functions[…]=`/`aliases[…]=`) whose code runs git or changes the directory, or whose name is
-      one the walker reads as a builtin or program it models (`cd`, `exit`, `git`, `eval` …), and
-      `hash` of a name to another program for git;
+      `functions[…]=`/`aliases[…]=`, also through `typeset`) whose code runs git or changes the
+      directory, or whose name is one the walker reads as a builtin or program it models (`cd`,
+      `exit`, `git`, `eval` …); one whose name or code it cannot read (`alias "$n=…"`,
+      `functions[$n]=…`, or zsh's code parameters set by `set -A`, `read -A`, `printf -v`, a loop or
+      arithmetic); a function zsh calls on each cd or before each command (`chpwd_functions`, and the
+      other hook arrays) whose code may cd; `enable`, `disable`, `functions`, `autoload` aimed at such a
+      name, a hook function or a word it cannot read (`disable cd`, bash's `enable -n cd`, zsh's
+      `functions -c f cd`), and `add-zsh-hook`; and `hash` of a name to another program for git;
     - a file sourced, or an `eval` of a dynamic string (`eval "$(ssh-agent -s)"`), before a push; a
       push from an unknown directory;
     - a push it cannot resolve: inside `$(…)`, behind `eval` with a dynamic string, through a

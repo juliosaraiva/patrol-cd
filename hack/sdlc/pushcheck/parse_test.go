@@ -118,7 +118,6 @@ func TestFindPushes(t *testing.T) {
 		{name: "in a function body", command: "f() { z other; }; f && git push origin a", want: []push{{Dir: "", Sources: []string{"a"}}}},
 		{name: "the last pipeline element runs in zsh's shell", command: "true | z other; git push origin a", want: []push{{Dir: "", Sources: []string{"a"}}}},
 		{name: "the last pipeline element, then &&", command: "echo | z other && git push origin a", want: []push{{Dir: "", Sources: []string{"a"}}}},
-		{name: "in a trap action", command: "trap 'z other' DEBUG; git push origin a", want: []push{{Dir: "", Sources: []string{"a"}}}},
 		{name: "in a loop body", command: "for i in 1 2; do git push origin a; z other; done", want: []push{{Dir: "", Sources: []string{"a"}}}},
 		// A function counts as defined only where its definition certainly runs in this shell.
 		{name: "a function defined in a subshell", command: "(z() { :; }); z other && git push origin a", want: []push{{Dir: "", Sources: []string{"a"}}}},
@@ -136,6 +135,34 @@ func TestFindPushes(t *testing.T) {
 		{name: "a function that cds, never called", command: "f() { cd /x; }; git push origin a", want: []push{{Dir: "/repo", Sources: []string{"a"}}}},
 		{name: "a program's name, maybe redefined to cd", command: "if true; then ls() { cd /x; }; fi; cd /repo && ls && git push origin a", want: []push{{Dir: "", Sources: []string{"a"}}}},
 		{name: "zsh runs an anonymous function at once", command: "() {cd /x} && git push origin a", want: []push{{Dir: "/x", Sources: []string{"a"}}}},
+		// A definition chained with && or || is one element of the chain (mvdan.cc/sh reads the chain
+		// as the body); the rest runs here.
+		{name: "a cd chained after a definition", command: "f() { :; } && cd /x; git push origin a", want: []push{{Dir: "", Sources: []string{"a"}}}},
+		{name: "a cd chained with || after a definition", command: "f() { :; } || cd /x; git push origin a", want: []push{{Dir: "", Sources: []string{"a"}}}},
+		{name: "a push chained after a definition and a cd", command: "f() { :; } && cd /x && git push origin a", want: []push{{Dir: "/x", Sources: []string{"a"}}}},
+		{name: "a function defined in a chain may cd", command: "f() { cd /x; } && cd /repo && f && git push origin a", want: []push{{Dir: "", Sources: []string{"a"}}}},
+		{name: "a function defined in a pipeline then a chain", command: "f() { :; } | cat && cd /x; git push origin a", want: []push{{Dir: "", Sources: []string{"a"}}}},
+		// A function runs instead of the builtin or program of its name, but not after command, exec
+		// or env, nor in a wrapper, which run programs.
+		{name: "a function named echo that cds", command: "echo() { cd /x; }; echo hi; git push origin a", want: []push{{Dir: "", Sources: []string{"a"}}}},
+		{name: "a function named true that cds", command: "true() { cd /x; }; true && git push origin a", want: []push{{Dir: "", Sources: []string{"a"}}}},
+		{name: "a function named after a wrapper", command: "nohup() { cd /x; }; nohup true; git push origin a", want: []push{{Dir: "", Sources: []string{"a"}}}},
+		{name: "a function named after a shell", command: "bash() { cd /x; }; bash -c true; git push origin a", want: []push{{Dir: "", Sources: []string{"a"}}}},
+		{name: "a function named echo without a cd", command: "echo() { :; }; echo hi; git push origin a", want: []push{{Dir: "/repo", Sources: []string{"a"}}}},
+		{name: "command skips the function", command: "echo() { cd /x; }; command echo hi; git push origin a", want: []push{{Dir: "/repo", Sources: []string{"a"}}}},
+		{name: "env skips the function", command: "echo() { cd /x; }; env echo hi; git push origin a", want: []push{{Dir: "/repo", Sources: []string{"a"}}}},
+		{name: "a wrapper skips the function", command: "echo() { cd /x; }; nohup echo hi; git push origin a", want: []push{{Dir: "/repo", Sources: []string{"a"}}}},
+		{name: "a function maybe defined, named echo", command: "false && echo() { cd /x; }; echo hi; git push origin a", want: []push{{Dir: "", Sources: []string{"a"}}}},
+		{name: "a function that cds, in a shell the command runs", command: "ls() { cd /x; }; bash -c 'ls && git push origin a'", want: []push{{Dir: "", Sources: []string{"a"}}}},
+		{name: "a function without a cd, in a shell the command runs", command: "f() { :; }; bash -c 'cd /x && git push origin a'", want: []push{{Dir: "/x", Sources: []string{"a"}}}},
+		{name: "a function maybe defined, in a shell the command runs", command: "false && ls() { cd /x; }; bash -c 'ls && git push origin a'", want: []push{{Dir: "", Sources: []string{"a"}}}},
+		{name: "env runs the program, not a function of its name", command: "bash() { :; }; env bash -c 'cd /x && git push origin a'", want: []push{{Dir: "/x", Sources: []string{"a"}}}},
+		{name: "a wrapper runs the program, not a function of its name", command: "bash() { :; }; nohup bash -c 'cd /x && git push origin a'", want: []push{{Dir: "/x", Sources: []string{"a"}}}},
+		{name: "a function named after a builtin the walker refuses", command: "enable() { :; }; enable -n cd; git push origin a", want: []push{{Dir: "/repo", Sources: []string{"a"}}}},
+		{name: "a hook function without a cd", command: "chpwd() { echo moved; }; cd /x && git push origin a", want: []push{{Dir: "/x", Sources: []string{"a"}}}},
+		{name: "set with options", command: "set -e -o pipefail; git push origin a", want: []push{{Dir: "/repo", Sources: []string{"a"}}}},
+		{name: "set -A on an ordinary array", command: "set -A arr x y; git push origin a", want: []push{{Dir: "/repo", Sources: []string{"a"}}}},
+		{name: "autoload of a completion function", command: "autoload -Uz compinit; git push origin a", want: []push{{Dir: "/repo", Sources: []string{"a"}}}},
 		{name: "zsh's anonymous function", command: "() echo hi; git push origin a", want: []push{{Dir: "/repo", Sources: []string{"a"}}}},
 		{name: "zsh's anonymous function with a cd", command: "() (cd /x); git push origin a", want: []push{{Dir: "/repo", Sources: []string{"a"}}}},
 		// Builtins that keep the directory, in a retry loop.
@@ -149,6 +176,8 @@ func TestFindPushes(t *testing.T) {
 		{name: "repeat runs its command here", command: "repeat 1 cd /x && git push origin a", want: []push{{Dir: "/x", Sources: []string{"a"}}}},
 		{name: "a glob qualifier's code may cd", command: "echo *(e:'cd /x; true':) && git push origin a", want: []push{{Dir: "", Sources: []string{"a"}}}},
 		{name: "a function whose glob qualifier may cd", command: "f() { echo *(e:'cd /x; true':); }; f && git push origin a", want: []push{{Dir: "", Sources: []string{"a"}}}},
+		{name: "a +function glob qualifier may cd", command: "ls *(+myfn) && git push origin a", want: []push{{Dir: "", Sources: []string{"a"}}}},
+		{name: "a function whose +function glob qualifier may cd", command: "f() { ls *(+myfn); }; f && git push origin a", want: []push{{Dir: "", Sources: []string{"a"}}}},
 		{name: "zsh --emulate takes a value", command: "zsh --emulate sh -c 'cd /x && git push origin a'", want: []push{{Dir: "/x", Sources: []string{"a"}}}},
 		{name: "a script piped to zsh --emulate", command: "echo 'git push origin a' | zsh --emulate sh", want: []push{{Dir: "/repo", Sources: []string{"a"}}}},
 		// git splits a refspec at its last colon.
@@ -187,7 +216,6 @@ func TestFindPushes(t *testing.T) {
 		{name: "eval's cd may fail before a ;", command: "eval 'cd /x'; git push origin a", want: []push{{Dir: "", Sources: []string{"a"}}}},
 		{name: "trap action runs later, from an unknown directory", command: "trap -- 'git push origin a' EXIT", want: []push{{Dir: "", Sources: []string{"a"}}}},
 		{name: "trap action runs after a later cd", command: "trap 'git push origin a' EXIT; cd /other && true", want: []push{{Dir: "", Sources: []string{"a"}}}},
-		{name: "a cd in a trap leaves the directory unknown", command: "trap 'cd /x' DEBUG; git push origin a", want: []push{{Dir: "", Sources: []string{"a"}}}},
 		{name: "a trap without a cd keeps it", command: "trap 'rm -f /tmp/x' EXIT; git push origin a", want: []push{{Dir: "/repo", Sources: []string{"a"}}}},
 		{name: "cd in a background job inside an if", command: "if true; then cd /tmp & fi; git push origin a", want: []push{{Dir: "/repo", Sources: []string{"a"}}}},
 		{name: "git-push dashed binary", command: "git-push origin a", want: []push{{Dir: "/repo", Sources: []string{"a"}}}},
@@ -422,7 +450,7 @@ func TestFindPushesBlocked(t *testing.T) {
 		{"alias up='cd /tmp'; eval up; git push origin a", "defines code"},
 		{`functions[gp]="$X"; gp origin change`, "cannot read"},
 		{"aliases=(gp 'git push --no-verify'); eval 'gp origin a'", "cannot read"},
-		{`alias gp="$G push --no-verify"; eval 'gp origin a'`, "alias defined from a value the hook cannot read"},
+		{`alias gp="$G push --no-verify"; eval 'gp origin a'`, "alias defined from a word the hook cannot read"},
 		{"hash -p /tmp/x git; git push origin a", "hash"},
 		// The red team's seventh round: forms kept refused, with their own reason.
 		{`eval "$(ssh-agent -s)" >/dev/null && git push origin HEAD`, "an eval of a dynamic string earlier in the command"},
@@ -544,6 +572,31 @@ func TestFindPushesBlocked(t *testing.T) {
 		{"exit() { :; }; cd /x || exit; git push origin main", "defines a function named exit"},
 		{"alias cd=:; eval 'cd /x'", "defines an alias named cd"},
 		{"functions[cd]=':'; cd /repo && git push origin a", "defines cd through zsh's functions"},
+		{"typeset functions[cd]=:; cd /repo && git push origin a", "defines cd through zsh's functions"},
+		{"n=cd; functions[$n]=:; cd /repo && git push origin a", "under a key the hook cannot read"},
+		{`n=cd; alias "$n=:"; cd /repo && git push origin a`, "alias defined from a word the hook cannot read"},
+		{"set -A functions cd :; cd /repo && git push origin a", "zsh's functions parameter set by a command the hook does not read"},
+		{"set -o pipefail -A functions cd :; cd /repo && git push origin a", "zsh's functions parameter set by a command the hook does not read"},
+		{`set -A "$n" cd :; cd /repo && git push origin a`, "set -A assigns an array the hook cannot name"},
+		{"read -A functions; cd /repo && git push origin a", "zsh's functions parameter set by a command the hook does not read"},
+		{"printf -v 'functions[cd]' :; cd /repo && git push origin a", "zsh's functions parameter set by a command the hook does not read"},
+		{"chpwd_functions+=(f); cd /repo && git push origin a", "zsh's chpwd_functions parameter set from a value the hook cannot read"},
+		{"chpwd_functions[1]=z; cd /repo && git push origin a", "defines code that runs git or changes the directory"},
+		// What turns a builtin off or defines a function under another name, or a hook the shell runs.
+		{"disable cd; cd /repo && git push origin a", "disable can change what a command"},
+		{"enable -n cd; cd /repo && git push origin a", "enable can change what a command"},
+		{"f() { :; }; functions -c f cd; cd /repo && git push origin a", "functions can change what a command"},
+		{"autoload cd; cd /repo && git push origin a", "autoload can change what a command"},
+		{`disable "$n"; cd /repo && git push origin a`, "disable can change what a command"},
+		{"add-zsh-hook chpwd f; cd /repo && git push origin a", "add-zsh-hook can change what a command"},
+		{"chpwd() { cd /x; }; cd /repo && git push origin a", "the function chpwd, which the shell runs on its own"},
+		{"TRAPDEBUG() { cd /x; }; cd /repo && git push origin a", "the function TRAPDEBUG, which the shell runs on its own"},
+		{"trap 'z other' DEBUG; git push origin a", "a trap action that may cd"},
+		{"trap 'cd /x' DEBUG; git push origin a", "a trap action that may cd"},
+		{"trap 'cd /x' DEBUG; cd /repo && git push origin a", "a trap action that may cd"},
+		// A function the command defines runs with a push in its arguments.
+		{`f() { "$@"; }; f git push origin a`, "a git push run through f"},
+		{`bash() { cd /other; command bash "$@"; }; bash -c 'git push origin a'`, "a git push run through bash"},
 		// One-letter abbreviations of a long option git accepts.
 		{"git ls-remote --u='git push origin main' .", runsStep},
 		{"git clone --u='git push origin main' /tmp/r.git d", runsStep},
@@ -729,8 +782,12 @@ func TestFindPushesAutoCD(t *testing.T) {
 	root := t.TempDir()
 	require.NoError(t, os.Mkdir(filepath.Join(root, "sub"), 0o755))
 	require.NoError(t, os.Mkdir(filepath.Join(root, "ls"), 0o755))
+	require.NoError(t, os.Mkdir(filepath.Join(root, "dirs"), 0o755))
 	for _, tt := range []struct{ command, dir string }{
-		{"ls && git push origin a", root}, // a command on PATH runs, even with a directory of its name
+		{"ls && git push origin a", root},                     // a command on PATH runs, even with a directory of its name
+		{"dirs && git push origin a", root},                   // so does a builtin that is no program on PATH
+		{"sub() { :; }; sub && git push origin a", root},      // and a function the command defines
+		{"sub() { :; }; true | sub; git push origin a", root}, // also where only changesDir looks
 		{"sub && git push origin a", filepath.Join(root, "sub")},
 		{"./sub && git push origin a", filepath.Join(root, "sub")},
 		{"sub; git push origin a", ""},             // the cd may fail

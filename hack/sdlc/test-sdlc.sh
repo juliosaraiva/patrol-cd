@@ -467,6 +467,16 @@ check "review input tree" "$newtree" "$(jq -r .tree <<<"$input")"
 check "review input files" "main.go" "$(jq -r '.files | join(",")' <<<"$input")"
 check "review input docsOnly" false "$(jq -r .docsOnly <<<"$input")"
 if [[ -s $(jq -r .diffFile <<<"$input") ]]; then check "review input diff written" yes yes; else check "review input diff written" yes no; fi
+# Attributes (here the clone's own) or a textconv driver cannot hide the content from the reviewers.
+printf '* -diff\n' >.git/info/attributes
+input=$(hack/sdlc/review-input.sh)
+check "review diff shows content despite -diff" 1 "$(grep -c '^+++ b/main.go' "$(jq -r .diffFile <<<"$input")")"
+printf '* diff=hide\n' >.git/info/attributes
+git config diff.hide.textconv 'echo hidden'
+input=$(hack/sdlc/review-input.sh)
+check "review diff shows content despite textconv" 0 "$(grep -c hidden "$(jq -r .diffFile <<<"$input")")"
+git config --unset diff.hide.textconv
+rm .git/info/attributes
 
 # An ignored file the checks could read (a .gitignore pattern such as kubeconfig* hiding a source
 # file) leaves the tree unclean, so nothing is recorded for a tree that lacks it; build outputs don't.
@@ -516,11 +526,11 @@ rm .git/info/grafts
 printf 'GOLANGCI_LINT ?= golangci-lint\n' >"$work/w.mk"
 printf 'GOFLAGS=-skip=TestX\n' >"$work/goenv"
 # shellcheck source=hack/sdlc/lib.sh
-check "weakened: nothing set" "" "$(source "$src/hack/sdlc/lib.sh" && GOENV=off GOFLAGS='' sdlc_weakened "$work/w.mk")"
+check "weakened: nothing set" "" "$(source "$src/hack/sdlc/lib.sh" && GOENV=off GOFLAGS='' CI_GO_TEST_FLAGS='' sdlc_weakened "$work/w.mk")"
 # shellcheck source=hack/sdlc/lib.sh
-check "weakened: a ?= variable" GOLANGCI_LINT "$(source "$src/hack/sdlc/lib.sh" && GOENV=off GOFLAGS='' GOLANGCI_LINT=true sdlc_weakened "$work/w.mk")"
+check "weakened: a ?= variable" GOLANGCI_LINT "$(source "$src/hack/sdlc/lib.sh" && GOENV=off GOFLAGS='' CI_GO_TEST_FLAGS='' GOLANGCI_LINT=true sdlc_weakened "$work/w.mk")"
 # shellcheck source=hack/sdlc/lib.sh
-check "weakened: GOFLAGS in Go's env file" "GOFLAGS (go env)" "$(source "$src/hack/sdlc/lib.sh" && GOENV=$work/goenv GOFLAGS='' sdlc_weakened "$work/w.mk")"
+check "weakened: GOFLAGS in Go's env file" "GOFLAGS (go env)" "$(source "$src/hack/sdlc/lib.sh" && GOENV=$work/goenv GOFLAGS='' CI_GO_TEST_FLAGS='' sdlc_weakened "$work/w.mk")"
 
 # check.sh end to end, in a scratch repository whose make targets are stubs: the step for a kind
 # script waits for a marker, so the test can act while the checks run. A clean run records a pass; a
@@ -542,7 +552,9 @@ checkrun() { # checkrun N ACTION: commit kind script N, run check.sh, do ACTION 
 	git -C "$chk" add -A
 	git -C "$chk" commit -q -m "chore: kind script $1"
 	local rc=0 tries=0
-	(cd "$chk" && MARKS=$marks hack/sdlc/check.sh >"$work/chk.out" 2>&1) &
+	# Without what makes check.sh check but record nothing (CI's GOFLAGS, a PATROL_SDLC_BASE set for
+	# a local iteration, Go's env file), so the test asserts the recording path wherever it runs.
+	(cd "$chk" && env -u PATROL_SDLC_BASE -u CI_GO_TEST_FLAGS -u GOFLAGS GOENV=off MARKS="$marks" hack/sdlc/check.sh >"$work/chk.out" 2>&1) &
 	local pid=$!
 	while [[ ! -e $marks/started && $tries -lt 300 ]]; do
 		sleep 0.1

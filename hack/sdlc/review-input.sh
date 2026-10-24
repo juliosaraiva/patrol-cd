@@ -23,7 +23,9 @@ tree=$(git rev-parse 'HEAD^{tree}')
 base=$(sdlc_base HEAD)
 state=$(sdlc_state_dir)
 diff_file=$state/reviews/$tree.diff
-git diff --no-color --no-ext-diff "$base" HEAD >"$diff_file"
+# The content as committed: no attribute (-diff, binary) or textconv driver may hide it from the
+# reviewers.
+git diff --no-color --no-ext-diff --no-textconv --text "$base" HEAD >"$diff_file"
 docs_only=false
 sdlc_changed "$base" HEAD | sdlc_docs_only && docs_only=true
 

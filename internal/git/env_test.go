@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"net"
+	"os"
 	"os/exec"
 	"path/filepath"
 	"strings"
@@ -220,7 +221,12 @@ func TestLFS(t *testing.T) {
 	f.commit("lfs", map[string]string{"blob.bin": "binary-content\n", ".gitattributes": "*.bin filter=lfs diff=lfs merge=lfs -text\n"})
 	f.push("main")
 	ctx := testCtx(t)
-	c := newTestClient(t, f.url(), nil, EnableLFS(true))
+	// The client's git reads the host's system gitconfig, which configures the LFS filter on some
+	// hosts (GitHub's runner) and not in the image: through a git that skips it, the files are filled
+	// only if the client configures the filter itself (#227).
+	wrapper := filepath.Join(t.TempDir(), "git")
+	require.NoError(t, os.WriteFile(wrapper, []byte("#!/bin/sh\nGIT_CONFIG_NOSYSTEM=1 exec '"+gitBin(t)+"' \"$@\"\n"), 0o755))
+	c := newTestClient(t, f.url(), nil, EnableLFS(true), GitPath(wrapper))
 	require.NoError(t, c.CheckoutRevision(ctx, "main", false))
 	assert.Equal(t, "binary-content\n", readFile(t, filepath.Join(c.Root(), "blob.bin")))
 }
