@@ -150,8 +150,21 @@ func TestFindPushes(t *testing.T) {
 		{name: "a function that cds, never called", command: "f() { cd /x; }; git push origin a", want: []push{{Dir: "/repo", Sources: []string{"a"}}}},
 		{name: "a program's name, maybe redefined to cd", command: "if true; then ls() { cd /x; }; fi; cd /repo && ls && git push origin a", want: []push{{Dir: "", Sources: []string{"a"}}}},
 		// Called from a function's body, it is found by the walk of that body (unknownWord), not at the call.
+		// A body's verdict holds until a word in it is defined: then it is a call.
+		{name: "a word in a body defined as a function after a call", command: "g() { f; }; cd /repo && g; f() { :; }; cd /repo && g && git push origin a", want: []push{{Dir: "/repo", Sources: []string{"a"}}}},
 		{name: "functions calling each other at the end of a pipeline", command: "f() { true | g; }; g() { true | f; }; f; git push origin a", want: []push{{Dir: "/repo", Sources: []string{"a"}}}},
 		{name: "a definition that may not run, its callee defined later to cd", command: "if true; then h() { g; }; fi; g() { cd /x; }; h; git push origin a", want: []push{{Dir: "", Sources: []string{"a"}}}},
+		// A function that runs "$@" (or $1, eval, through noglob or builtin) runs its arguments as a
+		// command in this shell: a cd among them moves it.
+		{name: "a cd run by a function that runs \"$@\"", command: `r() { "$@"; }; r cd /other && git push origin a`, want: []push{{Dir: "", Sources: []string{"a"}}}},
+		{name: "a pushd run by a function that runs \"$@\"", command: `r() { "$@"; }; r pushd /other && git push origin a`, want: []push{{Dir: "", Sources: []string{"a"}}}},
+		{name: "an eval run by a function that runs \"$@\"", command: `r() { "$@"; }; r eval 'cd /other' && git push origin a`, want: []push{{Dir: "", Sources: []string{"a"}}}},
+		{name: "builtin cd run by a function that runs \"$@\"", command: `r() { "$@"; }; r builtin cd /other && git push origin a`, want: []push{{Dir: "", Sources: []string{"a"}}}},
+		{name: "a cd run by a function that runs builtin \"$@\"", command: `r() { builtin "$@"; }; r cd /other && git push origin a`, want: []push{{Dir: "", Sources: []string{"a"}}}},
+		{name: "a cd run by a function that runs $1 $2", command: `r() { $1 $2; }; r cd /other && git push origin a`, want: []push{{Dir: "", Sources: []string{"a"}}}},
+		{name: "a program run by a function that runs \"$@\"", command: `r() { "$@"; }; r make test && git push origin a`, want: []push{{Dir: "/repo", Sources: []string{"a"}}}},
+		{name: "a function run through noglob \"$@\"", command: `r() { noglob "$@"; }; d() { cd /other; }; r d && git push origin a`, want: []push{{Dir: "", Sources: []string{"a"}}}},
+		{name: "a shell script with a long option through arch", command: "arch -arm64 bash --rcfile /dev/null -c 'cd /other && git push origin a'", want: []push{{Dir: "/other", Sources: []string{"a"}}}},
 		{name: "a function that cds, run by one that runs \"$@\"", command: `r() { "$@"; }; d() { cd /x; }; r d; git push origin a`, want: []push{{Dir: "", Sources: []string{"a"}}}},
 		{name: "a program's name, maybe redefined to cd, called by a function", command: "if true; then ls() { cd /x; }; fi; g() { ls; }; cd /repo && g && git push origin a", want: []push{{Dir: "", Sources: []string{"a"}}}},
 		{name: "a program's name, maybe defined to cd, called by a function", command: "false && ls() { cd /x; }; g() { ls; }; g && git push origin a", want: []push{{Dir: "", Sources: []string{"a"}}}},
@@ -717,6 +730,12 @@ func TestFindPushesBlocked(t *testing.T) {
 		{`f() { "$@"; }; f git send-pack origin HEAD:main`, "pushes without running git's pre-push hook"},
 		{"nosuch-runner git config alias.x '!sh'", config},
 		{"g() { :; }; chpwd() { g; }; g() { cd /x; }; git push origin a", "the function chpwd, which the shell runs on its own and which may cd"},
+		// A trap action runs the functions as they are defined when it runs.
+		{"d() { true; }; trap d EXIT; d() { cd /other; }; git push origin a", "a trap action that may cd"},
+		// bash 5.3's ${ …; } runs in this shell.
+		{": ${ cd /other; } && git push origin a", "run their commands in this shell"},
+		// A shell among an unmodeled program's arguments, with options the walker does not read.
+		{"arch -arm64 bash --frob x -c 'git push origin a'", "a git push through bash"},
 		{"find . -maxdepth 0 -okdir git config alias.x '!sh' ';' <<< y", config},
 	} {
 		t.Run(tt.command, func(t *testing.T) {
@@ -867,6 +886,19 @@ func TestFindPushesDeepCalls(t *testing.T) {
 	}
 	self.WriteString("f40() { :; }; f1 && git push origin a; v=$(f1)")
 	back.WriteString("f40() { f1; }; f1 && git push origin a; v=$(f1)")
+	// A long chain of definitions, each calling the one before: each body holds the code the bodies
+	// it calls could not read (here the possible aliases), so past maxRuns places it is refused, in
+	// time well short of the hook's timeout.
+	var chain strings.Builder
+	for i := 1; i <= 400; i++ {
+		fmt.Fprintf(&chain, "f%d() { f%d; echo; }; ", i, i-1)
+	}
+	chain.WriteString("true")
+	start := time.Now()
+	a, err := findPushes(chain.String(), "/repo")
+	require.NoError(t, err)
+	assert.Contains(t, a.Blocked, "in more than 256 places")
+	assert.Less(t, time.Since(start), 60*time.Second)
 	for _, command := range []string{self.String(), back.String()} {
 		done := make(chan analysis, 1)
 		go func() {
@@ -978,6 +1010,9 @@ func TestFindPushesUnknownWords(t *testing.T) {
 		{"g() { :; }; f() { noglob g; }; g() { nosuch-gp; }; cd /other && f", []unknownRun{{Dir: "", Word: "f", What: staleRun("f")}}},
 		{"g() { :; }; f() { eval g; }; g() { nosuch-gp; }; cd /other && f", []unknownRun{{Dir: "", Word: "f", What: staleRun("f")}}},
 		{"g() { :; }; chpwd() { g; }; g() { nosuch-gp; }", []unknownRun{{Dir: "", Word: "chpwd", What: staleRun("chpwd")}}},
+		{"d() { true; }; trap d EXIT; d() { cd /other && nosuch-gp; }", []unknownRun{{Dir: "", Word: "trap", What: "a trap action that runs a function defined, or defined again, after the trap was set (it looks the function up when it runs), code the hook did not read"}}},
+		{`r() { nocorrect "$@"; }; d() { cd /other && nosuch-gp; }; r d`, []unknownRun{{Dir: "/repo", What: "a command named by a word the hook cannot read"}, {Dir: "/repo", Word: "r", What: staleRun("r")}, {Dir: "/other", Word: "nosuch-gp"}}},
+		{`r() { repeat 1 "$@"; }; d() { cd /other && nosuch-gp; }; r d`, []unknownRun{{Dir: "/repo", What: "a command named by a word the hook cannot read"}, {Dir: "", Word: "r", What: staleRun("r")}, {Dir: "/other", Word: "nosuch-gp"}}},
 		{"h() { :; }; g() { h; }; f() { g; }; h() { nosuch-gp; }; cd /other && f", []unknownRun{{Dir: "", Word: "f", What: staleRun("f")}}}, // through g
 		{"g() { :; }; f() { v=$(g); }; g() { nosuch-gp; }; cd /other && f", []unknownRun{{Dir: "/other", Word: "f", What: staleRun("f")}}},
 		{"f() { g; }; f() { :; }; g() { nosuch-gp; }; cd /other && f", nil}, // the second definition replaces the first
@@ -1013,6 +1048,36 @@ func TestFindPushesUnknownWords(t *testing.T) {
 		{"source /dev/stdin <<<'true'", nil}, // read
 		{`eval "$x"`, []unknownRun{{Dir: "/repo", Word: "eval", What: "`eval` of a string the hook cannot read runs code it did not read"}}},
 		{`cd /other && "$X" a`, []unknownRun{{Dir: "/other", Word: "", What: "a command named by a word the hook cannot read"}}},
+	} {
+		got, err := findPushes(tt.command, "/repo")
+		require.NoError(t, err)
+		// Without the record of a possible alias at each call of a function (TestFindPushesFunctionAliases).
+		var runs []unknownRun
+		for _, u := range got.Unknown {
+			if u.What != aliasWhat(u.Word) {
+				runs = append(runs, u)
+			}
+		}
+		assert.Equal(t, tt.want, runs, tt.command)
+	}
+}
+
+// An alias of the shell's setup runs instead of a function the command defines of its name (zsh
+// expands aliases before it looks functions up), so a call of one that is no program on PATH or
+// builtin is a word the walker does not know too, where it runs: at the top or in a body.
+func TestFindPushesFunctionAliases(t *testing.T) {
+	t.Parallel()
+	alias := func(dir, fn string) unknownRun { return unknownRun{Dir: dir, Word: fn, What: aliasWhat(fn)} }
+	for _, tt := range []struct {
+		command string
+		want    []unknownRun
+	}{
+		{"function gp { kubectl get pods; }; cd /other && gp", []unknownRun{alias("/other", "gp")}},
+		{"function gp { :; }; f() { gp; }; cd /other && f", []unknownRun{alias("/other", "gp"), alias("/other", "f")}},
+		{"f() { cd /x && gp() { :; }; }; true", nil},               // defined, never called
+		{"ls() { :; }; cd /other && ls; echo() { :; }; echo", nil}, // a program on PATH, a builtin: their aliases are the guide's Limits
+		{"uname() { :; }; cd /other && uname", nil},                // a program on PATH the walker does not model
+		{"shopt() { :; }; cd /other && shopt", nil},                // a builtin no program on PATH shares
 	} {
 		got, err := findPushes(tt.command, "/repo")
 		require.NoError(t, err)

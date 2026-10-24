@@ -54,8 +54,20 @@ type sarifResult struct {
 	} `json:"locations"`
 	PartialFingerprints map[string]string `json:"partialFingerprints"`
 	Suppressions        []struct {
-		Kind string `json:"kind"`
+		Kind   string `json:"kind"`
+		Status string `json:"status"`
 	} `json:"suppressions"`
+}
+
+// suppressed reports whether one of a result's suppressions is in force: one with no status or the
+// status accepted (SARIF 2.1.0 §3.35.3; rejected and underReview suppress nothing).
+func (r sarifResult) suppressed() bool {
+	for _, s := range r.Suppressions {
+		if s.Status == "" || s.Status == "accepted" {
+			return true
+		}
+	}
+	return false
 }
 
 // result is one alert, resolved against its rule.
@@ -111,7 +123,7 @@ func readSARIF(path string) ([]result, error) {
 				Severity:    securitySeverity(rule),
 				Message:     r.Message.Text,
 				Fingerprint: r.PartialFingerprints["primaryLocationLineHash"],
-				Suppressed:  len(r.Suppressions) > 0,
+				Suppressed:  r.suppressed(),
 			}
 			if res.Level == "" {
 				res.Level = rule.DefaultConfiguration.Level

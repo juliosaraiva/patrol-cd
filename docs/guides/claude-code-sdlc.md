@@ -85,7 +85,8 @@ would need a GitHub Code Security license.
   exclusions of `.github/codeql/codeql-config.yml`) and runs the `security-extended` suite. SARIF
   files and a summary go to `dist/codeql/`.
 - **Gate.** `hack/sdlc/sarifgate` fails on every result of level `error` or `warning` that is not
-  suppressed in the source and not accepted in `hack/sdlc/codeql-baseline.txt`; notes are listed
+  suppressed (a suppression with no status or the status `accepted`; a rejected one, or one under
+  review, suppresses nothing) and not accepted in `hack/sdlc/codeql-baseline.txt`; notes are listed
   but do not fail. A baseline line names the rule, the file, CodeQL's line-independent fingerprint
   and the reason. Prefer fixing: accept an alert only when it is a false positive or a deliberate
   design, and dismiss it on GitHub with the same reason.
@@ -268,8 +269,19 @@ Two hooks run it:
     they are defined when it is called (bash and zsh look a function up then), so its `cd` is
     followed through them at each call, and one that calls a function defined, or defined again,
     after it runs code the walker did not read: like a word it does not know, from the call or, if
-    it may cd, from an unknown directory. A function named among the arguments of one that runs
-    `"$@"`, or of a word the walker does not know, runs there too. A `trap` action, or a function the shell
+    it may cd, from an unknown directory. A function that runs code given at run time (`"$@"`, `$1`,
+    `eval`, also through `noglob`, `builtin` or `repeat N`) runs its arguments as a command in this
+    shell: a `cd` among them (`r cd DIR`) moves the directory, and a function named there, as among
+    the arguments of a word the walker does not know, runs there too. A call of a function the
+    command defines whose name is no program on PATH or builtin is also a word the walker does not
+    know, so it runs only in this clone: an alias of that name in the shell's setup would run
+    instead (zsh expands aliases before it looks functions up; oh-my-zsh's `gp` is `git push`). A
+    trap action, like a function the shell calls on its own, is read again after each definition,
+    since it runs the functions as they are defined when it runs. bash 5.3's `${ …; }` and
+    `${| …; }` run in this shell, which the walker does not follow, so they are refused. Each
+    function, and the command, may hold code the walker did not read in at most 256 places (each
+    body holds those of the functions it calls); past that the command is refused, so a long chain
+    of functions cannot run the hook past its timeout. A `trap` action, or a function the shell
     calls on its own (zsh's `chpwd`, `precmd`, `preexec`, `periodic`, `TRAPDEBUG` and the other
     `TRAP…` functions, a command-not-found handler), that may cd, or a `trap` action the hook cannot
     read, can move the directory between any two commands, so a push after it is refused. zsh runs an
@@ -373,8 +385,10 @@ A second hook (`hack/sdlc/claude-format.sh`, `PostToolUse` for Edit, MultiEdit a
   as oh-my-zsh's `gp='git push'` or zoxide's `z`, options such as CDABLE_VARS). Its text net refuses
   a hook token anywhere in the command line, so a push through any of them still runs git's hook
   unless the token is assembled at run time; and a command word that is no program on PATH makes the
-  directory unknown and may run only in this clone, so a function that cds to another clone does
-  not place a push in this one, and an alias that pushes does not push from another one. An alias
+  directory unknown and may run only in this clone (a function the command defines of such a name
+  may run only there too, as an alias of the setup would replace it), so a function that cds to
+  another clone does not place a push in this one, and an alias that pushes does not push from
+  another one. An alias
   or function that shadows a program on PATH or a builtin (`make`, `ls`, `echo`) is not seen, nor
   is an alias of the setup that skips git's hook on its own (one that runs `git push --no-verify`). git's
   pre-push hook (required before any command runs) checks the pushes they make in this clone's work

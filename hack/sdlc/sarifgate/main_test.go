@@ -37,6 +37,13 @@ func TestReadSARIFResolvesRules(t *testing.T) {
 	assert.Equal(t, "error", rs[2].Level, "no level of its own: the driver rule's default")
 	assert.Equal(t, "none", rs[3].Level)
 	assert.InDelta(t, 9.1, rs[4].Severity, 1e-9, "a security-severity given as a number")
+
+	rs, err = readSARIF("testdata/suppressions.sarif")
+	require.NoError(t, err)
+	require.Len(t, rs, 5)
+	for i, want := range []bool{true, true, false, false, true} {
+		assert.Equal(t, want, rs[i].Suppressed, rs[i].Message)
+	}
 }
 
 func TestRun(t *testing.T) {

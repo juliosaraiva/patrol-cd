@@ -123,6 +123,10 @@ func TestRunUnknownWords(t *testing.T) {
 		{"g() { true; }; f() { g; }; g() { nosuch-gp; }; cd " + other + " && f", 2, "`f` runs a function defined, or defined again, after it"},
 		{"g() { true; }; f() { g; }; cd " + other + " && f; g() { nosuch-gp; }; f", 2, "`f` runs a function defined, or defined again, after it"},
 		{"f() { g; }; g() { :; }; f", 0, ""}, // a helper defined after its caller, in this clone
+		// An alias of the setup of a function's name runs instead; a cd among a "$@" function's arguments moves.
+		{"function nosuch-gp { :; }; cd " + other + " && nosuch-gp", 2, "`nosuch-gp` is a function the command defines, but an alias of that name in the shell's setup would run instead"},
+		{`r() { "$@"; }; r cd ` + other + ` && git push origin HEAD`, 2, "cannot tell which directory `git push` runs in"},
+		{"d() { true; }; trap d EXIT; d() { cd " + other + " && nosuch-gp; }", 2, "a trap action that runs a function defined, or defined again"},
 		// A shell script handed to a program the walker does not model runs as written.
 		{"arch -arm64 sh -c 'cd " + other + " && nosuch-gp'", 2, "it would run in " + other},
 		{"arch -arm64 sh -c 'nosuch-gp'", 0, ""},
