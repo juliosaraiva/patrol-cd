@@ -345,6 +345,13 @@ if [[ $need_static -eq 1 ]]; then
 		check_lock_tool "$t"
 	done
 	if path=$(command -v dash); then tool dash - "$path"; else tool dash missing "(lint-shell.sh skips dash -n)"; fi
+	# ci-sdlc's tests of the Claude Code hook read its input with jq, as the hook does.
+	if path=$(command -v jq); then
+		tool jq "$(first "$path" --version)" "$path"
+		ok "jq present"
+	else
+		fail "jq: not on PATH (ci-sdlc tests the Claude Code hook, which reads its input with jq)"
+	fi
 fi
 
 if [[ $need_ui -eq 1 ]]; then

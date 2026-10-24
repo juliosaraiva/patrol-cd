@@ -15,7 +15,8 @@ cd "$(git rev-parse --show-toplevel)"
 source hack/sdlc/lib.sh
 
 if ! sdlc_clean; then
-	echo "review-input: commit or stash the working tree first; the review is recorded for HEAD's tree" >&2
+	echo "review-input: commit or stash the working tree first, or remove what is listed; the review is recorded for HEAD's tree" >&2
+	sdlc_unclean
 	exit 1
 fi
 head=$(git rev-parse HEAD)

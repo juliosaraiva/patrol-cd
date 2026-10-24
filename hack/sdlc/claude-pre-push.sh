@@ -4,7 +4,7 @@
 # pre-push hook from checking a push (docs/guides/claude-code-sdlc.md).
 #
 # git's pre-push hook (.githooks/pre-push) is the gate's authority: it also sees what a script, an
-# alias or another tool pushes. So while this checkout has it, every command but
+# alias or another tool pushes from the work tree. So while this checkout has it, every command but
 # `make sdlc-git-hooks` is refused until it is enabled. Then every command goes to
 # hack/sdlc/pushcheck, which parses it as bash (so a "git push" in quoted text or a heredoc is not a
 # push) and runs the gate. The binary is built into bin/ on first use and rebuilt when its sources or

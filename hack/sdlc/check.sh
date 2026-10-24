@@ -78,7 +78,8 @@ while IFS= read -r f; do changed+=("$f"); done < <(sdlc_changed "$base" HEAD)
 record=1
 if ! sdlc_clean; then
 	record=0
-	echo "sdlc-check: the working tree has uncommitted changes; checking it, but recording nothing (commit first)"
+	echo "sdlc-check: the working tree has uncommitted changes; checking it, but recording nothing (commit first, or remove what is listed)"
+	sdlc_unclean
 fi
 [[ $codeql -eq 1 ]] || record=0
 if [[ -n ${PATROL_SDLC_BASE:-} ]]; then

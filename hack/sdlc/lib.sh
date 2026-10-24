@@ -80,3 +80,13 @@ sdlc_clean() {
 	[[ -z $(git status --porcelain --untracked-files=normal) && -z $(sdlc_ignored) ]] &&
 		! git ls-files -v | grep -E '^([a-z]|S) ' >/dev/null
 }
+
+# sdlc_unclean prints, to standard error, what keeps the working tree from being clean (sdlc_clean),
+# one path a line: an ignored file the checks read does not show in git status.
+sdlc_unclean() {
+	{
+		git status --porcelain --untracked-files=normal | sed 's/^/  changed or untracked: /'
+		sdlc_ignored | sed 's/^/  ignored by git, but read by the checks: /'
+		git ls-files -v | grep -E '^([a-z]|S) ' | sed 's/^[^ ]* /  hidden from git status (assume-unchanged or skip-worktree): /' || true
+	} >&2
+}

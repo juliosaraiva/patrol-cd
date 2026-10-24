@@ -28,8 +28,13 @@ done
 [[ -n $tree && $blocking =~ ^[0-9]+$ && -f $report ]] || usage
 
 current=$(git rev-parse 'HEAD^{tree}')
-if [[ $tree != "$current" ]] || ! sdlc_clean; then
-	echo "record-review: the review was for tree $tree, but HEAD's tree is $current (or the working tree is dirty); review again" >&2
+if [[ $tree != "$current" ]]; then
+	echo "record-review: the review was for tree $tree, but HEAD's tree is $current; review again" >&2
+	exit 1
+fi
+if ! sdlc_clean; then
+	echo "record-review: the working tree is not HEAD's tree; commit or stash it, or remove what is listed, and review again" >&2
+	sdlc_unclean
 	exit 1
 fi
 state=$(sdlc_state_dir)

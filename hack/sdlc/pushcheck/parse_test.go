@@ -1,10 +1,12 @@
 package main
 
 import (
+	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -136,8 +138,20 @@ func TestFindPushes(t *testing.T) {
 		{name: "a function that cds, called after a cd", command: "f() { cd /x; }; cd /repo && f && git push origin a", want: []push{{Dir: "", Sources: []string{"a"}}}},
 		{name: "a function that cds through a helper", command: "g() { cd /x; }; f() { g; }; cd /repo && f && git push origin a", want: []push{{Dir: "", Sources: []string{"a"}}}},
 		{name: "a recursive function without a cd", command: "f() { f; }; f && git push origin a", want: []push{{Dir: "/repo", Sources: []string{"a"}}}},
+		// A "no" for a function found while a function that calls it was cut short (recursion) is not
+		// kept: called on its own, it reaches that function's cd. The substitution's walker asks about
+		// each function, f first, so g's verdict is first found inside f's.
+		{name: "mutual recursion, the cd after the call", command: "f() { g; cd /x; }; g() { f; }; v=$(true); g && git push origin a", want: []push{{Dir: "", Sources: []string{"a"}}}},
+		{name: "mutual recursion through a third function", command: "f() { g; cd /x; }; g() { h; }; h() { f; }; v=$(true); g && git push origin a", want: []push{{Dir: "", Sources: []string{"a"}}}},
+		{name: "mutual recursion, the cd in the callee", command: "f() { g; g; }; g() { f; cd /x; }; f && git push origin a", want: []push{{Dir: "", Sources: []string{"a"}}}},
+		// A verdict kept for a function does not outlive a change to what the functions it calls run.
+		{name: "a callee redefined after a call", command: "g() { :; }; f() { g; }; cd /repo && f; g() { cd /x; }; cd /repo && f && git push origin a", want: []push{{Dir: "", Sources: []string{"a"}}}},
+		{name: "a callee autoloaded after a call", command: "f() { ls; }; cd /repo && f; autoload ls; cd /repo && f && git push origin a", want: []push{{Dir: "", Sources: []string{"a"}}}},
 		{name: "a function that cds, never called", command: "f() { cd /x; }; git push origin a", want: []push{{Dir: "/repo", Sources: []string{"a"}}}},
 		{name: "a program's name, maybe redefined to cd", command: "if true; then ls() { cd /x; }; fi; cd /repo && ls && git push origin a", want: []push{{Dir: "", Sources: []string{"a"}}}},
+		// Called from a function's body, it is found by the walk of that body (unknownWord), not at the call.
+		{name: "a program's name, maybe redefined to cd, called by a function", command: "if true; then ls() { cd /x; }; fi; g() { ls; }; cd /repo && g && git push origin a", want: []push{{Dir: "", Sources: []string{"a"}}}},
+		{name: "a program's name, maybe defined to cd, called by a function", command: "false && ls() { cd /x; }; g() { ls; }; g && git push origin a", want: []push{{Dir: "", Sources: []string{"a"}}}},
 		{name: "zsh runs an anonymous function at once", command: "() {cd /x} && git push origin a", want: []push{{Dir: "/x", Sources: []string{"a"}}}},
 		{name: "an anonymous function as a pipeline's last element", command: "true | () {cd /x}; git push origin a", want: []push{{Dir: "", Sources: []string{"a"}}}},
 		// A definition chained with && or || is one element of the chain (mvdan.cc/sh reads the chain
@@ -262,6 +276,8 @@ func TestFindPushes(t *testing.T) {
 		{name: "env with an assignment that is not literal", command: `env PATH="$PWD/bin:$PATH" git push origin a`, want: []push{{Dir: "/repo", Sources: []string{"a"}}}},
 		{name: "find -exec a push", command: "find . -maxdepth 0 -exec git push origin a ;", want: []push{{Dir: "/repo", Sources: []string{"a"}}}},
 		{name: "find -execdir runs from each file's directory", command: "find . -name x -execdir git push origin a ;", want: []push{{Dir: "", Sources: []string{"a"}}}},
+		{name: "find -ok a push", command: "yes | find . -maxdepth 0 -ok git push origin a ;", want: []push{{Dir: "/repo", Sources: []string{"a"}}}},
+		{name: "find -okdir runs from each file's directory", command: "find /tmp/other -maxdepth 0 -okdir git push origin a \\; <<< y", want: []push{{Dir: "", Sources: []string{"a"}}}},
 		{name: "kubectl exec a push", command: "kubectl exec pod -- git push origin a", want: []push{{Dir: "/repo", Sources: []string{"a"}}}},
 		// A cd run by a child process (env, a wrapper, find -exec, kubectl exec) does not move the shell.
 		{name: "env cd", command: "env cd /tmp && git push origin a", want: []push{{Dir: "/repo", Sources: []string{"a"}}}},
@@ -688,6 +704,7 @@ func TestFindPushesBlocked(t *testing.T) {
 		{`f() { "$@"; }; f git update-ref refs/remotes/origin/main HEAD`, "can move origin/main"},
 		{`f() { "$@"; }; f git send-pack origin HEAD:main`, "pushes without running git's pre-push hook"},
 		{"nosuch-runner git config alias.x '!sh'", config},
+		{"find . -maxdepth 0 -okdir git config alias.x '!sh' ';' <<< y", config},
 	} {
 		t.Run(tt.command, func(t *testing.T) {
 			t.Parallel()
@@ -820,6 +837,30 @@ func TestFindPushesAllowed(t *testing.T) {
 	}
 }
 
+// Functions that call each other many times are followed once each: a chain of functions each calling
+// the next twice (and itself) would otherwise take time exponential in its length, past the hook's
+// timeout, which lets the command run.
+func TestFindPushesDeepCalls(t *testing.T) {
+	t.Parallel()
+	var b strings.Builder
+	for i := 1; i < 40; i++ {
+		fmt.Fprintf(&b, "f%d() { f%d; f%d; f%d; }; ", i, i+1, i+1, i)
+	}
+	b.WriteString("f40() { :; }; f1 && git push origin a; v=$(f1)") // no cd: every call is followed
+	done := make(chan analysis, 1)
+	go func() {
+		a, err := findPushes(b.String(), "/repo")
+		assert.NoError(t, err)
+		done <- a
+	}()
+	select {
+	case a := <-done:
+		assert.Equal(t, []push{{Dir: "/repo", Sources: []string{"a"}}}, a.Pushes)
+	case <-time.After(30 * time.Second):
+		t.Fatal("the walk of 40 functions calling each other did not finish in 30 s")
+	}
+}
+
 func TestFindPushesCalls(t *testing.T) {
 	t.Parallel()
 	got, err := findPushes("git status; cd /x && git ship origin a; git --git-dir=/y lg; echo a | xargs git ls", "/repo")
@@ -845,6 +886,7 @@ func TestFindPushesCalls(t *testing.T) {
 		"eval 'git ship origin main'",
 		"git rebase -x 'git ship origin main' HEAD~1",
 		"git bisect run git ship origin main",
+		"yes | find . -maxdepth 0 -ok git ship origin main ;",
 		// A function, or an alias or function of the shell's setup, may hand its arguments to git.
 		`f() { "$@"; }; f git ship origin main`,
 		`retry() { for i in 1 2 3; do "$@" && return 0; sleep 5; done; return 1; }; retry git ship origin main`,
@@ -941,6 +983,18 @@ func TestFindPushesCDPATH(t *testing.T) {
 	got, err = findPushes("cd /abs/sub && git push origin a", "/repo")
 	require.NoError(t, err)
 	assert.Equal(t, []push{{Dir: "/abs/sub", Sources: []string{"a"}}}, got.Pushes)
+}
+
+// The verdict on a function is kept per directory: a word in its body that names no program on PATH
+// but a directory where it is called is a cd there (AUTO_CD), and not elsewhere. With PATH empty, grep
+// is such a word.
+func TestFindPushesFunctionVerdictPerDirectory(t *testing.T) {
+	root := t.TempDir()
+	require.NoError(t, os.Mkdir(filepath.Join(root, "grep"), 0o755))
+	t.Setenv("PATH", t.TempDir())
+	got, err := findPushes("f() { grep; }; cd /nonexistent && f; cd "+root+" && f && git push origin a", root)
+	require.NoError(t, err)
+	assert.Equal(t, []push{{Dir: "", Sources: []string{"a"}}}, got.Pushes)
 }
 
 // zsh's AUTO_CD (on in the Bash tool's zsh) runs a lone directory name as a cd.

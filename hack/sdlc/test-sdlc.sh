@@ -501,6 +501,8 @@ echo 'kubeconfig*' >>.git/info/exclude
 touch kubeconfig.go
 # shellcheck source=hack/sdlc/lib.sh
 check "an ignored source file is not clean" 1 "$(source hack/sdlc/lib.sh && sdlc_clean && echo 0 || echo 1)"
+# shellcheck source=hack/sdlc/lib.sh
+check "the reason names it" "  ignored by git, but read by the checks: kubeconfig.go" "$(source hack/sdlc/lib.sh && sdlc_unclean 2>&1)"
 rm kubeconfig.go
 touch bin/tool.out
 # shellcheck source=hack/sdlc/lib.sh
@@ -509,6 +511,8 @@ check "ignored build outputs are clean" 0 "$(source hack/sdlc/lib.sh && sdlc_cle
 git update-index --skip-worktree main.go
 # shellcheck source=hack/sdlc/lib.sh
 check "a skip-worktree file is not clean" 1 "$(source hack/sdlc/lib.sh && sdlc_clean && echo 0 || echo 1)"
+# shellcheck source=hack/sdlc/lib.sh
+check "the reason names it" "  hidden from git status (assume-unchanged or skip-worktree): main.go" "$(source hack/sdlc/lib.sh && sdlc_unclean 2>&1)"
 git update-index --no-skip-worktree main.go
 git update-index --assume-unchanged main.go
 # shellcheck source=hack/sdlc/lib.sh

@@ -26,8 +26,8 @@ The machine was shared with up to 16 review and red-team agents during most runs
 |---------|--------|
 | `go vet ./hack/sdlc/...`; `golangci-lint run --no-config ./hack/sdlc/...` | passed, 0 issues |
 | `shellcheck hack/sdlc/*.sh hack/ci/lint-shell.sh`; `make ci-shell`; `actionlint` | passed |
-| `go test -race -count=1 ./hack/sdlc/...` | passed: `pushcheck` and `sarifgate`, 709 tests (counted with `-json`) |
-| `bash hack/sdlc/test-sdlc.sh` (the gate end to end in scratch repositories with a bare remote, and check.sh with stub make targets) | passed: 206 passed, 0 failed; also with `GOFLAGS=-mod=readonly` (as CI sets it), `PATROL_SDLC_BASE=HEAD~1` and `CI_GO_TEST_FLAGS=-short` set |
+| `go test -race -count=1 ./hack/sdlc/...` | passed: `pushcheck` and `sarifgate`, 721 tests (counted with `-json`) |
+| `bash hack/sdlc/test-sdlc.sh` (the gate end to end in scratch repositories with a bare remote, and check.sh with stub make targets) | passed: 208 passed, 0 failed; also with `GOFLAGS=-mod=readonly` (as CI sets it), `PATROL_SDLC_BASE=HEAD~1` and `CI_GO_TEST_FLAGS=-short` set |
 | The suite in a scratch copy of the tree with the review diff's `--text --no-textconv` removed | its two new checks fail (`-diff` and a textconv driver hide main.go's content) |
 | `GOOS=linux CGO_ENABLED=0 GOWORK=off go vet ./...` on macOS (the step check.sh now adds off Linux) | passed, in 3 minutes from a cold cache |
 | A graft making HEAD a root and origin/main its child, in a scratch repository (`graft-check.sh` in the scratchpad), and pushcheck without its graft setting (`graftmut/mutate.py`) | without `hack/sdlc/lib.sh` the changed files are `[]`, with it `[main.go]`; the mutant fails `TestGatePushRunsTheBaseGate` |
@@ -40,13 +40,14 @@ The machine was shared with up to 16 review and red-team agents during most runs
 | Targeted mutants of the twentieth round's changes (`structural20.py` in the scratchpad: the statement-time walk of a statement's words, its substitutions and the statements it leaves to stmt, the function body's placeholder directory and callRun's two placements, a body's pushes, hook functions, a call's and a child walker's use of the body's runs, AUTO_CD's builtin-only skip, the clean-gate-files condition for unread code, sarifgate's level `none` and numeric severity) | 16 mutants, all caught (two survived a first run and got tests: a probe repeated for nested statements, and a relative `cd` in a body) |
 | Targeted mutants of the twenty-first round's changes (`structural21.py` in the scratchpad: the walk of an exit fallback and its unknown directory, callRun under CDPATH and HOME, the dedup of recorded code, a maybe-defined function's record at the call and what a child walker knows, AUTO_CD in a body and beside a maybe-defined function, changesDir at named and anonymous function bodies, the remote helpers in the walker, the text net and checkSubcommands, the refusal of unreadable input) | 17 mutants, all caught (three survived a first run and got tests) |
 | Targeted mutants of the twenty-second round's changes (`structural22.py` in the scratchpad: `git config`'s stop at the first positional and its subcommands, git walked among a function's or unknown word's arguments and its data guard, the silent gate's message; and, through the shell suite, each trigger check.sh gained or widened: ci-ui for the OpenAPI document, ci-scripts for the CRDs and their types, every package for a file outside every package and the files that do not count, the image's offline pin checks) | 25 mutants (10 in Go, 15 in check.sh), all caught (two survived a first run: a read flag before two positionals got a test, and check.sh's own go.mod rule, which the rule for a file outside every package now covers, was removed) |
+| Targeted mutants of the twenty-third round's changes (`structural23.py` in the scratchpad: unknownWord's guard for a maybe-defined function, find's `-ok` and `-okdir`, the verdicts unknownWord keeps (used, kept only when no recursion was cut short further up, the cut recorded and passed up, keyed by directory, cleared at a definition and by `autoload`), sarifgate's fingerprint line, and through the shell suite the reasons a tree is not clean) | 14 mutants, all caught (four survived a first run and got stronger tests: the deep chain now ends without a cd, the recursion cases go through a substitution's walker, and a third function passes the cut up) |
 | A replace ref giving `origin/main` HEAD's tree, in a scratch repository (`replace-check.sh` in the scratchpad) | without `hack/sdlc/lib.sh` the changed files are `[]`; with it, `[main.go]` |
 | `PATH="$PWD/bin:$PATH" go test -race -count=1 ./internal/git/...` (git-lfs 3.7.1 in `bin/`) | passed on `c409428` (and `./internal/reposerver/...` on `6f9f985`); TestLFS passed again after its change to a git wrapper |
 | TestLFS against a client without its LFS filter settings (`go test -overlay`, `lfsmut.sh` in the scratchpad) | fails through the wrapper that skips the system gitconfig; passes when git reads a system config that sets the filter, as the test did before on GitHub's runner |
 
 ## Agent review
 
-Twenty-two runs of `.claude/workflows/sdlc-review.js` on successive trees, each verified finding fixed
+Twenty-three runs of `.claude/workflows/sdlc-review.js` on successive trees, each verified finding fixed
 before the next run:
 
 | Tree | Blocking (verified) | Minor | Refuted |
@@ -73,6 +74,7 @@ before the next run:
 | `ecce621` | 7 | 6 | 0 |
 | `03bda33` | 4 | 5 | 0 |
 | `8043d72` | 2 | 4 | 0 |
+| `6e62649` | 2 | 6 | 0 |
 
 Most findings were ways around the Claude Code hook (shell and git constructs it read differently
 from bash, zsh or git) and tests that could not fail. The seventh run's were six untested branches
@@ -319,6 +321,26 @@ so a configuration write, a write under `refs/remotes/` or a remote helper among
 refused, not only a push or an alias; a gate that refuses without output has a test; and check.sh
 runs the image's offline pin checks (`image-verify-pins --offline`: the Dockerfile's Go and pnpm
 against `go.mod` and `ui/package.json`) when one of those files or `hack/images/` changes.
+
+The twenty-third run found 2 blocking findings. One was a missing test: unknownWord's guard for a
+function that may be defined, named after a program and called from another function's body, had
+none (the case written for it called the name at top level, which the call already covers); two
+cases now fail without it. The other: `core.hooksPath` is the relative `.githooks`, which git
+resolves against the directory it runs hooks from, so git's hook does not run for a push given this
+clone's git directory from outside the work tree (`--git-dir` or `GIT_DIR` from another directory, a
+push from inside `.git`). The Claude Code hook refuses those forms on a command line, but a script or
+another tool that pushes so is not covered, as the guide claimed. An absolute path needs
+`extensions.worktreeConfig` for linked worktrees and stops working, silently for git, when the clone
+moves, so the guide's claim is narrowed and its Limits list the gap; #231 tracks a fix. All 6 minor
+findings were addressed: find's `-ok` and `-okdir` are walked as `-exec` and `-execdir`; unknownWord
+keeps its verdict on each function (by directory, CDPATH and HOME; cleared when a definition changes
+what a name runs; not kept when recursion cut the walk short at a function further up), so 40
+functions each calling the next twice are followed in milliseconds rather than in time exponential in
+their number, past the hook's timeout (18 took 55 s), and a child walker asks about the functions in a
+fixed order; sarifgate's report test rules out a fingerprint for a result that does not fail; a dirty
+tree's message lists what makes it dirty (an ignored file the checks read, such as a UI build in
+`internal/ui/dist`, does not show in `git status`); the static preflight checks for jq, which
+ci-static's SDLC tests need; and the Limits name GitHub's API, which writes commits without a push.
 
 ## Red team
 

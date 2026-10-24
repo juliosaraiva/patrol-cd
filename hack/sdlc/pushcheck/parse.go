@@ -2,6 +2,8 @@ package main
 
 import (
 	"bytes"
+	"maps"
+	"math"
 	"os"
 	"os/exec"
 	"path"
@@ -270,7 +272,9 @@ type walker struct {
 	cdpath     bool                      // CDPATH was set in the command: a relative cd may go elsewhere
 	homeSet    bool                      // HOME was set in the command: a word starting with ~ is not literal
 	funcs      map[string]*syntax.Stmt   // functions the command defines, with their bodies
-	calling    map[string]bool           // the functions unknownWord is following (recursion)
+	calling    map[string]int            // the functions unknownWord is following (recursion), by depth
+	cut        int                       // the least depth of such a function a recursion stopped at
+	cdMemo     map[cdKey]bool            // unknownWord's verdict on a defined function, by name and context
 	cdFuncs    map[string]bool           // functions defined where the definition may not run, whose body may cd
 	topFuncs   map[*syntax.FuncDecl]bool // definitions that certainly run in this shell
 	inEval     int                       // inside eval, whose definitions may sit in a branch
@@ -279,6 +283,16 @@ type walker struct {
 	body       []string                  // the names of the function whose body is being walked, at its definition
 	funcUnread map[string][]unknownRun   // the code each function's body runs that the walker could not read
 	defined    map[string]bool           // functions whose definition certainly ran in this shell (or its parent)
+}
+
+// noCut is walker.cut when no recursion was stopped.
+const noCut = math.MaxInt
+
+// cdKey is what unknownWord's verdict on a function depends on: its name, and the directory, CDPATH
+// and HOME its body's AUTO_CD words resolve against.
+type cdKey struct {
+	name, dir       string
+	cdpath, homeSet bool
 }
 
 // bodyDir is the directory a function body is walked from: it stands for the directory of each call,
@@ -311,9 +325,9 @@ const (
 )
 
 func newWalker(dir, src string) *walker {
-	return &walker{dir: dir, src: src, funcs: map[string]*syntax.Stmt{}, calling: map[string]bool{},
-		cdFuncs: map[string]bool{}, topFuncs: map[*syntax.FuncDecl]bool{}, funcUnread: map[string][]unknownRun{},
-		defined: map[string]bool{}}
+	return &walker{dir: dir, src: src, funcs: map[string]*syntax.Stmt{}, calling: map[string]int{},
+		cut: noCut, cdMemo: map[cdKey]bool{}, cdFuncs: map[string]bool{}, topFuncs: map[*syntax.FuncDecl]bool{},
+		funcUnread: map[string][]unknownRun{}, defined: map[string]bool{}}
 }
 
 // child is a walker for code that runs in a child of this shell (a substitution, a shell the command
@@ -333,11 +347,12 @@ func (w *walker) child(dir, src string) *walker {
 	for name := range w.defined {
 		c.defined[name] = true
 	}
-	for name, body := range w.funcs {
+	// In a fixed order: unknownWord keeps its verdicts, so the order it is asked in must not vary.
+	for _, name := range slices.Sorted(maps.Keys(w.funcs)) {
 		if w.unknownWord(name) {
 			c.cdFuncs[name] = true
 		} else {
-			c.funcs[name] = body
+			c.funcs[name] = w.funcs[name]
 		}
 	}
 	return c
@@ -742,6 +757,7 @@ func (w *walker) cmd(s *syntax.Stmt) {
 			case mayCD:
 				w.cdFuncs[n.Value] = true
 			}
+			clear(w.cdMemo) // a call of the name now runs other code
 		}
 		saved, body, pushes := w.dir, w.body, len(w.pushes)
 		w.dir, w.body = bodyDir, nil
@@ -1518,6 +1534,7 @@ prefix:
 			}
 			if !strings.HasPrefix(a, "-") && !strings.HasPrefix(a, "+") {
 				w.cdFuncs[a] = true
+				clear(w.cdMemo)
 			}
 		}
 	case name == "hash": // hash -p PATH NAME, zsh's hash NAME=PATH: the name runs another program
@@ -1610,12 +1627,28 @@ func (w *walker) unknownWord(word string) bool {
 		return true // a function that may be defined, and may cd, whatever else the name is
 	}
 	if body, ok := w.funcs[name]; ok && !strings.Contains(word, "/") {
-		if w.calling[name] {
+		if depth, ok := w.calling[name]; ok {
+			w.cut = min(w.cut, depth)
 			return false // recursion: the body is being looked at already
 		}
-		w.calling[name] = true
-		defer delete(w.calling, name)
-		return w.changesDir(body)
+		// Each verdict is kept, so functions that call each other many times are followed once each
+		// (a chain of functions each calling the next twice would otherwise take time exponential in
+		// its length, past the hook's timeout). The body's AUTO_CD words depend on the directory.
+		key := cdKey{name, w.dir, w.cdpath, w.homeSet}
+		if v, ok := w.cdMemo[key]; ok {
+			return v
+		}
+		depth, outer := len(w.calling)+1, w.cut
+		w.calling[name], w.cut = depth, noCut
+		v := w.changesDir(body)
+		delete(w.calling, name)
+		if v || w.cut >= depth {
+			// Not a "no" that took a function further up the stack not to cd: called from elsewhere,
+			// that function may.
+			w.cdMemo[key] = v
+		}
+		w.cut = min(outer, w.cut)
+		return v
 	}
 	if strings.Contains(word, "/") || knownCommand(name) {
 		return false
@@ -1896,7 +1929,9 @@ func (w *walker) watch(args []string, lit []bool) {
 // and of -execdir, which runs from each file's directory (unknown here).
 func (w *walker) findExec(args []string, lit []bool) {
 	for i := 1; i < len(args); i++ {
-		if !lit[i] || (args[i] != "-exec" && args[i] != "-execdir") {
+		// -ok and -okdir run their command as -exec and -execdir do once their prompt is answered
+		// (from standard input).
+		if !lit[i] || (args[i] != "-exec" && args[i] != "-execdir" && args[i] != "-ok" && args[i] != "-okdir") {
 			continue
 		}
 		end := i + 1
@@ -1905,7 +1940,7 @@ func (w *walker) findExec(args []string, lit []bool) {
 		}
 		if end > i+1 {
 			dir := w.dir
-			if args[i] == "-execdir" {
+			if args[i] == "-execdir" || args[i] == "-okdir" {
 				dir = ""
 			}
 			w.inChild(dir, args[i+1:end], lit[i+1:end], nil)

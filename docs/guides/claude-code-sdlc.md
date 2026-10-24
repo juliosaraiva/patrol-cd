@@ -54,12 +54,16 @@ one undone before the end, which HEAD's reflog shows).
 
 When every check passed on a **clean** tree, it writes a record for HEAD's tree
 (`git rev-parse HEAD^{tree}`) to `$(git rev-parse --git-common-dir)/patrol-sdlc/checks/<tree>`. A
-dirty tree is checked but not recorded, and `--no-codeql` (`make sdlc-check SDLC_CHECK_FLAGS=--no-codeql`,
+dirty tree is checked but not recorded; the run lists what makes it dirty: a change, an untracked
+file, a file marked assume-unchanged or skip-worktree, or an ignored file the checks read, which
+`git status` does not show (a UI build that `make ui-build` copied into `internal/ui/dist`, which Go
+embeds: `make ui-clean` removes it). `--no-codeql` (`make sdlc-check SDLC_CHECK_FLAGS=--no-codeql`,
 for quick iterations) records nothing either. Records are keyed by tree, so amending a commit or
 adding one needs a new run, and rebasing onto a new `main` changes the tree too.
 
 The test suites need what CI installs: envtest assets (`make envtest`), kustomize, helm, git-lfs,
-gpg and sshd. A missing tool turns into a forbidden skip and fails the run, as on CI
+gpg and sshd, and `make ci-static` needs jq (its SDLC tests feed the Claude Code hook with it);
+`hack/ci/preflight.sh static unit` lists what is missing. A missing tool turns into a forbidden skip and fails the run, as on CI
 (`hack/ci/allowed-skips.txt`); install it (for example `brew install git-lfs`).
 
 ## CodeQL
@@ -149,7 +153,8 @@ Two hooks run it:
   `core.hooksPath` for the clone and, with `extensions.worktreeConfig`, for the work tree it runs in,
   whose own value then wins). It is the authority: git gives it the commits actually being pushed, so a
   commit made in the same command line (`git commit … && git push`), a push from a script, an
-  alias or another tool are all checked. A person can bypass it in an emergency with
+  alias or another tool are all checked when git runs in the work tree (a push given the git
+  directory from outside it is not: the Limits). A person can bypass it in an emergency with
   `git push --no-verify`.
 - **the Claude Code hook** (`hack/sdlc/claude-pre-push.sh`, a `PreToolUse` hook in
   `.claude/settings.json` for the tools that run commands: Bash, Monitor, the terminal, and the browser
@@ -364,8 +369,16 @@ A second hook (`hack/sdlc/claude-format.sh`, `PostToolUse` for Edit, MultiEdit a
   not place a push in this one, and an alias that pushes does not push from another one. An alias
   or function that shadows a program on PATH or a builtin (`make`, `ls`, `echo`) is not seen, nor
   is an alias of the setup that skips git's hook on its own (one that runs `git push --no-verify`). git's
-  pre-push hook (required before any command runs) checks the pushes they make in this clone; a
-  script or program that disables git's hook on purpose gets past both.
+  pre-push hook (required before any command runs) checks the pushes they make in this clone's work
+  trees; a script or program that disables git's hook on purpose gets past both.
+- `core.hooksPath` is the relative `.githooks`, which git resolves against the directory it runs
+  hooks from: the top of the work tree it found or, when it is given the git directory (`--git-dir`,
+  `GIT_DIR`) without a work tree, its current directory; inside `.git` it has no work tree. So git's
+  hook does not run for a push given this clone's git directory from outside the work tree
+  (`git --git-dir=…/.git push` from another directory, `cd .git && git push`). The Claude Code hook
+  refuses those forms on a command line, not in a script or another tool. An absolute path would
+  need `extensions.worktreeConfig` for linked worktrees and stop working, silently for git, when the
+  clone moves; #231 tracks a fix.
 - The Claude Code hook checks the gate, and `core.hooksPath`, as they are before the command runs. A
   command line that commits and also turns git's hook off on the way without naming it (a program
   or an editor that rewrites `.git/config` or the hook) pushes the new commit unchecked.
@@ -389,7 +402,9 @@ A second hook (`hack/sdlc/claude-format.sh`, `PostToolUse` for Edit, MultiEdit a
   belongs on GitHub, in branch protection or a ruleset on `main` that requires CI, CodeQL and a
   review (#25, #220). None applies yet: until the owner turns it on, a push to `main` that gets past
   the local hooks lands there directly, and the owner's merge decision on a pull request is the only
-  other check.
+  other check. GitHub's API writes commits and moves branches without any push (`gh api` on a
+  repository's `contents`, `git/refs` or `merges`, a pull request's update-branch), so neither hook
+  sees it; only branch protection would.
 - A check run takes most of an hour, and records for the tree it started on. A file edited during
   the run and restored by hand before its end is not seen (HEAD moving is).
 - The checks run the tools on PATH, `bin/` first (which the clean-tree rule does not inspect), and

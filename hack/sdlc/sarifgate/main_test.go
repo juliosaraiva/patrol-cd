@@ -104,7 +104,8 @@ func TestRun(t *testing.T) {
 				"suppressed error   go/log-injection internal/d/d.go:40",
 				"info       note    go/useless-assignment internal/c/c.go:7",
 			},
-			notWant: []string{"unused baseline line"},
+			// Only a failing result prints its fingerprint, to be copied into the baseline.
+			notWant: []string{"unused baseline line", "fingerprint aaa:1", "fingerprint bbb:1", "fingerprint ccc:1", "fingerprint ddd:1"},
 		},
 		{
 			name: "a line for another file does not accept, and is reported as unused",
