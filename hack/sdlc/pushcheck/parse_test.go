@@ -3,6 +3,7 @@ package main
 import (
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
@@ -42,7 +43,10 @@ func TestFindPushes(t *testing.T) {
 		{name: "brace expansion makes several arguments", command: "git push {origin,main}", want: []push{{Dir: "/repo", Sources: []string{"main"}}}},
 		{name: "zsh brace group without spaces", command: "{git push origin a}", want: []push{{Dir: "/repo", Sources: []string{"a"}}}},
 		{name: "zsh brace group keeps a ref's braces", command: "{git push origin HEAD@{1}:refs/heads/x}", want: []push{{Dir: "/repo", Sources: []string{"HEAD@{1}"}}}},
-		{name: "zsh - precommand", command: "- git push origin a", want: []push{{Dir: "/repo", Sources: []string{"a"}}}},
+		{name: "command -p and -- run the command", command: "command -p git -C /other push origin main", want: []push{{Dir: "/other", Sources: []string{"main"}}}},
+		{name: "command -v prints, then command -p runs", command: "command -v notgit; command -p git push origin a", want: []push{{Dir: "/repo", Sources: []string{"a"}}}},
+		{name: "command -p cd in a bash script", command: "bash -c 'command -p cd /x && git push origin a'", want: []push{{Dir: "/x", Sources: []string{"a"}}}},
+		{name: "builtin -- cd", command: "builtin -- cd /x && git push origin a", want: []push{{Dir: "/x", Sources: []string{"a"}}}},
 
 		// git push tag forms.
 		{name: "push a tag by the tag keyword", command: "git push origin tag v0.1.0", want: []push{{Dir: "/repo", Sources: []string{"refs/tags/v0.1.0"}}}},
@@ -155,6 +159,8 @@ func TestFindPushes(t *testing.T) {
 		{name: "a function maybe defined, named echo", command: "false && echo() { cd /x; }; echo hi; git push origin a", want: []push{{Dir: "", Sources: []string{"a"}}}},
 		{name: "a function that cds, in a shell the command runs", command: "ls() { cd /x; }; bash -c 'ls && git push origin a'", want: []push{{Dir: "", Sources: []string{"a"}}}},
 		{name: "a function without a cd, in a shell the command runs", command: "f() { :; }; bash -c 'cd /x && git push origin a'", want: []push{{Dir: "/x", Sources: []string{"a"}}}},
+		{name: "a trap calls a function without a cd", command: "cleanup() { rm -f x; }; trap cleanup EXIT; git push origin a", want: []push{{Dir: "/repo", Sources: []string{"a"}}}},
+		{name: "a function without a cd is no unknown word in a shell", command: "f() { :; }; bash -c 'f; git push origin a'", want: []push{{Dir: "/repo", Sources: []string{"a"}}}},
 		{name: "a function maybe defined, in a shell the command runs", command: "false && ls() { cd /x; }; bash -c 'ls && git push origin a'", want: []push{{Dir: "", Sources: []string{"a"}}}},
 		{name: "env runs the program, not a function of its name", command: "bash() { :; }; env bash -c 'cd /x && git push origin a'", want: []push{{Dir: "/x", Sources: []string{"a"}}}},
 		{name: "a wrapper runs the program, not a function of its name", command: "bash() { :; }; nohup bash -c 'cd /x && git push origin a'", want: []push{{Dir: "/x", Sources: []string{"a"}}}},
@@ -177,6 +183,17 @@ func TestFindPushes(t *testing.T) {
 		{name: "a glob qualifier's code may cd", command: "echo *(e:'cd /x; true':) && git push origin a", want: []push{{Dir: "", Sources: []string{"a"}}}},
 		{name: "a function whose glob qualifier may cd", command: "f() { echo *(e:'cd /x; true':); }; f && git push origin a", want: []push{{Dir: "", Sources: []string{"a"}}}},
 		{name: "a +function glob qualifier may cd", command: "ls *(+myfn) && git push origin a", want: []push{{Dir: "", Sources: []string{"a"}}}},
+		// zsh globs, and runs a qualifier's code, wherever it expands words, before the command.
+		{name: "a glob qualifier in an array assignment", command: "x=(*(e:'cd /x; true':)) && git push origin a", want: []push{{Dir: "", Sources: []string{"a"}}}},
+		{name: "a glob qualifier in a typeset array", command: "typeset -a y=(*(e:'cd /x; true':)) && git push origin a", want: []push{{Dir: "", Sources: []string{"a"}}}},
+		{name: "a glob qualifier in a for list", command: "for f in *(e:'cd /x; true':); do git push origin a; done", want: []push{{Dir: "", Sources: []string{"a"}}}},
+		{name: "a glob qualifier in a redirection", command: "echo hi > *(e:'cd /x; true':) && git push origin a", want: []push{{Dir: "", Sources: []string{"a"}}}},
+		{name: "a glob qualifier runs before its command", command: "git push origin a 2>*(e:'cd /x; true':)", want: []push{{Dir: "", Sources: []string{"a"}}}},
+		{name: "a glob qualifier in a background job", command: "x=(*(e:'cd /x; true':)) & git push origin a", want: []push{{Dir: "/repo", Sources: []string{"a"}}}},
+		{name: "a function whose array assignment may cd", command: "f() { x=(*(e:'cd /x; true':)); }; f && git push origin a", want: []push{{Dir: "", Sources: []string{"a"}}}},
+		// zsh's functions -c and autoload define a function under a name the walker may read as a program.
+		{name: "a function copied under a program's name", command: "f() { cd /x; }; functions -c f ls; ls && git push origin a", want: []push{{Dir: "", Sources: []string{"a"}}}},
+		{name: "an autoloaded function with a program's name", command: "autoload ls; ls && git push origin a", want: []push{{Dir: "", Sources: []string{"a"}}}},
 		{name: "a function whose +function glob qualifier may cd", command: "f() { ls *(+myfn); }; f && git push origin a", want: []push{{Dir: "", Sources: []string{"a"}}}},
 		{name: "zsh --emulate takes a value", command: "zsh --emulate sh -c 'cd /x && git push origin a'", want: []push{{Dir: "/x", Sources: []string{"a"}}}},
 		{name: "a script piped to zsh --emulate", command: "echo 'git push origin a' | zsh --emulate sh", want: []push{{Dir: "/repo", Sources: []string{"a"}}}},
@@ -317,7 +334,8 @@ func TestFindPushesBlocked(t *testing.T) {
 		{"tcsh -c 'git push --no-verify origin a'", "through tcsh"},
 		{"fish -C 'git push --no-verify origin a'", "through fish"},
 		{". ./env.sh; git push origin a", "sourced earlier"},
-		{"command -v notgit; command -p git push origin a", "command with options"},
+		{"command -V git push origin a", "command with options"},
+		{"- git push origin a", "a git push run through -"}, // `-` is an alias in oh-my-zsh (cd -), not the precommand
 		{"exec -a x git push origin a", "exec with options"},
 		{"env -S 'git push origin a'", "env with options"},
 		// Fail-closed branches of a shell script.
@@ -547,7 +565,7 @@ func TestFindPushesBlocked(t *testing.T) {
 		// The fallback text check reads git's global options and their values, and git by its path.
 		{`bash -c "git -C $D push origin main"`, "a git push through a shell argument that is not literal"},
 		{`eval "git -C $D push origin main"`, "a git push through eval"},
-		{"command -p git -C /other push origin main", "a git push through command with options"},
+		{"command -pv git -C /other push origin main", "a git push through command with options"},
 		{"zsh -c 'git -C /other push origin main; print -l ${(f)x}'", "cannot parse the shell script"},
 		{"printf 'git -C /other push origin main' | bash", "a git push through a script piped to a shell"},
 		{"parallel ::: 'git -C /x push origin a'", "through parallel"},
@@ -597,6 +615,15 @@ func TestFindPushesBlocked(t *testing.T) {
 		// A function the command defines runs with a push in its arguments.
 		{`f() { "$@"; }; f git push origin a`, "a git push run through f"},
 		{`bash() { cd /other; command bash "$@"; }; bash -c 'git push origin a'`, "a git push run through bash"},
+		{`f() { "$@"; }; f git $'push' origin a`, "a git push run through f"},
+		{`f() { "$@"; }; f git pu\sh origin a`, "a git push run through f"},
+		// A glob qualifier's code with a push, wherever zsh globs.
+		{"x=(*(e:'git push origin a':))", "a git push through a zsh glob qualifier"},
+		{"for f in *(e:'git push origin a':); do :; done", "a git push through a zsh glob qualifier"},
+		{"local y=(*(e:'git push origin a':))", "a git push through a zsh glob qualifier"},
+		{"x=(*(e:'git push origin a':)) &", "a git push through a zsh glob qualifier"},
+		// A trap action the hook cannot read may cd before any later command.
+		{`trap "$a" DEBUG; git push origin a`, "a trap action the hook cannot read"},
 		// One-letter abbreviations of a long option git accepts.
 		{"git ls-remote --u='git push origin main' .", runsStep},
 		{"git clone --u='git push origin main' /tmp/r.git d", runsStep},
@@ -729,6 +756,9 @@ func TestFindPushesAllowed(t *testing.T) {
 			require.NoError(t, err)
 			assert.Empty(t, got.Blocked, "pushes: %+v", got.Pushes)
 			assert.Empty(t, got.Pushes)
+			for _, u := range got.Unknown { // main.run lets an unknown word run only in the clone
+				assert.True(t, u.Dir == "/repo" || strings.HasPrefix(u.Dir, "/repo/"), "%+v", u)
+			}
 		})
 	}
 }
@@ -758,10 +788,43 @@ func TestFindPushesCalls(t *testing.T) {
 		"eval 'git ship origin main'",
 		"git rebase -x 'git ship origin main' HEAD~1",
 		"git bisect run git ship origin main",
+		// A function, or an alias or function of the shell's setup, may hand its arguments to git.
+		`f() { "$@"; }; f git ship origin main`,
+		`retry() { for i in 1 2 3; do "$@" && return 0; sleep 5; done; return 1; }; retry git ship origin main`,
+		`f() { "$@"; }; f git -C . ship origin main`,
+		"nosuch-runner git ship origin main",
 	} {
 		got, err := findPushes(command, "/repo")
 		require.NoError(t, err)
 		assert.Contains(t, got.Calls, "ship", command)
+	}
+	// A program on PATH that is not a runner the walker models takes git as data (a package to install).
+	got, err = findPushes("ls git ship", "/repo")
+	require.NoError(t, err)
+	assert.Empty(t, got.Calls)
+}
+
+// A command word the walker does not know (an alias or function of the shell's setup, or a program
+// not on PATH) may push, so main.go learns where it runs; one run as a program (after command, env or
+// a wrapper) is no alias or function.
+func TestFindPushesUnknownWords(t *testing.T) {
+	t.Parallel()
+	for _, tt := range []struct {
+		command string
+		want    []unknownRun
+	}{
+		{"nosuch-gp origin main", []unknownRun{{Dir: "/repo", Word: "nosuch-gp"}}},
+		{"cd /other && nosuch-gp origin main", []unknownRun{{Dir: "/other", Word: "nosuch-gp"}}},
+		{"nosuch-z x && nosuch-gp", []unknownRun{{Dir: "/repo", Word: "nosuch-z"}, {Dir: "", Word: "nosuch-gp"}}},
+		{"cd /other && cd /repo && - && true", []unknownRun{{Dir: "/repo", Word: "-"}}},
+		{"x=$(nosuch-gp)", []unknownRun{{Dir: "/repo", Word: "nosuch-gp"}}},
+		{"cd /other && bash -c 'nosuch-gp origin main'", []unknownRun{{Dir: "/other", Word: "nosuch-gp"}}},
+		{"command nosuch-gp; env nosuch-gp; nohup nosuch-gp", nil},
+		{"f() { :; }; f; ls; true", nil},
+	} {
+		got, err := findPushes(tt.command, "/repo")
+		require.NoError(t, err)
+		assert.Equal(t, tt.want, got.Unknown, tt.command)
 	}
 }
 
@@ -788,6 +851,7 @@ func TestFindPushesAutoCD(t *testing.T) {
 		{"dirs && git push origin a", root},                   // so does a builtin that is no program on PATH
 		{"sub() { :; }; sub && git push origin a", root},      // and a function the command defines
 		{"sub() { :; }; true | sub; git push origin a", root}, // also where only changesDir looks
+		{"true | ./sub; git push origin a", ""},               // a path to a directory is AUTO_CD there too
 		{"sub && git push origin a", filepath.Join(root, "sub")},
 		{"./sub && git push origin a", filepath.Join(root, "sub")},
 		{"sub; git push origin a", ""},             // the cd may fail

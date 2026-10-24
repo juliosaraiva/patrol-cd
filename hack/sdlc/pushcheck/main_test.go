@@ -50,6 +50,8 @@ func TestRunFailsClosed(t *testing.T) {
 		{name: "push plumbing", command: "git send-pack origin HEAD", want: 2, reason: tokenNet},
 		{name: "a safe GIT_* variable", command: "GIT_AUTHOR_NAME=x GIT_EDITOR=true git commit --amend --no-edit", want: 0},
 		{name: "a git alias", command: "git ship origin main", want: 2, reason: "git ship: not a git command but an alias"},
+		{name: "a git alias through a function", command: `f() { "$@"; }; f git ship origin main`, want: 2, reason: "git ship: not a git command but an alias"},
+		{name: "an alias of the shell's setup outside this clone", command: "nosuch-gp origin main", want: 2, reason: "outside "},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
@@ -60,6 +62,33 @@ func TestRunFailsClosed(t *testing.T) {
 			assert.Equal(t, tt.want, run(bytes.NewReader(in), &stderr, t.TempDir()), stderr.String())
 			assert.Contains(t, stderr.String(), tt.reason)
 		})
+	}
+}
+
+// A command word the walker does not know may be an alias that pushes (oh-my-zsh's gp): it runs in
+// this clone, or a subdirectory, and not in another repository or a directory the hook cannot tell.
+func TestRunUnknownWords(t *testing.T) {
+	t.Parallel()
+	root, other := t.TempDir(), t.TempDir()
+	gitIn(t, root, "init", "-q")
+	gitIn(t, other, "init", "-q")
+	require.NoError(t, os.Mkdir(filepath.Join(root, "sub"), 0o755))
+	for _, tt := range []struct {
+		command string
+		want    int
+		reason  string
+	}{
+		{"nosuch-gp origin main", 0, ""},
+		{"cd sub && nosuch-gp origin main", 0, ""},
+		{"cd " + other + " && nosuch-gp origin main", 2, "it would run in " + other + ", outside " + root},
+		{"nosuch-z x && nosuch-gp origin main", 2, "a directory the hook cannot tell"},
+		{"cd " + other + " && command nosuch-gp origin main", 0, ""}, // command runs a program: no alias
+	} {
+		in, err := json.Marshal(map[string]any{"cwd": root, "tool_input": map[string]string{"command": tt.command}})
+		require.NoError(t, err)
+		var stderr bytes.Buffer
+		assert.Equal(t, tt.want, run(bytes.NewReader(in), &stderr, root), "%s: %s", tt.command, stderr.String())
+		assert.Contains(t, stderr.String(), tt.reason, tt.command)
 	}
 }
 
@@ -186,10 +215,13 @@ func TestGatePushChecksTheGateFiles(t *testing.T) {
 	gitIn(t, root, "commit", "-q", "--allow-empty", "-m", "base, without a gate")
 	gitIn(t, root, "update-ref", "refs/remotes/origin/main", "HEAD")
 	gate, hook := filepath.Join(root, "hack", "sdlc", "gate.sh"), filepath.Join(root, ".githooks", "pre-push")
+	settings := filepath.Join(root, ".claude", "settings.json")
 	require.NoError(t, os.MkdirAll(filepath.Dir(gate), 0o755))
 	require.NoError(t, os.MkdirAll(filepath.Dir(hook), 0o755))
+	require.NoError(t, os.MkdirAll(filepath.Dir(settings), 0o755))
 	require.NoError(t, os.WriteFile(gate, []byte("#!/bin/sh\necho \"gate saw $1\"\nexit 1\n"), 0o755))
 	require.NoError(t, os.WriteFile(hook, []byte("#!/bin/sh\nexit 0\n"), 0o755))
+	require.NoError(t, os.WriteFile(settings, []byte("{}\n"), 0o644))
 	gitIn(t, root, "add", "-A")
 	gitIn(t, root, "commit", "-q", "-m", "gate")
 	gitIn(t, root, "config", "core.hooksPath", ".githooks")
@@ -208,6 +240,11 @@ func TestGatePushChecksTheGateFiles(t *testing.T) {
 	require.NoError(t, os.WriteFile(gate, []byte("#!/bin/sh\nexit 0\n"), 0o755))
 	assert.Contains(t, gatePush(p, root), "uncommitted changes", "an edited gate does not decide")
 	gitIn(t, root, "commit", "-q", "-am", "gate passes")
+	assert.Empty(t, gatePush(p, root))
+	// The Claude Code hook's settings are a gate file too.
+	require.NoError(t, os.WriteFile(settings, []byte("{\"hooks\": {}}\n"), 0o644))
+	assert.Contains(t, gatePush(p, root), "uncommitted changes", "an edited hook setting does not decide")
+	gitIn(t, root, "checkout", "-q", "--", ".claude/settings.json")
 	assert.Empty(t, gatePush(p, root))
 	// A form the gate cannot check ref by ref is refused, even with the gate passing.
 	for _, command := range []string{"git push --tags origin", "git push --all origin", "git push origin :",
@@ -385,7 +422,8 @@ func TestGatePushGatesEverySource(t *testing.T) {
 	other, err := gitOut(root, "rev-parse", "other")
 	require.NoError(t, err)
 
-	for _, sources := range [][]string{{"main", "other"}, {"other", "main"}} {
+	// A source that does not resolve yet is left to git's hook; the others are still gated.
+	for _, sources := range [][]string{{"main", "other"}, {"other", "main"}, {"other", "no-such-branch"}, {"no-such-branch", "other"}} {
 		assert.Contains(t, gatePush(push{Dir: root, Sources: sources}, root), "gate refused "+other, sources)
 	}
 	a, err := findPushes("git push origin main other", root)

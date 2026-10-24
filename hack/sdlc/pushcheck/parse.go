@@ -25,10 +25,19 @@ type push struct {
 	Refused string // a form the gate cannot check; refused for a push from a clone of this project
 }
 
+// unknownRun is a command word the walker does not know (no program on PATH, builtin or function the
+// command defines), which may be an alias or function of the shell's setup that pushes (oh-my-zsh's
+// gp is `git push`), and the directory it runs in ("" when that is unknown).
+type unknownRun struct {
+	Dir  string
+	Word string
+}
+
 // analysis is what findPushes learned about a command.
 type analysis struct {
-	Pushes []push
-	Calls  []string // git subcommands other than push; one that is not a git command is an alias
+	Pushes  []push
+	Unknown []unknownRun
+	Calls   []string // git subcommands other than push; one that is not a git command is an alias
 	// Blocked says why the whole command is refused, wherever it runs: a git push the walker cannot
 	// follow, one that skips git's pre-push hook, or something that can point git at another
 	// repository, change its configuration, hooks or aliases.
@@ -121,7 +130,8 @@ func parseBash(script string) (*syntax.File, error) {
 
 // hoistFuncChain undoes a reading of mvdan.cc/sh: `f() { …; } && cmd` (or ||, |, |&) parses as a
 // function whose body is the whole chain, where the shell defines f with the first element as its
-// body and runs the rest of the chain after the definition, in this shell.
+// body and runs the rest of the chain after the definition, in this shell. (The parser puts `!`, `&`
+// and redirections on the outer statement or on the chain's elements, never on the body itself.)
 func hoistFuncChain(s *syntax.Stmt) {
 	fd, ok := s.Cmd.(*syntax.FuncDecl)
 	if !ok || fd.Body == nil {
@@ -131,15 +141,11 @@ func hoistFuncChain(s *syntax.Stmt) {
 	if !ok {
 		return
 	}
-	body := fd.Body
 	def := *fd
 	def.Body = chain.X
 	// parseBash's walk reaches first next and splits it too (f() { …; } | cmd && cmd).
 	first := &syntax.Stmt{Position: s.Position, Cmd: &def}
 	s.Cmd = &syntax.BinaryCmd{OpPos: chain.OpPos, Op: chain.Op, X: first, Y: chain.Y}
-	s.Negated = s.Negated != body.Negated
-	s.Background, s.Coprocess = s.Background || body.Background, s.Coprocess || body.Coprocess
-	s.Redirs = append(s.Redirs, body.Redirs...)
 }
 
 // findPushes parses command as bash and returns what it does with git, starting in cwd.
@@ -150,7 +156,7 @@ func findPushes(command, cwd string) (analysis, error) {
 	}
 	w := newWalker(cwd, command)
 	w.run(f)
-	return analysis{Pushes: w.pushes, Calls: w.calls, Blocked: w.blocked}, nil
+	return analysis{Pushes: w.pushes, Unknown: w.unknown, Calls: w.calls, Blocked: w.blocked}, nil
 }
 
 // run walks a parsed program on this walker: the statements, then the command and process
@@ -180,6 +186,7 @@ func (w *walker) run(f *syntax.File) {
 		}
 		w.block(p.blocked)
 		w.calls = append(w.calls, p.calls...)
+		w.unknown = append(w.unknown, p.unknown...)
 	}
 	syntax.Walk(f, func(n syntax.Node) bool {
 		switch n := n.(type) {
@@ -230,6 +237,7 @@ type walker struct {
 	src     string // the whole command
 	cmdText string // the text of the command currently being dispatched (its own words, not siblings)
 	pushes  []push
+	unknown []unknownRun
 	calls   []string
 	blocked string
 	// envUnknown says why git's environment and the directory may have changed in ways the walker
@@ -253,18 +261,21 @@ func newWalker(dir, src string) *walker {
 }
 
 // child is a walker for code that runs in a child of this shell (a substitution, a shell the command
-// runs), from dir: it inherits CDPATH, HOME and whatever a sourced file or an eval set before it. A
-// function this shell defines may reach the child (a subshell, bash's export -f) or not, so one
-// whose body may cd may run there and cd.
+// runs, a trap action), from dir: it inherits CDPATH, HOME and whatever a sourced file or an eval set
+// before it. A function this shell defines may reach the child (a subshell, bash's export -f) or not,
+// so one whose body may cd may run there and cd; one whose body cannot runs as a function that does
+// not cd, or as the program of its name (a child shell has no alias or function of the user's setup).
 func (w *walker) child(dir, src string) *walker {
 	c := newWalker(dir, src)
 	c.cdpath, c.envUnknown, c.homeSet = w.cdpath, w.envUnknown, w.homeSet
 	for name := range w.cdFuncs {
 		c.cdFuncs[name] = true
 	}
-	for name := range w.funcs {
+	for name, body := range w.funcs {
 		if w.unknownWord(name) {
 			c.cdFuncs[name] = true
+		} else {
+			c.funcs[name] = body
 		}
 	}
 	return c
@@ -479,11 +490,18 @@ func (w *walker) stmt(s *syntax.Stmt) {
 	if s == nil {
 		return
 	}
+	code := qualifierCode(s)
+	if code != "" {
+		w.blockText(code, "a zsh glob qualifier that runs code")
+	}
 	if s.Background || s.Coprocess {
 		saved := w.dir // it runs in a subshell: a cd inside does not reach the commands after it
 		w.cmd(s)
 		w.dir = saved
 		return
+	}
+	if code != "" {
+		w.dir = "" // zsh runs the qualifier's code in this shell as it globs, before the command
 	}
 	w.cmd(s)
 }
@@ -812,7 +830,10 @@ func (w *walker) changesDir(node syntax.Node) bool {
 		case *syntax.Subshell, *syntax.CmdSubst, *syntax.ProcSubst:
 			return false
 		case *syntax.Stmt:
-			return !n.Background && !n.Coprocess
+			if n.Background || n.Coprocess {
+				return false
+			}
+			found = qualifierCode(n) != ""
 		case *syntax.BinaryCmd:
 			if n.Op == syntax.Pipe || n.Op == syntax.PipeAll {
 				found = w.changesDir(n.Y) // zsh runs the last element in this shell
@@ -821,7 +842,7 @@ func (w *walker) changesDir(node syntax.Node) bool {
 		case *syntax.CallExpr:
 			args, lit := fields(n.Args)
 			args, lit = stripBraces(args, lit)
-			found = w.autoCD(args, lit) || qualifierCode(n.Args)
+			found = w.autoCD(args, lit)
 			for len(args) > 1 && lit[0] && (precommand[path.Base(args[0])]) {
 				args, lit = args[1:], lit[1:]
 			}
@@ -843,16 +864,49 @@ func (w *walker) changesDir(node syntax.Node) bool {
 // them in this shell while it globs, so their code can cd or push. (bash reads them as extglobs.)
 var codeQualifier = regexp.MustCompile(`e[^A-Za-z0-9_\s|]|\+[A-Za-z_]`)
 
-// qualifierCode reports whether a command's words hold a glob qualifier that runs code.
-func qualifierCode(words []*syntax.Word) bool {
-	for _, word := range words {
-		for _, part := range word.Parts {
-			if g, ok := part.(*syntax.ExtGlob); ok && codeQualifier.MatchString(g.Pattern.Value) {
-				return true
+// qualifierCode returns the words of a statement that hold a glob qualifier that runs code, as
+// written, or "". zsh globs, and so runs that code, in the arguments, the assignments (arrays too),
+// a for list and the redirections, before the command runs.
+func qualifierCode(s *syntax.Stmt) string {
+	var words []*syntax.Word
+	for _, r := range s.Redirs {
+		words = append(words, r.Word)
+	}
+	assigns := func(list []*syntax.Assign) {
+		for _, a := range list {
+			words = append(words, a.Value)
+			if a.Array != nil {
+				for _, e := range a.Array.Elems {
+					words = append(words, e.Value)
+				}
 			}
 		}
 	}
-	return false
+	switch c := s.Cmd.(type) {
+	case *syntax.CallExpr:
+		words = append(words, c.Args...)
+		assigns(c.Assigns)
+	case *syntax.DeclClause:
+		assigns(c.Args)
+	case *syntax.ForClause:
+		if it, ok := c.Loop.(*syntax.WordIter); ok {
+			words = append(words, it.Items...)
+		}
+	}
+	var b bytes.Buffer
+	for _, word := range words {
+		if word == nil {
+			continue
+		}
+		for _, part := range word.Parts {
+			if g, ok := part.(*syntax.ExtGlob); ok && codeQualifier.MatchString(g.Pattern.Value) {
+				_ = syntax.NewPrinter().Print(&b, word)
+				b.WriteByte(' ')
+				break
+			}
+		}
+	}
+	return b.String()
 }
 
 // autoCD reports whether zsh's AUTO_CD (on in the Bash tool's zsh) runs a command of one word as
@@ -875,8 +929,8 @@ func (w *walker) autoCD(args []string, lit []bool) bool {
 	return err == nil && fi.IsDir()
 }
 
-// precommand lists the words that run the rest of the command in this shell (zsh's - included).
-var precommand = map[string]bool{"command": true, "builtin": true, "exec": true, "noglob": true, "nocorrect": true, "-": true}
+// precommand lists the words that run the rest of the command in this shell.
+var precommand = map[string]bool{"command": true, "builtin": true, "exec": true, "noglob": true, "nocorrect": true}
 
 // stripBraces removes the braces of a zsh brace group written without spaces, `{git push …}`,
 // which bash would read as a command named `{git`.
@@ -1074,10 +1128,6 @@ func (w *walker) call(c *syntax.CallExpr, redirs []*syntax.Redirect) {
 	}
 	saved := w.cmdText
 	w.cmdText = wordsText(c.Args, redirs) // this command's own text for the conservative net
-	if qualifierCode(c.Args) {
-		w.blockText(w.cmdText, "a zsh glob qualifier that runs code")
-		defer func() { w.dir = "" }() // its code runs in this shell and may cd
-	}
 	args, lit := w.fields(c.Args)
 	w.command(args, lit, redirs)
 	// The net under the walker, on the words and the heredoc or here-string bodies as bash expands
@@ -1158,17 +1208,22 @@ func (w *walker) command(args []string, lit []bool, redirs []*syntax.Redirect) {
 prefix:
 	for len(args) > 0 && lit[0] {
 		switch path.Base(strings.TrimPrefix(args[0], "=")) { // zsh's =cmd is the path of cmd
-		case "command", "exec", "builtin", "noglob", "nocorrect", "-":
-			// They run the rest as a command; zsh's noglob/nocorrect/- are precommand modifiers. With
-			// an option (exec -a NAME, command -p), the grammar varies and -v/-V only print, so fall
-			// back to a conservative text check. (noglob/nocorrect/- take no options.)
+		case "command", "exec", "builtin", "noglob", "nocorrect":
+			// They run the rest as a command; zsh's noglob/nocorrect are precommand modifiers, which
+			// take no options. (zsh's `-` modifier is not read as one: an alias of that name, `cd -`
+			// in oh-my-zsh, comes first.) After -- (and command's -p) the command follows as well; with
+			// another option (exec -a NAME, command -v) the grammar varies and -v/-V only print, so
+			// fall back to a conservative text check.
 			base := path.Base(strings.TrimPrefix(args[0], "="))
-			if (base == "command" || base == "exec" || base == "builtin") && len(args) > 1 && lit[1] && strings.HasPrefix(args[1], "-") {
+			args, lit = args[1:], lit[1:]
+			for len(args) > 1 && lit[0] && (args[0] == "--" || args[0] == "-p" && base == "command") {
+				args, lit = args[1:], lit[1:]
+			}
+			if (base == "command" || base == "exec" || base == "builtin") && len(args) > 0 && lit[0] && strings.HasPrefix(args[0], "-") {
 				w.blockText(w.cmdText, base+" with options")
 				return
 			}
 			program = program || base == "command" || base == "exec" || base == "builtin"
-			args, lit = args[1:], lit[1:]
 		case "env":
 			child, program = true, true
 			args, lit = args[1:], lit[1:]
@@ -1227,6 +1282,7 @@ prefix:
 			if argvHasGitPush(args, lit) || mentionsGitPush(w.cmdText) {
 				w.block("a git push run through " + fn + " cannot be checked; " + runAlone)
 			}
+			w.calls = append(w.calls, argvGitCalls(args, lit)...)
 			if w.unknownWord(fn) {
 				w.dir = ""
 			}
@@ -1244,6 +1300,8 @@ prefix:
 	_, isWrapper := wrapperSkip[name]
 	switch {
 	case w.autoCD(args, lit):
+		// An alias of that name would run instead (zsh expands it first), so it is an unknown word too.
+		w.unknown = append(w.unknown, unknownRun{Dir: w.dir, Word: args[0]})
 		w.chdir("cd", args, lit)
 	case name == "cd" || name == "chdir" || name == "pushd": // chdir: zsh's synonym for cd
 		w.chdir(name, args[1:], lit[1:])
@@ -1292,6 +1350,7 @@ prefix:
 				}
 			} else {
 				w.blockText(w.cmdText, "trap")
+				w.envUnknown = "a trap action the hook cannot read, set earlier in the command,"
 			}
 		}
 	case name == "alias": // alias [-gs…] NAME=VALUE…: VALUE runs wherever NAME is used later
@@ -1328,13 +1387,17 @@ prefix:
 		}
 	case name == "enable" || name == "disable" || name == "functions" || name == "autoload" || name == "add-zsh-hook":
 		// They can turn a builtin off (disable cd, bash's enable -n cd), load one (enable -f), define
-		// a function under another name (zsh's functions -c f cd, autoload cd) or have the shell call
+		// a function under another name (zsh's functions -c f ls, autoload ls) or have the shell call
 		// one on each cd or before each command (add-zsh-hook): refuse one aimed at a name the walker
-		// models, at a hook, or at a word it cannot read.
+		// models, at a hook, or at a word it cannot read. Any other name they touch may now run code
+		// the walker has not seen, which may cd.
 		for i, a := range args[1:] {
 			if name == "add-zsh-hook" || !lit[i+1] || modeledNames[a] || hookFunction(a) {
 				w.block(name + " can change what a command or a hook of the shell runs, which the hook cannot follow; " + runAlone)
 				break
+			}
+			if !strings.HasPrefix(a, "-") && !strings.HasPrefix(a, "+") {
+				w.cdFuncs[a] = true
 			}
 		}
 	case name == "hash": // hash -p PATH NAME, zsh's hash NAME=PATH: the name runs another program
@@ -1365,10 +1428,42 @@ prefix:
 		if !dataCommands[name] && argvHasGitPush(args, lit) {
 			w.block("a git push run through " + name + " cannot be checked; " + runAlone)
 		}
-		if w.unknownWord(args[0]) {
+		if !program && w.unknownWord(args[0]) {
+			// An alias or function of the shell's setup (or a program not on PATH): it may cd, push
+			// (oh-my-zsh's gp is `git push`, which main.go lets run only in this clone, where git's hook
+			// judges it) or hand its arguments to git (a git alias among them is checked).
+			w.unknown = append(w.unknown, unknownRun{Dir: w.dir, Word: args[0]})
+			w.calls = append(w.calls, argvGitCalls(args, lit)...)
 			w.dir = ""
 		}
 	}
+}
+
+// argvGitCalls returns the subcommand after each literal `git` in argv (past git's global options),
+// for a command that may hand its arguments to git: a function the command defines, or an alias or
+// function of the shell's setup. checkSubcommands refuses one that is a git alias.
+func argvGitCalls(args []string, lit []bool) []string {
+	var subs []string
+	for i := range args {
+		if !lit[i] || path.Base(args[i]) != "git" {
+			continue
+		}
+		for j := i + 1; j < len(args) && lit[j]; j++ {
+			a := args[j]
+			if !strings.HasPrefix(a, "-") {
+				subs = append(subs, a)
+				break
+			}
+			name, _, hasValue := strings.Cut(a, "=")
+			if !gitGlobalSafe[name] && !gitGlobalWithValue[name] {
+				break
+			}
+			if gitGlobalWithValue[name] && !hasValue {
+				j++ // its value is the next argument
+			}
+		}
+	}
+	return subs
 }
 
 // unknownWord reports whether a command word may be a function or alias of the user's shell setup,
@@ -1413,7 +1508,7 @@ var modeledNames = map[string]bool{"cd": true, "chdir": true, "pushd": true, "po
 var namedCommands = map[string]bool{"git": true, "alias": true, "hash": true, "read": true, "mapfile": true,
 	"readarray": true, "getopts": true, "printf": true, "watch": true, "xargs": true, "parallel": true, "find": true,
 	"fish": true, "csh": true, "tcsh": true, "env": true, "command": true, "exec": true, "builtin": true,
-	"noglob": true, "nocorrect": true, "-": true}
+	"noglob": true, "nocorrect": true}
 
 // shellBuiltins are bash and zsh builtins and keywords, not programs on PATH, that never change the
 // shell's directory (the ones that do, and those that run code, are handled by name above).
@@ -1898,6 +1993,7 @@ func (w *walker) script(s string) {
 	w.block(inner.blocked)
 	w.pushes = append(w.pushes, inner.pushes...)
 	w.calls = append(w.calls, inner.calls...)
+	w.unknown = append(w.unknown, inner.unknown...)
 }
 
 func (w *walker) chdir(name string, args []string, lit []bool) {

@@ -179,10 +179,12 @@ Two hooks run it:
   3. **Where a push may run.** From Claude Code a push runs only in this clone or one of its
      worktrees (the same `git rev-parse --git-common-dir`): another clone, a bare repository, a `.git`
      directory or an unrelated repository may not run git's hook, so a push there is refused, dry runs
-     and deletions included. In this clone a push is refused while `core.hooksPath` is not
+     and deletions included. So is a command word the walker does not know (below), which may be an
+     alias that pushes (oh-my-zsh's `gp`): it runs only in this clone or its worktrees, where git's
+     hook judges what it pushes. In this clone a push is refused while `core.hooksPath` is not
      `.githooks`, while `.githooks/pre-push` is missing or not executable, while the gate's own files
-     (`.githooks/`, `hack/sdlc/`) have uncommitted changes, and from a branch without
-     `hack/sdlc/gate.sh`.
+     (`.githooks/`, `hack/sdlc/`, `.claude/settings.json`) have uncommitted changes, and from a branch
+     without `hack/sdlc/gate.sh`.
 
   The walker's contract:
 
@@ -191,8 +193,10 @@ Two hooks run it:
     `git p""ush` and `git push {origin,main}` are read as bash runs them. A word with a variable, a
     substitution, an unquoted glob or an unescaped `$` that bash leaves as text is *not literal*. The
     Bash tool may run zsh, so zsh's readings win where they differ: `{git push …}` without spaces is a
-    brace group, `$=x`, `$^x` and `$~x` are not literal, `-` is a precommand, `chdir` is `cd`, and a
-    lone directory name is a `cd` (AUTO_CD). Text in quotes, heredoc bodies and comments are not
+    brace group, `$=x`, `$^x` and `$~x` are not literal, `chdir` is `cd`, and a lone directory name is
+    a `cd` (AUTO_CD); zsh's `-` precommand is read as an unknown word, since an alias of that name
+    (oh-my-zsh's `cd -`) runs first. `command -p` and `--`, and `builtin --`, run the command that
+    follows. Text in quotes, heredoc bodies and comments are not
     commands. `cd`, `pushd` and `git -C` move the directory only where they certainly run: inside a
     pipeline, a background job, a subshell, a substitution or a command run by `env`, a wrapper,
     `find -exec` or `kubectl exec` they do not reach the commands after them; a `cd` that may or may
@@ -204,11 +208,16 @@ Two hooks run it:
     (after a symbolic link, the parent of its target, where `cd -P` and a shell made physical go):
     when the two differ, the directory is unknown. `git -C` is a chdir, so its path stays as written
     for `gatePush`'s stat and git to resolve. zsh's `emulate -c`
-    and `repeat` run their code in this shell, and a glob qualifier that runs code (`*(e:…:)`)
-    leaves the directory unknown. A program on PATH runs as a child, whose cd cannot move the shell;
+    and `repeat` run their code in this shell, and a glob qualifier that runs code (`*(e:…:)`,
+    `*(+fn)`) runs it as zsh globs, before the command, wherever zsh globs (arguments, assignments
+    and arrays, a `for` list, a redirection): the directory is unknown from that command on, and a
+    push in its code is refused. A program on PATH runs as a child, whose cd cannot move the shell;
     any other command word (not a builtin the walker knows, not a function the command defines) may
     be a function or alias of the user's shell setup, which the Bash tool loads and which can cd
-    (zoxide's `z`, oh-my-zsh's `...` and `take`), so the directory after it is unknown. A function
+    (zoxide's `z`, oh-my-zsh's `...` and `take`) or push (oh-my-zsh's `gp`), so the directory after
+    it is unknown, it may run only in this clone (above), and a git subcommand in its arguments is
+    checked as git's own would be. `enable`, `disable`, `functions` and `autoload` leave each name
+    they touch unknown too (`functions -c f ls`, `autoload ls`). A function
     the command defines counts only where its definition certainly runs in this shell (a statement
     of its own, not in a subshell, branch, chain, pipeline, the background or `eval`), and a call of
     it may cd wherever its body, or a function it calls, may; it runs instead of the builtin or
@@ -227,8 +236,8 @@ Two hooks run it:
     the shell is then: a push in it runs from an unknown directory, and a `cd` in it leaves the
     directory unknown after each call of the function. A `trap` action, or a function the shell
     calls on its own (zsh's `chpwd`, `precmd`, `preexec`, `periodic`, `TRAPDEBUG` and the other
-    `TRAP…` functions, a command-not-found handler), that may cd can move the directory between any
-    two commands, so a push after it is refused. zsh runs an
+    `TRAP…` functions, a command-not-found handler), that may cd, or a `trap` action the hook cannot
+    read, can move the directory between any two commands, so a push after it is refused. zsh runs an
     anonymous function at once, in this shell, and the walker follows it there (`() {cd /x}`,
     `() cmd`); the spaced form `() { …; }` does not parse as bash, so a command with it is refused.
   - **What it refuses wherever the command runs**, because it can point git elsewhere, run a push the
@@ -257,9 +266,10 @@ Two hooks run it:
       `git remote add`, `remove`, `rename`, `set-url` or `set-branches`, and `git fast-import` and
       `git replace`;
     - a git subcommand that is not a git command: an alias, whose definition the command could
-      change on the way (a config file it writes, `HOME`, `XDG_CONFIG_HOME`). A `git-*` program run
-      by its own name, and git run in a container by `kubectl`/`docker exec`, are not alias lookups
-      here;
+      change on the way (a config file it writes, `HOME`, `XDG_CONFIG_HOME`), also among the
+      arguments of a function the command defines or of an unknown word (`retry git ship`). A
+      `git-*` program run by its own name, and git run in a container by `kubectl`/`docker exec`, are
+      not alias lookups here;
     - a shell alias or zsh function the command defines (`alias`, zsh's
       `functions[…]=`/`aliases[…]=`, also through `typeset`) whose code runs git or changes the
       directory, or whose name is one the walker reads as a builtin or program it models (`cd`,
@@ -319,8 +329,10 @@ A second hook (`hack/sdlc/claude-format.sh`, `PostToolUse` for Edit, MultiEdit a
   as oh-my-zsh's `gp='git push'` or zoxide's `z`, options such as CDABLE_VARS). Its text net refuses
   a hook token anywhere in the command line, so a push through any of them still runs git's hook
   unless the token is assembled at run time; and a command word that is no program on PATH makes the
-  directory unknown, so a function that cds to another clone does not place a push in this one. An
-  alias or function that shadows a program on PATH (`make`, `ls`) and cds is not seen. git's
+  directory unknown and may run only in this clone, so a function that cds to another clone does
+  not place a push in this one, and an alias that pushes does not push from another one. An alias
+  or function that shadows a program on PATH or a builtin (`make`, `ls`, `echo`) is not seen, nor
+  is an alias of the setup that skips git's hook on its own (one that runs `git push --no-verify`). git's
   pre-push hook (required before any command runs) checks the pushes they make in this clone; a
   script or program that disables git's hook on purpose gets past both.
 - The Claude Code hook checks the gate, and `core.hooksPath`, as they are before the command runs. A

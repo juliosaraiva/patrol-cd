@@ -97,6 +97,11 @@ func run(stdin io.Reader, stderr io.Writer, root string) int {
 			problems = append(problems, msg)
 		}
 	}
+	for _, u := range a.Unknown {
+		if msg := gateUnknown(u, root); msg != "" {
+			problems = append(problems, msg)
+		}
+	}
 	if len(problems) > 0 {
 		return refuse(strings.Join(problems, "\n"))
 	}
@@ -135,10 +140,10 @@ func gatePush(p push, root string) string {
 	}
 	// The gate's own files must be as committed: no change git status shows, and none it hides (a
 	// file marked assume-unchanged or skip-worktree: a lower-case or S tag in git ls-files -v).
-	status, errStatus := gitOut(top, "status", "--porcelain", "--", ".githooks", "hack/sdlc")
-	tags, errTags := gitOut(top, "ls-files", "-v", "--", ".githooks", "hack/sdlc")
+	status, errStatus := gitOut(top, append([]string{"status", "--porcelain", "--"}, gateFiles...)...)
+	tags, errTags := gitOut(top, append([]string{"ls-files", "-v", "--"}, gateFiles...)...)
 	if errStatus != nil || errTags != nil || status != "" || hidesChanges(tags) {
-		return "the gate's own files in " + top + " (git's hook, hack/sdlc) have uncommitted changes, are marked assume-unchanged or skip-worktree, or git cannot list them: commit or restore them, and clear the marks, before pushing"
+		return "the gate's own files in " + top + " (" + strings.Join(gateFiles, ", ") + ") have uncommitted changes, are marked assume-unchanged or skip-worktree, or git cannot list them: commit or restore them, and clear the marks, before pushing"
 	}
 	var problems []string
 	for _, src := range p.Sources {
@@ -165,6 +170,22 @@ func gatePush(p push, root string) string {
 		}
 	}
 	return strings.Join(problems, "\n")
+}
+
+// gateUnknown returns why a command word the walker does not know may not run where it runs, or "".
+// It may be an alias or function of the shell's setup that pushes (oh-my-zsh's gp is `git push`), so
+// it runs only in a work tree of this repository, where git's own pre-push hook (which the wrapper
+// requires before any command) judges what it pushes.
+func gateUnknown(u unknownRun, root string) string {
+	what := "`" + u.Word + "` is no program on PATH, builtin or function the command defines, so it may be an alias or function of the shell's setup, which can push (oh-my-zsh's gp is `git push`)"
+	if u.Dir == "" {
+		return what + "; it would run in a directory the hook cannot tell: run it after a literal `cd` into this clone, or run the command it stands for"
+	}
+	top, err := gitOut(u.Dir, "rev-parse", "--show-toplevel")
+	if err != nil || !sameRepository(top, root) {
+		return what + "; it would run in " + u.Dir + ", outside " + root + " and its worktrees, where git's pre-push hook may not run: run the command it stands for"
+	}
+	return ""
 }
 
 // gateFiles are the paths whose change the gate of the change's base judges too: the gate cannot

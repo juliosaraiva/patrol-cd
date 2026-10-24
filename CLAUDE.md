@@ -83,9 +83,10 @@ Go: run `go vet ./...` after changes. UI: `pnpm -C ui typecheck` before marking 
 
 Follow `docs/guides/claude-code-sdlc.md` (the `sdlc` skill): issue, branch, change with tests,
 conventional commit, `make sdlc-check`, the `review-change` skill (agent review), push, pull request,
-CI. The pre-push hook in `.claude/settings.json` refuses a push whose tree has no passing
-`make sdlc-check` and, unless the change is documentation only, no passing agent review. Never weaken a
-check, a skip list or the CodeQL baseline to get a push through.
+CI. git's pre-push hook (enabled once with `make sdlc-git-hooks`) refuses a push whose tree has no
+passing `make sdlc-check` and, unless the change is documentation only, no passing agent review; the
+Claude Code hook in `.claude/settings.json` refuses it early and keeps git's hook from being skipped.
+Never weaken a check, a skip list or the CodeQL baseline to get a push through.
 
 ## Interruption policy
 
