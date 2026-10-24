@@ -207,7 +207,10 @@ Two hooks run it:
     leaves the directory unknown. A program on PATH runs as a child, whose cd cannot move the shell;
     any other command word (not a builtin the walker knows, not a function the command defines) may
     be a function or alias of the user's shell setup, which the Bash tool loads and which can cd
-    (zoxide's `z`, oh-my-zsh's `...` and `take`), so the directory after it is unknown. It follows
+    (zoxide's `z`, oh-my-zsh's `...` and `take`), so the directory after it is unknown. A function
+    the command defines counts only where its definition certainly runs in this shell (a statement
+    of its own, not in a subshell, branch, chain, pipeline, the background or `eval`), and a call of
+    it may cd wherever its body, or a function it calls, may. It follows
     the command a wrapper runs (`timeout`, `nice`, `sudo`, `nohup`, `env`, `xargs`, `find -exec`,
     `kubectl`/`docker exec -- …`, `command`, `exec`, …) into that command, and parses `bash -c '…'`,
     a heredoc or here-string given to `bash`/`sh`/`zsh`/`dash`/`ksh`/`mksh`, a literal script piped
@@ -215,7 +218,9 @@ Two hooks run it:
     or its argv with `-x`), and the commands git runs for a subcommand (below). A `git push` found
     this way is gated like a direct one. A function body or `trap` action runs later, from wherever
     the shell is then: a push in it runs from an unknown directory, and a `cd` in it leaves the
-    directory unknown.
+    directory unknown after each call of the function (from the trap on, for a trap). zsh runs an
+    anonymous function at once, in this shell, and the walker follows it there (`() {cd /x}`,
+    `() cmd`); the spaced form `() { …; }` does not parse as bash, so a command with it is refused.
   - **What it refuses wherever the command runs**, because it can point git elsewhere, run a push the
     gate cannot see, or move what the gate measures from:
     - a push with an argument that is not literal (it could be `--no-verify`);
@@ -246,8 +251,9 @@ Two hooks run it:
       by its own name, and git run in a container by `kubectl`/`docker exec`, are not alias lookups
       here;
     - a shell alias or zsh function the command defines (`alias`, zsh's
-      `functions[…]=`/`aliases[…]=`) whose code runs git or changes the directory, and `hash` of a
-      name to another program for git;
+      `functions[…]=`/`aliases[…]=`) whose code runs git or changes the directory, or whose name is
+      one the walker reads as a builtin or program it models (`cd`, `exit`, `git`, `eval` …), and
+      `hash` of a name to another program for git;
     - a file sourced, or an `eval` of a dynamic string (`eval "$(ssh-agent -s)"`), before a push; a
       push from an unknown directory;
     - a push it cannot resolve: inside `$(…)`, behind `eval` with a dynamic string, through a

@@ -55,13 +55,17 @@ done
 head=$(git rev-parse HEAD)
 tree=$(git rev-parse 'HEAD^{tree}')
 base=$(sdlc_base HEAD)
-# HEAD's reflog and the stash's, by length: a checkout, reset or stash during the run (to another
+# The last entry of this worktree's HEAD reflog: a checkout, reset or stash during the run (to another
 # branch and back, say) can leave the end looking like the start while the steps in between checked
-# other files.
-moves() {
-	cat "$(git rev-parse --git-path logs/HEAD)" "$(git rev-parse --git-path logs/refs/stash)" 2>/dev/null | wc -l | tr -d ' '
+# other files, but each adds an entry (a stash too: it resets HEAD). The last entry, not a count, so
+# that a reflog expiry in between cannot shift it; this worktree's only, as other worktrees' moves
+# check nothing here.
+last_move() {
+	local log
+	log=$(git rev-parse --git-path logs/HEAD)
+	if [[ -f $log ]]; then tail -n 1 "$log"; else echo none; fi
 }
-start_moves=$(moves)
+start_move=$(last_move)
 changed=()
 while IFS= read -r f; do changed+=("$f"); done < <(sdlc_changed "$base" HEAD)
 record=1
@@ -191,7 +195,7 @@ echo
 if [[ $record -eq 1 ]]; then
 	# Nothing may have changed while the checks ran (an edit made and undone by hand in between is not
 	# seen: the guide's Limits).
-	if [[ $(git rev-parse 'HEAD^{tree}') != "$tree" ]] || ! sdlc_clean || [[ $(moves) != "$start_moves" ]]; then
+	if [[ $(git rev-parse 'HEAD^{tree}') != "$tree" ]] || ! sdlc_clean || [[ $(last_move) != "$start_move" ]]; then
 		echo "sdlc-check: the tree changed, or HEAD moved (a checkout, reset or stash), while the checks ran; nothing recorded" >&2
 		exit 1
 	fi

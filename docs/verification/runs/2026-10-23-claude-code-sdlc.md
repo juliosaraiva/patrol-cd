@@ -26,18 +26,18 @@ The machine was shared with up to 16 review and red-team agents during most runs
 |---------|--------|
 | `go vet ./hack/sdlc/...`; `golangci-lint run --no-config ./hack/sdlc/...` | passed, 0 issues |
 | `shellcheck hack/sdlc/*.sh hack/ci/lint-shell.sh`; `make ci-shell`; `actionlint` | passed |
-| `go test -race -count=1 ./hack/sdlc/...` | passed: `pushcheck` and `sarifgate`, 564 tests (counted with `-json`) |
-| `bash hack/sdlc/test-sdlc.sh` (the gate end to end in scratch repositories with a bare remote) | passed: 164 passed, 0 failed |
+| `go test -race -count=1 ./hack/sdlc/...` | passed: `pushcheck` and `sarifgate`, 584 tests (counted with `-json`) |
+| `bash hack/sdlc/test-sdlc.sh` (the gate end to end in scratch repositories with a bare remote, and check.sh with stub make targets) | passed: 182 passed, 0 failed |
 | `GOOS=linux CGO_ENABLED=0 GOWORK=off go vet ./...` on macOS (the step check.sh now adds off Linux) | passed, in 3 minutes from a cold cache |
 | A graft making HEAD a root and origin/main its child, in a scratch repository (`graft-check.sh` in the scratchpad), and pushcheck without its graft setting (`graftmut/mutate.py`) | without `hack/sdlc/lib.sh` the changed files are `[]`, with it `[main.go]`; the mutant fails `TestGatePushRunsTheBaseGate` |
 | `/bin/bash hack/ci/lint-shell.sh` (bash 3.2) in a scratch repository with no POSIX sh script | reports SC2086 in its bash script; the version before this change stopped with `sh_files[@]: unbound variable` |
-| Mutation sweep of `hack/sdlc/pushcheck` (a scratchpad script: each refusal, unknown-directory, environment and option-value site of `parse.go`, each `return true` of a predicate, each refusal or early allowing return of `main.go`, and its loop over the pushed sources, disabled or narrowed in turn through `go test -overlay`, the repository untouched) | 128 sites; 125 caught by a failing test, 2 do not compile (the base gate's refusal, which a test asserts, and the extraction's error path); the survivor is an error path of the environment in `baseGate` (git failing to name its directory right after it worked). The first sweep, on `0b31e0f`, covered refusal sites only and left 20 in `parse.go` and 5 in `main.go` uncaught; the eleventh and twelfth reviews found more kinds of site, which the sweep now covers. Each uncaught site got a test, and four that could not change the outcome were removed |
+| Mutation sweep of `hack/sdlc/pushcheck` (a scratchpad script: each refusal, unknown-directory, environment and option-value site of `parse.go`, each `return true` of a predicate, each refusal or early allowing return of `main.go`, and its loop over the pushed sources, disabled or narrowed in turn through `go test -overlay`, the repository untouched) | 130 sites; 127 caught by a failing test, 2 do not compile (the base gate's refusal, which a test asserts, and the extraction's error path); the survivor is an error path of the environment in `baseGate` (git failing to name its directory right after it worked). The first sweep, on `0b31e0f`, covered refusal sites only and left 20 in `parse.go` and 5 in `main.go` uncaught; the eleventh and twelfth reviews found more kinds of site, which the sweep now covers. Each uncaught site got a test, and four that could not change the outcome were removed |
 | A replace ref giving `origin/main` HEAD's tree, in a scratch repository (`replace-check.sh` in the scratchpad) | without `hack/sdlc/lib.sh` the changed files are `[]`; with it, `[main.go]` |
 | `PATH="$PWD/bin:$PATH" go test -race -count=1 ./internal/git/...` | passed on `c409428` (and `./internal/reposerver/...` on `6f9f985`); `internal/git` has not changed since |
 
 ## Agent review
 
-Fourteen runs of `.claude/workflows/sdlc-review.js` on successive trees, each verified finding fixed
+Fifteen runs of `.claude/workflows/sdlc-review.js` on successive trees, each verified finding fixed
 before the next run:
 
 | Tree | Blocking (verified) | Minor | Refuted |
@@ -56,6 +56,7 @@ before the next run:
 | `e06316e` | 4 | 8 | 0 |
 | `ffaf3de` | 5 | 10 | 0 |
 | `d2b1a08` | 4 | 11 | 0 |
+| `4e5b0f1` | 5 | 6 | 0 |
 
 Most findings were ways around the Claude Code hook (shell and git constructs it read differently
 from bash, zsh or git) and tests that could not fail. The seventh run's were six untested branches
@@ -144,8 +145,26 @@ when they differ), a nil-pointer panic on zsh's anonymous functions, `break`, `c
 builtins, an exit-guarded chain with two cds, `read -s` and `mapfile -t`, grafts (now ignored like
 replace refs), Linux-only files no step compiled on macOS (a Linux `go vet` now runs there), CLAUDE.md
 and AGENTS.md counted as documentation, and the shell suite building the hook's binary with a
-`go.work`. The review of the tree that contains this record runs after it is written; its result is
-in the pull request.
+`go.work`.
+
+The fifteenth run found 5 blocking findings. One was a defect the fourteenth round's fix brought in:
+the comparison of reflogs in `check.sh` exited the script whenever no stash existed (`cat` of a
+missing reflog under pipefail), so no check could be recorded; it now compares the last entry of
+this worktree's HEAD reflog alone (a stash resets HEAD, so it is there too). The others: a function
+the command defines that cds, called after a later cd, counted as harmless (now a call of a defined
+function may cd wherever its body, or a function it calls, may); a definition in a pipeline counted
+as defined; and neither the reflog comparison nor git's hook's new HEAD and work-tree conditions had
+a test (test-sdlc.sh now runs check.sh end to end with stub make targets, switching branches and
+stashing during a run, and pushes from a work tree with an uncommitted or checked-out change to each
+gate path). All 6 minor findings were fixed: a function or alias the command defines under a name
+the walker models (`cd`, `exit`, `git` …) is refused, a one-letter long-option abbreviation git
+accepts (`--u=`) is read, `printf -vNAME` is read, AUTO_CD ignores builtins, a background definition
+has a test, and other worktrees' stashes no longer count. The mutation sweep after these fixes found
+one site no test needed: a definition that may not run left the directory unknown at once, though
+nothing had run yet. Such a definition, when its body may cd, now makes the function's name unknown
+for later calls instead, and zsh's anonymous functions, which run at once, are walked in place
+(`() { …; }` does not parse as bash and is refused). The review of the tree that contains this
+record runs after it is written; its result is in the pull request.
 
 ## Red team
 

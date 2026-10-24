@@ -32,6 +32,7 @@ func TestRunFailsClosed(t *testing.T) {
 		{name: "unparseable, git and push split by quotes", command: "git p''ush origin main; echo \"oops", want: 2, reason: "cannot parse the command as bash"},
 		{name: "a push before a syntax error runs anyway", command: "git push origin main\necho \"oops", want: 2, reason: "cannot parse the command as bash"},
 		{name: "zsh syntax", command: "print -l ${(f)x}; git push origin main", want: 2, reason: "cannot parse the command as bash"},
+		{name: "zsh anonymous function with a brace body", command: "() { cd /x; } && git push origin a", want: 2, reason: "cannot parse the command as bash"},
 		{name: "push in a substitution", command: "out=$(git push 2>&1)", want: 2, reason: "command or process substitution"},
 		{name: "bash -c script that does not parse", command: `bash -c 'git push "unterminated'`, want: 2, reason: "cannot parse the shell script"},
 		{name: "--git-dir outside the repository", command: "cd / && git --git-dir=/x/.git push origin main", want: 2, reason: "git --git-dir can point git"},

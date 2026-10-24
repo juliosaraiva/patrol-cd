@@ -409,6 +409,25 @@ contains "reason: pushcheck names the checked-out gate" "$work/hook.err" "or the
 check "a broken gate checked out: git's hook asks the base's gate for another branch" 1 "$(gitpush origin plainb)"
 contains "reason: git's hook names the checked-out gate" "$work/push.err" "or the gate checked out to judge it"
 check "remote did not get the other branch" none "$(remote_has plainb)"
+# The same when the gate's change is not committed: git's hook runs the work tree's gate.
+git checkout -q main
+printf '#!/usr/bin/env bash\nexit 0\n' >hack/sdlc/gate.sh
+check "an uncommitted broken gate: git's hook asks the base's gate" 1 "$(gitpush origin plainb)"
+contains "reason: git's hook names the base's gate for an uncommitted change" "$work/push.err" "judged it too"
+git checkout -q -- hack/sdlc/gate.sh
+# And when the checked-out branch changes only the settings, or only git's hook.
+for path in .claude/settings.json .githooks/pre-push; do
+	git checkout -q -B "only-$(basename "$path")" main
+	mkdir -p "$(dirname "$path")"
+	echo '# edited' >>"$path"
+	git add "$path"
+	git commit -qm "chore: edit $path"
+	check "a checked-out edit of $path: pushcheck asks the base's gate for another branch" 2 "$(hook 'git push origin plainb')"
+	contains "reason: pushcheck names the checked-out $path" "$work/hook.err" "or the gate checked out to judge it"
+	check "a checked-out edit of $path: git's hook asks the base's gate for another branch" 1 "$(gitpush origin plainb)"
+	contains "reason: git's hook names the checked-out $path" "$work/push.err" "judged it too"
+done
+git checkout -q weak
 # Each of the gate's own paths sends a change to the base's gate, in both hooks, which list the same.
 for path in .githooks/pre-push .claude/settings.json; do
 	git checkout -q -B edit main
@@ -422,9 +441,10 @@ for path in .githooks/pre-push .claude/settings.json; do
 	contains "reason: git's hook names the base's gate for $path" "$work/push.err" "judged it too"
 done
 gate_paths=".githooks hack/sdlc .claude/settings.json"
-# shellcheck disable=SC2016 # the pattern matches the literal text of the hook
-check "git's hook sends the gate's paths to the base's gate" "$gate_paths" \
-	"$(sed -n 's/.*git diff --quiet "\$base" "\$commit" -- \(.*\) \&\&$/\1/p' "$src/.githooks/pre-push")"
+# git's hook compares the pushed commit, HEAD and the work tree with the base, each on the same paths.
+hook_lists=$(sed -n -e 's/.*git diff --quiet .* -- \(.*\) \&\&$/\1/p' -e 's/.*git diff --quiet .* -- \(.*\); then$/\1/p' "$src/.githooks/pre-push")
+check "git's hook compares three path lists" 3 "$(wc -l <<<"$hook_lists" | tr -d ' ')"
+check "git's hook sends the gate's paths to the base's gate" "$gate_paths" "$(sort -u <<<"$hook_lists")"
 check "pushcheck sends the same paths" "$gate_paths" \
 	"$(sed -n 's/^var gateFiles = \[\]string{\(.*\)}/\1/p' "$src/hack/sdlc/pushcheck/main.go" | tr -d '",')"
 # A change to the gate that has its records goes through: the base's gate (this repository's real
@@ -501,6 +521,48 @@ check "weakened: nothing set" "" "$(source "$src/hack/sdlc/lib.sh" && GOENV=off 
 check "weakened: a ?= variable" GOLANGCI_LINT "$(source "$src/hack/sdlc/lib.sh" && GOENV=off GOFLAGS='' GOLANGCI_LINT=true sdlc_weakened "$work/w.mk")"
 # shellcheck source=hack/sdlc/lib.sh
 check "weakened: GOFLAGS in Go's env file" "GOFLAGS (go env)" "$(source "$src/hack/sdlc/lib.sh" && GOENV=$work/goenv GOFLAGS='' sdlc_weakened "$work/w.mk")"
+
+# check.sh end to end, in a scratch repository whose make targets are stubs: the step for a kind
+# script waits for a marker, so the test can act while the checks run. A clean run records a pass; a
+# run during which HEAD moves (to another branch and back, a stash) records nothing.
+chk=$work/chk
+marks=$work/chk-marks
+mkdir -p "$chk/hack/sdlc" "$chk/hack/kind" "$marks"
+cp "$src"/hack/sdlc/{check.sh,lib.sh} "$chk/hack/sdlc/"
+# shellcheck disable=SC2016 # make expands $(MARKS), not the shell
+printf 'ci-static release-lint-commits:\n\t@true\nci-scripts:\n\t@touch "$(MARKS)/started"; while [ ! -e "$(MARKS)/go" ]; do sleep 0.1; done; rm -f "$(MARKS)/started" "$(MARKS)/go"\n' >"$chk/Makefile"
+touch "$chk/hack/none.mk"
+git -C "$chk" init -q -b main
+git -C "$chk" add -A
+git -C "$chk" commit -q -m "chore: base"
+git -C "$chk" update-ref refs/remotes/origin/main HEAD
+git -C "$chk" switch -q -c change
+checkrun() { # checkrun N ACTION: commit kind script N, run check.sh, do ACTION while a step runs; prints the exit status
+	echo "echo $1" >"$chk/hack/kind/x.sh"
+	git -C "$chk" add -A
+	git -C "$chk" commit -q -m "chore: kind script $1"
+	local rc=0 tries=0
+	(cd "$chk" && MARKS=$marks hack/sdlc/check.sh >"$work/chk.out" 2>&1) &
+	local pid=$!
+	while [[ ! -e $marks/started && $tries -lt 300 ]]; do
+		sleep 0.1
+		tries=$((tries + 1))
+	done
+	(cd "$chk" && eval "$2")
+	touch "$marks/go"
+	wait "$pid" || rc=$?
+	echo "$rc"
+}
+recorded() { # recorded: the check record of HEAD's tree in the scratch repository, or "none"
+	cat "$(git -C "$chk" rev-parse --path-format=absolute --git-common-dir)/patrol-sdlc/checks/$(git -C "$chk" rev-parse 'HEAD^{tree}')" 2>/dev/null | grep -x 'result=pass' || echo none
+}
+check "check.sh: a clean run" 0 "$(checkrun 1 true)"
+check "check.sh: a clean run records a pass" result=pass "$(recorded)"
+check "check.sh: HEAD to another branch and back during the run" 1 "$(checkrun 2 'git switch -q main && git switch -q -')"
+contains "reason: HEAD moved" "$work/chk.out" "HEAD moved"
+check "check.sh: nothing recorded after HEAD moved" none "$(recorded)"
+check "check.sh: a stash during the run" 1 "$(checkrun 3 'echo y >>hack/kind/x.sh && git stash -q && git stash pop -q && git checkout -q -- hack/kind/x.sh')"
+check "check.sh: nothing recorded after a stash" none "$(recorded)"
 
 echo "test-sdlc: $passed passed, $failed failed"
 [[ $failed -eq 0 ]]

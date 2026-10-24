@@ -125,6 +125,17 @@ func TestFindPushes(t *testing.T) {
 		{name: "a function defined in a branch", command: "if false; then z() { :; }; fi; z other && git push origin a", want: []push{{Dir: "", Sources: []string{"a"}}}},
 		{name: "a function defined in a chain", command: "false && z() { :; }; z other && git push origin a", want: []push{{Dir: "", Sources: []string{"a"}}}},
 		{name: "a function defined in eval", command: "eval 'z() { :; }'; z other && git push origin a", want: []push{{Dir: "", Sources: []string{"a"}}}},
+		{name: "a function defined in the background", command: "z() { :; } & z other && git push origin a", want: []push{{Dir: "", Sources: []string{"a"}}}},
+		{name: "a function defined in a pipeline", command: "z() { :; } | true; z other && git push origin a", want: []push{{Dir: "", Sources: []string{"a"}}}},
+		{name: "a function defined in a |& pipeline", command: "z() { :; } |& true; z other && git push origin a", want: []push{{Dir: "", Sources: []string{"a"}}}},
+		// A function the command defines may cd wherever it is called, even after a cd that sets the
+		// directory again, also through the functions it calls.
+		{name: "a function that cds, called after a cd", command: "f() { cd /x; }; cd /repo && f && git push origin a", want: []push{{Dir: "", Sources: []string{"a"}}}},
+		{name: "a function that cds through a helper", command: "g() { cd /x; }; f() { g; }; cd /repo && f && git push origin a", want: []push{{Dir: "", Sources: []string{"a"}}}},
+		{name: "a recursive function without a cd", command: "f() { f; }; f && git push origin a", want: []push{{Dir: "/repo", Sources: []string{"a"}}}},
+		{name: "a function that cds, never called", command: "f() { cd /x; }; git push origin a", want: []push{{Dir: "/repo", Sources: []string{"a"}}}},
+		{name: "a program's name, maybe redefined to cd", command: "if true; then ls() { cd /x; }; fi; cd /repo && ls && git push origin a", want: []push{{Dir: "", Sources: []string{"a"}}}},
+		{name: "zsh runs an anonymous function at once", command: "() {cd /x} && git push origin a", want: []push{{Dir: "/x", Sources: []string{"a"}}}},
 		{name: "zsh's anonymous function", command: "() echo hi; git push origin a", want: []push{{Dir: "/repo", Sources: []string{"a"}}}},
 		{name: "zsh's anonymous function with a cd", command: "() (cd /x); git push origin a", want: []push{{Dir: "/repo", Sources: []string{"a"}}}},
 		// Builtins that keep the directory, in a retry loop.
@@ -526,6 +537,17 @@ func TestFindPushesBlocked(t *testing.T) {
 		{"read -r EDITOR < f; git commit --amend", "shell code git runs"},
 		{"printf -v VISUAL '%s' 'git push origin main'; git commit", "shell code git runs"},
 		{"read -s PAGER; git log", "shell code git runs"},
+		{"printf -vEDITOR '%s' 'sh ./x.sh'; git commit", "shell code git runs"},
+		// A function or alias the command defines under a name the walker reads as the builtin.
+		{"cd() { :; }; cd /repo && git push origin main", "defines a function named cd"},
+		{"pushd() { :; }; pushd /repo && git push origin main", "defines a function named pushd"},
+		{"exit() { :; }; cd /x || exit; git push origin main", "defines a function named exit"},
+		{"alias cd=:; eval 'cd /x'", "defines an alias named cd"},
+		{"functions[cd]=':'; cd /repo && git push origin a", "defines cd through zsh's functions"},
+		// One-letter abbreviations of a long option git accepts.
+		{"git ls-remote --u='git push origin main' .", runsStep},
+		{"git clone --u='git push origin main' /tmp/r.git d", runsStep},
+		{"git archive --e='git push origin main' HEAD", runsStep},
 		{"mapfile -t PAGER < notes; git log", "shell code git runs"},
 		// Configuration under diff. or merge. with a subsection, and what rewrites refs or objects.
 		{"git -c diff.x.binary=true diff", config},
@@ -645,6 +667,7 @@ func TestFindPushesAllowed(t *testing.T) {
 		"export EDITOR; git commit",
 		": ${PAGER:=less}; git log -1",
 		"VISUAL= git commit",
+		`cd "$X"; alias x=:`, // a builtin is no AUTO_CD, even where the directory is unknown
 	} {
 		t.Run(command, func(t *testing.T) {
 			t.Parallel()

@@ -128,9 +128,16 @@ func (w *walker) run(f *syntax.File) {
 	// statement of its own at the top (not in a subshell, a branch, a chain, the background or eval).
 	if w.inEval == 0 {
 		for _, s := range f.Stmts {
-			if fd, ok := s.Cmd.(*syntax.FuncDecl); ok && !s.Background && !s.Coprocess {
-				w.topFuncs[fd] = true
+			fd, ok := s.Cmd.(*syntax.FuncDecl)
+			if !ok || s.Background || s.Coprocess {
+				continue
 			}
+			// mvdan.cc/sh reads `f() {…} | cmd` as a function whose body is the pipeline; the shell
+			// runs the definition in a pipeline subshell, so it defines nothing here.
+			if b, ok := fd.Body.Cmd.(*syntax.BinaryCmd); ok && (b.Op == syntax.Pipe || b.Op == syntax.PipeAll) {
+				continue
+			}
+			w.topFuncs[fd] = true
 		}
 	}
 	w.stmts(f.Stmts)
@@ -203,14 +210,17 @@ type walker struct {
 	envUnknown string
 	cdpath     bool                      // CDPATH was set in the command: a relative cd may go elsewhere
 	homeSet    bool                      // HOME was set in the command: a word starting with ~ is not literal
-	funcs      map[string]bool           // functions the command defines (their cd is handled where they are)
+	funcs      map[string]*syntax.Stmt   // functions the command defines, with their bodies
+	calling    map[string]bool           // the functions unknownWord is following (recursion)
+	cdFuncs    map[string]bool           // functions defined where the definition may not run, whose body may cd
 	topFuncs   map[*syntax.FuncDecl]bool // definitions that certainly run in this shell
 	inEval     int                       // inside eval, whose definitions may sit in a branch
 	seen       map[*syntax.CallExpr]bool
 }
 
 func newWalker(dir, src string) *walker {
-	return &walker{dir: dir, src: src, seen: map[*syntax.CallExpr]bool{}, funcs: map[string]bool{},
+	return &walker{dir: dir, src: src, seen: map[*syntax.CallExpr]bool{}, funcs: map[string]*syntax.Stmt{}, calling: map[string]bool{},
+		cdFuncs:  map[string]bool{},
 		topFuncs: map[*syntax.FuncDecl]bool{}}
 }
 
@@ -555,23 +565,33 @@ func (w *walker) cmd(s *syntax.Stmt) {
 		w.stmt(c.Stmt)
 		w.dir = saved
 	case *syntax.FuncDecl:
-		// The body runs when the function is called, from wherever that is: a push in it is refused,
-		// and a cd in it makes the directory unknown from here on.
-		if w.topFuncs[c] {
-			if c.Name != nil { // nil for zsh's anonymous `() CMD`
-				w.funcs[c.Name.Value] = true
+		names := c.Names   // zsh's `f g () { … }`
+		if c.Name != nil { // nil for zsh's anonymous `() CMD`
+			names = append([]*syntax.Lit{c.Name}, names...)
+		}
+		if len(names) == 0 {
+			w.stmt(c.Body) // zsh runs an anonymous function at once, in this shell
+			return
+		}
+		// A named function's body runs when it is called, from wherever that is: a push in it is
+		// refused, and a call of it may cd where its body may (unknownWord): a definition that
+		// certainly runs is followed into its body, any other one that may cd makes its name unknown.
+		mayCD := w.changesDir(c.Body)
+		for _, n := range names {
+			if modeledNames[n.Value] {
+				w.block("the command defines a function named " + n.Value + ", which the hook reads as the builtin or program of that name; " + runAlone)
 			}
-			for _, n := range c.Names { // zsh's `f g () { … }`
-				w.funcs[n.Value] = true
+			switch {
+			case w.topFuncs[c]:
+				w.funcs[n.Value] = c.Body
+			case mayCD:
+				w.cdFuncs[n.Value] = true
 			}
 		}
 		saved := w.dir
 		w.dir = ""
 		w.stmt(c.Body)
 		w.dir = saved
-		if w.changesDir(c.Body) {
-			w.dir = ""
-		}
 	}
 }
 
@@ -782,6 +802,9 @@ func (w *walker) autoCD(args []string, lit []bool) bool {
 	if _, err := exec.LookPath(args[0]); err == nil {
 		return false
 	}
+	if _, ok := w.funcs[args[0]]; ok || shellBuiltins[args[0]] || pureOutput[args[0]] {
+		return false // a command, which zsh does not take for a directory
+	}
 	d := w.resolve(args[0])
 	if d == "" {
 		return true // relative to a directory already unknown
@@ -953,6 +976,13 @@ func (w *walker) call(c *syntax.CallExpr, redirs []*syntax.Redirect) {
 		}
 		w.assignExpr(a)
 		if zshCode[a.Name.Value] {
+			if a.Index != nil { // functions[NAME]=…: the key names the function or alias
+				var key bytes.Buffer
+				_ = syntax.NewPrinter().Print(&key, a.Index)
+				if k := strings.Trim(normalize(key.String()), " "); modeledNames[k] {
+					w.block("the command defines " + k + " through zsh's " + a.Name.Value + ", which the hook reads as the builtin or program of that name; " + runAlone)
+				}
+			}
 			code, ok := literalWord(a.Value)
 			if !ok || a.Array != nil {
 				w.block("zsh's " + a.Name.Value + " parameter set from a value the hook cannot read defines code it cannot check; " + runAlone)
@@ -1172,6 +1202,9 @@ prefix:
 				}
 			case strings.Contains(a, "=") && !strings.HasPrefix(a, "-") && !strings.HasPrefix(a, "+"):
 				aliasName, value, _ := strings.Cut(a, "=")
+				if modeledNames[aliasName] {
+					w.block("the command defines an alias named " + aliasName + ", which the hook reads as the builtin or program of that name; " + runAlone)
+				}
 				w.definition("alias "+aliasName, value)
 			}
 		}
@@ -1212,10 +1245,22 @@ prefix:
 // unknownWord reports whether a command word may be a function or alias of the user's shell setup,
 // which the Bash tool loads (zoxide's z, oh-my-zsh's ... and take), or a builtin the walker does not
 // know, and so may cd: no program on PATH (which runs as a child, whose cd cannot move this shell),
-// no path, no builtin or command the walker knows, no function the command defines.
+// no path, no builtin or command the walker knows. A function the command defines may cd when its
+// body may, followed through the functions it calls.
 func (w *walker) unknownWord(word string) bool {
 	name := path.Base(strings.TrimPrefix(word, "="))
-	if strings.Contains(word, "/") || shellBuiltins[name] || w.funcs[name] || namedCommands[name] || shells[name] ||
+	if w.cdFuncs[name] && !strings.Contains(word, "/") {
+		return true // a function that may be defined, and may cd, whatever else the name is
+	}
+	if body, ok := w.funcs[name]; ok && !strings.Contains(word, "/") {
+		if w.calling[name] {
+			return false // recursion: the body is being looked at already
+		}
+		w.calling[name] = true
+		defer delete(w.calling, name)
+		return w.changesDir(body)
+	}
+	if strings.Contains(word, "/") || shellBuiltins[name] || namedCommands[name] || shells[name] ||
 		execRunners[name] || dataCommands[name] || pureOutput[name] {
 		return false
 	}
@@ -1225,6 +1270,14 @@ func (w *walker) unknownWord(word string) bool {
 	_, err := exec.LookPath(name)
 	return err != nil
 }
+
+// modeledNames are the names the walker reads as a builtin or program it models: a function or
+// alias of that name the command defines would run instead, unseen, so such a definition is refused.
+var modeledNames = map[string]bool{"cd": true, "chdir": true, "pushd": true, "popd": true, "exit": true,
+	"return": true, "source": true, ".": true, "eval": true, "trap": true, "emulate": true, "repeat": true,
+	"git": true, "command": true, "builtin": true, "exec": true, "env": true, "noglob": true, "nocorrect": true,
+	"alias": true, "hash": true, "set": true, "export": true, "declare": true, "typeset": true, "readonly": true,
+	"local": true, "read": true, "printf": true, "unset": true}
 
 // namedCommands are the commands command() handles by name that change no directory (those that do
 // are in changesDir's list).
@@ -1582,8 +1635,12 @@ func (w *walker) setter(name string, args []string, lit []bool) {
 
 // printf checks only the target of printf -v NAME.
 func (w *walker) printf(args []string, lit []bool) {
-	for i := 0; i+1 < len(args); i++ {
-		if lit[i] && args[i] == "-v" {
+	for i := 0; i < len(args); i++ {
+		if lit[i] && strings.HasPrefix(args[i], "-v") && len(args[i]) > 2 { // bash: -vNAME
+			w.assign(args[i][2:], nil)
+			return
+		}
+		if lit[i] && args[i] == "-v" && i+1 < len(args) {
 			if lit[i+1] {
 				w.assign(args[i+1], nil)
 			}
@@ -1944,8 +2001,8 @@ var cmdOptions = map[string][]cmdOption{
 
 // optionValues returns the values args give opts, read the way git's parse-options reads them: a
 // short option's value attached (-xCMD) or next (-x CMD), also after bundled flags (-ixCMD); a long
-// one as --name=value or --name value, in any abbreviation of two letters or more (--ex for
-// --exec). unreadable is set when such a value is not literal.
+// one as --name=value or --name value, in any abbreviation (--e and --ex for --exec; an ambiguous one
+// git rejects, so reading it too is harmless). unreadable is set when such a value is not literal.
 func optionValues(args []string, lit []bool, opts []cmdOption) (values []string, unreadable bool) {
 	next := func(j int, optional bool) int {
 		switch {
@@ -1970,7 +2027,7 @@ func optionValues(args []string, lit []bool, opts []cmdOption) (values []string,
 		if strings.HasPrefix(a, "--") {
 			name, value, hasEq := strings.Cut(a, "=")
 			for _, o := range opts {
-				if len(name) < len("--xy") || !strings.HasPrefix(o.long, name) {
+				if len(name) < len("--x") || !strings.HasPrefix(o.long, name) {
 					continue
 				}
 				switch {
