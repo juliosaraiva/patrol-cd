@@ -127,16 +127,10 @@ func gatePush(p push, root string) string {
 	if p.DryRun || len(p.Sources) == 0 {
 		return "" // a dry run, or deletions only: no commit is pushed
 	}
-	if hp, _ := gitOut(top, "config", "--get", "core.hooksPath"); hp != ".githooks" {
-		return "git's pre-push hook is not enabled in " + top + " (core.hooksPath is " + quoteOrUnset(hp) + "): run `make sdlc-git-hooks` once, then push again"
+	if msg := hookRuns(top); msg != "" {
+		return msg
 	}
 	gate := filepath.Join(top, "hack", "sdlc", "gate.sh")
-	if _, err := os.Stat(gate); err != nil {
-		return top + " has no hack/sdlc/gate.sh (a branch from before the SDLC gate?): check out a branch based on main"
-	}
-	if fi, err := os.Stat(filepath.Join(top, ".githooks", "pre-push")); err != nil || fi.Mode()&0o111 == 0 {
-		return "git's pre-push hook in " + top + " is missing or not executable, so git would push without it: restore it before pushing"
-	}
 	// The gate's own files must be as committed: no change git status shows, and none it hides (a
 	// file marked assume-unchanged or skip-worktree: a lower-case or S tag in git ls-files -v).
 	status, errStatus := gitOut(top, append([]string{"status", "--porcelain", "--"}, gateFiles...)...)
@@ -187,6 +181,24 @@ func gateUnknown(u unknownRun, root string) string {
 	top, err := gitOut(u.Dir, "rev-parse", "--show-toplevel")
 	if err != nil || !sameRepository(top, root) {
 		return what + "; it would run in " + u.Dir + ", outside " + root + " and its worktrees, where git's pre-push hook may not run: run the command it stands for"
+	}
+	if msg := hookRuns(top); msg != "" {
+		return what + "; " + msg
+	}
+	return ""
+}
+
+// hookRuns returns why git's pre-push hook would not run the gate for a push from the work tree top,
+// or "": core.hooksPath must be .githooks, and the hook and hack/sdlc/gate.sh must be there.
+func hookRuns(top string) string {
+	if hp, _ := gitOut(top, "config", "--get", "core.hooksPath"); hp != ".githooks" {
+		return "git's pre-push hook is not enabled in " + top + " (core.hooksPath is " + quoteOrUnset(hp) + "): run `make sdlc-git-hooks` there once (it sets this work tree's own value too), then run the command again"
+	}
+	if _, err := os.Stat(filepath.Join(top, "hack", "sdlc", "gate.sh")); err != nil {
+		return top + " has no hack/sdlc/gate.sh (a branch from before the SDLC gate?): check out a branch based on main"
+	}
+	if fi, err := os.Stat(filepath.Join(top, ".githooks", "pre-push")); err != nil || fi.Mode()&0o111 == 0 {
+		return "git's pre-push hook in " + top + " is missing or not executable, so git would push without it: restore it before pushing"
 	}
 	return ""
 }

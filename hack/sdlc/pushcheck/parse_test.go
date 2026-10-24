@@ -159,7 +159,10 @@ func TestFindPushes(t *testing.T) {
 		{name: "a function maybe defined, named echo", command: "false && echo() { cd /x; }; echo hi; git push origin a", want: []push{{Dir: "", Sources: []string{"a"}}}},
 		{name: "a function that cds, in a shell the command runs", command: "ls() { cd /x; }; bash -c 'ls && git push origin a'", want: []push{{Dir: "", Sources: []string{"a"}}}},
 		{name: "a function without a cd, in a shell the command runs", command: "f() { :; }; bash -c 'cd /x && git push origin a'", want: []push{{Dir: "/x", Sources: []string{"a"}}}},
-		{name: "source of a heredoc runs it here", command: "cd /other && source /dev/stdin <<< 'git push origin main'", want: []push{{Dir: "/other", Sources: []string{"main"}}}},
+		{name: "source of a here-string runs it here", command: "cd /other && source /dev/stdin <<< 'git push origin main'", want: []push{{Dir: "/other", Sources: []string{"main"}}}},
+		{name: "source of /dev/fd/0 runs it here", command: "cd /other && source /dev/fd/0 <<< 'git push origin main'", want: []push{{Dir: "/other", Sources: []string{"main"}}}},
+		{name: "source of a heredoc runs it here", command: "cd /other && . /dev/stdin <<'EOF'\ngit push origin main\nEOF", want: []push{{Dir: "/other", Sources: []string{"main"}}}},
+		{name: "source of a heredoc with tabs runs it here", command: "cd /other && . /dev/stdin <<-'EOF'\n\tgit push origin main\n\tEOF", want: []push{{Dir: "/other", Sources: []string{"main"}}}},
 		{name: "a trap calls a function without a cd", command: "cleanup() { rm -f x; }; trap cleanup EXIT; git push origin a", want: []push{{Dir: "/repo", Sources: []string{"a"}}}},
 		{name: "a function without a cd is no unknown word in a shell", command: "f() { :; }; bash -c 'f; git push origin a'", want: []push{{Dir: "/repo", Sources: []string{"a"}}}},
 		{name: "a function maybe defined, in a shell the command runs", command: "false && ls() { cd /x; }; bash -c 'ls && git push origin a'", want: []push{{Dir: "", Sources: []string{"a"}}}},
@@ -631,6 +634,8 @@ func TestFindPushesBlocked(t *testing.T) {
 		{`echo 'true\ncd /other\ngit push origin main' | sh`, "a git push through a script piped to a shell"},
 		{`printf 'true\012git push origin main' | sh`, "a git push through a script piped to a shell"},
 		{`printf 'true\x0agit push origin main' | sh`, "a git push through a script piped to a shell"},
+		{`printf 'true\u000agit push origin main' | sh`, "a git push through a script piped to a shell"},
+		{`printf 'true\U0000000agit push origin main' | sh`, "a git push through a script piped to a shell"},
 		// What source reads from a word the hook cannot read.
 		{`cd /other && . <(echo 'git push origin main')`, "a git push through source"},
 		// A ref or refspec read from standard input, in any abbreviation git accepts, can move origin/main.
@@ -638,6 +643,9 @@ func TestFindPushesBlocked(t *testing.T) {
 		{`echo 'refs/heads/change:refs/remotes/origin/main' | git fetch --stdin .`, "can move origin/main"},
 		{`git update-ref --stdi <<<'update refs/remotes/origin/main HEAD'`, "can move origin/main"},
 		{`git update-ref --std <<<'update refs/remotes/origin/main HEAD'`, "can move origin/main"},
+		{`git update-ref --st <<<'update refs/remotes/origin/main HEAD'`, "can move origin/main"},
+		{`git update-ref --s <<<'update refs/remotes/origin/main HEAD'`, "can move origin/main"},
+		{`git fetch --st . <<<'x:refs/remotes/origin/main'`, "can move origin/main"},
 		// One-letter abbreviations of a long option git accepts.
 		{"git ls-remote --u='git push origin main' .", runsStep},
 		{"git clone --u='git push origin main' /tmp/r.git d", runsStep},
@@ -856,6 +864,9 @@ func TestFindPushesUnknownWords(t *testing.T) {
 		{"echo x | xargs sh ./run.sh", nil},       // and here the script file's
 		{"echo x | xargs -0 sh", []unknownRun{{Dir: "/repo", Word: "sh", What: inputScript("sh")}, {Dir: "/repo", Word: "sh", What: stdinScript("sh")}}},
 		{"echo x | parallel", []unknownRun{{Dir: "/repo", Word: "parallel", What: "`parallel` with no command runs each line of its input, which the hook did not read, as a command"}}},
+		{"echo x | parallel sh -c {}", []unknownRun{{Dir: "/repo", Word: "sh", What: inputScript("sh")}}},
+		{"echo x | parallel bash -c 'echo {}'", []unknownRun{{Dir: "/repo", Word: "bash", What: inputScript("bash")}}},
+		{"cd /other && echo x | source /dev/fd/0", []unknownRun{{Dir: "/other", Word: "source", What: sourced}}},
 		{"cd /other && source /dev/stdin", []unknownRun{{Dir: "/other", Word: "source", What: sourced}}},
 		{`. "$f"`, []unknownRun{{Dir: "/repo", Word: "source", What: sourced}}},
 		{"source /dev/stdin <<<'true'", nil}, // read

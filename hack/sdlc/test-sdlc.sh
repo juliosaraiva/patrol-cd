@@ -49,6 +49,9 @@ check "a parity status file is not documentation" 1 "$(docs_only docs/parity/sta
 check "the parity matrix is not documentation" 1 "$(docs_only docs/guides/x.md docs/parity/matrix.md)"
 check "CLAUDE.md is not documentation" 1 "$(docs_only CLAUDE.md)"
 check "AGENTS.md is not documentation" 1 "$(docs_only README.md AGENTS.md)"
+for f in docs/CLAUDE.md docs/guides/CLAUDE.md CLAUDE.local.md docs/AGENTS.md; do
+	check "$f is not documentation" 1 "$(docs_only docs/guides/x.md "$f")"
+done
 check "code is not documentation" 1 "$(docs_only main.go)"
 
 # CI's CodeQL bundle must be the one hack/sdlc/codeql.sh pins and checks: the workflow fetches it
@@ -193,6 +196,13 @@ check "git hook not enabled: any command" 2 "$(wrapper 'ls')"
 contains "reason: make sdlc-git-hooks" "$work/hook.err" "make sdlc-git-hooks"
 check "git hook not enabled: make sdlc-git-hooks runs" 0 "$(wrapper 'make sdlc-git-hooks')"
 check "git hook not enabled: only make sdlc-git-hooks itself" 2 "$(wrapper 'make sdlc-git-hooks; git push origin change')"
+# The target sets the work tree's own value too: with extensions.worktreeConfig, a value in
+# config.worktree wins over the clone's, and the hooks would stay off whatever it set there.
+git init -q "$work/wtc"
+git -C "$work/wtc" config extensions.worktreeConfig true
+git -C "$work/wtc" config --worktree core.hooksPath /elsewhere
+make -s -C "$work/wtc" -f "$src/hack/sdlc.mk" sdlc-git-hooks
+check "make sdlc-git-hooks overrides a work tree's own value" .githooks "$(git -C "$work/wtc" config --get core.hooksPath)"
 check "git hook not enabled: push" 2 "$(hook 'git push -u origin change')"
 contains "reason: make sdlc-git-hooks" "$work/hook.err" "make sdlc-git-hooks"
 check "git hook not enabled: negated dry run" 2 "$(hook 'git push -n --no-dry-run origin change')"

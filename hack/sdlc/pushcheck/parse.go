@@ -193,9 +193,17 @@ func (w *walker) run(f *syntax.File) {
 	w.stmts(f.Stmts)
 	// The statements of a command or process substitution, with their pipelines, redirections and
 	// heredocs, on a walker of their own (they run in a child): a push there is refused, as is what
-	// the walker refuses anywhere. A call reached no other way (none, so far) is probed alone.
+	// the walker refuses anywhere. A call reached no other way (none, so far) is probed alone. Each
+	// runs from the directory of the statement it is part of, in that statement's function body if
+	// it is in one.
+	var path []*syntax.Stmt // the statements enclosing the node the walk is at
+	var isStmt []bool       // whether each node on the walk's path is a statement
 	probe := func(walk func(*walker)) {
-		p := w.child(w.dir, w.src)
+		at := stmtCtx{} // a statement the walk never reached: from an unknown directory
+		if len(path) > 0 {
+			at = w.stmtAt[path[len(path)-1]]
+		}
+		p := w.child(at.dir, w.src)
 		p.seen = w.seen
 		walk(p)
 		if len(p.pushes) > 0 {
@@ -203,9 +211,24 @@ func (w *walker) run(f *syntax.File) {
 		}
 		w.block(p.blocked)
 		w.calls = append(w.calls, p.calls...)
-		w.unknown = append(w.unknown, p.unknown...)
+		body := w.body
+		w.body = at.body
+		w.unread(p.unknown...)
+		w.body = body
 	}
 	syntax.Walk(f, func(n syntax.Node) bool {
+		if n == nil { // leaving a node; Walk ignores what this returns
+			if isStmt[len(isStmt)-1] {
+				path = path[:len(path)-1]
+			}
+			isStmt = isStmt[:len(isStmt)-1]
+			return false
+		}
+		st, ok := n.(*syntax.Stmt)
+		isStmt = append(isStmt, ok)
+		if ok {
+			path = append(path, st)
+		}
 		switch n := n.(type) {
 		case *syntax.CmdSubst:
 			probe(func(p *walker) { p.stmts(n.Stmts) })
@@ -269,7 +292,16 @@ type walker struct {
 	inEval     int                       // inside eval, whose definitions may sit in a branch
 	program    bool                      // the command runs as a program (a wrapper's), which no function shadows
 	input      inputArgs                 // xargs or parallel adds its input to the command's arguments
+	body       []string                  // the names of the function whose body is being walked, at its definition
+	funcUnread map[string]bool           // functions whose body runs code the walker could not read
+	stmtAt     map[*syntax.Stmt]stmtCtx  // where each statement the walk reached runs
 	seen       map[*syntax.CallExpr]bool
+}
+
+// stmtCtx is where a statement runs: its directory, and the function whose body holds it, if any.
+type stmtCtx struct {
+	dir  string
+	body []string
 }
 
 // inputArgs is how xargs or parallel gives its input to the command it runs.
@@ -283,8 +315,8 @@ const (
 
 func newWalker(dir, src string) *walker {
 	return &walker{dir: dir, src: src, seen: map[*syntax.CallExpr]bool{}, funcs: map[string]*syntax.Stmt{}, calling: map[string]bool{},
-		cdFuncs:  map[string]bool{},
-		topFuncs: map[*syntax.FuncDecl]bool{}}
+		cdFuncs: map[string]bool{}, topFuncs: map[*syntax.FuncDecl]bool{}, funcUnread: map[string]bool{},
+		stmtAt: map[*syntax.Stmt]stmtCtx{}}
 }
 
 // child is a walker for code that runs in a child of this shell (a substitution, a shell the command
@@ -297,6 +329,9 @@ func (w *walker) child(dir, src string) *walker {
 	c.cdpath, c.envUnknown, c.homeSet = w.cdpath, w.envUnknown, w.homeSet
 	for name := range w.cdFuncs {
 		c.cdFuncs[name] = true
+	}
+	for name := range w.funcUnread {
+		c.funcUnread[name] = true
 	}
 	for name, body := range w.funcs {
 		if w.unknownWord(name) {
@@ -335,6 +370,22 @@ func (w *walker) block(msg string) {
 	if w.blocked == "" {
 		w.blocked = msg
 	}
+}
+
+// unread records code the walker could not read, which may push. In a function body, walked where
+// the function is defined, it marks the function instead: a call of it records it, from the
+// directory of the call.
+func (w *walker) unread(runs ...unknownRun) {
+	if len(runs) == 0 {
+		return
+	}
+	if len(w.body) > 0 {
+		for _, name := range w.body {
+			w.funcUnread[name] = true
+		}
+		return
+	}
+	w.unknown = append(w.unknown, runs...)
 }
 
 // blockText blocks the command when text names a git push the walker could not resolve.
@@ -518,6 +569,9 @@ func (w *walker) stmt(s *syntax.Stmt) {
 	if s == nil {
 		return
 	}
+	if _, ok := w.stmtAt[s]; !ok {
+		w.stmtAt[s] = stmtCtx{dir: w.dir, body: w.body}
+	}
 	code := qualifierCode(s)
 	if code != "" {
 		w.blockText(code, "a zsh glob qualifier that runs code")
@@ -677,10 +731,13 @@ func (w *walker) cmd(s *syntax.Stmt) {
 				w.cdFuncs[n.Value] = true
 			}
 		}
-		saved := w.dir
-		w.dir = ""
+		saved, body := w.dir, w.body
+		w.dir, w.body = "", nil
+		for _, n := range names {
+			w.body = append(w.body, n.Value)
+		}
 		w.stmt(c.Body)
-		w.dir = saved
+		w.dir, w.body = saved, body
 	}
 }
 
@@ -946,8 +1003,8 @@ func (w *walker) autoCD(args []string, lit []bool) bool {
 	if _, err := exec.LookPath(args[0]); err == nil {
 		return false
 	}
-	if _, ok := w.funcs[args[0]]; ok || shellBuiltins[args[0]] || pureOutput[args[0]] {
-		return false // a command, which zsh does not take for a directory
+	if _, ok := w.funcs[args[0]]; ok || knownCommand(args[0]) {
+		return false // a command (popd, eval …), which zsh does not take for a directory
 	}
 	d := w.resolve(args[0])
 	if d == "" {
@@ -1297,13 +1354,17 @@ prefix:
 	}
 	if !lit[0] {
 		w.dynamicWord(args, lit)
-		w.unknown = append(w.unknown, unknownRun{Dir: w.dir, Word: args[0], What: "a command named by a word the hook cannot read"})
+		w.unread(unknownRun{Dir: w.dir, Word: args[0], What: "a command named by a word the hook cannot read"})
 		return
 	}
 	if fn := args[0]; !program {
 		// A function the command defines runs instead of the builtin or program of its name: its body
-		// was walked where it was defined, so only its cd matters here, and a push in its arguments,
-		// which it may hand to git or a shell ("$@").
+		// was walked where it was defined, so only its cd matters here, code in it the walker could
+		// not read (which runs from here), and a push in its arguments, which it may hand to git or a
+		// shell ("$@").
+		if w.funcUnread[fn] {
+			w.unread(unknownRun{Dir: w.dir, Word: fn, What: "the function `" + fn + "` runs code the hook could not read"})
+		}
 		if w.cdFuncs[fn] {
 			w.dir = "" // a function that may be defined, and may cd, may run instead
 		}
@@ -1330,7 +1391,7 @@ prefix:
 	switch {
 	case w.autoCD(args, lit):
 		// An alias of that name would run instead (zsh expands it first), so it is an unknown word too.
-		w.unknown = append(w.unknown, unknownRun{Dir: w.dir, Word: args[0]})
+		w.unread(unknownRun{Dir: w.dir, Word: args[0]})
 		w.chdir("cd", args, lit)
 	case name == "cd" || name == "chdir" || name == "pushd": // chdir: zsh's synonym for cd
 		w.chdir(name, args[1:], lit[1:])
@@ -1461,7 +1522,7 @@ prefix:
 			// An alias or function of the shell's setup (or a program not on PATH): it may cd, push
 			// (oh-my-zsh's gp is `git push`, which main.go lets run only in this clone, where git's hook
 			// judges it) or hand its arguments to git (a git alias among them is checked).
-			w.unknown = append(w.unknown, unknownRun{Dir: w.dir, Word: args[0]})
+			w.unread(unknownRun{Dir: w.dir, Word: args[0]})
 			w.calls = append(w.calls, argvGitCalls(args, lit)...)
 			w.dir = ""
 		}
@@ -1513,15 +1574,18 @@ func (w *walker) unknownWord(word string) bool {
 		defer delete(w.calling, name)
 		return w.changesDir(body)
 	}
-	if strings.Contains(word, "/") || shellBuiltins[name] || namedCommands[name] || shells[name] ||
-		execRunners[name] || dataCommands[name] || pureOutput[name] {
-		return false
-	}
-	if _, ok := wrapperSkip[name]; ok {
+	if strings.Contains(word, "/") || knownCommand(name) {
 		return false
 	}
 	_, err := exec.LookPath(name)
 	return err != nil
+}
+
+// knownCommand reports whether the walker knows name as a builtin or a command it models.
+func knownCommand(name string) bool {
+	_, wrapper := wrapperSkip[name]
+	return wrapper || shellBuiltins[name] || namedCommands[name] || modeledNames[name] || shells[name] ||
+		execRunners[name] || dataCommands[name] || pureOutput[name]
 }
 
 // modeledNames are the names the walker reads as a builtin or program it models: a function or
@@ -1537,7 +1601,7 @@ var modeledNames = map[string]bool{"cd": true, "chdir": true, "pushd": true, "po
 var namedCommands = map[string]bool{"git": true, "alias": true, "hash": true, "read": true, "mapfile": true,
 	"readarray": true, "getopts": true, "printf": true, "watch": true, "xargs": true, "parallel": true, "find": true,
 	"fish": true, "csh": true, "tcsh": true, "env": true, "command": true, "exec": true, "builtin": true,
-	"noglob": true, "nocorrect": true}
+	"noglob": true, "nocorrect": true, "add-zsh-hook": true}
 
 // shellBuiltins are bash and zsh builtins and keywords, not programs on PATH, that never change the
 // shell's directory (the ones that do, and those that run code, are handled by name above).
@@ -1594,7 +1658,7 @@ func (w *walker) source(args []string, lit []bool, redirs []*syntax.Redirect) {
 		w.blockText(w.cmdText, "source")
 	}
 	if stdin || len(args) > 0 && !lit[0] {
-		w.unknown = append(w.unknown, unknownRun{Dir: w.dir, Word: "source", What: "`source` of standard input or of a word the hook cannot read runs a script it did not read"})
+		w.unread(unknownRun{Dir: w.dir, Word: "source", What: "`source` of standard input or of a word the hook cannot read runs a script it did not read"})
 	}
 	w.dir, w.envUnknown = "", "a file sourced earlier in the command"
 }
@@ -1804,7 +1868,7 @@ func (w *walker) eval(args []string, lit []bool) {
 	for _, l := range lit {
 		if !l {
 			w.blockText(w.cmdText, "eval")
-			w.unknown = append(w.unknown, unknownRun{Dir: w.dir, Word: "eval", What: "`eval` of a string the hook cannot read runs code it did not read"})
+			w.unread(unknownRun{Dir: w.dir, Word: "eval", What: "`eval` of a string the hook cannot read runs code it did not read"})
 			w.dir, w.envUnknown = "", "an eval of a dynamic string earlier in the command"
 			return
 		}
@@ -1858,7 +1922,7 @@ func (w *walker) xargs(name string, args []string, lit []bool) {
 	inner, innerLit := skipOptions(args, lit, xargsValue[name], 0)
 	if len(inner) == 0 {
 		if name == "parallel" { // GNU parallel with no command runs each input line as a command
-			w.unknown = append(w.unknown, unknownRun{Dir: w.dir, Word: name, What: "`parallel` with no command runs each line of its input, which the hook did not read, as a command"})
+			w.unread(unknownRun{Dir: w.dir, Word: name, What: "`parallel` with no command runs each line of its input, which the hook did not read, as a command"})
 		}
 		return // xargs' default command is echo
 	}
@@ -1877,7 +1941,7 @@ func (w *walker) xargs(name string, args []string, lit []bool) {
 	}
 	s.command(inner, innerLit, nil)
 	w.calls = append(w.calls, s.calls...)
-	w.unknown = append(w.unknown, s.unknown...)
+	w.unread(s.unknown...)
 	if len(s.pushes) > 0 || s.blocked != "" || (path.Base(inner[0]) == "git" && gitSubcommand(inner[1:], innerLit[1:]) < 0) {
 		refuse()
 	}
@@ -1993,7 +2057,7 @@ options:
 	if w.input == inputReplaced || w.input == inputAppended && len(operands) == 0 {
 		// With no script (-c) or script file of its own, or one the input fills in, the input is the
 		// script or names it.
-		w.unknown = append(w.unknown, unknownRun{Dir: w.dir, Word: args[0], What: "`" + args[0] + "` run by xargs or parallel takes its script from their input, which the hook did not read"})
+		w.unread(unknownRun{Dir: w.dir, Word: args[0], What: "`" + args[0] + "` run by xargs or parallel takes its script from their input, which the hook did not read"})
 	}
 	switch {
 	case command:
@@ -2035,7 +2099,7 @@ options:
 	// The script comes from a pipe, a file or a redirection of an enclosing command (`(cd X && sh)
 	// <<EOF`, `exec 0<<<…`). A literal producer piped straight in is parsed by pipedScript in the
 	// pipeline branch; the rest is out of the hook's reach and may push, so it runs only in this clone.
-	w.unknown = append(w.unknown, unknownRun{Dir: w.dir, Word: args[0], What: "`" + args[0] + "` reads a script from standard input that the hook did not read"})
+	w.unread(unknownRun{Dir: w.dir, Word: args[0], What: "`" + args[0] + "` reads a script from standard input that the hook did not read"})
 }
 
 // heredocText returns the script a heredoc or here-string gives a shell, when it has no expansions.
@@ -2075,7 +2139,7 @@ func (w *walker) script(s string) {
 	w.block(inner.blocked)
 	w.pushes = append(w.pushes, inner.pushes...)
 	w.calls = append(w.calls, inner.calls...)
-	w.unknown = append(w.unknown, inner.unknown...)
+	w.unread(inner.unknown...)
 }
 
 func (w *walker) chdir(name string, args []string, lit []bool) {

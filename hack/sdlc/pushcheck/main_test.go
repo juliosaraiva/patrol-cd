@@ -72,7 +72,18 @@ func TestRunFailsClosed(t *testing.T) {
 func TestRunUnknownWords(t *testing.T) {
 	t.Parallel()
 	root, other := t.TempDir(), t.TempDir()
-	gitIn(t, root, "init", "-q")
+	wt := filepath.Join(t.TempDir(), "wt")
+	gitIn(t, root, "init", "-q", "-b", "main")
+	gitIn(t, root, "commit", "-q", "--allow-empty", "-m", "before the gate")
+	gitIn(t, root, "branch", "old")
+	for _, f := range []string{".githooks/pre-push", "hack/sdlc/gate.sh"} {
+		require.NoError(t, os.MkdirAll(filepath.Dir(filepath.Join(root, f)), 0o755))
+		require.NoError(t, os.WriteFile(filepath.Join(root, f), []byte("#!/bin/sh\nexit 0\n"), 0o755))
+	}
+	gitIn(t, root, "add", "-A")
+	gitIn(t, root, "commit", "-q", "-m", "gate")
+	gitIn(t, root, "config", "core.hooksPath", ".githooks")
+	gitIn(t, root, "worktree", "add", "-q", wt, "old") // a worktree of this clone without the gate
 	gitIn(t, other, "init", "-q")
 	require.NoError(t, os.Mkdir(filepath.Join(root, "sub"), 0o755))
 	for _, tt := range []struct {
@@ -81,6 +92,18 @@ func TestRunUnknownWords(t *testing.T) {
 		reason  string
 	}{
 		{"nosuch-gp origin main", 0, ""},
+		{"cd " + wt + " && nosuch-gp origin main", 2, wt + " has no hack/sdlc/gate.sh"},
+		// A function's unread code runs where the function is called; a builtin is no AUTO_CD.
+		{`retry() { for i in 1 2 3; do "$@" && return 0; sleep 5; done; return 1; }; retry go test ./...`, 0, ""},
+		{`f() { nosuch-tool; }; echo hi`, 0, ""},
+		{`f() { "$@"; }; cd ` + other + ` && f ls`, 2, "the function `f` runs code the hook could not read, which can push; it would run in " + other},
+		{"pushd sub && true; popd", 0, ""},
+		{"cd sub; ls; popd", 0, ""},
+		// A substitution runs from the directory of its statement.
+		{"cd " + other + " || exit 1; out=$(nosuch-gp origin main); cd " + root + " || exit 1; echo \"$out\"", 2, "it would run in " + other},
+		{"v=$(nosuch-tool --version); cd sub; ls", 0, ""},
+		{"f() { v=$(nosuch-tool); }; echo hi", 0, ""}, // a substitution in a body runs where f is called
+		{"f() { nosuch-tool; }; cd " + other + " && bash -c f", 2, "the function `f` runs code the hook could not read"},
 		{"cd sub && nosuch-gp origin main", 0, ""},
 		{"cd " + other + " && nosuch-gp origin main", 2, "it would run in " + other + ", outside " + root},
 		{"nosuch-z x && nosuch-gp origin main", 2, "a directory the hook cannot tell"},

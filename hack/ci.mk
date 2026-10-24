@@ -195,7 +195,8 @@ ci-ui: ## pnpm install --frozen-lockfile, gen:api:check, typecheck, lint, vitest
 	pnpm -C $(UI_DIR) gen:api:check
 	pnpm -C $(UI_DIR) typecheck
 	pnpm -C $(UI_DIR) lint
-	pnpm -C $(UI_DIR) test
+	# CI=true here as on GitHub: vitest then fails a focused test (.only) instead of running it alone.
+	CI=true pnpm -C $(UI_DIR) test
 	pnpm -C $(UI_DIR) build
 
 # Offline pin checks first (cheap), then the image itself. umask 022: rootfs-check asserts file

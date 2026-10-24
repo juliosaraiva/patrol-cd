@@ -126,9 +126,10 @@ replace them.
 
 - a passing check record, always;
 - a passing review record, unless the change since the merge base is documentation only (the rule
-  above, except that `docs/parity/`, `CLAUDE.md` and `AGENTS.md` are not documentation here: a
-  status file that marks a feature complete needs its evidence reviewed, and the agents'
-  instructions their review).
+  above, except that `docs/parity/`, and `CLAUDE.md`, `CLAUDE.local.md` and `AGENTS.md` at any
+  depth, are not documentation here: a status file that marks a feature complete needs its evidence
+  reviewed, and the agents' instructions their review; Claude Code loads a nested `CLAUDE.md` for the
+  files under it).
 
 A change to the gate's own files (`.githooks/`, `hack/sdlc/`, `.claude/settings.json`) is judged by
 the gate of its base too (the merge base with `origin/main`, run from the base's files), so a gate
@@ -143,7 +144,8 @@ the agent review and CI stand behind such a change.
 Two hooks run it:
 
 - **git's pre-push hook** (`.githooks/pre-push`, enabled with `make sdlc-git-hooks`, which sets
-  `core.hooksPath`). It is the authority: git gives it the commits actually being pushed, so a
+  `core.hooksPath` for the clone and for the work tree it runs in, whose own value wins with
+  `extensions.worktreeConfig`). It is the authority: git gives it the commits actually being pushed, so a
   commit made in the same command line (`git commit … && git push`), a push from a script, an
   alias or another tool are all checked. A person can bypass it in an emergency with
   `git push --no-verify`.
@@ -184,8 +186,11 @@ Two hooks run it:
      script from standard input it did not read (`(cd X && sh) <<EOF`, `… | env sh`, `sh < <(…)`), or
      from the input of `xargs` or `parallel` (`xargs sh -c`, `xargs -I{} sh -c {}`, `parallel` with no
      command); `source` of standard input or of a word it cannot read; an `eval` of a dynamic string;
-     a command word that is not literal. Such code runs only in this clone or its worktrees, where
-     git's hook judges what it pushes; a command that does not parse as bash is refused outright. In
+     a command word that is not literal. Such code runs only in a work tree of this clone where
+     git's hook runs the gate (`core.hooksPath` is `.githooks`, and the hook and `hack/sdlc/gate.sh`
+     are there), which judges what it pushes. It is placed where it runs: code in a function body
+     where the function is called, code in a substitution in the directory of its statement. A
+     command that does not parse as bash is refused outright. In
      this clone a push is refused while `core.hooksPath` is not
      `.githooks`, while `.githooks/pre-push` is missing or not executable, while the gate's own files
      (`.githooks/`, `hack/sdlc/`, `.claude/settings.json`) have uncommitted changes, and from a branch
