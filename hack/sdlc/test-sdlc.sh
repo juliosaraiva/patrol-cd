@@ -549,15 +549,24 @@ check "weakened: a ?= variable" GOLANGCI_LINT "$(source "$src/hack/sdlc/lib.sh" 
 # shellcheck source=hack/sdlc/lib.sh
 check "weakened: GOFLAGS in Go's env file" "GOFLAGS (go env)" "$(source "$src/hack/sdlc/lib.sh" && GOENV=$work/goenv GOFLAGS='' CI_GO_TEST_FLAGS='' sdlc_weakened "$work/w.mk")"
 
-# check.sh end to end, in a scratch repository whose make targets are stubs: the step for a kind
-# script waits for a marker, so the test can act while the checks run. A clean run records a pass; a
-# run during which HEAD moves (to another branch and back, a stash) records nothing.
+# check.sh end to end, in a scratch repository (a Go module of two packages) whose make targets are
+# stubs that log what they were asked to run: the step for a kind script waits for a marker when
+# MARKS is set, so the test can act while the checks run. A clean run records a pass; a run during
+# which HEAD moves (to another branch and back, a stash) records nothing.
 chk=$work/chk
 marks=$work/chk-marks
-mkdir -p "$chk/hack/sdlc" "$chk/hack/kind" "$marks"
+mkdir -p "$chk/hack/sdlc" "$chk/hack/kind" "$chk/a/testdata" "$chk/b" "$marks"
 cp "$src"/hack/sdlc/{check.sh,lib.sh} "$chk/hack/sdlc/"
-# shellcheck disable=SC2016 # make expands $(MARKS), not the shell
-printf 'ci-static release-lint-commits:\n\t@[ "$(MAKE)" != false ]\nci-scripts:\n\t@touch "$(MARKS)/started"; while [ ! -e "$(MARKS)/go" ]; do sleep 0.1; done; rm -f "$(MARKS)/started" "$(MARKS)/go"\n' >"$chk/Makefile"
+printf 'module example.com/chk\n\ngo 1.21\n' >"$chk/go.mod"
+printf 'package a\n' >"$chk/a/a.go"
+printf 'package b\n' >"$chk/b/b.go"
+# shellcheck disable=SC2016 # make expands $(MARKS), $(LOG) and the others, not the shell
+{
+	printf 'ci-static release-lint-commits:\n\t@[ "$(MAKE)" != false ]\n'
+	printf 'ci-unit ci-integration ci-deploy ci-ui image-verify-pins:\n\t@echo "$(strip $@ $(CI_UNIT_PKGS) $(VERIFY_PINS_FLAGS))" >>"$(LOG)"\n'
+	printf 'ci-scripts:\n\t@echo $@ >>"$(LOG)"\n'
+	printf '\t@[ -z "$(MARKS)" ] || { touch "$(MARKS)/started"; while [ ! -e "$(MARKS)/go" ]; do sleep 0.1; done; rm -f "$(MARKS)/started" "$(MARKS)/go"; }\n'
+} >"$chk/Makefile"
 touch "$chk/hack/none.mk"
 git -C "$chk" init -q -b main
 git -C "$chk" add -A
@@ -572,7 +581,7 @@ checkrun() { # checkrun N ACTION: commit kind script N, run check.sh, do ACTION 
 	# Without what makes check.sh check but record nothing (CI's GOFLAGS, a PATROL_SDLC_BASE set for
 	# a local iteration, Go's env file), so the test asserts the recording path wherever it runs.
 	# MAKE=false too: check.sh must drop it, or the stub's ci-static fails (as $(MAKE) recipes would be emptied).
-	(cd "$chk" && env -u PATROL_SDLC_BASE -u CI_GO_TEST_FLAGS -u GOFLAGS GOENV=off MAKE=false MARKS="$marks" hack/sdlc/check.sh >"$work/chk.out" 2>&1) &
+	(cd "$chk" && env -u PATROL_SDLC_BASE -u CI_GO_TEST_FLAGS -u GOFLAGS GOENV=off MAKE=false MARKS="$marks" LOG="$work/chk.log" hack/sdlc/check.sh >"$work/chk.out" 2>&1) &
 	local pid=$!
 	while [[ ! -e $marks/started && $tries -lt 300 ]]; do
 		sleep 0.1
@@ -593,6 +602,37 @@ contains "reason: HEAD moved" "$work/chk.out" "HEAD moved"
 check "check.sh: nothing recorded after HEAD moved" none "$(recorded)"
 check "check.sh: a stash during the run" 1 "$(checkrun 3 'echo y >>hack/kind/x.sh && git stash -q && git stash pop -q && git checkout -q -- hack/kind/x.sh')"
 check "check.sh: nothing recorded after a stash" none "$(recorded)"
+
+# What check.sh runs for a change: a package's data file tests that package; a file outside every
+# package (examples/, a CRD, the OpenAPI document, the Dockerfile) tests every package, as a test
+# anywhere may read it; the UI's sources and the agents' instructions test none.
+selected() { # selected FILE...: from the base, commit a change to each FILE and run check.sh --no-codeql; prints the steps run
+	git -C "$chk" switch -q -C sel main
+	local f
+	for f; do
+		mkdir -p "$chk/$(dirname "$f")"
+		echo '// x' >>"$chk/$f" # a comment to go.mod, which go list still reads
+	done
+	git -C "$chk" add -A
+	git -C "$chk" commit -q -m "chore: change"
+	: >"$work/chk.log"
+	(cd "$chk" && env -u PATROL_SDLC_BASE -u CI_GO_TEST_FLAGS -u GOFLAGS -u MARKS GOENV=off LOG="$work/chk.log" hack/sdlc/check.sh --no-codeql >"$work/sel.out" 2>&1) || echo "check.sh failed: $(tail -n 3 "$work/sel.out")"
+	paste -sd ';' "$work/chk.log"
+}
+all="ci-unit example.com/chk/a example.com/chk/b"
+check "selection: a package's data file" "ci-unit example.com/chk/a" "$(selected a/testdata/x.txt)"
+check "selection: a package's data file and documentation" "ci-unit example.com/chk/a" "$(selected a/testdata/x.txt docs/x.md)"
+check "selection: a file outside every package" "$all" "$(selected examples/app.yaml)"
+check "selection: a file outside every package after a package's" "$all" "$(selected a/testdata/x.txt examples/app.yaml)"
+check "selection: a UI source" ci-ui "$(selected ui/src/x.ts)"
+check "selection: the agents' instructions" "" "$(selected sub/CLAUDE.md sub/CLAUDE.local.md sub/AGENTS.md .claude/x.md)"
+check "selection: the OpenAPI document" "$all;ci-ui" "$(selected api/openapi/openapi.json)"
+check "selection: a CRD" "$all;ci-deploy;ci-scripts" "$(selected deploy/crds/x.yaml)"
+check "selection: the CRD types' directory" "$all;ci-scripts" "$(selected api/v1alpha1/x.txt)"
+check "selection: the Dockerfile" "$all;image-verify-pins --offline" "$(selected Dockerfile)"
+check "selection: the UI's package.json" "ci-ui;image-verify-pins --offline" "$(selected ui/package.json)"
+check "selection: go.mod" "$all;image-verify-pins --offline" "$(selected go.mod)"
+check "selection: the image's pins" "$all;image-verify-pins --offline" "$(selected hack/images/checksums.txt)"
 
 echo "test-sdlc: $passed passed, $failed failed"
 [[ $failed -eq 0 ]]

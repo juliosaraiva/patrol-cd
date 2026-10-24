@@ -32,11 +32,12 @@ this guide.
 | When | Check |
 |------|-------|
 | always | `make ci-static` (gofmt, `go mod tidy`, build, vet, golangci-lint, generated files, OpenAPI, parity matrix, test report rules, tier and SDLC gate tests, shell scripts, workflow lint, gitleaks) and `make release-lint-commits` |
-| Go files changed | `make ci-unit` on the changed packages (`-race`, envtest, the strict skip policy); all packages when `go.mod` or `go.sum` changed; off Linux, `go vet` of every package for Linux too, since files built only for Linux compile in no other step there |
+| any other change | `make ci-unit` (`-race`, envtest, the strict skip policy) on the packages of the changed files, a data file counting for the nearest package above it; every package when `go.mod`, `go.sum` or a file outside every package changed (`examples/`, `deploy/`, a script, the Makefiles: a test anywhere may read it, `test/examples` reads `examples/`), except the UI's sources and the agents' instructions, which no Go test reads; off Linux, when Go files changed, `go vet` of every package for Linux too, since files built only for Linux compile in no other step there |
 | `test/integration/` | `make ci-integration` |
 | `deploy/` or `test/deploy/` | `make ci-deploy` |
-| `hack/kind/` or `test/e2e/` | `make ci-scripts` |
-| `ui/` | `make ci-ui` |
+| `hack/kind/`, `test/e2e/`, `deploy/crds/` or `api/v1alpha1/` | `make ci-scripts` (its `validate.sh` checks the e2e fixtures against the CRDs) |
+| `ui/` or `api/openapi/` | `make ci-ui` (the UI's API types are generated from the OpenAPI document) |
+| `Dockerfile`, `hack/images/`, `go.mod` or `ui/package.json` | `make image-verify-pins VERIFY_PINS_FLAGS=--offline` (the image's pins; `ci-image` runs the rest of the image checks on CI) |
 | Go, JavaScript/TypeScript or workflow files | CodeQL for those languages (below) |
 
 A documentation-only change (the rule of `hack/ci/classify-changes.sh`: `docs/`, `*.md` at the root,
@@ -274,7 +275,8 @@ Two hooks run it:
       they are refused;
     - `git -c`, `git --config-env` and `git config` writes of keys outside a short safe list
       (`core.hooksPath`, `alias.*`, `include.*`, `core.pager`, `diff.external`,
-      `diff.<driver>.command` …); `--git-dir`, `--work-tree`, `--bare`, `--shallow-file` and other
+      `diff.<driver>.command` …), read as git reads them (without a subcommand, an option after the
+      key is a value: `git config KEY VALUE --get` writes); `--git-dir`, `--work-tree`, `--bare`, `--shallow-file` and other
       global options before `push`; `git send-pack`, `git http-push` and git's remote helpers
       (`git remote-*`, `git-remote-*`, also handed to a function or an unknown word), which push
       without the hook;
@@ -288,6 +290,8 @@ Two hooks run it:
       refspecs from standard input (`--stdin` in every abbreviation git accepts),
       `git remote add`, `remove`, `rename`, `set-url` or `set-branches`, and `git fast-import` and
       `git replace`;
+    - each git command of the items above also when git is handed to a function the command defines
+      or to an unknown word (`f git config alias.x …` with `f() { "$@"; }`);
     - a git subcommand that is not a git command: an alias, whose definition the command could
       change on the way (a config file it writes, `HOME`, `XDG_CONFIG_HOME`), also among the
       arguments of a function the command defines or of an unknown word (`retry git ship`). A

@@ -7,12 +7,18 @@
 #                          OpenAPI, parity, test rules, tier tests, SDLC script tests, shell,
 #                          actionlint, gitleaks) and make release-lint-commits (commit subjects)
 #   Go files, Go data      make ci-unit on the changed packages, a data file counting for the
-#                          nearest package above it (-race, envtest, skip policy); go.mod or
-#                          go.sum: every package
+#                          nearest package above it (-race, envtest, skip policy); go.mod, go.sum
+#                          or another file outside every package (examples/, deploy/, a script,
+#                          which a test elsewhere may read): every package
 #   test/integration/      make ci-integration
 #   deploy/, test/deploy/  make ci-deploy
-#   hack/kind/, test/e2e/  make ci-scripts
-#   ui/                    make ci-ui
+#   hack/kind/, test/e2e/, make ci-scripts (validate.sh checks the e2e fixtures against the CRDs)
+#   deploy/crds/,
+#   api/v1alpha1/
+#   ui/, api/openapi/      make ci-ui (the UI's API types come from api/openapi/openapi.json)
+#   Dockerfile, go.mod,    make image-verify-pins VERIFY_PINS_FLAGS=--offline (the image's pins)
+#   hack/images/,
+#   ui/package.json
 #   Go, JS/TS, workflows   CodeQL: hack/sdlc/codeql.sh analyze for the languages that changed
 #
 # Documentation-only changes run the first row only. When every check passed on a clean tree, the
@@ -126,31 +132,44 @@ else
 	# to the package above them); without the two suites that have their own targets, and only
 	# packages go can load (hack/deps holds a single `//go:build tools` file).
 	pkgs=()
-	if any '^(go\.mod|go\.sum)$'; then
-		# A dependency change touches every package; test them all except the two suites that have
-		# their own targets (ci-integration, ci-deploy), which ci-unit's default also excludes.
+	# A file outside every package may be read by a test anywhere (test/examples reads examples/,
+	# internal/apiserver reads deploy/crds/), and go.mod and go.sum touch every package: test them all
+	# then, as CI's ci-unit always does. Documentation, the agents' instructions and the UI's sources
+	# (ci-ui tests them; Go embeds only the build, which the repository does not track) are read by no
+	# Go test.
+	all=0
+	dirs=()
+	seen=$'\n'
+	for f in ${changed[@]+"${changed[@]}"}; do
+		[[ $all -eq 1 ]] && break
+		printf '%s\n' "$f" | sdlc_docs_only && continue
+		d=${f%%/testdata/*}
+		[[ $d == "$f" ]] && d=$(dirname "$f")
+		while [[ $d != . ]] && ! compgen -G "$d/*.go" >/dev/null; do
+			d=$(dirname "$d")
+		done
+		if [[ $d == . ]]; then
+			case /$f in
+			/ui/* | */.claude/* | */CLAUDE.md | */CLAUDE.local.md | */AGENTS.md) ;;
+			*) all=1 ;;
+			esac
+			continue
+		fi
+		[[ $d == test/integration* || $d == test/deploy* ]] && continue
+		[[ $seen == *$'\n'"$d"$'\n'* ]] && continue
+		seen+="$d"$'\n'
+		dirs+=("./$d")
+	done
+	if [[ $all -eq 1 ]]; then
+		# Every package but the two suites that have their own targets (ci-integration, ci-deploy),
+		# which ci-unit's default also excludes.
 		while IFS= read -r p; do
 			[[ -n $p ]] && pkgs+=("$p")
 		done < <(go list ./... | grep -v -e '/test/integration' -e '/test/deploy')
-	else
-		dirs=()
-		seen=$'\n'
-		for f in ${changed[@]+"${changed[@]}"}; do
-			d=${f%%/testdata/*}
-			[[ $d == "$f" ]] && d=$(dirname "$f")
-			while [[ $d != . ]] && ! compgen -G "$d/*.go" >/dev/null; do
-				d=$(dirname "$d")
-			done
-			[[ $d == . || $d == test/integration* || $d == test/deploy* ]] && continue
-			[[ $seen == *$'\n'"$d"$'\n'* ]] && continue
-			seen+="$d"$'\n'
-			dirs+=("./$d")
-		done
-		if [[ ${#dirs[@]} -gt 0 ]]; then
-			while IFS= read -r p; do
-				[[ -n $p ]] && pkgs+=("$p")
-			done < <(go list -e -f '{{if not .Error}}{{.ImportPath}}{{end}}' "${dirs[@]}")
-		fi
+	elif [[ ${#dirs[@]} -gt 0 ]]; then
+		while IFS= read -r p; do
+			[[ -n $p ]] && pkgs+=("$p")
+		done < <(go list -e -f '{{if not .Error}}{{.ImportPath}}{{end}}' "${dirs[@]}")
 	fi
 	if [[ ${#pkgs[@]} -gt 0 ]]; then
 		step "go tests (${#pkgs[@]} packages)" make --no-print-directory ci-unit CI_UNIT_PKGS="${pkgs[*]}"
@@ -165,11 +184,18 @@ else
 	if any '^(deploy/|test/deploy/)'; then
 		step deploy make --no-print-directory ci-deploy
 	fi
-	if any '^(hack/kind/|test/e2e/)'; then
+	# validate.sh checks the e2e fixtures against the CRDs, which api/v1alpha1 generates.
+	if any '^(hack/kind/|test/e2e/|deploy/crds/|api/v1alpha1/)'; then
 		step kind-scripts make --no-print-directory ci-scripts
 	fi
-	if any '^ui/'; then
+	# The UI's API types are generated from the OpenAPI document (gen:api:check).
+	if any '^(ui/|api/openapi/)'; then
 		step ui make --no-print-directory ci-ui
+	fi
+	# The image's pins, offline: the Dockerfile's against go.mod's Go and ui/package.json's pnpm
+	# (ci-image runs the same check before it builds the image, which needs a daemon).
+	if any '^(Dockerfile|hack/images/|go\.mod$|ui/package\.json$)'; then
+		step image-pins make --no-print-directory image-verify-pins VERIFY_PINS_FLAGS=--offline
 	fi
 	if [[ $codeql -eq 1 ]]; then
 		langs=()

@@ -678,6 +678,16 @@ func TestFindPushesBlocked(t *testing.T) {
 		{`export $'\x47IT_DIR=/x/.git'; git push origin a`, gitEnv},
 		{`git commit -m $'\x47IT_DIR'`, givenTo},
 		{`echo $'core.hooks\x50ath'`, givenTo},
+		// Without a subcommand git reads no option after the first positional: these set the key.
+		{"git config alias.x '!sh' --get", config},
+		{"git config alias.x '!sh' -l", config},
+		{"git config --file .git/config alias.x '!sh' --name-only", config},
+		// git handed to a function the command defines, or to an unknown word, is refused as git is.
+		{`f() { "$@"; }; f git config alias.x '!sh'`, config},
+		{`f() { "$@"; }; f git -C . -c alias.x='!sh' x`, config},
+		{`f() { "$@"; }; f git update-ref refs/remotes/origin/main HEAD`, "can move origin/main"},
+		{`f() { "$@"; }; f git send-pack origin HEAD:main`, "pushes without running git's pre-push hook"},
+		{"nosuch-runner git config alias.x '!sh'", config},
 	} {
 		t.Run(tt.command, func(t *testing.T) {
 			t.Parallel()
@@ -783,6 +793,18 @@ func TestFindPushesAllowed(t *testing.T) {
 		": ${PAGER:=less}; git log -1",
 		"VISUAL= git commit",
 		`cd "$X"; alias x=:`, // a builtin is no AUTO_CD, even where the directory is unknown
+		// git config reads, an option before the key or with a subcommand.
+		"git config --get-regexp '^alias\\.'",
+		"git config --get-urlmatch http.proxy https://github.com",
+		"git config get --all user.name",
+		"git config list --show-origin",
+		// Options after a subcommand are read as options: these unset and set a safe key.
+		"git config unset --all user.name",
+		"git config set --comment x user.name y",
+		// git handed to a function: a safe git command, and git as data.
+		`f() { "$@"; }; f git config user.name x`,
+		`f() { "$@"; }; f git status`,
+		`f() { "$@"; }; f grep -n -e git -e update-ref refs/remotes/origin/main docs`,
 	} {
 		t.Run(command, func(t *testing.T) {
 			t.Parallel()

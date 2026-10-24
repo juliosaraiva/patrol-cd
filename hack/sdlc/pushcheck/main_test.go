@@ -212,6 +212,10 @@ func TestCheckSubcommands(t *testing.T) {
 		{"status", ""},
 		{"rev-parse", ""},
 		{"log", ""},
+		// git commands that push without the pre-push hook (the walker refuses them first, wherever
+		// it finds them; this holds if one reaches the list another way).
+		{"send-pack", "git send-pack pushes without running git's pre-push hook"},
+		{"remote-https", "git remote-https pushes without running git's pre-push hook"},
 	} {
 		got := checkSubcommands([]string{c.sub}, root)
 		if c.want == "" {
@@ -339,6 +343,12 @@ func TestGatePushChecksTheGateFiles(t *testing.T) {
 		gitIn(t, root, "update-index", "--no-"+mark, "hack/sdlc/gate.sh")
 	}
 	assert.Empty(t, gatePush(p, root))
+	// A gate that refuses without a word still refuses.
+	require.NoError(t, os.WriteFile(gate, []byte("#!/bin/sh\nexit 1\n"), 0o755))
+	gitIn(t, root, "commit", "-q", "-am", "silent gate")
+	head, err := gitOut(root, "rev-parse", "main")
+	require.NoError(t, err)
+	assert.Contains(t, gatePush(p, root), "gate.sh "+head+": exit status 1")
 }
 
 // A change to the gate's own files is judged by its base's gate too, which a broken gate in the

@@ -1402,7 +1402,7 @@ prefix:
 			if argvHasGitPush(args, lit) || mentionsGitPush(w.cmdText) {
 				w.block("a git push run through " + fn + " cannot be checked; " + runAlone)
 			}
-			w.calls = append(w.calls, argvGitCalls(args, lit)...)
+			w.argvGit(args, lit)
 			if w.unknownWord(fn) {
 				w.dir = ""
 			}
@@ -1556,37 +1556,47 @@ prefix:
 			if !w.cdFuncs[args[0]] {
 				w.unread(unknownRun{Dir: w.dir, Word: args[0]})
 			}
-			w.calls = append(w.calls, argvGitCalls(args, lit)...)
+			w.argvGit(args, lit)
 			w.dir = ""
 		}
 	}
 }
 
-// argvGitCalls returns the subcommand after each literal `git` in argv (past git's global options),
-// for a command that may hand its arguments to git: a function the command defines, or an alias or
-// function of the shell's setup. checkSubcommands refuses one that is a git alias.
-func argvGitCalls(args []string, lit []bool) []string {
-	var subs []string
-	for i := range args {
-		if !lit[i] || path.Base(args[i]) != "git" {
+// argvGit walks each literal `git` in the arguments of a command that may hand them to git (a
+// function the command defines with "$@", an alias or function of the shell's setup) as the git
+// command it would be: a configuration, ref write or remote helper refused in a command is refused
+// here too, and a git alias among them is checked (checkSubcommands). Only a `git` followed by git's
+// global options and a literal subcommand counts, so `git` as data (grep -e git -e config) does not.
+// A push among them is refused by the caller.
+func (w *walker) argvGit(args []string, lit []bool) {
+	for i := 1; i < len(args); i++ {
+		if !lit[i] || path.Base(args[i]) != "git" || !gitSubcommandNext(args[i+1:], lit[i+1:]) {
 			continue
 		}
-		for j := i + 1; j < len(args) && lit[j]; j++ {
-			a := args[j]
-			if !strings.HasPrefix(a, "-") {
-				subs = append(subs, a)
-				break
-			}
-			name, _, hasValue := strings.Cut(a, "=")
-			if !gitGlobalSafe[name] && !gitGlobalWithValue[name] {
-				break
-			}
-			if gitGlobalWithValue[name] && !hasValue {
-				j++ // its value is the next argument
-			}
+		s := w.child(w.dir, w.src)
+		s.git(args[i+1:], lit[i+1:])
+		w.block(s.blocked)
+		w.calls = append(w.calls, s.calls...)
+	}
+}
+
+// gitSubcommandNext reports whether args (those after a literal `git`) are git's global options
+// followed by a literal subcommand.
+func gitSubcommandNext(args []string, lit []bool) bool {
+	for j := 0; j < len(args) && lit[j]; j++ {
+		a := args[j]
+		if !strings.HasPrefix(a, "-") {
+			return true
+		}
+		name, _, hasValue := strings.Cut(a, "=")
+		if !gitGlobalSafe[name] && !gitGlobalWithValue[name] {
+			return false
+		}
+		if gitGlobalWithValue[name] && !hasValue {
+			j++ // its value is the next argument
 		}
 	}
-	return subs
+	return false
 }
 
 // unknownWord reports whether a command word may be a function or alias of the user's shell setup,
@@ -2619,6 +2629,11 @@ func refuseConfig(key string) string {
 	return "git configuration " + key + " in a command is not on the hook's list of safe settings (it could change git's hooks, aliases or repository, or run a command); change it in a command of its own, by hand, or use an option of the git command"
 }
 
+// configSubcommands are `git config`'s subcommands (git 2.46 and later), named by its first positional.
+var configSubcommands = map[string]bool{
+	"list": true, "get": true, "set": true, "unset": true, "rename-section": true, "remove-section": true, "edit": true,
+}
+
 // gitConfig refuses a `git config` that writes a key outside the safe list. A read is allowed, and
 // only the key (not its value) needs to be literal. For --rename-section both section names count.
 func (w *walker) gitConfig(args []string, lit []bool) {
@@ -2627,29 +2642,28 @@ func (w *walker) gitConfig(args []string, lit []bool) {
 		lit  bool
 	}
 	var positional []pos
-	write, rename := false, false
+	write, rename, stop := false, false, false
 	for j := 0; j < len(args); j++ {
 		a := args[j]
-		if !lit[j] {
-			positional = append(positional, pos{a, false})
+		if !lit[j] || stop || !strings.HasPrefix(a, "-") {
+			positional = append(positional, pos{a, lit[j]})
+			// Without a subcommand, git reads no option after the first positional: `git config KEY
+			// VALUE --get` sets KEY (--get is then the value pattern).
+			stop = !positional[0].lit || !configSubcommands[positional[0].text]
 			continue
 		}
-		switch {
-		case a == "--get" || a == "--get-all" || a == "--get-regexp" || a == "--get-urlmatch" || a == "--get-color" ||
-			a == "--get-colorbool" || a == "-l" || a == "--list" || a == "--name-only":
+		switch a {
+		case "--get", "--get-all", "--get-regexp", "--get-urlmatch", "--get-color", "--get-colorbool", "-l", "--list", "--name-only":
 			return // a read
-		case a == "-e" || a == "--edit":
+		case "-e", "--edit":
 			w.block(refuseConfig(""))
 			return
-		case a == "--rename-section" || a == "--remove-section":
+		case "--rename-section", "--remove-section":
 			write, rename = true, true
-		case a == "--add" || a == "--replace-all" || a == "--unset" || a == "--unset-all":
+		case "--add", "--replace-all", "--unset", "--unset-all":
 			write = true
-		case a == "-f" || a == "--file" || a == "--blob" || a == "--type" || a == "-t" || a == "--default" || a == "--comment" || a == "--value":
+		case "-f", "--file", "--blob", "--type", "-t", "--default", "--comment", "--value":
 			j++
-		case strings.HasPrefix(a, "-"):
-		default:
-			positional = append(positional, pos{a, true})
 		}
 	}
 	if len(positional) > 0 && positional[0].lit {
