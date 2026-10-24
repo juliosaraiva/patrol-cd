@@ -390,6 +390,40 @@ contains "reason: the base's gate" "$work/hook.err" "so the gate of its base"
 check "a broken gate: git's hook asks the base's gate" 1 "$(gitpush origin weak)"
 contains "reason: git's hook names the base's gate" "$work/push.err" "judged it too"
 check "remote did not get the broken gate" none "$(remote_has weak)"
+# A replace ref that gives the broken commit its base's files hides nothing from git's hook.
+git replace weak "$(git commit-tree "$(git rev-parse 'main^{tree}')" -p main -m fake)"
+check "a broken gate behind a replace ref: git's hook" 1 "$(gitpush origin weak)"
+contains "reason: git's hook still names the base's gate" "$work/push.err" "judged it too"
+git replace -d weak >/dev/null
+# Each of the gate's own paths sends a change to the base's gate, in both hooks, which list the same.
+for path in .githooks/pre-push .claude/settings.json; do
+	git checkout -q -B edit main
+	mkdir -p "$(dirname "$path")"
+	echo '# edited' >>"$path"
+	git add "$path"
+	git commit -qm "chore: edit $path"
+	check "an edit of $path: pushcheck asks the base's gate" 2 "$(hook 'git push origin edit')"
+	contains "reason: pushcheck names the base's gate for $path" "$work/hook.err" "so the gate of its base"
+	check "an edit of $path: git's hook asks the base's gate" 1 "$(gitpush origin edit)"
+	contains "reason: git's hook names the base's gate for $path" "$work/push.err" "judged it too"
+done
+gate_paths=".githooks hack/sdlc .claude/settings.json"
+# shellcheck disable=SC2016 # the pattern matches the literal text of the hook
+check "git's hook sends the gate's paths to the base's gate" "$gate_paths" \
+	"$(sed -n 's/.*git diff --quiet "\$base" "\$commit" -- \(.*\) \&\& return 0/\1/p' "$src/.githooks/pre-push")"
+check "pushcheck sends the same paths" "$gate_paths" \
+	"$(sed -n 's/^var gateFiles = \[\]string{\(.*\)}/\1/p' "$src/hack/sdlc/pushcheck/main.go" | tr -d '",')"
+# A change to the gate that has its records goes through: the base's gate (this repository's real
+# gate.sh, which sources the base's lib.sh) accepts it, in both hooks.
+git checkout -q -B gatefix main
+echo '# a comment' >>hack/sdlc/gate.sh
+git commit -qam "fix(sdlc): comment the gate"
+gtree=$(git rev-parse 'HEAD^{tree}')
+printf 'tree=%s\nresult=pass\n' "$gtree" >"$state/checks/$gtree"
+printf 'tree=%s\nresult=pass\nblocking=0\n' "$gtree" >"$state/reviews/$gtree"
+check "a recorded gate change: pushcheck lets it through" 0 "$(hook 'git push origin gatefix')"
+check "a recorded gate change: git's hook lets it through" 0 "$(gitpush origin gatefix)"
+check "remote got the recorded gate change" "$(git rev-parse HEAD)" "$(remote_has gatefix)"
 
 # The review input names this tree and the changed files since origin/main, whatever
 # PATROL_SDLC_BASE says: a narrower review must not be recorded for the whole tree.

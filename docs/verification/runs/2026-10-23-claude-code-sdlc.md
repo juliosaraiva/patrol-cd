@@ -26,16 +26,16 @@ The machine was shared with up to 16 review and red-team agents during most runs
 |---------|--------|
 | `go vet ./hack/sdlc/...`; `golangci-lint run --no-config ./hack/sdlc/...` | passed, 0 issues |
 | `shellcheck hack/sdlc/*.sh hack/ci/lint-shell.sh`; `make ci-shell`; `actionlint` | passed |
-| `go test -race -count=1 ./hack/sdlc/...` | passed: `pushcheck` and `sarifgate`, 517 tests (counted with `-json`) |
-| `bash hack/sdlc/test-sdlc.sh` (the gate end to end in scratch repositories with a bare remote) | passed: 141 passed, 0 failed |
+| `go test -race -count=1 ./hack/sdlc/...` | passed: `pushcheck` and `sarifgate`, 540 tests (counted with `-json`) |
+| `bash hack/sdlc/test-sdlc.sh` (the gate end to end in scratch repositories with a bare remote) | passed: 156 passed, 0 failed |
 | `/bin/bash hack/ci/lint-shell.sh` (bash 3.2) in a scratch repository with no POSIX sh script | reports SC2086 in its bash script; the version before this change stopped with `sh_files[@]: unbound variable` |
-| Mutation sweep of `hack/sdlc/pushcheck` (a scratchpad script: each refusal, unknown-directory, environment and option-value site of `parse.go`, each `return true` of a predicate, each refusal or early allowing return of `main.go`, and its loop over the pushed sources, disabled or narrowed in turn through `go test -overlay`, the repository untouched) | 124 sites; 120 caught by a failing test, 2 do not compile; the 2 survivors are error paths of the environment in `baseGate` (git failing to name its directory right after it worked, and the base's files failing to extract). The first sweep, on `0b31e0f`, covered refusal sites only and left 20 in `parse.go` and 5 in `main.go` uncaught; the eleventh and twelfth reviews found more kinds of site, which the sweep now covers. Each uncaught site got a test, and four that could not change the outcome were removed |
+| Mutation sweep of `hack/sdlc/pushcheck` (a scratchpad script: each refusal, unknown-directory, environment and option-value site of `parse.go`, each `return true` of a predicate, each refusal or early allowing return of `main.go`, and its loop over the pushed sources, disabled or narrowed in turn through `go test -overlay`, the repository untouched) | 126 sites; 123 caught by a failing test, 2 do not compile (the base gate's refusal, which a test asserts, and the extraction's error path); the survivor is an error path of the environment in `baseGate` (git failing to name its directory right after it worked). The first sweep, on `0b31e0f`, covered refusal sites only and left 20 in `parse.go` and 5 in `main.go` uncaught; the eleventh and twelfth reviews found more kinds of site, which the sweep now covers. Each uncaught site got a test, and four that could not change the outcome were removed |
 | A replace ref giving `origin/main` HEAD's tree, in a scratch repository (`replace-check.sh` in the scratchpad) | without `hack/sdlc/lib.sh` the changed files are `[]`; with it, `[main.go]` |
 | `PATH="$PWD/bin:$PATH" go test -race -count=1 ./internal/git/...` | passed on `c409428` (and `./internal/reposerver/...` on `6f9f985`); `internal/git` has not changed since |
 
 ## Agent review
 
-Twelve runs of `.claude/workflows/sdlc-review.js` on successive trees, each verified finding fixed
+Thirteen runs of `.claude/workflows/sdlc-review.js` on successive trees, each verified finding fixed
 before the next run:
 
 | Tree | Blocking (verified) | Minor | Refuted |
@@ -52,6 +52,7 @@ before the next run:
 | `e69bdb2` | 3 | 7 | 0 |
 | `f794b5b` | 5 | 10 | 0 |
 | `e06316e` | 4 | 8 | 0 |
+| `ffaf3de` | 5 | 10 | 0 |
 
 Most findings were ways around the Claude Code hook (shell and git constructs it read differently
 from bash, zsh or git) and tests that could not fail. The seventh run's were six untested branches
@@ -108,8 +109,22 @@ minor findings, 7 were fixed (the duplicate path finding, the shell lint test th
 wrong reason under bash 3.2 and the bug behind it, sarifgate's untested report order, driver rule
 levels and error paths, parity status changes skipping the review, the format hook erroring where
 the checkout has no formatter); the eighth, a git-lfs version floor for custom images, is product
-hardening outside this change and is filed as #230. The review of the tree that contains this
-record runs after it is written; its result is in the pull request.
+hardening outside this change and is filed as #230.
+
+The thirteenth run found 5 blocking findings. Two showed that telling a logical cd from a physical
+one cannot be done from the command line (a `cd ..` after `cd -P`, and shell options such as
+`set -P` or zsh's `chase_dots`), so the walker no longer tries: a path with `..` is kept as written
+for any cd and for `git -C`, and gatePush's stat and git resolve it as the kernel does, which refuses
+a push through a link and back rather than placing it in this clone. The others: a push in a command
+substitution through a shell fed a heredoc, a here-string or a pipe went unseen (the substitution's
+statements are now walked with their pipelines and redirections); no test of HOME reaching a shell
+the command runs; and no test where the base's gate passes a change to the gate. Of the 10 minor
+findings, 8 were fixed (zsh's `emulate -c`, `repeat` and code-running glob qualifiers, `--emulate`'s
+value, `refs/Remotes/` on a case-insensitive file system, a refspec split at its last colon, replace
+refs in the base gate's extraction and their tests, the gate-file list's tests), and 2 are recorded
+as limits in the guide: a change that weakens `check.sh` writes the record the base's gate trusts,
+and local tool versions are not checked. The review of the tree that contains this record runs
+after it is written; its result is in the pull request.
 
 ## Red team
 

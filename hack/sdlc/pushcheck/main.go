@@ -176,12 +176,7 @@ var gateFiles = []string{".githooks", "hack/sdlc", ".claude/settings.json"}
 // change: the base's gate asks for the same check and review records. It returns why that gate
 // refuses, or "" (also when the base has no gate yet). git's pre-push hook does the same on its own.
 func baseGate(top, commit string) string {
-	git := func(args ...string) (string, error) {
-		cmd := exec.Command("git", append([]string{"-C", top}, args...)...)
-		cmd.Env = append(os.Environ(), "GIT_NO_REPLACE_OBJECTS=1")
-		out, err := cmd.Output()
-		return strings.TrimSpace(string(out)), err
-	}
+	git := func(args ...string) (string, error) { return gitOut(top, args...) }
 	base, err := git("merge-base", commit, "refs/remotes/origin/main")
 	if err != nil {
 		return "cannot find the base of " + commit + " (its merge base with origin/main), whose gate would judge a change to the gate: fetch origin"
@@ -204,6 +199,7 @@ func baseGate(top, commit string) string {
 	// The base's hack/sdlc, run with this repository's git directory (its records and refs) and the
 	// extracted files as its work tree, so the base's gate sources the base's lib.sh.
 	extract := exec.Command("sh", "-c", `git -C "$1" archive "$2" hack/sdlc | tar -xf - -C "$3"`, "sh", top, base, tmp)
+	extract.Env = append(os.Environ(), "GIT_NO_REPLACE_OBJECTS=1")
 	if out, err := extract.CombinedOutput(); err != nil {
 		return "cannot extract the gate of the base " + base + ": " + strings.TrimSpace(string(out))
 	}
@@ -279,8 +275,10 @@ func quoteOrUnset(s string) string {
 	return fmt.Sprintf("%q", s)
 }
 
+// gitOut runs git in dir with replace refs ignored, as the gate's scripts do.
 func gitOut(dir string, args ...string) (string, error) {
 	cmd := exec.Command("git", append([]string{"-C", dir}, args...)...)
+	cmd.Env = append(os.Environ(), "GIT_NO_REPLACE_OBJECTS=1")
 	out, err := cmd.Output()
 	return strings.TrimSpace(string(out)), err
 }

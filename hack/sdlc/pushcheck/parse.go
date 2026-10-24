@@ -54,8 +54,8 @@ var hookEvasion = regexp.MustCompile(`(?i:no-verify|hookspath)|GIT_[A-Z]`)
 // could not parse or follow; the normal path parses the command.
 func mentionsGitPush(s string) bool {
 	n := normalize(s)
-	words := strings.FieldsFunc(n, func(r rune) bool {
-		return unicode.IsSpace(r) || strings.ContainsRune(";&|()<>{}`", r)
+	words := strings.FieldsFunc(n, func(r rune) bool { // `:` too, for zsh's e:CODE: qualifier
+		return unicode.IsSpace(r) || strings.ContainsRune(";&|()<>{}`:", r)
 	})
 	for i, word := range words {
 		if !strings.HasPrefix(word, "-") {
@@ -125,19 +125,29 @@ func findPushes(command, cwd string) (analysis, error) {
 // assignments made inside words and arithmetic (${NAME:=value}, $((NAME=1)), let NAME=1).
 func (w *walker) run(f *syntax.File) {
 	w.stmts(f.Stmts)
+	// The statements of a command or process substitution, with their pipelines, redirections and
+	// heredocs, on a walker of their own (they run in a child): a push there is refused, as is what
+	// the walker refuses anywhere. A call reached no other way (none, so far) is probed alone.
+	probe := func(walk func(*walker)) {
+		p := w.child(w.dir, w.src)
+		p.seen = w.seen
+		walk(p)
+		if len(p.pushes) > 0 {
+			w.block("a git push inside a command or process substitution cannot be checked; " + runAlone)
+		}
+		w.block(p.blocked)
+		w.calls = append(w.calls, p.calls...)
+	}
 	syntax.Walk(f, func(n syntax.Node) bool {
 		switch n := n.(type) {
+		case *syntax.CmdSubst:
+			probe(func(p *walker) { p.stmts(n.Stmts) })
+		case *syntax.ProcSubst:
+			probe(func(p *walker) { p.stmts(n.Stmts) })
 		case *syntax.CallExpr:
-			if w.seen[n] {
-				break
+			if !w.seen[n] {
+				probe(func(p *walker) { p.call(n, nil) })
 			}
-			probe := newWalker(w.dir, w.src)
-			probe.call(n, nil)
-			if len(probe.pushes) > 0 {
-				w.block("a git push inside a command or process substitution cannot be checked; " + runAlone)
-			}
-			w.block(probe.blocked)
-			w.calls = append(w.calls, probe.calls...)
 		case *syntax.ParamExp:
 			if n.Exp != nil && (n.Exp.Op == syntax.AssignUnset || n.Exp.Op == syntax.AssignUnsetOrNull) && n.Param != nil {
 				if n.Exp.Word == nil {
@@ -189,6 +199,14 @@ type walker struct {
 
 func newWalker(dir, src string) *walker {
 	return &walker{dir: dir, src: src, seen: map[*syntax.CallExpr]bool{}}
+}
+
+// child is a walker for code that runs in a child of this shell (a substitution, a shell the command
+// runs), from dir: it inherits CDPATH, HOME and whatever a sourced file or an eval set before it.
+func (w *walker) child(dir, src string) *walker {
+	c := newWalker(dir, src)
+	c.cdpath, c.envUnknown, c.homeSet = w.cdpath, w.envUnknown, w.homeSet
+	return c
 }
 
 // wordsText prints words (and any heredoc or here-string bodies) as written, for the conservative
@@ -699,13 +717,13 @@ func (w *walker) changesDir(node syntax.Node) bool {
 		case *syntax.CallExpr:
 			args, lit := fields(n.Args)
 			args, lit = stripBraces(args, lit)
-			found = w.autoCD(args, lit)
+			found = w.autoCD(args, lit) || qualifierCode(n.Args)
 			for len(args) > 1 && lit[0] && (precommand[path.Base(args[0])]) {
 				args, lit = args[1:], lit[1:]
 			}
 			if len(args) > 0 && lit[0] {
 				switch path.Base(strings.TrimPrefix(args[0], "=")) {
-				case "cd", "chdir", "pushd", "popd", "source", ".", "eval", "trap":
+				case "cd", "chdir", "pushd", "popd", "source", ".", "eval", "trap", "emulate", "repeat":
 					found = true
 				}
 			}
@@ -713,6 +731,22 @@ func (w *walker) changesDir(node syntax.Node) bool {
 		return !found
 	})
 	return found
+}
+
+// codeQualifier matches the zsh glob qualifiers that run code (e:…:, e{…}, +function): zsh evaluates
+// them in this shell while it globs, so their code can cd or push. (bash reads them as extglobs.)
+var codeQualifier = regexp.MustCompile(`e[^A-Za-z0-9_\s|]|\+[A-Za-z_]`)
+
+// qualifierCode reports whether a command's words hold a glob qualifier that runs code.
+func qualifierCode(words []*syntax.Word) bool {
+	for _, word := range words {
+		for _, part := range word.Parts {
+			if g, ok := part.(*syntax.ExtGlob); ok && codeQualifier.MatchString(g.Pattern.Value) {
+				return true
+			}
+		}
+	}
+	return false
 }
 
 // autoCD reports whether zsh's AUTO_CD (on in the Bash tool's zsh) runs a command of one word as
@@ -905,6 +939,10 @@ func (w *walker) call(c *syntax.CallExpr, redirs []*syntax.Redirect) {
 	}
 	saved := w.cmdText
 	w.cmdText = wordsText(c.Args, redirs) // this command's own text for the conservative net
+	if qualifierCode(c.Args) {
+		w.blockText(w.cmdText, "a zsh glob qualifier that runs code")
+		defer func() { w.dir = "" }() // its code runs in this shell and may cd
+	}
 	args, lit := w.fields(c.Args)
 	w.command(args, lit, redirs)
 	// The net under the walker, on the words and the heredoc or here-string bodies as bash expands
@@ -1067,6 +1105,15 @@ prefix:
 		w.blockText(w.cmdText, name) // their syntax is not bash's
 	case name == "eval":
 		w.eval(args[1:], lit[1:])
+	case name == "emulate": // zsh: emulate [-LR] MODE ... -c CODE runs CODE in this shell, as eval
+		for i := 1; i < len(args)-1; i++ {
+			if lit[i] && args[i] == "-c" {
+				w.eval(args[i+1:i+2], lit[i+1:i+2])
+				break
+			}
+		}
+	case name == "repeat" && len(args) > 2: // zsh: repeat N COMMAND... runs it in this shell
+		w.command(args[2:], lit[2:], redirs)
 	case name == "trap": // trap [--] ACTION SIGSPEC...: the action runs as a command on the signal
 		a, l := args[1:], lit[1:]
 		for len(a) > 0 && l[0] && (a[0] == "--" || a[0] == "-p" || a[0] == "-l") {
@@ -1479,7 +1526,7 @@ func (w *walker) printf(args []string, lit []bool) {
 }
 
 // shellWithValue lists shell options that take the next argument as their value.
-var shellWithValue = map[string]bool{"--rcfile": true, "--init-file": true}
+var shellWithValue = map[string]bool{"--rcfile": true, "--init-file": true, "--emulate": true}
 
 // shell handles a shell that runs a script: `bash -c SCRIPT`, or a heredoc or here-string on its
 // standard input. A literal script is parsed like the command itself; a script file is not read
@@ -1590,9 +1637,7 @@ func (w *walker) script(s string) {
 		}
 		return
 	}
-	inner := newWalker(w.dir, s)
-	// The shell inherits CDPATH and whatever a file sourced, or an eval run, earlier set.
-	inner.cdpath, inner.envUnknown, inner.homeSet = w.cdpath, w.envUnknown, w.homeSet
+	inner := w.child(w.dir, s)
 	inner.run(f)
 	w.block(inner.blocked)
 	w.pushes = append(w.pushes, inner.pushes...)
@@ -1604,17 +1649,12 @@ func (w *walker) chdir(name string, args []string, lit []bool) {
 		w.dir = "" // -n, +N, -N
 		return
 	}
-	physical := false
 	for len(args) > 0 && lit[0] && strings.HasPrefix(args[0], "-") && args[0] != "-" {
 		if args[0] == "--" {
 			args, lit = args[1:], lit[1:]
 			break
 		}
-		// -L, -P, -e, -@; the last of -L and -P wins
-		if i := strings.LastIndexAny(args[0], "LP"); i > 0 {
-			physical = args[0][i] == 'P'
-		}
-		args, lit = args[1:], lit[1:]
+		args, lit = args[1:], lit[1:] // -L, -P, -e, -@ (resolveFrom serves -L and -P alike)
 	}
 	if len(args) != 1 || !lit[0] || args[0] == "-" {
 		w.dir = "" // $HOME, OLDPWD, a variable, or zsh's `cd OLD NEW`: unknown here
@@ -1624,10 +1664,6 @@ func (w *walker) chdir(name string, args []string, lit []bool) {
 		w.dir = "" // CDPATH may take a relative cd elsewhere
 		return
 	}
-	if physical {
-		w.dir = w.physicalFrom(w.dir, args[0])
-		return
-	}
 	w.dir = w.resolve(args[0])
 }
 
@@ -1635,31 +1671,23 @@ func (w *walker) resolve(dir string) string {
 	return w.resolveFrom(w.dir, dir)
 }
 
-// resolveFrom resolves dir from base as bash's logical cd does: lexically, `link/..` being base. A
-// base kept as written (with `..`, from cd -P) cannot be resolved that way, so the result is unknown.
+// resolveFrom resolves dir from base. A path with `..` is kept as written, for gatePush's stat and
+// git to resolve as the kernel does: after a symbolic link, `..` is the parent of the link's target
+// where git -C, cd -P and a shell made physical (set -P, zsh's chase_dots) go, while bash's default
+// cd goes back lexically. Kept as written, a push through a link and back is refused, never placed
+// in this clone when it runs in another.
 func (w *walker) resolveFrom(base, dir string) string {
-	if filepath.IsAbs(dir) {
-		return filepath.Clean(dir)
-	}
-	if base == "" || hasDotDot(base) {
-		return ""
-	}
-	return filepath.Join(base, dir)
-}
-
-// physicalFrom resolves dir from base as the kernel does for git -C and cd -P: `..` after a symbolic
-// link is the parent of the link's target, so a path with `..` is kept as written, for gatePush's git
-// to resolve.
-func (w *walker) physicalFrom(base, dir string) string {
 	switch {
-	case !hasDotDot(dir) && !hasDotDot(base):
-		return w.resolveFrom(base, dir)
-	case filepath.IsAbs(dir):
+	case filepath.IsAbs(dir) && hasDotDot(dir):
 		return dir
+	case filepath.IsAbs(dir):
+		return filepath.Clean(dir)
 	case base == "":
 		return ""
+	case hasDotDot(dir) || hasDotDot(base):
+		return base + "/" + dir
 	}
-	return base + "/" + dir
+	return filepath.Join(base, dir)
 }
 
 // hasDotDot reports whether a path has a `..` element.
@@ -1720,7 +1748,7 @@ func (w *walker) git(args []string, lit []bool) {
 		switch name {
 		case "-C":
 			if litVal {
-				dir = w.physicalFrom(dir, value) // git's -C is a chdir(2)
+				dir = w.resolveFrom(dir, value)
 			} else {
 				dir = ""
 			}
@@ -1957,9 +1985,10 @@ func remoteRefWrite(sub string, args []string, lit []bool) string {
 		}
 		_, dst, isRefspec := strings.Cut(a, ":")
 		switch {
-		case (sub == "update-ref" || sub == "symbolic-ref") && (strings.Contains(a, "remotes/") || a == "--stdin"):
+		// remotes/ in any case: on a case-insensitive file system (macOS) refs/Remotes/… is that ref.
+		case (sub == "update-ref" || sub == "symbolic-ref") && (strings.Contains(strings.ToLower(a), "remotes/") || a == "--stdin"):
 			return "git " + sub + " " + a
-		case (sub == "fetch" || sub == "pull") && isRefspec && strings.Contains(dst, "remotes/"):
+		case (sub == "fetch" || sub == "pull") && isRefspec && strings.Contains(strings.ToLower(dst), "remotes/"):
 			return "git " + sub + " " + a
 		case sub == "remote" && (a == "add" || a == "remove" || a == "rm" || a == "rename" || a == "set-url" || a == "set-branches"):
 			return "git remote " + a
@@ -2206,7 +2235,9 @@ func pushArgs(dir string, args []string, lit []bool) (p push, skip string, ok bo
 			refuse("the matching refspec ':' pushes refs the gate cannot check one by one; push branches by name")
 			continue
 		}
-		src, _, _ = strings.Cut(src, ":")
+		if i := strings.LastIndex(src, ":"); i >= 0 {
+			src = src[:i] // git splits a refspec at its last colon (`:/fix:dst` pushes the commit `:/fix`)
+		}
 		if src == "" {
 			deleteRefspec = true // ":dst"
 			continue

@@ -129,7 +129,10 @@ replace them.
 A change to the gate's own files (`.githooks/`, `hack/sdlc/`, `.claude/settings.json`) is judged by
 the gate of its base too (the merge base with `origin/main`, run from the base's files), so a gate
 the change breaks cannot pass the change; both hooks do this, each on its own. A push the base's gate
-refuses (because the change also changed what the records hold, say) is made by the owner.
+refuses (because the change also changed what the records hold, say) is made by the owner. This
+covers the gate's decision, not the checks behind a record: a change that weakens
+`hack/sdlc/check.sh` writes a passing record with its own check.sh, which the base's gate accepts;
+the agent review and CI stand behind such a change.
 
 Two hooks run it:
 
@@ -190,7 +193,12 @@ Two hooks run it:
     not run (after `||`, in an `if`, `case`, loop or function, or in an `if` or `while` condition,
     whose branches can run whether it worked or not) leaves the directory unknown; and so does a
     `cd` that may fail without stopping the command (`cd DIR; git push`), unless `&&` or `|| exit`
-    guards it; sudo's `-D`, `-R` and `-i` run the command from an unknown directory. It follows
+    guards it; sudo's `-D`, `-R` and `-i` run the command from an unknown directory. A path with
+    `..` is kept as written, for `gatePush`'s stat and git to resolve as the kernel does (after a
+    symbolic link, the parent of its target, where `git -C`, `cd -P` and a shell made physical go):
+    a push through a link and back is refused rather than placed in this clone. zsh's `emulate -c`
+    and `repeat` run their code in this shell, and a glob qualifier that runs code (`*(e:…:)`)
+    leaves the directory unknown. It follows
     the command a wrapper runs (`timeout`, `nice`, `sudo`, `nohup`, `env`, `xargs`, `find -exec`,
     `kubectl`/`docker exec -- …`, `command`, `exec`, …) into that command, and parses `bash -c '…'`,
     a heredoc or here-string given to `bash`/`sh`/`zsh`/`dash`/`ksh`/`mksh`, a literal script piped
@@ -307,6 +315,10 @@ A second hook (`hack/sdlc/claude-format.sh`, `PostToolUse` for Edit, MultiEdit a
   review (#25, #220). None applies yet: until the owner turns it on, a push to `main` that gets past
   the local hooks lands there directly, and the owner's merge decision on a pull request is the only
   other check.
+- The checks run the tools on PATH, `bin/` first (which the clean-tree rule does not inspect), and
+  check no tool's version: off Linux, `hack/ci/install-tools.sh` does not install the pins of
+  `hack/ci/tools.lock`, so a local golangci-lint or shellcheck of another version can pass what CI's
+  fails, or fail what it passes. CI runs the pinned tools.
 - The hooks come from the checked-out tree: while a commit from before the gate is checked out, they
   are not there to run.
 - The check record is keyed by the tree. Two of its checks also read history (commit subjects,

@@ -266,6 +266,49 @@ func TestGatePushRunsTheBaseGate(t *testing.T) {
 	require.Len(t, where, 1, "only the base's gate wrote, once")
 	assert.NotEqual(t, resolvedRoot, where[0], "the base's gate runs from its own files, not the work tree")
 
+	// Replace refs choose neither the gate that judges (the base read as the broken commit) nor hide
+	// the change from it (the pushed commit read as one with the base's files).
+	base, err := gitOut(root, "rev-parse", "refs/remotes/origin/main")
+	require.NoError(t, err)
+	gitIn(t, root, "replace", base, head)
+	assert.Contains(t, gatePush(push{Dir: root, Sources: []string{"HEAD"}}, root), "gate refused "+head, "base replaced")
+	gitIn(t, root, "replace", "-d", base)
+	fake := exec.Command("git", "-C", root, "commit-tree", base+"^{tree}", "-p", base, "-m", "fake")
+	fake.Env = append(os.Environ(), "GIT_AUTHOR_NAME=t", "GIT_AUTHOR_EMAIL=t@example.invalid", "GIT_COMMITTER_NAME=t", "GIT_COMMITTER_EMAIL=t@example.invalid")
+	fakeOut, err := fake.Output()
+	require.NoError(t, err)
+	gitIn(t, root, "replace", head, strings.TrimSpace(string(fakeOut)))
+	assert.Contains(t, gatePush(push{Dir: root, Sources: []string{"HEAD"}}, root), "gate refused "+head, "pushed commit replaced")
+	gitIn(t, root, "replace", "-d", head)
+	ranIn()
+
+	// Each of the gate's own paths sends the change to the base's gate, not only hack/sdlc.
+	for _, edit := range []struct{ path, content string }{
+		{".githooks/pre-push", "#!/bin/sh\nexit 0\n# edited\n"},
+		{".claude/settings.json", "{}\n"},
+	} {
+		gitIn(t, root, "switch", "-q", "-C", "edit", "main")
+		require.NoError(t, os.MkdirAll(filepath.Join(root, filepath.Dir(edit.path)), 0o755))
+		require.NoError(t, os.WriteFile(filepath.Join(root, edit.path), []byte(edit.content), 0o755))
+		gitIn(t, root, "add", edit.path)
+		gitIn(t, root, "commit", "-q", "-m", "refuse")
+		sha, err := gitOut(root, "rev-parse", "HEAD")
+		require.NoError(t, err)
+		got := gatePush(push{Dir: root, Sources: []string{"HEAD"}}, root)
+		assert.Contains(t, got, "so the gate of its base", edit.path)
+		assert.Contains(t, got, "gate refused "+sha, edit.path)
+		ranIn()
+	}
+
+	// A change to the gate that its base's gate accepts goes through, judged by both gates.
+	gitIn(t, root, "switch", "-q", "-C", "gatefix", "main")
+	require.NoError(t, os.WriteFile(gate, []byte(script+"# a comment\n"), 0o755))
+	gitIn(t, root, "commit", "-q", "-am", "fine")
+	assert.Empty(t, gatePush(push{Dir: root, Sources: []string{"HEAD"}}, root))
+	where = ranIn()
+	assert.Len(t, where, 2, "the work tree's gate and the base's")
+	assert.Contains(t, where, resolvedRoot)
+
 	// A change elsewhere is the tree's gate's alone (the same script here, which notes the work tree).
 	gitIn(t, root, "switch", "-q", "-c", "elsewhere", "main")
 	require.NoError(t, os.WriteFile(filepath.Join(root, "README.md"), []byte("x\n"), 0o644))

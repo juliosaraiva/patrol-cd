@@ -101,25 +101,43 @@ func TestFindPushes(t *testing.T) {
 		{name: "function whose body is a subshell", command: "t() ( cd ui && pnpm test ); t && git push origin a", want: []push{{Dir: "/repo", Sources: []string{"a"}}}},
 		{name: "function running its arguments", command: "retry() { for i in 1 2 3; do \"$@\" && return 0; sleep 5; done; return 1; }\nretry git fetch origin && git push origin a",
 			want: []push{{Dir: "/repo", Sources: []string{"a"}}}},
-		{name: "cd chain with a return to the repo", command: "cd ui && echo ok && cd .. && git push -u origin f", want: []push{{Dir: "/repo", Sources: []string{"f"}}}},
+		{name: "cd chain with a return to the repo", command: "cd ui && echo ok && cd .. && git push -u origin f", want: []push{{Dir: "/repo/ui/..", Sources: []string{"f"}}}},
 		{name: "cd in an if", command: "if false; then cd /tmp; fi; git push", want: []push{{Dir: "", Sources: head}}},
 		{name: "cd in a function", command: "f() { cd /tmp; }; f; git push", want: []push{{Dir: "", Sources: head}}},
 		{name: "push in a function", command: "f() { git push; }", want: []push{{Dir: "", Sources: head}}},
 		{name: "if without cd", command: "if make sdlc-gate; then git push; fi", want: []push{{Dir: "/repo", Sources: head}}},
 		{name: "chdir, zsh's synonym for cd", command: "chdir /other && git push origin b", want: []push{{Dir: "/other", Sources: []string{"b"}}}},
-		// git -C and cd -P resolve `..` physically (after a symbolic link, the target's parent): the path
-		// stays as written for gatePush's git to resolve. A logical cd resolves it lexically, as bash does.
+		// zsh code that runs in this shell.
+		{name: "emulate -c, as eval", command: "emulate sh -c 'cd /x && git push origin a'", want: []push{{Dir: "/x", Sources: []string{"a"}}}},
+		{name: "emulate -c carries its cd", command: "emulate zsh -c 'cd /x' && git push origin a", want: []push{{Dir: "/x", Sources: []string{"a"}}}},
+		{name: "repeat runs its command here", command: "repeat 1 cd /x && git push origin a", want: []push{{Dir: "/x", Sources: []string{"a"}}}},
+		{name: "a glob qualifier's code may cd", command: "echo *(e:'cd /x; true':) && git push origin a", want: []push{{Dir: "", Sources: []string{"a"}}}},
+		{name: "a function whose glob qualifier may cd", command: "f() { echo *(e:'cd /x; true':); }; f && git push origin a", want: []push{{Dir: "", Sources: []string{"a"}}}},
+		{name: "zsh --emulate takes a value", command: "zsh --emulate sh -c 'cd /x && git push origin a'", want: []push{{Dir: "/x", Sources: []string{"a"}}}},
+		{name: "a script piped to zsh --emulate", command: "echo 'git push origin a' | zsh --emulate sh", want: []push{{Dir: "/repo", Sources: []string{"a"}}}},
+		// git splits a refspec at its last colon.
+		{name: "a commit named by a message", command: "git push origin ':/fix:refs/heads/x'", want: []push{{Dir: "/repo", Sources: []string{":/fix"}}}},
+		{name: "a reflog date with colons", command: "git push origin 'main@{2026-10-01 10:00}:refs/heads/x'", want: []push{{Dir: "/repo", Sources: []string{"main@{2026-10-01 10:00}"}}}},
+		// A path with `..` stays as written, for gatePush's stat and git to resolve as the kernel does:
+		// git -C, cd -P and a shell made physical (set -P, zsh's chase_dots and chase_links) go to the
+		// parent of a link's target, whatever the walker could tell of the shell's options.
 		{name: "git -C with .. stays as written", command: "git -C link/.. push origin a", want: []push{{Dir: "/repo/link/..", Sources: []string{"a"}}}},
 		{name: "git -C .. after a cd", command: "cd link && git -C .. push origin a", want: []push{{Dir: "/repo/link/..", Sources: []string{"a"}}}},
 		{name: "cd -P with ..", command: "cd -P link/.. && git push origin a", want: []push{{Dir: "/repo/link/..", Sources: []string{"a"}}}},
-		{name: "cd -LP: the last wins", command: "cd -LP link/.. && git push origin a", want: []push{{Dir: "/repo/link/..", Sources: []string{"a"}}}},
-		{name: "cd -PL: logical", command: "cd -PL link/.. && git push origin a", want: []push{{Dir: "/repo", Sources: []string{"a"}}}},
+		{name: "cd -L with .., the same", command: "cd -L link/.. && git push origin a", want: []push{{Dir: "/repo/link/..", Sources: []string{"a"}}}},
 		{name: "cd -P without ..", command: "cd -P /x && git push origin a", want: []push{{Dir: "/x", Sources: []string{"a"}}}},
-		{name: "a logical cd from a physical path is unknown", command: "cd -P link/.. && cd sub && git push origin a", want: []push{{Dir: "", Sources: []string{"a"}}}},
-		{name: "logical cd with ..", command: "cd link/.. && git push origin a", want: []push{{Dir: "/repo", Sources: []string{"a"}}}},
+		{name: "a cd after one through ..", command: "cd -P link/.. && cd sub && git push origin a", want: []push{{Dir: "/repo/link/../sub", Sources: []string{"a"}}}},
+		{name: "cd .. after cd -P", command: "cd -P link && cd .. && git push origin a", want: []push{{Dir: "/repo/link/..", Sources: []string{"a"}}}},
+		{name: "cd ../x after cd -P", command: "cd -P link && cd ../x && git push origin a", want: []push{{Dir: "/repo/link/../x", Sources: []string{"a"}}}},
+		{name: "set -P makes cd physical", command: "set -P && cd link/.. && git push origin a", want: []push{{Dir: "/repo/link/..", Sources: []string{"a"}}}},
+		{name: "zsh's chase_links", command: "setopt chase_links && cd link && cd .. && git push origin a", want: []push{{Dir: "/repo/link/..", Sources: []string{"a"}}}},
+		{name: "plain cd with ..", command: "cd link/.. && git push origin a", want: []push{{Dir: "/repo/link/..", Sources: []string{"a"}}}},
 		// The shell expands ~ with a HOME the command sets, not the hook's.
 		{name: "~ after HOME is set", command: "export HOME=/elsewhere && cd ~/r && git push origin a", want: []push{{Dir: "", Sources: []string{"a"}}}},
 		{name: "git -C ~ after HOME is set", command: "HOME=/elsewhere; git -C ~/r push origin a", want: []push{{Dir: "", Sources: []string{"a"}}}},
+		{name: "HOME reaches a shell the command runs", command: "HOME=/elsewhere && bash -c 'cd ~/r && git push origin a'", want: []push{{Dir: "", Sources: []string{"a"}}}},
+		{name: "HOME reaches a piped script", command: "HOME=/elsewhere && echo 'cd ~/r && git push origin a' | bash", want: []push{{Dir: "", Sources: []string{"a"}}}},
+		{name: "HOME reaches a heredoc script", command: "HOME=/elsewhere && bash <<'EOF'\ncd ~/r && git push origin a\nEOF", want: []push{{Dir: "", Sources: []string{"a"}}}},
 		{name: "zsh's cdpath set in the command", command: "cdpath=(/tmp/other); cd sub && git push origin a", want: []push{{Dir: "", Sources: []string{"a"}}}},
 		{name: "CDPATH reaches a shell the command runs", command: "CDPATH=/tmp/other; bash -c 'cd sub && git push origin a'", want: []push{{Dir: "", Sources: []string{"a"}}}},
 		{name: "git -C", command: "git -C /x -c color.ui=never push origin HEAD", want: []push{{Dir: "/x", Sources: head}}},
@@ -428,12 +446,22 @@ func TestFindPushesBlocked(t *testing.T) {
 		{`VISUAL="$X" git commit`, "shell code git runs"},
 		{"export PAGER='sh -c \"git push origin main\"'; git log", "shell code git runs"},
 		// The net: shell code or a program that gets a hook token, which the walker cannot follow.
-		{"emulate sh -c 'git push --no-verify origin main'", givenTo},
+		{"emulate sh -c 'git push --no-verify origin main'", noVerify}, // emulate -c runs its code here, as eval
+		{"echo *(e:'git push origin a':)", "a git push through a zsh glob qualifier that runs code"},
+		{"git update-ref refs/Remotes/origin/main HEAD", "can move origin/main"},
+		{"git fetch . HEAD:refs/Remotes/origin/main", "can move origin/main"},
 		{"source /dev/stdin <<< 'git push --no-verify origin main'", givenTo},
 		{`python3 -c "import subprocess; subprocess.run(['git','push','--no-verify'])"`, givenTo},
 		{"go test ./x -run 'Blocked/--no-verify'", givenTo},
 		{"docker run --rm -e GIT_PUSH_OPTION=1 alpine echo push", givenTo},
 		{"$GP --no-verify origin main", givenTo},
+		// A push in a command or process substitution, also through a shell fed a heredoc, a here-string
+		// or a pipe there.
+		{"x=$(bash <<'EOF'\ncd /tmp/clone && git push origin HEAD:main\nEOF\n)", "inside a command or process substitution"},
+		{"x=$(bash <<< 'git push origin a')", "inside a command or process substitution"},
+		{"x=$(echo 'git push origin a' | bash)", "inside a command or process substitution"},
+		{"echo x > >(bash <<< 'git push origin a')", "inside a command or process substitution"},
+		{"echo \"$(echo $(git push origin a))\"", "inside a command or process substitution"},
 		// A refusal inside a command or process substitution refuses the whole command.
 		{"x=$(git config include.path /x.cfg)", config},
 		{`echo "$(git -c alias.ship=push ship)"; git status`, config},
