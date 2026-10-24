@@ -150,6 +150,9 @@ func TestFindPushes(t *testing.T) {
 		{name: "a function that cds, never called", command: "f() { cd /x; }; git push origin a", want: []push{{Dir: "/repo", Sources: []string{"a"}}}},
 		{name: "a program's name, maybe redefined to cd", command: "if true; then ls() { cd /x; }; fi; cd /repo && ls && git push origin a", want: []push{{Dir: "", Sources: []string{"a"}}}},
 		// Called from a function's body, it is found by the walk of that body (unknownWord), not at the call.
+		{name: "functions calling each other at the end of a pipeline", command: "f() { true | g; }; g() { true | f; }; f; git push origin a", want: []push{{Dir: "/repo", Sources: []string{"a"}}}},
+		{name: "a definition that may not run, its callee defined later to cd", command: "if true; then h() { g; }; fi; g() { cd /x; }; h; git push origin a", want: []push{{Dir: "", Sources: []string{"a"}}}},
+		{name: "a function that cds, run by one that runs \"$@\"", command: `r() { "$@"; }; d() { cd /x; }; r d; git push origin a`, want: []push{{Dir: "", Sources: []string{"a"}}}},
 		{name: "a program's name, maybe redefined to cd, called by a function", command: "if true; then ls() { cd /x; }; fi; g() { ls; }; cd /repo && g && git push origin a", want: []push{{Dir: "", Sources: []string{"a"}}}},
 		{name: "a program's name, maybe defined to cd, called by a function", command: "false && ls() { cd /x; }; g() { ls; }; g && git push origin a", want: []push{{Dir: "", Sources: []string{"a"}}}},
 		{name: "zsh runs an anonymous function at once", command: "() {cd /x} && git push origin a", want: []push{{Dir: "/x", Sources: []string{"a"}}}},
@@ -274,9 +277,18 @@ func TestFindPushes(t *testing.T) {
 		{name: "sudo wraps a push", command: "sudo -u ci git push origin a", want: []push{{Dir: "/repo", Sources: []string{"a"}}}},
 		{name: "env unset then push", command: "env -i git push origin a", want: []push{{Dir: "/repo", Sources: []string{"a"}}}},
 		{name: "env with an assignment that is not literal", command: `env PATH="$PWD/bin:$PATH" git push origin a`, want: []push{{Dir: "/repo", Sources: []string{"a"}}}},
-		{name: "find -exec a push", command: "find . -maxdepth 0 -exec git push origin a ;", want: []push{{Dir: "/repo", Sources: []string{"a"}}}},
-		{name: "find -execdir runs from each file's directory", command: "find . -name x -execdir git push origin a ;", want: []push{{Dir: "", Sources: []string{"a"}}}},
-		{name: "find -ok a push", command: "yes | find . -maxdepth 0 -ok git push origin a ;", want: []push{{Dir: "/repo", Sources: []string{"a"}}}},
+		// find's terminator is a quoted or escaped `;` (a bare one ends the shell command) or `+`.
+		{name: "find -exec a push", command: "find . -maxdepth 0 -exec git push origin a \\;", want: []push{{Dir: "/repo", Sources: []string{"a"}}}},
+		{name: "find -execdir runs from each file's directory", command: "find . -name x -execdir git push origin a ';'", want: []push{{Dir: "", Sources: []string{"a"}}}},
+		{name: "find -ok a push", command: "yes | find . -maxdepth 0 -ok git push origin a \\;", want: []push{{Dir: "/repo", Sources: []string{"a"}}}},
+		{name: "find -ok stops at its terminator", command: "yes | find . -maxdepth 0 -ok git push origin a \\; -print", want: []push{{Dir: "/repo", Sources: []string{"a"}}}},
+		// A shell with a script among the arguments of a program the walker does not model, or of a
+		// word that may be an alias or function of the shell's setup, which may cd first.
+		{name: "a shell script through arch", command: "arch -arm64 sh -c 'cd /other && git push origin a'", want: []push{{Dir: "/other", Sources: []string{"a"}}}},
+		{name: "a shell script with options through arch", command: "arch -arm64 bash -o pipefail -ec 'git -C /other push origin a'", want: []push{{Dir: "/other", Sources: []string{"a"}}}},
+		{name: "a shell script through an unknown word", command: "nosuch-wrapper bash -lc 'git push origin a'", want: []push{{Dir: "", Sources: []string{"a"}}}},
+		{name: "a shell's name as data", command: "arch -arm64 sh ./build.sh; git push origin a", want: []push{{Dir: "/repo", Sources: []string{"a"}}}},
+		{name: "find -exec with +", command: "find . -maxdepth 0 -exec git push origin a {} +", want: []push{{Dir: "/repo", Sources: []string{"a", "{}"}}}},
 		{name: "find -okdir runs from each file's directory", command: "find /tmp/other -maxdepth 0 -okdir git push origin a \\; <<< y", want: []push{{Dir: "", Sources: []string{"a"}}}},
 		{name: "kubectl exec a push", command: "kubectl exec pod -- git push origin a", want: []push{{Dir: "/repo", Sources: []string{"a"}}}},
 		// A cd run by a child process (env, a wrapper, find -exec, kubectl exec) does not move the shell.
@@ -704,6 +716,7 @@ func TestFindPushesBlocked(t *testing.T) {
 		{`f() { "$@"; }; f git update-ref refs/remotes/origin/main HEAD`, "can move origin/main"},
 		{`f() { "$@"; }; f git send-pack origin HEAD:main`, "pushes without running git's pre-push hook"},
 		{"nosuch-runner git config alias.x '!sh'", config},
+		{"g() { :; }; chpwd() { g; }; g() { cd /x; }; git push origin a", "the function chpwd, which the shell runs on its own and which may cd"},
 		{"find . -maxdepth 0 -okdir git config alias.x '!sh' ';' <<< y", config},
 	} {
 		t.Run(tt.command, func(t *testing.T) {
@@ -842,22 +855,31 @@ func TestFindPushesAllowed(t *testing.T) {
 // timeout, which lets the command run.
 func TestFindPushesDeepCalls(t *testing.T) {
 	t.Parallel()
-	var b strings.Builder
+	// Each calls the next twice and itself; then each calls the first (a call back to a function
+	// still being looked at) and the next twice. No cd anywhere, so every call is followed.
+	var self, back strings.Builder
+	back.WriteString("f1() { f2; f2; }; ")
 	for i := 1; i < 40; i++ {
-		fmt.Fprintf(&b, "f%d() { f%d; f%d; f%d; }; ", i, i+1, i+1, i)
+		fmt.Fprintf(&self, "f%d() { f%d; f%d; f%d; }; ", i, i+1, i+1, i)
+		if i > 1 {
+			fmt.Fprintf(&back, "f%d() { f1; f%d; f%d; }; ", i, i+1, i+1)
+		}
 	}
-	b.WriteString("f40() { :; }; f1 && git push origin a; v=$(f1)") // no cd: every call is followed
-	done := make(chan analysis, 1)
-	go func() {
-		a, err := findPushes(b.String(), "/repo")
-		assert.NoError(t, err)
-		done <- a
-	}()
-	select {
-	case a := <-done:
-		assert.Equal(t, []push{{Dir: "/repo", Sources: []string{"a"}}}, a.Pushes)
-	case <-time.After(30 * time.Second):
-		t.Fatal("the walk of 40 functions calling each other did not finish in 30 s")
+	self.WriteString("f40() { :; }; f1 && git push origin a; v=$(f1)")
+	back.WriteString("f40() { f1; }; f1 && git push origin a; v=$(f1)")
+	for _, command := range []string{self.String(), back.String()} {
+		done := make(chan analysis, 1)
+		go func() {
+			a, err := findPushes(command, "/repo")
+			assert.NoError(t, err)
+			done <- a
+		}()
+		select {
+		case a := <-done:
+			assert.Equal(t, []push{{Dir: "/repo", Sources: []string{"a"}}}, a.Pushes)
+		case <-time.After(30 * time.Second):
+			t.Fatalf("the walk of 40 functions calling each other did not finish in 30 s: %.80s…", command)
+		}
 	}
 }
 
@@ -886,7 +908,7 @@ func TestFindPushesCalls(t *testing.T) {
 		"eval 'git ship origin main'",
 		"git rebase -x 'git ship origin main' HEAD~1",
 		"git bisect run git ship origin main",
-		"yes | find . -maxdepth 0 -ok git ship origin main ;",
+		"yes | find . -maxdepth 0 -ok git ship origin main \\;",
 		// A function, or an alias or function of the shell's setup, may hand its arguments to git.
 		`f() { "$@"; }; f git ship origin main`,
 		`retry() { for i in 1 2 3; do "$@" && return 0; sleep 5; done; return 1; }; retry git ship origin main`,
@@ -916,6 +938,9 @@ func TestFindPushesUnknownWords(t *testing.T) {
 		return "`" + sh + "` run by xargs or parallel takes its script from their input, which the hook did not read"
 	}
 	sourced := "`source` of standard input or of a word the hook cannot read runs a script it did not read"
+	staleRun := func(fn string) string {
+		return "`" + fn + "` runs a function defined, or defined again, after it (bash and zsh look a function up when it is called), code the hook did not read"
+	}
 	for _, tt := range []struct {
 		command string
 		want    []unknownRun
@@ -941,6 +966,27 @@ func TestFindPushesUnknownWords(t *testing.T) {
 		{"f() { nosuch-gp; }; g() { f; f; }; h() { g; g; }; h", []unknownRun{{Dir: "/repo", Word: "nosuch-gp"}, {Dir: "", Word: "nosuch-gp"}}},
 		{"f() { cd sub && nosuch-gp; }; f", []unknownRun{{Dir: "/repo/sub", Word: "nosuch-gp"}}},
 		{"f() { cd /x && nosuch-gp; }; cd /other && f", []unknownRun{{Dir: "/x", Word: "nosuch-gp"}}},
+		// A function runs the functions it calls as they are defined when it is called (bash and zsh look
+		// a function up then): one that runs a function defined, or defined again, after it runs code the
+		// walker did not read with its body, from the call or, if it may cd now, from anywhere.
+		{"g() { true; }; f() { g; }; g() { nosuch-gp; }; cd /other && f", []unknownRun{{Dir: "", Word: "f", What: staleRun("f")}}},
+		{"g() { true; }; f() { g; }; cd /other && f; g() { nosuch-gp; }; f", []unknownRun{{Dir: "", Word: "f", What: staleRun("f")}}},
+		{"f() { ls; }; ls() { nosuch-gp; }; cd /other && f", []unknownRun{{Dir: "", Word: "f", What: staleRun("f")}}},
+		{"g() { :; }; f() { g; nosuch-gp; }; g() { cd /x; }; f", []unknownRun{{Dir: "/repo", Word: "nosuch-gp"}, {Dir: "", Word: "f", What: staleRun("f")}}},
+		{"f() { g; }; g() { :; }; cd /other && f", []unknownRun{{Dir: "/other", Word: "g"}, {Dir: "/other", Word: "f", What: staleRun("f")}}},
+		{"g() { nosuch-gp; }; f() { g; }; cd /other && f", []unknownRun{{Dir: "/other", Word: "nosuch-gp"}}}, // as defined: no change
+		{"g() { :; }; f() { noglob g; }; g() { nosuch-gp; }; cd /other && f", []unknownRun{{Dir: "", Word: "f", What: staleRun("f")}}},
+		{"g() { :; }; f() { eval g; }; g() { nosuch-gp; }; cd /other && f", []unknownRun{{Dir: "", Word: "f", What: staleRun("f")}}},
+		{"g() { :; }; chpwd() { g; }; g() { nosuch-gp; }", []unknownRun{{Dir: "", Word: "chpwd", What: staleRun("chpwd")}}},
+		{"h() { :; }; g() { h; }; f() { g; }; h() { nosuch-gp; }; cd /other && f", []unknownRun{{Dir: "", Word: "f", What: staleRun("f")}}}, // through g
+		{"g() { :; }; f() { v=$(g); }; g() { nosuch-gp; }; cd /other && f", []unknownRun{{Dir: "/other", Word: "f", What: staleRun("f")}}},
+		{"f() { g; }; f() { :; }; g() { nosuch-gp; }; cd /other && f", nil}, // the second definition replaces the first
+		{`r() { eval "$@"; }; d() { cd /other && nosuch-gp; }; r d`, []unknownRun{{Dir: "/repo", Word: "eval", What: "`eval` of a string the hook cannot read runs code it did not read"}, {Dir: "", Word: "r", What: staleRun("r")}, {Dir: "/other", Word: "nosuch-gp"}}},
+		// A function given to one that runs "$@", or to an unknown word, runs there.
+		{`r() { "$@"; }; d() { nosuch-gp; }; cd /other && r d`, []unknownRun{{Dir: "/other", What: "a command named by a word the hook cannot read"}, {Dir: "/other", Word: "r", What: staleRun("r")}, {Dir: "/other", Word: "nosuch-gp"}}},
+		{"d() { cd /x && nosuch-gp; }; nosuch-runner d", []unknownRun{{Dir: "/repo", Word: "nosuch-runner"}, {Dir: "/x", Word: "nosuch-gp"}}},
+		{"d() { nosuch-gp; }; nosuch-runner d", []unknownRun{{Dir: "/repo", Word: "nosuch-runner"}, {Dir: "", Word: "nosuch-gp"}}},
+		{`r() { echo "$@"; }; d() { nosuch-gp; }; r d`, nil}, // a function that runs no code given at run time
 		{"f() { nosuch-gp; }; cd /other && f && cd /y && f", []unknownRun{{Dir: "/other", Word: "nosuch-gp"}, {Dir: "/y", Word: "nosuch-gp"}}},
 		{"cd /other && bash -c 'nosuch-gp origin main'", []unknownRun{{Dir: "/other", Word: "nosuch-gp"}}},
 		{"command nosuch-gp; env nosuch-gp; nohup nosuch-gp", nil},

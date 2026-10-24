@@ -119,6 +119,14 @@ func TestRunUnknownWords(t *testing.T) {
 		{`f() { cd "$1" && nosuch-gp; }; f ` + other, 2, "a directory the hook cannot tell"},
 		{"f() { cd sub && nosuch-gp; }; f", 0, ""},
 		{"chpwd() { nosuch-gp; }; cd sub", 2, "a directory the hook cannot tell"}, // zsh calls it on each cd
+		// A function runs the functions it calls as they are defined when it is called.
+		{"g() { true; }; f() { g; }; g() { nosuch-gp; }; cd " + other + " && f", 2, "`f` runs a function defined, or defined again, after it"},
+		{"g() { true; }; f() { g; }; cd " + other + " && f; g() { nosuch-gp; }; f", 2, "`f` runs a function defined, or defined again, after it"},
+		{"f() { g; }; g() { :; }; f", 0, ""}, // a helper defined after its caller, in this clone
+		// A shell script handed to a program the walker does not model runs as written.
+		{"arch -arm64 sh -c 'cd " + other + " && nosuch-gp'", 2, "it would run in " + other},
+		{"arch -arm64 sh -c 'nosuch-gp'", 0, ""},
+		{`r() { "$@"; }; d() { cd ` + other + ` && nosuch-gp; }; r d`, 2, "it would run in " + other},
 		// Nested substitutions run where their statement runs.
 		{"x=$(echo $(nosuch-tool))", 0, ""},
 		{"cd " + other + " || exit 1; x=$(echo $(nosuch-gp))", 2, "it would run in " + other},

@@ -133,9 +133,10 @@ replace them.
 - a passing check record, always;
 - a passing review record, unless the change since the merge base is documentation only (the rule
   above, except that `docs/parity/`, and `CLAUDE.md`, `CLAUDE.local.md`, `AGENTS.md` and anything
-  under a `.claude/` directory at any depth, are not documentation here: a status file that marks a
-  feature complete needs its evidence reviewed, and the agents' instructions their review; Claude
-  Code loads a nested `CLAUDE.md` or skill for the files under it).
+  under a `.claude/` directory at any depth, in any case, are not documentation here: a status file
+  that marks a feature complete needs its evidence reviewed, and the agents' instructions their
+  review; Claude Code loads a nested `CLAUDE.md` or skill for the files under it, and on a
+  case-insensitive file system, as macOS's default, `claude.md` is that file).
 
 A change to the gate's own files (`.githooks/`, `hack/sdlc/`, `.claude/settings.json`) is judged by
 the gate of its base too (the merge base with `origin/main`, run from the base's files), so a gate
@@ -253,15 +254,22 @@ Two hooks run it:
     cd, leaves its name unknown; a function whose body may cd may also run in a shell the command
     starts (a subshell, bash's `export -f`). A definition chained with `&&`, `||` or a pipe
     (`f() { …; } && cd /x`) is one element of the chain; the rest runs in this shell. It follows
-    the command a wrapper runs (`timeout`, `nice`, `sudo`, `nohup`, `env`, `xargs`, `find -exec`,
-    `kubectl`/`docker exec -- …`, `command`, `exec`, …) into that command, and parses `bash -c '…'`,
+    the command a wrapper runs (`timeout`, `nice`, `sudo`, `nohup`, `env`, `xargs`, `find -exec`
+    and `-ok`, `kubectl`/`docker exec -- …`, `command`, `exec`, …) into that command, and a shell
+    given a script among the arguments of a program it does not model (`arch -arm64 sh -c '…'`,
+    `script -q /dev/null bash -c '…'`, from an unknown directory after a word it does not know), and parses `bash -c '…'`,
     a heredoc or here-string given to `bash`/`sh`/`zsh`/`dash`/`ksh`/`mksh` or to `source
     /dev/stdin`, a literal script piped to a shell (whatever the shell's options; `echo` text with a
     backslash is not read as written, since zsh's echo expands `\n`), `eval`, `watch` (its operands as `sh -c` runs them,
     or its argv with `-x`), and the commands git runs for a subcommand (below). A `git push` found
     this way is gated like a direct one. A function body or `trap` action runs later, from wherever
     the shell is then: a push in it runs from an unknown directory, and a `cd` in it leaves the
-    directory unknown after each call of the function. A `trap` action, or a function the shell
+    directory unknown after each call of the function. A function runs the functions it calls as
+    they are defined when it is called (bash and zsh look a function up then), so its `cd` is
+    followed through them at each call, and one that calls a function defined, or defined again,
+    after it runs code the walker did not read: like a word it does not know, from the call or, if
+    it may cd, from an unknown directory. A function named among the arguments of one that runs
+    `"$@"`, or of a word the walker does not know, runs there too. A `trap` action, or a function the shell
     calls on its own (zsh's `chpwd`, `precmd`, `preexec`, `periodic`, `TRAPDEBUG` and the other
     `TRAP…` functions, a command-not-found handler), that may cd, or a `trap` action the hook cannot
     read, can move the directory between any two commands, so a push after it is refused. zsh runs an

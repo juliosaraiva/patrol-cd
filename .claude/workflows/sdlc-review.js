@@ -26,7 +26,8 @@ const REVIEWERS = [
   { name: 'test-reviewer', match: /(_test\.go$|^test\/|\/testdata\/|^hack\/ci\/|\.test\.tsx?$|^ui\/e2e\/)/ },
   { name: 'api-reviewer', match: /^(internal\/apiserver\/|pkg\/apiclient\/|api\/openapi\/|internal\/cli\/|cmd\/patrol\/|ui\/src\/api\/|docs\/parity\/)/ },
   { name: 'ui-reviewer', match: /^ui\// },
-  { name: 'delivery-reviewer', match: /^(deploy\/|Dockerfile$|\.dockerignore$|Makefile$|hack\/[^/]+\.mk$|hack\/(images|kind|ci|release|sdlc)\/|test\/e2e\/|\.github\/|\.githooks\/|(.*\/)?\.claude\/|(.*\/)?(CLAUDE|CLAUDE\.local|AGENTS)\.md$)/ },
+  // The agents' instructions in any case: on a case-insensitive file system claude.md is CLAUDE.md.
+  { name: 'delivery-reviewer', match: { test: f => /^(deploy\/|Dockerfile$|\.dockerignore$|Makefile$|hack\/[^/]+\.mk$|hack\/(images|kind|ci|release|sdlc)\/|test\/e2e\/|\.github\/|\.githooks\/)/.test(f) || /(^|\/)(\.claude\/|(claude|claude\.local|agents)\.md$)/i.test(f) } },
 ]
 
 const FINDINGS = {
@@ -72,7 +73,7 @@ if (input.docsOnly) {
 }
 
 // Documentation: hack/sdlc/lib.sh sdlc_docs_only (the rule of hack/ci/classify-changes.sh; docs/parity/,
-// and CLAUDE.md, CLAUDE.local.md, AGENTS.md and .claude/ directories at any depth, are not
+// and CLAUDE.md, CLAUDE.local.md, AGENTS.md and .claude/ directories at any depth and in any case, are not
 // documentation there, and the api-reviewer and delivery-reviewer own them here).
 const DOCS = /^(docs\/|[^/]+\.md$|\.gitignore$)/
 

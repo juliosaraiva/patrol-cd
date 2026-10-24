@@ -3,7 +3,6 @@ package main
 import (
 	"bytes"
 	"maps"
-	"math"
 	"os"
 	"os/exec"
 	"path"
@@ -272,9 +271,12 @@ type walker struct {
 	cdpath     bool                      // CDPATH was set in the command: a relative cd may go elsewhere
 	homeSet    bool                      // HOME was set in the command: a word starting with ~ is not literal
 	funcs      map[string]*syntax.Stmt   // functions the command defines, with their bodies
-	calling    map[string]int            // the functions unknownWord is following (recursion), by depth
-	cut        int                       // the least depth of such a function a recursion stopped at
-	cdMemo     map[cdKey]bool            // unknownWord's verdict on a defined function, by name and context
+	maybeFuncs map[string][]*syntax.Stmt // the bodies of definitions that may not run
+	cdMemo     map[cdKey]cdVerdict       // what a function's own body does to the directory (directCD)
+	reachMemo  map[cdKey]bool            // whether a call of a function may cd, through the ones it calls
+	gen        map[string]int            // how many times each name has been defined as a function so far
+	gens       int                       // how many definitions there have been so far
+	refs       map[string]map[string]int // the command words each function's body runs, with their gen then
 	cdFuncs    map[string]bool           // functions defined where the definition may not run, whose body may cd
 	topFuncs   map[*syntax.FuncDecl]bool // definitions that certainly run in this shell
 	inEval     int                       // inside eval, whose definitions may sit in a branch
@@ -285,15 +287,20 @@ type walker struct {
 	defined    map[string]bool           // functions whose definition certainly ran in this shell (or its parent)
 }
 
-// noCut is walker.cut when no recursion was stopped.
-const noCut = math.MaxInt
+// cdKey is what a verdict on a function depends on: its name, and the directory its body's AUTO_CD
+// words resolve against.
+type cdKey struct{ name, dir string }
 
-// cdKey is what unknownWord's verdict on a function depends on: its name, and the directory, CDPATH
-// and HOME its body's AUTO_CD words resolve against.
-type cdKey struct {
-	name, dir       string
-	cdpath, homeSet bool
+// cdVerdict is what a function's own body does to the directory: whether it may cd, and the
+// functions it calls, whose bodies may.
+type cdVerdict struct {
+	cd    bool
+	calls []string
 }
+
+// anyName stands in walker.refs for every name: a body that runs code given as text (eval, source)
+// or a command word the walker cannot read may run any function.
+const anyName = ""
 
 // bodyDir is the directory a function body is walked from: it stands for the directory of each call,
 // where callRun puts it.
@@ -325,8 +332,9 @@ const (
 )
 
 func newWalker(dir, src string) *walker {
-	return &walker{dir: dir, src: src, funcs: map[string]*syntax.Stmt{}, calling: map[string]int{},
-		cut: noCut, cdMemo: map[cdKey]bool{}, cdFuncs: map[string]bool{}, topFuncs: map[*syntax.FuncDecl]bool{},
+	return &walker{dir: dir, src: src, funcs: map[string]*syntax.Stmt{}, maybeFuncs: map[string][]*syntax.Stmt{},
+		cdMemo: map[cdKey]cdVerdict{}, reachMemo: map[cdKey]bool{}, gen: map[string]int{},
+		refs: map[string]map[string]int{}, cdFuncs: map[string]bool{}, topFuncs: map[*syntax.FuncDecl]bool{},
 		funcUnread: map[string][]unknownRun{}, defined: map[string]bool{}}
 }
 
@@ -347,12 +355,18 @@ func (w *walker) child(dir, src string) *walker {
 	for name := range w.defined {
 		c.defined[name] = true
 	}
-	// In a fixed order: unknownWord keeps its verdicts, so the order it is asked in must not vary.
-	for _, name := range slices.Sorted(maps.Keys(w.funcs)) {
+	c.gen, c.gens = maps.Clone(w.gen), w.gens
+	for name, refs := range w.refs {
+		c.refs[name] = maps.Clone(refs)
+	}
+	for name, bodies := range w.maybeFuncs {
+		c.maybeFuncs[name] = slices.Clone(bodies)
+	}
+	for name, body := range w.funcs {
 		if w.unknownWord(name) {
 			c.cdFuncs[name] = true
 		} else {
-			c.funcs[name] = w.funcs[name]
+			c.funcs[name] = body
 		}
 	}
 	return c
@@ -737,28 +751,31 @@ func (w *walker) cmd(s *syntax.Stmt) {
 			w.stmt(c.Body) // zsh runs an anonymous function at once, in this shell
 			return
 		}
-		// A named function's body runs when it is called, from wherever that is: a push in it is
-		// refused, and a call of it may cd where its body may (unknownWord): a definition that
-		// certainly runs is followed into its body, any other one that may cd makes its name unknown.
-		mayCD := w.changesDir(c.Body)
+		// A named function's body runs when it is called, from wherever that is, and runs the
+		// functions it calls as they are defined then (bash and zsh look a function up when it is
+		// called): a push in it is refused, a call of it may cd where its body or theirs may
+		// (funcMayCD), and a call of it after one of them was defined again runs as an unknown word
+		// (stale). A definition that certainly runs is followed into its body; any other one that may
+		// cd makes its name unknown.
 		for _, n := range names {
 			if modeledNames[n.Value] {
 				w.block("the command defines a function named " + n.Value + ", which the hook reads as the builtin or program of that name; " + runAlone)
 			}
-			if mayCD && hookFunction(n.Value) {
-				// The shell calls it on its own (before each command, on each cd, on a signal), so it may
-				// move the directory between any two commands from here on.
-				w.envUnknown = "the function " + n.Value + ", which the shell runs on its own and which may cd,"
-			}
-			switch {
-			case w.topFuncs[c]:
+			w.defining(n.Value)
+			if w.topFuncs[c] {
 				w.funcs[n.Value] = c.Body
 				w.defined[n.Value] = true
-			case mayCD:
-				w.cdFuncs[n.Value] = true
+				w.refs[n.Value] = map[string]int{} // it replaces the earlier definition
+				delete(w.funcUnread, n.Value)
+			} else {
+				w.maybeFuncs[n.Value] = append(w.maybeFuncs[n.Value], c.Body)
+				if w.refs[n.Value] == nil {
+					w.refs[n.Value] = map[string]int{}
+				}
 			}
-			clear(w.cdMemo) // a call of the name now runs other code
+			w.bodyRefs(w.refs[n.Value], c.Body)
 		}
+		w.redefined()
 		saved, body, pushes := w.dir, w.body, len(w.pushes)
 		w.dir, w.body = bodyDir, nil
 		for _, n := range names {
@@ -776,6 +793,111 @@ func (w *walker) cmd(s *syntax.Stmt) {
 					w.unread(u)
 				}
 			}
+		}
+	}
+}
+
+// defining notes a definition of the function name: the verdicts kept on functions no longer hold,
+// and a function whose body runs name now runs other code than the walker read (stale).
+func (w *walker) defining(name string) {
+	w.gen[name]++
+	w.gens++
+	clear(w.cdMemo)
+	clear(w.reachMemo)
+}
+
+// bodyRefs notes, in refs, the command words a function's body runs, with each one's definition as it
+// is now, wherever in the body they run (substitutions too). A command word the walker cannot read,
+// and code given as text (eval, source), may run any function.
+func (w *walker) bodyRefs(refs map[string]int, body syntax.Node) {
+	syntax.Walk(body, func(n syntax.Node) bool {
+		if c, ok := n.(*syntax.CallExpr); ok && len(c.Args) > 0 {
+			word, ok := literalWord(c.Args[0])
+			switch {
+			case !ok:
+				w.ref(refs, anyName)
+			case word == "eval" || word == "source" || word == ".":
+				w.ref(refs, anyName)
+			}
+			if ok {
+				w.ref(refs, word)
+			}
+		}
+		return true
+	})
+}
+
+// ref notes in refs that a body runs the command word name (anyName: any), with its definition as it
+// is now. A path runs a program, never a function.
+func (w *walker) ref(refs map[string]int, name string) {
+	if _, ok := refs[name]; ok || strings.Contains(name, "/") {
+		return
+	}
+	if name == anyName {
+		refs[name] = w.gens
+	} else {
+		refs[name] = w.gen[name]
+	}
+}
+
+// stale reports whether a call of fn may run code the walker did not read when it walked fn's body:
+// a function fn's body runs, or one theirs runs, was defined again (or first) since.
+func (w *walker) stale(fn string) bool {
+	seen := map[string]bool{}
+	var walk func(name string) bool
+	walk = func(name string) bool {
+		if seen[name] {
+			return false
+		}
+		seen[name] = true
+		for ref, gen := range w.refs[name] {
+			if ref == anyName {
+				if w.gens != gen {
+					return true
+				}
+			} else if w.gen[ref] != gen || walk(ref) {
+				return true
+			}
+		}
+		return false
+	}
+	return walk(fn)
+}
+
+// redefined re-reads, after a definition, what depends on which functions are defined: a name whose
+// definition may not have run may cd if a body of it may now, and a function the shell calls on its
+// own (hookFunction) that may now cd can move the directory between any two commands, and one that
+// may run code the walker did not read (stale) runs it from anywhere.
+func (w *walker) redefined() {
+	for changed := true; changed; {
+		changed = false
+		for _, name := range slices.Sorted(maps.Keys(w.maybeFuncs)) {
+			if w.cdFuncs[name] {
+				continue
+			}
+			for _, b := range w.maybeFuncs[name] {
+				if w.changesDir(b) {
+					w.cdFuncs[name] = true
+					clear(w.cdMemo)
+					clear(w.reachMemo)
+					changed = true
+					break
+				}
+			}
+		}
+	}
+	names := slices.Sorted(maps.Keys(w.refs))
+	for _, name := range names {
+		if !hookFunction(name) {
+			continue
+		}
+		if _, ok := w.funcs[name]; w.cdFuncs[name] || ok && w.funcMayCD(name) {
+			// The shell calls it on its own (before each command, on each cd, on a signal), so it may
+			// move the directory between any two commands from here on.
+			w.envUnknown = "the function " + name + ", which the shell runs on its own and which may cd,"
+		}
+		if w.stale(name) {
+			w.unread(unknownRun{Dir: "", Word: name, What: staleWhat(name)})
 		}
 	}
 }
@@ -945,6 +1067,12 @@ func (w *walker) assignWord(assign string) {
 // cannot. A command word that is not literal counts as no cd, as at top level (a cd assembled at
 // run time is out of the hook's reach).
 func (w *walker) changesDir(node syntax.Node) bool {
+	return w.changesDirCalls(node, nil)
+}
+
+// changesDirCalls is changesDir, but with calls not nil a call of a function the command defines is
+// added to calls instead of followed into its body.
+func (w *walker) changesDirCalls(node syntax.Node, calls *[]string) bool {
 	found := false
 	syntax.Walk(node, func(n syntax.Node) bool {
 		if found {
@@ -962,7 +1090,7 @@ func (w *walker) changesDir(node syntax.Node) bool {
 			found = qualifierCode(n) != ""
 		case *syntax.BinaryCmd:
 			if n.Op == syntax.Pipe || n.Op == syntax.PipeAll {
-				found = w.changesDir(n.Y) // zsh runs the last element in this shell
+				found = w.changesDirCalls(n.Y, calls) // zsh runs the last element in this shell
 				return false
 			}
 		case *syntax.CallExpr:
@@ -977,7 +1105,12 @@ func (w *walker) changesDir(node syntax.Node) bool {
 				case "cd", "chdir", "pushd", "popd", "source", ".", "eval", "trap", "emulate", "repeat":
 					found = true
 				default:
-					found = found || w.unknownWord(args[0])
+					name := path.Base(strings.TrimPrefix(args[0], "="))
+					if _, ok := w.funcs[name]; ok && calls != nil && !w.cdFuncs[name] && !strings.Contains(args[0], "/") {
+						*calls = append(*calls, name)
+					} else {
+						found = found || w.unknownWord(args[0])
+					}
 				}
 			}
 		}
@@ -1403,9 +1536,10 @@ prefix:
 		// was walked where it was defined, so only its cd matters here, code in it the walker could
 		// not read (which runs from here), and a push in its arguments, which it may hand to git or a
 		// shell ("$@").
-		for _, u := range w.funcUnread[fn] {
-			w.unread(w.callRun(u))
+		for _, name := range w.body { // the body being walked runs fn, as it is defined now
+			w.ref(w.refs[name], fn)
 		}
+		w.runFunc(fn, w.dir)
 		if w.cdFuncs[fn] {
 			// A function that may cd runs instead. If its definition may not have run, the name may
 			// also be an alias or function of the shell's setup, which runs from here.
@@ -1419,7 +1553,11 @@ prefix:
 				w.block("a git push run through " + fn + " cannot be checked; " + runAlone)
 			}
 			w.argvGit(args, lit)
-			if w.unknownWord(fn) {
+			mayCD := w.unknownWord(fn)
+			if _, ok := w.refs[fn][anyName]; ok && w.argvFuncs(args, lit, mayCD) {
+				mayCD = true // it runs code given at run time ("$@"), which may be a function named here
+			}
+			if mayCD {
 				w.dir = ""
 			}
 			return
@@ -1534,7 +1672,7 @@ prefix:
 			}
 			if !strings.HasPrefix(a, "-") && !strings.HasPrefix(a, "+") {
 				w.cdFuncs[a] = true
-				clear(w.cdMemo)
+				w.defining(a)
 			}
 		}
 	case name == "hash": // hash -p PATH NAME, zsh's hash NAME=PATH: the name runs another program
@@ -1565,7 +1703,17 @@ prefix:
 		if !dataCommands[name] && argvHasGitPush(args, lit) {
 			w.block("a git push run through " + name + " cannot be checked; " + runAlone)
 		}
-		if !program && w.unknownWord(args[0]) {
+		unknown := !program && w.unknownWord(args[0])
+		if !dataCommands[name] {
+			// A shell with a script among its arguments (arch -arm64 sh -c '…', script -q /dev/null
+			// bash -c '…') is walked as it runs: from here, or from anywhere after a word that may cd.
+			dir := w.dir
+			if unknown {
+				dir = ""
+			}
+			w.argvShell(args, lit, dir)
+		}
+		if unknown {
 			// An alias or function of the shell's setup (or a program not on PATH): it may cd, push
 			// (oh-my-zsh's gp is `git push`, which main.go lets run only in this clone, where git's hook
 			// judges it) or hand its arguments to git (a git alias among them is checked). A function the
@@ -1574,9 +1722,80 @@ prefix:
 				w.unread(unknownRun{Dir: w.dir, Word: args[0]})
 			}
 			w.argvGit(args, lit)
+			w.argvFuncs(args, lit, true)
 			w.dir = ""
 		}
 	}
+}
+
+// argvShell walks the first shell given a script (`sh -c '…'`, `bash -lc '…'`) among the arguments of
+// a command the walker does not model, as that shell runs from dir.
+func (w *walker) argvShell(args []string, lit []bool, dir string) {
+	for i := 1; i < len(args); i++ {
+		if lit[i] && shells[path.Base(args[i])] && shellScriptNext(args[i+1:], lit[i+1:]) {
+			w.inChild(dir, args[i:], lit[i:], nil)
+			return
+		}
+	}
+}
+
+// shellScriptNext reports whether a shell's arguments start with options that give it a script as an
+// argument (-c, alone or in a cluster such as -lc or -ec).
+func shellScriptNext(args []string, lit []bool) bool {
+	for j := 0; j < len(args) && lit[j] && len(args[j]) > 1 && (args[j][0] == '-' || args[j][0] == '+'); j++ {
+		switch {
+		case args[j] == "--":
+			return false
+		case args[j] == "-o" || args[j] == "+o" || args[j] == "-O" || args[j] == "+O":
+			j++ // its value is the next argument
+		case args[j][0] == '-' && args[j][1] != '-' && strings.Contains(args[j], "c"):
+			return true
+		}
+	}
+	return false
+}
+
+// runFunc records the code a call of the function fn from dir runs that the walker could not read:
+// what its body (and the bodies it called, as they were) could not, placed at the call, and, when a
+// function it runs was defined again since (stale), the function itself as an unknown word, from
+// dir or, if it may cd, from anywhere.
+func (w *walker) runFunc(fn, dir string) {
+	saved := w.dir
+	w.dir = dir
+	defer func() { w.dir = saved }()
+	for _, u := range w.funcUnread[fn] {
+		w.unread(w.callRun(u))
+	}
+	if w.stale(fn) {
+		u := unknownRun{Dir: dir, Word: fn, What: staleWhat(fn)}
+		if w.unknownWord(fn) {
+			u.Dir = ""
+		}
+		w.unread(u)
+	}
+}
+
+// staleWhat says why a stale function runs code the walker did not read.
+func staleWhat(fn string) string {
+	return "`" + fn + "` runs a function defined, or defined again, after it (bash and zsh look a function up when it is called), code the hook did not read"
+}
+
+// argvFuncs records the functions the command defines that a command may run from its arguments (a
+// function that runs "$@", an alias or function of the shell's setup), as runFunc does for a call:
+// from here, or from anywhere when what runs them may cd first. It reports whether one may cd.
+func (w *walker) argvFuncs(args []string, lit []bool, mayCDFirst bool) bool {
+	dir, mayCD := w.dir, false
+	if mayCDFirst {
+		dir = ""
+	}
+	for i := 1; i < len(args); i++ {
+		if !lit[i] || strings.Contains(args[i], "/") || w.refs[args[i]] == nil {
+			continue
+		}
+		w.runFunc(args[i], dir)
+		mayCD = mayCD || w.unknownWord(args[i])
+	}
+	return mayCD
 }
 
 // argvGit walks each literal `git` in the arguments of a command that may hand them to git (a
@@ -1626,35 +1845,51 @@ func (w *walker) unknownWord(word string) bool {
 	if w.cdFuncs[name] && !strings.Contains(word, "/") {
 		return true // a function that may be defined, and may cd, whatever else the name is
 	}
-	if body, ok := w.funcs[name]; ok && !strings.Contains(word, "/") {
-		if depth, ok := w.calling[name]; ok {
-			w.cut = min(w.cut, depth)
-			return false // recursion: the body is being looked at already
-		}
-		// Each verdict is kept, so functions that call each other many times are followed once each
-		// (a chain of functions each calling the next twice would otherwise take time exponential in
-		// its length, past the hook's timeout). The body's AUTO_CD words depend on the directory.
-		key := cdKey{name, w.dir, w.cdpath, w.homeSet}
-		if v, ok := w.cdMemo[key]; ok {
-			return v
-		}
-		depth, outer := len(w.calling)+1, w.cut
-		w.calling[name], w.cut = depth, noCut
-		v := w.changesDir(body)
-		delete(w.calling, name)
-		if v || w.cut >= depth {
-			// Not a "no" that took a function further up the stack not to cd: called from elsewhere,
-			// that function may.
-			w.cdMemo[key] = v
-		}
-		w.cut = min(outer, w.cut)
-		return v
+	if _, ok := w.funcs[name]; ok && !strings.Contains(word, "/") {
+		return w.funcMayCD(name)
 	}
 	if strings.Contains(word, "/") || knownCommand(name) {
 		return false
 	}
 	_, err := exec.LookPath(name)
 	return err != nil
+}
+
+// funcMayCD reports whether a call of the function name may cd: whether its own body, or the body of a
+// function it calls, as defined now, may (directCD). Each body is looked at once per directory, so
+// functions that call each other many times cost no more than their text (a chain of functions each
+// calling the next twice would otherwise take time exponential in its length, past the hook's
+// timeout, which lets the command run).
+func (w *walker) funcMayCD(name string) bool {
+	key := cdKey{name, w.dir}
+	if v, ok := w.reachMemo[key]; ok {
+		return v
+	}
+	seen, v := map[string]bool{name: true}, false
+	for queue := []string{name}; len(queue) > 0 && !v; queue = queue[1:] {
+		d := w.directCD(queue[0])
+		v = d.cd
+		for _, c := range d.calls {
+			if !seen[c] {
+				seen[c] = true
+				queue = append(queue, c)
+			}
+		}
+	}
+	w.reachMemo[key] = v
+	return v
+}
+
+// directCD is what the body of the function name does to the directory itself, and the functions it
+// calls (whose bodies funcMayCD looks at), from the current directory.
+func (w *walker) directCD(name string) cdVerdict {
+	key := cdKey{name, w.dir}
+	v, ok := w.cdMemo[key]
+	if !ok {
+		v.cd = w.changesDirCalls(w.funcs[name], &v.calls)
+		w.cdMemo[key] = v
+	}
+	return v
 }
 
 // shellCommand reports whether name is a builtin or keyword of the shell the walker knows. (A program

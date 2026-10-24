@@ -37,11 +37,14 @@ sdlc_changed() {
 # Claude Code loads a nested CLAUDE.md or skill for the files under it). No file at all also counts
 # (nothing to review).
 sdlc_docs_only() {
-	local f
+	local f lower
 	while IFS= read -r f; do
-		case ${f##*/} in CLAUDE.md | CLAUDE.local.md | AGENTS.md) return 1 ;; esac
-		[[ /$f != */.claude/* ]] || return 1
-		[[ $f != docs/parity/* ]] || return 1
+		# The exceptions in any case: on a case-insensitive file system (macOS's default) claude.md is
+		# CLAUDE.md, and docs/.Claude/ is docs/.claude/, which Claude Code reads.
+		lower=$(printf '%s' "$f" | tr '[:upper:]' '[:lower:]')
+		case ${lower##*/} in claude.md | claude.local.md | agents.md) return 1 ;; esac
+		[[ /$lower != */.claude/* ]] || return 1
+		[[ $lower != docs/parity/* ]] || return 1
 		[[ -z $f || $f =~ ^(docs/|[^/]+\.md$|\.gitignore$) ]] || return 1
 	done
 	return 0

@@ -150,8 +150,8 @@ else
 			d=$(dirname "$d")
 		done
 		if [[ $d == . ]]; then
-			case /$f in
-			/ui/* | */.claude/* | */CLAUDE.md | */CLAUDE.local.md | */AGENTS.md) ;;
+			case /$(printf '%s' "$f" | tr '[:upper:]' '[:lower:]') in # in any case, as sdlc_docs_only
+			/ui/* | */.claude/* | */claude.md | */claude.local.md | */agents.md) ;;
 			*) all=1 ;;
 			esac
 			continue

@@ -50,7 +50,8 @@ check "the parity matrix is not documentation" 1 "$(docs_only docs/guides/x.md d
 check "CLAUDE.md is not documentation" 1 "$(docs_only CLAUDE.md)"
 check "AGENTS.md is not documentation" 1 "$(docs_only README.md AGENTS.md)"
 for f in docs/CLAUDE.md docs/guides/CLAUDE.md CLAUDE.local.md docs/AGENTS.md docs/.claude/skills/x/SKILL.md \
-	docs/guides/.claude/agents/x.md; do
+	docs/guides/.claude/agents/x.md claude.local.md docs/guides/claude.md docs/guides/Agents.md \
+	docs/.Claude/skills/x/SKILL.md docs/Parity/matrix.md; do
 	check "$f is not documentation" 1 "$(docs_only docs/guides/x.md "$f")"
 done
 check "code is not documentation" 1 "$(docs_only main.go)"
