@@ -162,6 +162,26 @@ func TestFindPushes(t *testing.T) {
 		{name: "builtin cd run by a function that runs \"$@\"", command: `r() { "$@"; }; r builtin cd /other && git push origin a`, want: []push{{Dir: "", Sources: []string{"a"}}}},
 		{name: "a cd run by a function that runs builtin \"$@\"", command: `r() { builtin "$@"; }; r cd /other && git push origin a`, want: []push{{Dir: "", Sources: []string{"a"}}}},
 		{name: "a cd run by a function that runs $1 $2", command: `r() { $1 $2; }; r cd /other && git push origin a`, want: []push{{Dir: "", Sources: []string{"a"}}}},
+		// The same wherever the call is read for a cd: in a body, at a pipeline's end, run by a runner;
+		// and from any tail of the arguments when the body shifts them or slices "${@:N}".
+		{name: "a runner given a cd in a function's body", command: `r() { "$@"; }; g() { r cd /other; }; g && git push origin a`, want: []push{{Dir: "", Sources: []string{"a"}}}},
+		{name: "a runner given a function that cds, in a body", command: `r() { "$@"; }; g() { cd /other; }; h() { r g; }; h && git push origin a`, want: []push{{Dir: "", Sources: []string{"a"}}}},
+		{name: "a runner given a cd at a pipeline's end", command: `r() { "$@"; }; echo | r cd /other; git push origin a`, want: []push{{Dir: "", Sources: []string{"a"}}}},
+		{name: "a runner given a runner given a cd", command: `r() { "$@"; }; r r cd /other && git push origin a`, want: []push{{Dir: "", Sources: []string{"a"}}}},
+		{name: "a runner that shifts", command: `run_logged() { local log=$1; shift; "$@" >"$log" 2>&1; }; run_logged /tmp/x.log cd /other && git push origin a`, want: []push{{Dir: "", Sources: []string{"a"}}}},
+		{name: "a runner that shifts a word away", command: `r() { shift; "$@"; }; r true cd /other && git push origin a`, want: []push{{Dir: "", Sources: []string{"a"}}}},
+		{name: "a runner that slices its arguments", command: `r() { "${@:2}"; }; r true cd /other && git push origin a`, want: []push{{Dir: "", Sources: []string{"a"}}}},
+		{name: "a runner defined again without a shift", command: `r() { shift; "$@"; }; r() { "$@"; }; r git fetch origin && git push origin a`, want: []push{{Dir: "/repo", Sources: []string{"a"}}}},
+		{name: "a runner that does not shift: later arguments are data", command: `retry() { for i in 1 2 3; do "$@" && return 0; sleep 5; done; return 1; }; retry git fetch origin && git push origin a`, want: []push{{Dir: "/repo", Sources: []string{"a"}}}},
+		// `trap - SIG`, `trap SIG` and `trap N…` reset signals; they run nothing.
+		{name: "a trap reset", command: "trap 'rm -f /tmp/x' EXIT; make test; trap - EXIT; git push origin a", want: []push{{Dir: "/repo", Sources: []string{"a"}}}},
+		{name: "a trap reset by one operand", command: "trap INT; git push origin a", want: []push{{Dir: "/repo", Sources: []string{"a"}}}},
+		{name: "a trap reset by signal numbers", command: "trap 2 15; git push origin a", want: []push{{Dir: "/repo", Sources: []string{"a"}}}},
+		// A coprocess runs in a subshell, from the directory of its statement.
+		{name: "a coprocess", command: "coproc git push origin main", want: []push{{Dir: "/repo", Sources: []string{"main"}}}},
+		{name: "a coprocess after a cd", command: "cd /other && coproc git push origin main", want: []push{{Dir: "/other", Sources: []string{"main"}}}},
+		{name: "a named coprocess", command: "coproc P { git push origin main; }", want: []push{{Dir: "/repo", Sources: []string{"main"}}}},
+		{name: "a coprocess's cd stays in it", command: "coproc { cd /x; }; git push origin a", want: []push{{Dir: "/repo", Sources: []string{"a"}}}},
 		{name: "a program run by a function that runs \"$@\"", command: `r() { "$@"; }; r make test && git push origin a`, want: []push{{Dir: "/repo", Sources: []string{"a"}}}},
 		{name: "a function run through noglob \"$@\"", command: `r() { noglob "$@"; }; d() { cd /other; }; r d && git push origin a`, want: []push{{Dir: "", Sources: []string{"a"}}}},
 		{name: "a shell script with a long option through arch", command: "arch -arm64 bash --rcfile /dev/null -c 'cd /other && git push origin a'", want: []push{{Dir: "/other", Sources: []string{"a"}}}},
@@ -730,6 +750,16 @@ func TestFindPushesBlocked(t *testing.T) {
 		{`f() { "$@"; }; f git send-pack origin HEAD:main`, "pushes without running git's pre-push hook"},
 		{"nosuch-runner git config alias.x '!sh'", config},
 		{"g() { :; }; chpwd() { g; }; g() { cd /x; }; git push origin a", "the function chpwd, which the shell runs on its own and which may cd"},
+		// git config's section commands write every key under them (core.hooksPath under core).
+		{"git config --remove-section core && git push origin main", config},
+		{"git config --remove-section core", config},
+		{"git config remove-section core", config},
+		{"git config rename-section color core", config},
+		// An export of a quoted or escaped name with no value marks a variable of the shell for export.
+		{`export $'\x47IT_DIR'; git push origin a`, gitEnv},
+		{`export "GIT_""DIR"; git push origin a`, gitEnv},
+		// zsh's functions -c copies code over a name a trap runs: the trap is read again.
+		{"ls() { :; }; trap ls DEBUG; e() { cd /other; }; functions -c e ls; git push origin a", "a trap action that may cd"},
 		// A trap action runs the functions as they are defined when it runs.
 		{"d() { true; }; trap d EXIT; d() { cd /other; }; git push origin a", "a trap action that may cd"},
 		// bash 5.3's ${ …; } runs in this shell.
@@ -886,6 +916,14 @@ func TestFindPushesDeepCalls(t *testing.T) {
 	}
 	self.WriteString("f40() { :; }; f1 && git push origin a; v=$(f1)")
 	back.WriteString("f40() { f1; }; f1 && git push origin a; v=$(f1)")
+	// More trap actions than the walker reads again after each definition.
+	var traps strings.Builder
+	for i := 0; i <= maxTraps; i++ {
+		fmt.Fprintf(&traps, "trap 'echo %d' USR1; ", i)
+	}
+	a, err := findPushes(traps.String()+"true", "/repo")
+	require.NoError(t, err)
+	assert.Contains(t, a.Blocked, "more than 64 trap actions")
 	// A long chain of definitions, each calling the one before: each body holds the code the bodies
 	// it calls could not read (here the possible aliases), so past maxRuns places it is refused, in
 	// time well short of the hook's timeout.
@@ -895,7 +933,7 @@ func TestFindPushesDeepCalls(t *testing.T) {
 	}
 	chain.WriteString("true")
 	start := time.Now()
-	a, err := findPushes(chain.String(), "/repo")
+	a, err = findPushes(chain.String(), "/repo")
 	require.NoError(t, err)
 	assert.Contains(t, a.Blocked, "in more than 256 places")
 	assert.Less(t, time.Since(start), 60*time.Second)
@@ -1010,6 +1048,12 @@ func TestFindPushesUnknownWords(t *testing.T) {
 		{"g() { :; }; f() { noglob g; }; g() { nosuch-gp; }; cd /other && f", []unknownRun{{Dir: "", Word: "f", What: staleRun("f")}}},
 		{"g() { :; }; f() { eval g; }; g() { nosuch-gp; }; cd /other && f", []unknownRun{{Dir: "", Word: "f", What: staleRun("f")}}},
 		{"g() { :; }; chpwd() { g; }; g() { nosuch-gp; }", []unknownRun{{Dir: "", Word: "chpwd", What: staleRun("chpwd")}}},
+		// A trap action, or a function the shell calls on its own, that may cd moves the directory
+		// before or after any command (DEBUG, ERR): no later directory is known, even after a cd.
+		{"trap 'cd /other' DEBUG; nosuch-gp origin HEAD", []unknownRun{{Dir: "", Word: "nosuch-gp"}}},
+		{"trap 'cd /other' ERR; false; nosuch-gp", []unknownRun{{Dir: "", Word: "nosuch-gp"}}},
+		{"TRAPDEBUG() { cd /other; }; nosuch-gp", []unknownRun{{Dir: "", Word: "nosuch-gp"}}},
+		{"trap 'cd /other' DEBUG; cd /repo && nosuch-gp", []unknownRun{{Dir: "", Word: "nosuch-gp"}}},
 		{"d() { true; }; trap d EXIT; d() { cd /other && nosuch-gp; }", []unknownRun{{Dir: "", Word: "trap", What: "a trap action that runs a function defined, or defined again, after the trap was set (it looks the function up when it runs), code the hook did not read"}}},
 		{`r() { nocorrect "$@"; }; d() { cd /other && nosuch-gp; }; r d`, []unknownRun{{Dir: "/repo", What: "a command named by a word the hook cannot read"}, {Dir: "/repo", Word: "r", What: staleRun("r")}, {Dir: "/other", Word: "nosuch-gp"}}},
 		{`r() { repeat 1 "$@"; }; d() { cd /other && nosuch-gp; }; r d`, []unknownRun{{Dir: "/repo", What: "a command named by a word the hook cannot read"}, {Dir: "", Word: "r", What: staleRun("r")}, {Dir: "/other", Word: "nosuch-gp"}}},

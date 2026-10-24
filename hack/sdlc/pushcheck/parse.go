@@ -284,15 +284,19 @@ type walker struct {
 	refs       map[string]map[string]int       // the command words each function's body runs, with their gen then
 	hooks      map[string]bool                 // the functions defined that the shell calls on its own (hookFunction)
 	traps      []trapAction                    // the trap actions set so far, which run the functions defined then
-	paths      map[string]bool                 // whether each name is a program on PATH (onPath), shared with children
-	cdFuncs    map[string]bool                 // functions defined where the definition may not run, whose body may cd
-	topFuncs   map[*syntax.FuncDecl]bool       // definitions that certainly run in this shell
-	inEval     int                             // inside eval, whose definitions may sit in a branch
-	program    bool                            // the command runs as a program (a wrapper's), which no function shadows
-	input      inputArgs                       // xargs or parallel adds its input to the command's arguments
-	body       []string                        // the names of the function whose body is being walked, at its definition
-	funcUnread map[string][]unknownRun         // the code each function's body runs that the walker could not read
-	defined    map[string]bool                 // functions whose definition certainly ran in this shell (or its parent)
+	// dirLost: a trap action or a function the shell calls on its own may cd before or after any
+	// command from here on (DEBUG, ERR, chpwd), so no later directory is known, even after a cd.
+	dirLost    bool
+	shifts     map[string]bool           // functions whose body shifts its arguments or slices them (${@:2})
+	paths      map[string]bool           // whether each name is a program on PATH (onPath), shared with children
+	cdFuncs    map[string]bool           // functions defined where the definition may not run, whose body may cd
+	topFuncs   map[*syntax.FuncDecl]bool // definitions that certainly run in this shell
+	inEval     int                       // inside eval, whose definitions may sit in a branch
+	program    bool                      // the command runs as a program (a wrapper's), which no function shadows
+	input      inputArgs                 // xargs or parallel adds its input to the command's arguments
+	body       []string                  // the names of the function whose body is being walked, at its definition
+	funcUnread map[string][]unknownRun   // the code each function's body runs that the walker could not read
+	defined    map[string]bool           // functions whose definition certainly ran in this shell (or its parent)
 }
 
 // cdKey is what a verdict on a function depends on: its name, and the directory its body's AUTO_CD
@@ -348,7 +352,7 @@ const (
 func newWalker(dir, src string) *walker {
 	return &walker{dir: dir, src: src, funcs: map[string]*syntax.Stmt{}, maybeFuncs: map[string][]*syntax.Stmt{},
 		cdMemo: map[string]map[string]cdVerdict{}, reachMemo: map[cdKey]bool{}, gen: map[string]int{}, hooks: map[string]bool{},
-		refs: map[string]map[string]int{}, paths: map[string]bool{}, cdFuncs: map[string]bool{},
+		refs: map[string]map[string]int{}, paths: map[string]bool{}, shifts: map[string]bool{}, cdFuncs: map[string]bool{},
 		topFuncs: map[*syntax.FuncDecl]bool{}, funcUnread: map[string][]unknownRun{}, defined: map[string]bool{}}
 }
 
@@ -369,7 +373,7 @@ func (w *walker) child(dir, src string) *walker {
 	for name := range w.defined {
 		c.defined[name] = true
 	}
-	c.gen, c.gens, c.hooks = maps.Clone(w.gen), w.gens, maps.Clone(w.hooks)
+	c.gen, c.gens, c.hooks, c.shifts = maps.Clone(w.gen), w.gens, maps.Clone(w.hooks), maps.Clone(w.shifts)
 	for name, refs := range w.refs {
 		c.refs[name] = maps.Clone(refs)
 	}
@@ -425,7 +429,35 @@ func (w *walker) unread(runs ...unknownRun) {
 		}
 		return
 	}
+	if w.dirLost {
+		for i := range runs {
+			runs[i].Dir = ""
+		}
+	}
 	w.unknown = w.appendNew(w.unknown, runs...)
+}
+
+// loseDir notes that a trap action or a hook function may move the directory between any two
+// commands from here on: a push after it is refused (why), and anything else runs from an unknown
+// directory.
+func (w *walker) loseDir(why string) {
+	w.envUnknown, w.dir, w.dirLost = why, "", true
+}
+
+// maxTraps bounds the trap actions the walker keeps to read again after each definition.
+const maxTraps = 64
+
+// isUnsigned reports whether s is an unsigned decimal integer (a signal number).
+func isUnsigned(s string) bool {
+	if s == "" {
+		return false
+	}
+	for _, r := range s {
+		if r < '0' || r > '9' {
+			return false
+		}
+	}
+	return true
 }
 
 // maxRuns bounds the places a function (or the command) runs code the walker did not read: each body
@@ -792,6 +824,7 @@ func (w *walker) cmd(s *syntax.Stmt) {
 				w.defined[n.Value] = true
 				w.refs[n.Value] = map[string]int{} // it replaces the earlier definition
 				delete(w.funcUnread, n.Value)
+				delete(w.shifts, n.Value)
 			} else {
 				w.maybeFuncs[n.Value] = append(w.maybeFuncs[n.Value], c.Body)
 				if w.refs[n.Value] == nil {
@@ -799,6 +832,9 @@ func (w *walker) cmd(s *syntax.Stmt) {
 				}
 			}
 			w.bodyRefs(w.refs[n.Value], c.Body)
+			if shiftsArgs(c.Body) {
+				w.shifts[n.Value] = true
+			}
 		}
 		w.redefined()
 		saved, body, pushes := w.dir, w.body, len(w.pushes)
@@ -872,6 +908,9 @@ func (w *walker) bodyRefs(refs map[string]int, body syntax.Node) {
 // commandWord returns a simple command's command word, after the precommands that run the rest in
 // this shell (noglob, nocorrect, builtin, command, exec, zsh's repeat N), and whether it is literal.
 func commandWord(args []*syntax.Word) (string, bool) {
+	if len(args) == 0 { // assignments only
+		return "", false
+	}
 	for len(args) > 1 {
 		word, ok := literalWord(args[0])
 		switch {
@@ -953,7 +992,7 @@ func (w *walker) redefined() {
 		if _, ok := w.funcs[name]; w.cdFuncs[name] || ok && w.funcMayCD(name) {
 			// The shell calls it on its own (before each command, on each cd, on a signal), so it may
 			// move the directory between any two commands from here on.
-			w.envUnknown = "the function " + name + ", which the shell runs on its own and which may cd,"
+			w.loseDir("the function " + name + ", which the shell runs on its own and which may cd,")
 		}
 		if w.stale(name) {
 			w.unread(unknownRun{Dir: "", Word: name, What: staleWhat(name)})
@@ -962,7 +1001,7 @@ func (w *walker) redefined() {
 	// A trap action likewise runs the functions as they are defined when it runs.
 	for _, t := range w.traps {
 		if w.changesDir(t.code) {
-			w.envUnknown = "a trap action that may cd, set earlier in the command,"
+			w.loseDir("a trap action that may cd, set earlier in the command,")
 		}
 		if w.staleRefs(t.refs, map[string]bool{}) {
 			w.unread(unknownRun{Dir: "", Word: "trap", What: "a trap action that runs a function defined, or defined again, after the trap was set (it looks the function up when it runs), code the hook did not read"})
@@ -1174,25 +1213,75 @@ func (w *walker) changesDirCalls(node syntax.Node, calls *[]string) bool {
 // and its kin, code that may (source, eval, a trap), a directory name AUTO_CD enters, or a word the
 // walker does not know. With calls not nil a function the command defines is added to calls instead
 // of followed into its body.
+//
+// A function that runs code given at run time ("$@", $1, eval) runs its arguments as a command in this
+// shell (`r cd DIR`, `r r cd DIR`), or, if its body shifts them, any literal tail of them (`r : cd DIR`).
 func (w *walker) argvMayCD(args []string, lit []bool, calls *[]string) bool {
 	args, lit = stripBraces(args, lit)
-	found := w.autoCD(args, lit)
-	for len(args) > 1 && lit[0] && (precommand[path.Base(args[0])]) {
-		args, lit = args[1:], lit[1:]
-	}
-	if len(args) > 0 && lit[0] {
-		switch name := path.Base(strings.TrimPrefix(args[0], "=")); name {
-		case "cd", "chdir", "pushd", "popd", "source", ".", "eval", "trap", "emulate", "repeat":
-			found = true
-		default:
-			if _, ok := w.funcs[name]; ok && calls != nil && !w.cdFuncs[name] && !strings.Contains(args[0], "/") {
-				*calls = append(*calls, name)
-			} else {
-				found = found || w.unknownWord(args[0])
+	memo := map[int]bool{}
+	var from func(i int) bool // whether args[i:], as a command, may cd
+	from = func(i int) bool {
+		if v, ok := memo[i]; ok {
+			return v
+		}
+		found := w.autoCD(args[i:], lit[i:])
+		for len(args)-i > 1 && lit[i] && (precommand[path.Base(args[i])]) {
+			i++
+		}
+		if i < len(args) && lit[i] {
+			switch name := path.Base(strings.TrimPrefix(args[i], "=")); name {
+			case "cd", "chdir", "pushd", "popd", "source", ".", "eval", "trap", "emulate", "repeat":
+				found = true
+			default:
+				_, isFunc := w.funcs[name]
+				isFunc = isFunc && !w.cdFuncs[name] && !strings.Contains(args[i], "/")
+				if isFunc && w.runsArgs(name) {
+					last := i + 1
+					if w.shifts[name] {
+						last = len(args) - 1
+					}
+					for j := i + 1; j <= last && j < len(args) && !found; j++ {
+						found = lit[j] && from(j)
+					}
+				}
+				if isFunc && calls != nil {
+					*calls = append(*calls, name)
+				} else {
+					found = found || w.unknownWord(args[i])
+				}
 			}
 		}
+		memo[i] = found
+		return found
 	}
+	return from(0)
+}
+
+// shiftsArgs reports whether a body shifts its arguments, or takes a slice of them (${@:2}): then
+// the code it runs from them may start at any of them.
+func shiftsArgs(body syntax.Node) bool {
+	found := false
+	syntax.Walk(body, func(n syntax.Node) bool {
+		switch n := n.(type) {
+		case *syntax.CallExpr:
+			if word, ok := commandWord(n.Args); ok && word == "shift" { // "" for assignments only
+				found = true
+			}
+		case *syntax.ParamExp:
+			if n.Slice != nil && n.Param != nil && (n.Param.Value == "@" || n.Param.Value == "*") {
+				found = true
+			}
+		}
+		return !found
+	})
 	return found
+}
+
+// runsArgs reports whether the function name runs code given at run time ("$@", $1, eval, source),
+// which may be its arguments.
+func (w *walker) runsArgs(name string) bool {
+	_, ok := w.refs[name][anyName]
+	return ok
 }
 
 // codeQualifier matches the zsh glob qualifiers that run code (e:…:, e{…}, +function): zsh evaluates
@@ -1635,13 +1724,13 @@ prefix:
 				w.block("a git push run through " + fn + " cannot be checked; " + runAlone)
 			}
 			w.argvGit(args, lit)
-			mayCD := w.unknownWord(fn)
-			if _, ok := w.refs[fn][anyName]; ok {
-				// It runs code given at run time ("$@", eval): a function named among its arguments
-				// runs there, and its arguments may be a command that moves this shell (r cd DIR).
-				if w.argvFuncs(args, lit, mayCD) || w.argvMayCD(args[1:], lit[1:], nil) {
-					mayCD = true
-				}
+			// Its body may cd, or, if it runs code given at run time ("$@", eval), its arguments may be a
+			// command that moves this shell (r cd DIR, argvMayCD), and a function named among them
+			// runs there (argvFuncs).
+			bodyMayCD := w.unknownWord(fn)
+			mayCD := bodyMayCD || w.argvMayCD(args, lit, nil)
+			if w.runsArgs(fn) && w.argvFuncs(args, lit, bodyMayCD) {
+				mayCD = true
 			}
 			if mayCD {
 				w.dir = ""
@@ -1695,6 +1784,10 @@ prefix:
 			}
 			a, l = a[1:], l[1:]
 		}
+		// `trap - SIG…`, `trap SIG` and `trap N…` (an unsigned number first) reset the signals: no action.
+		if len(a) > 0 && l[0] && (a[0] == "-" || len(a) == 1 || isUnsigned(a[0])) {
+			a = nil
+		}
 		if len(a) > 0 {
 			if l[0] {
 				// The action runs later, on exit or a signal (DEBUG: before each command), from
@@ -1707,16 +1800,20 @@ prefix:
 				w.dir = saved
 				f, err := parseBash(a[0])
 				if err != nil || w.changesDir(f) {
-					w.envUnknown = "a trap action that may cd, set earlier in the command,"
+					w.loseDir("a trap action that may cd, set earlier in the command,")
 				}
 				if err == nil { // it runs the functions defined when it runs: redefined reads it again
-					t := trapAction{code: f, refs: map[string]int{}}
-					w.bodyRefs(t.refs, f)
-					w.traps = append(w.traps, t)
+					if len(w.traps) >= maxTraps {
+						w.block(fmt.Sprintf("the command sets more than %d trap actions, more than the hook follows; run it in parts", maxTraps))
+					} else {
+						t := trapAction{code: f, refs: map[string]int{}}
+						w.bodyRefs(t.refs, f)
+						w.traps = append(w.traps, t)
+					}
 				}
 			} else {
 				w.blockText(w.cmdText, "trap")
-				w.envUnknown = "a trap action the hook cannot read, set earlier in the command,"
+				w.loseDir("a trap action the hook cannot read, set earlier in the command,")
 			}
 		}
 	case name == "alias": // alias [-gs…] NAME=VALUE…: VALUE runs wherever NAME is used later
@@ -1767,6 +1864,7 @@ prefix:
 				w.defining(a)
 			}
 		}
+		w.redefined()
 	case name == "hash": // hash -p PATH NAME, zsh's hash NAME=PATH: the name runs another program
 		if mentionsGit(w.cmdText) {
 			w.block("hash can make the name git run another program; " + runAlone)
@@ -1978,6 +2076,10 @@ func (w *walker) funcMayCD(name string) bool {
 	}
 	seen, v := map[string]bool{name: true}, false
 	for queue := []string{name}; len(queue) > 0 && !v; queue = queue[1:] {
+		if r, ok := w.reachMemo[cdKey{queue[0], w.dir}]; ok {
+			v = r // looked at already: it, and all it reaches, may cd or not
+			continue
+		}
 		d := w.directCD(queue[0])
 		v = d.cd
 		for _, c := range d.calls {
@@ -1985,6 +2087,13 @@ func (w *walker) funcMayCD(name string) bool {
 				seen[c] = true
 				queue = append(queue, c)
 			}
+		}
+	}
+	if !v {
+		// Nothing it reaches may cd, so nothing any of those reaches may either: one search settles
+		// them all (a trap read again after each definition asks about each of them).
+		for n := range seen {
+			w.reachMemo[cdKey{n, w.dir}] = false
 		}
 	}
 	w.reachMemo[key] = v

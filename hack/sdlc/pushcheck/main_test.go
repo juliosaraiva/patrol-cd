@@ -27,6 +27,7 @@ func TestRunFailsClosed(t *testing.T) {
 		reason  string
 	}{
 		{name: "not a push", command: "echo hi", want: 0},
+		{name: "a coprocess pushing from another directory", command: "cd / && coproc git push origin main", want: 2, reason: "which is not a work tree of"},
 		{name: "unparseable without git", command: "echo 'push unterminated", want: 2, reason: "cannot parse the command as bash"},
 		{name: "unparseable, with an alias of the shell's setup", command: "cd / && nosuch-gp origin main; print -l ${(f)x}", want: 2, reason: "cannot parse the command as bash"},
 		{name: "a zsh glob qualifier bash cannot parse", command: "cd / && nosuch-gp origin main && ls *.go(.)", want: 2, reason: "cannot parse the command as bash"},
@@ -127,6 +128,8 @@ func TestRunUnknownWords(t *testing.T) {
 		{"function nosuch-gp { :; }; cd " + other + " && nosuch-gp", 2, "`nosuch-gp` is a function the command defines, but an alias of that name in the shell's setup would run instead"},
 		{`r() { "$@"; }; r cd ` + other + ` && git push origin HEAD`, 2, "cannot tell which directory `git push` runs in"},
 		{"d() { true; }; trap d EXIT; d() { cd " + other + " && nosuch-gp; }", 2, "a trap action that runs a function defined, or defined again"},
+		{"trap 'cd " + other + "' DEBUG; nosuch-gp origin main", 2, "a directory the hook cannot tell"},
+		{`run() { "$@"; }; deploy() { run cd ` + other + `; }; deploy && git push origin HEAD`, 2, "cannot tell which directory `git push` runs in"},
 		// A shell script handed to a program the walker does not model runs as written.
 		{"arch -arm64 sh -c 'cd " + other + " && nosuch-gp'", 2, "it would run in " + other},
 		{"arch -arm64 sh -c 'nosuch-gp'", 0, ""},

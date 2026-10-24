@@ -271,7 +271,9 @@ Two hooks run it:
     after it runs code the walker did not read: like a word it does not know, from the call or, if
     it may cd, from an unknown directory. A function that runs code given at run time (`"$@"`, `$1`,
     `eval`, also through `noglob`, `builtin` or `repeat N`) runs its arguments as a command in this
-    shell: a `cd` among them (`r cd DIR`) moves the directory, and a function named there, as among
+    shell: a `cd` among them (`r cd DIR`) moves the directory, wherever the call is (in a body, at a
+    pipeline's end, given to another such function), and from any of them when the body shifts them or
+    slices `"${@:N}"`; a function named there, as among
     the arguments of a word the walker does not know, runs there too. A call of a function the
     command defines whose name is no program on PATH or builtin is also a word the walker does not
     know, so it runs only in this clone: an alias of that name in the shell's setup would run
@@ -284,7 +286,11 @@ Two hooks run it:
     of functions cannot run the hook past its timeout. A `trap` action, or a function the shell
     calls on its own (zsh's `chpwd`, `precmd`, `preexec`, `periodic`, `TRAPDEBUG` and the other
     `TRAP…` functions, a command-not-found handler), that may cd, or a `trap` action the hook cannot
-    read, can move the directory between any two commands, so a push after it is refused. zsh runs an
+    read, can move the directory between any two commands (a DEBUG trap runs before each, an ERR trap
+    after a failing one), so a push after it is refused and anything else after it runs from an
+    unknown directory, even after a `cd`. `trap - SIG`, `trap SIG` and `trap N …` reset signals and run
+    nothing. At most 64 trap actions are followed (each is read again after each definition); past
+    that the command is refused. zsh runs an
     anonymous function at once, in this shell, and the walker follows it there (`() {cd /x}`,
     `() cmd`); the spaced form `() { …; }` does not parse as bash, so a command with it is refused.
   - **What it refuses wherever the command runs**, because it can point git elsewhere, run a push the
@@ -386,7 +392,9 @@ A second hook (`hack/sdlc/claude-format.sh`, `PostToolUse` for Edit, MultiEdit a
   a hook token anywhere in the command line, so a push through any of them still runs git's hook
   unless the token is assembled at run time; and a command word that is no program on PATH makes the
   directory unknown and may run only in this clone (a function the command defines of such a name
-  may run only there too, as an alias of the setup would replace it), so a function that cds to
+  may run only there too, as an alias of the setup would replace it, but the directory after it
+  stays known: an alias that cds, as oh-my-zsh's `-` or a `dev='cd ~/Developer'`, given the name of a
+  function the command defines, moves a later push unseen), so a function that cds to
   another clone does not place a push in this one, and an alias that pushes does not push from
   another one. An alias
   or function that shadows a program on PATH or a builtin (`make`, `ls`, `echo`) is not seen, nor
