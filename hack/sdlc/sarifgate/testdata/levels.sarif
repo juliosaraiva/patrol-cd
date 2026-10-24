@@ -8,7 +8,8 @@
           "rules": [
             {"id": "x/note-by-default", "defaultConfiguration": {"level": "note"}},
             {"id": "x/no-default"},
-            {"id": "x/error-by-default", "defaultConfiguration": {"level": "error"}}
+            {"id": "x/error-by-default", "defaultConfiguration": {"level": "error"}},
+            {"id": "x/numeric-severity", "defaultConfiguration": {"level": "error"}, "properties": {"security-severity": 9.1}}
           ]
         }
       },
@@ -31,6 +32,19 @@
           "message": {"text": "No level of its own: the driver rule's default, error."},
           "locations": [{"physicalLocation": {"artifactLocation": {"uri": "c.go"}, "region": {"startLine": 3}}}],
           "partialFingerprints": {"primaryLocationLineHash": "ccc:1"}
+        },
+        {
+          "ruleId": "x/no-default",
+          "level": "none",
+          "message": {"text": "Level none: information only."},
+          "locations": [{"physicalLocation": {"artifactLocation": {"uri": "d.go"}, "region": {"startLine": 4}}}],
+          "partialFingerprints": {"primaryLocationLineHash": "ddd:1"}
+        },
+        {
+          "ruleId": "x/numeric-severity",
+          "message": {"text": "A security-severity given as a number, not a string."},
+          "locations": [{"physicalLocation": {"artifactLocation": {"uri": "e.go"}, "region": {"startLine": 5}}}],
+          "partialFingerprints": {"primaryLocationLineHash": "eee:1"}
         }
       ]
     }

@@ -126,10 +126,10 @@ replace them.
 
 - a passing check record, always;
 - a passing review record, unless the change since the merge base is documentation only (the rule
-  above, except that `docs/parity/`, and `CLAUDE.md`, `CLAUDE.local.md` and `AGENTS.md` at any
-  depth, are not documentation here: a status file that marks a feature complete needs its evidence
-  reviewed, and the agents' instructions their review; Claude Code loads a nested `CLAUDE.md` for the
-  files under it).
+  above, except that `docs/parity/`, and `CLAUDE.md`, `CLAUDE.local.md`, `AGENTS.md` and anything
+  under a `.claude/` directory at any depth, are not documentation here: a status file that marks a
+  feature complete needs its evidence reviewed, and the agents' instructions their review; Claude
+  Code loads a nested `CLAUDE.md` or skill for the files under it).
 
 A change to the gate's own files (`.githooks/`, `hack/sdlc/`, `.claude/settings.json`) is judged by
 the gate of its base too (the merge base with `origin/main`, run from the base's files), so a gate
@@ -144,8 +144,8 @@ the agent review and CI stand behind such a change.
 Two hooks run it:
 
 - **git's pre-push hook** (`.githooks/pre-push`, enabled with `make sdlc-git-hooks`, which sets
-  `core.hooksPath` for the clone and for the work tree it runs in, whose own value wins with
-  `extensions.worktreeConfig`). It is the authority: git gives it the commits actually being pushed, so a
+  `core.hooksPath` for the clone and, with `extensions.worktreeConfig`, for the work tree it runs in,
+  whose own value then wins). It is the authority: git gives it the commits actually being pushed, so a
   commit made in the same command line (`git commit … && git push`), a push from a script, an
   alias or another tool are all checked. A person can bypass it in an emergency with
   `git push --no-verify`.
@@ -187,9 +187,12 @@ Two hooks run it:
      from the input of `xargs` or `parallel` (`xargs sh -c`, `xargs -I{} sh -c {}`, `parallel` with no
      command); `source` of standard input or of a word it cannot read; an `eval` of a dynamic string;
      a command word that is not literal. Such code runs only in a work tree of this clone where
-     git's hook runs the gate (`core.hooksPath` is `.githooks`, and the hook and `hack/sdlc/gate.sh`
-     are there), which judges what it pushes. It is placed where it runs: code in a function body
-     where the function is called, code in a substitution in the directory of its statement. A
+     git's hook runs the gate as committed (`core.hooksPath` is `.githooks`, the hook and
+     `hack/sdlc/gate.sh` are there, and the gate's own files have no uncommitted or hidden change),
+     which judges what it pushes. It is placed where it runs: code in a function body at each call
+     of the function, in the call's directory moved by any `cd` in the body before it (a function
+     the shell calls on its own, `chpwd` or `TRAPDEBUG`, from an unknown directory); code in a
+     substitution in the directory of its statement. A
      command that does not parse as bash is refused outright. In
      this clone a push is refused while `core.hooksPath` is not
      `.githooks`, while `.githooks/pre-push` is missing or not executable, while the gate's own files
@@ -204,7 +207,7 @@ Two hooks run it:
     substitution, an unquoted glob or an unescaped `$` that bash leaves as text is *not literal*. The
     Bash tool may run zsh, so zsh's readings win where they differ: `{git push …}` without spaces is a
     brace group, `$=x`, `$^x` and `$~x` are not literal, `chdir` is `cd`, and a lone directory name is
-    a `cd` (AUTO_CD); zsh's `-` precommand is read as an unknown word, since an alias of that name
+    a `cd` (AUTO_CD) unless it is a builtin or function; zsh's `-` precommand is read as an unknown word, since an alias of that name
     (oh-my-zsh's `cd -`) runs first. `command -p` and `--`, and `builtin --`, run the command that
     follows. Text in quotes, heredoc bodies and comments are not
     commands. `cd`, `pushd` and `git -C` move the directory only where they certainly run: inside a
@@ -213,7 +216,9 @@ Two hooks run it:
     not run (after `||`, in an `if`, `case`, loop or function, or in an `if` or `while` condition,
     whose branches can run whether it worked or not) leaves the directory unknown; and so does a
     `cd` that may fail without stopping the command (`cd DIR; git push`), unless `&&` or `|| exit`
-    guards it; sudo's `-D`, `-R` and `-i` run the command from an unknown directory. A `cd` operand
+    guards it; sudo's `-D`, `-R` and `-i` run the command from an unknown directory; a relative `cd`
+    after `CDPATH` (or zsh's `cdpath`) is set, in any form and also within a word (`${CDPATH:=…}`,
+    taken in the order the shell expands it), goes to an unknown directory. A `cd` operand
     with `..` is resolved both ways, lexically as bash's default cd does and as the kernel does
     (after a symbolic link, the parent of its target, where `cd -P` and a shell made physical go):
     when the two differ, the directory is unknown. `git -C` is a chdir, so its path stays as written

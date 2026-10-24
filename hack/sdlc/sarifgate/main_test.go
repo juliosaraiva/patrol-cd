@@ -31,10 +31,12 @@ func TestReadSARIFResolvesRules(t *testing.T) {
 
 	rs, err = readSARIF("testdata/levels.sarif")
 	require.NoError(t, err)
-	require.Len(t, rs, 3)
+	require.Len(t, rs, 5)
 	assert.Equal(t, "warning", rs[0].Level, "the result's level wins over the rule's default (note)")
 	assert.Equal(t, "warning", rs[1].Level, "no level anywhere: SARIF's default")
 	assert.Equal(t, "error", rs[2].Level, "no level of its own: the driver rule's default")
+	assert.Equal(t, "none", rs[3].Level)
+	assert.InDelta(t, 9.1, rs[4].Severity, 1e-9, "a security-severity given as a number")
 }
 
 func TestRun(t *testing.T) {
@@ -76,10 +78,12 @@ func TestRun(t *testing.T) {
 			sarifs:   []string{"testdata/sample.sarif", "testdata/levels.sarif"},
 			wantCode: 1,
 			want: []string{
-				"CodeQL gate: FAILED: 7 results, 5 blocking",
+				"CodeQL gate: FAILED: 9 results, 6 blocking",
 				"fail       warning x/note-by-default a.go:1",
 				"fail       warning x/no-default b.go:2",
 				"fail       error   x/error-by-default c.go:3",
+				"fail       error   x/numeric-severity e.go:5 (security-severity 9.1)",
+				"info       none    x/no-default d.go:4", // level none blocks nothing
 			},
 		},
 		{

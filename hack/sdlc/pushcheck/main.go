@@ -131,13 +131,6 @@ func gatePush(p push, root string) string {
 		return msg
 	}
 	gate := filepath.Join(top, "hack", "sdlc", "gate.sh")
-	// The gate's own files must be as committed: no change git status shows, and none it hides (a
-	// file marked assume-unchanged or skip-worktree: a lower-case or S tag in git ls-files -v).
-	status, errStatus := gitOut(top, append([]string{"status", "--porcelain", "--"}, gateFiles...)...)
-	tags, errTags := gitOut(top, append([]string{"ls-files", "-v", "--"}, gateFiles...)...)
-	if errStatus != nil || errTags != nil || status != "" || hidesChanges(tags) {
-		return "the gate's own files in " + top + " (" + strings.Join(gateFiles, ", ") + ") have uncommitted changes, are marked assume-unchanged or skip-worktree, or git cannot list them: commit or restore them, and clear the marks, before pushing"
-	}
 	var problems []string
 	for _, src := range p.Sources {
 		commit, err := gitOut(top, "rev-parse", "--verify", "--quiet", src+"^{commit}")
@@ -188,8 +181,9 @@ func gateUnknown(u unknownRun, root string) string {
 	return ""
 }
 
-// hookRuns returns why git's pre-push hook would not run the gate for a push from the work tree top,
-// or "": core.hooksPath must be .githooks, and the hook and hack/sdlc/gate.sh must be there.
+// hookRuns returns why git's pre-push hook would not run the gate, as committed, for a push from the
+// work tree top, or "": core.hooksPath must be .githooks, the hook and hack/sdlc/gate.sh must be there,
+// and the gate's own files must be as committed.
 func hookRuns(top string) string {
 	if hp, _ := gitOut(top, "config", "--get", "core.hooksPath"); hp != ".githooks" {
 		return "git's pre-push hook is not enabled in " + top + " (core.hooksPath is " + quoteOrUnset(hp) + "): run `make sdlc-git-hooks` there once (it sets this work tree's own value too), then run the command again"
@@ -199,6 +193,13 @@ func hookRuns(top string) string {
 	}
 	if fi, err := os.Stat(filepath.Join(top, ".githooks", "pre-push")); err != nil || fi.Mode()&0o111 == 0 {
 		return "git's pre-push hook in " + top + " is missing or not executable, so git would push without it: restore it before pushing"
+	}
+	// No change git status shows, and none it hides (a file marked assume-unchanged or skip-worktree:
+	// a lower-case or S tag in git ls-files -v).
+	status, errStatus := gitOut(top, append([]string{"status", "--porcelain", "--"}, gateFiles...)...)
+	tags, errTags := gitOut(top, append([]string{"ls-files", "-v", "--"}, gateFiles...)...)
+	if errStatus != nil || errTags != nil || status != "" || hidesChanges(tags) {
+		return "the gate's own files in " + top + " (" + strings.Join(gateFiles, ", ") + ") have uncommitted changes, are marked assume-unchanged or skip-worktree, or git cannot list them: commit or restore them, and clear the marks, before pushing"
 	}
 	return ""
 }

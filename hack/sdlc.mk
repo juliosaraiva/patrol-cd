@@ -27,11 +27,11 @@ codeql-install: ## Download the pinned CodeQL bundle into bin/ (checksum verifie
 	hack/sdlc/codeql.sh install
 
 .PHONY: sdlc-git-hooks
-# --worktree as well: with extensions.worktreeConfig a work tree's own value (config.worktree) wins over
-# the clone's; without it, --worktree writes the clone's configuration like the first line.
+# With extensions.worktreeConfig a work tree's own value (config.worktree) wins over the clone's, so
+# it is set too; without the extension git refuses --worktree in a clone with linked worktrees.
 sdlc-git-hooks: ## Make git use .githooks (pre-push runs the SDLC gate), in this work tree too.
 	git config core.hooksPath .githooks
-	git config --worktree core.hooksPath .githooks
+	if [ "$$(git config --bool extensions.worktreeConfig)" = true ]; then git config --worktree core.hooksPath .githooks; fi
 
 .PHONY: ci-sdlc
 ci-sdlc: ## Offline tests of the SDLC gate scripts (the CodeQL result gate is tested by ci-unit).

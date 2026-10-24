@@ -32,13 +32,15 @@ sdlc_changed() {
 # sdlc_docs_only reads file names on stdin and succeeds when every one is documentation: the rule
 # of docs_re in hack/ci/classify-changes.sh (hack/sdlc/test-sdlc.sh checks that they agree), except
 # docs/parity/, whose status files claim features complete (such a claim needs its evidence reviewed),
-# and CLAUDE.md, CLAUDE.local.md and AGENTS.md at any depth, the instructions agents follow (this
-# lifecycle among them; Claude Code loads a nested CLAUDE.md for the files under it). No file at all
-# also counts (nothing to review).
+# and the instructions agents follow at any depth (this lifecycle among them): CLAUDE.md,
+# CLAUDE.local.md and AGENTS.md, and anything under a .claude/ directory (skills, agents, commands;
+# Claude Code loads a nested CLAUDE.md or skill for the files under it). No file at all also counts
+# (nothing to review).
 sdlc_docs_only() {
 	local f
 	while IFS= read -r f; do
 		case ${f##*/} in CLAUDE.md | CLAUDE.local.md | AGENTS.md) return 1 ;; esac
+		[[ /$f != */.claude/* ]] || return 1
 		[[ $f != docs/parity/* ]] || return 1
 		[[ -z $f || $f =~ ^(docs/|[^/]+\.md$|\.gitignore$) ]] || return 1
 	done

@@ -49,7 +49,8 @@ check "a parity status file is not documentation" 1 "$(docs_only docs/parity/sta
 check "the parity matrix is not documentation" 1 "$(docs_only docs/guides/x.md docs/parity/matrix.md)"
 check "CLAUDE.md is not documentation" 1 "$(docs_only CLAUDE.md)"
 check "AGENTS.md is not documentation" 1 "$(docs_only README.md AGENTS.md)"
-for f in docs/CLAUDE.md docs/guides/CLAUDE.md CLAUDE.local.md docs/AGENTS.md; do
+for f in docs/CLAUDE.md docs/guides/CLAUDE.md CLAUDE.local.md docs/AGENTS.md docs/.claude/skills/x/SKILL.md \
+	docs/guides/.claude/agents/x.md; do
 	check "$f is not documentation" 1 "$(docs_only docs/guides/x.md "$f")"
 done
 check "code is not documentation" 1 "$(docs_only main.go)"
@@ -203,6 +204,12 @@ git -C "$work/wtc" config extensions.worktreeConfig true
 git -C "$work/wtc" config --worktree core.hooksPath /elsewhere
 make -s -C "$work/wtc" -f "$src/hack/sdlc.mk" sdlc-git-hooks
 check "make sdlc-git-hooks overrides a work tree's own value" .githooks "$(git -C "$work/wtc" config --get core.hooksPath)"
+# Without the extension, in a clone with a linked worktree, where git refuses --worktree.
+git init -q "$work/wtl"
+git -C "$work/wtl" commit -q --allow-empty -m base
+git -C "$work/wtl" worktree add -q "$work/wtl-linked"
+check "make sdlc-git-hooks with a linked worktree and no extension" 0 "$(make -s -C "$work/wtl" -f "$src/hack/sdlc.mk" sdlc-git-hooks >/dev/null 2>&1 && echo 0 || echo 1)"
+check "  and git's hook is enabled there" .githooks "$(git -C "$work/wtl-linked" config --get core.hooksPath)"
 check "git hook not enabled: push" 2 "$(hook 'git push -u origin change')"
 contains "reason: make sdlc-git-hooks" "$work/hook.err" "make sdlc-git-hooks"
 check "git hook not enabled: negated dry run" 2 "$(hook 'git push -n --no-dry-run origin change')"

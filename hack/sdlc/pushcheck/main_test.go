@@ -96,14 +96,25 @@ func TestRunUnknownWords(t *testing.T) {
 		// A function's unread code runs where the function is called; a builtin is no AUTO_CD.
 		{`retry() { for i in 1 2 3; do "$@" && return 0; sleep 5; done; return 1; }; retry go test ./...`, 0, ""},
 		{`f() { nosuch-tool; }; echo hi`, 0, ""},
-		{`f() { "$@"; }; cd ` + other + ` && f ls`, 2, "the function `f` runs code the hook could not read, which can push; it would run in " + other},
+		{`f() { "$@"; }; cd ` + other + ` && f ls`, 2, "a command named by a word the hook cannot read, which can push; it would run in " + other},
 		{"pushd sub && true; popd", 0, ""},
 		{"cd sub; ls; popd", 0, ""},
 		// A substitution runs from the directory of its statement.
 		{"cd " + other + " || exit 1; out=$(nosuch-gp origin main); cd " + root + " || exit 1; echo \"$out\"", 2, "it would run in " + other},
 		{"v=$(nosuch-tool --version); cd sub; ls", 0, ""},
 		{"f() { v=$(nosuch-tool); }; echo hi", 0, ""}, // a substitution in a body runs where f is called
-		{"f() { nosuch-tool; }; cd " + other + " && bash -c f", 2, "the function `f` runs code the hook could not read"},
+		{"f() { v=$(nosuch-gp origin main); }; cd " + other + " && f", 2, "`nosuch-gp` is no program on PATH, builtin or function the command defines, so it may be an alias or function of the shell's setup, which can push (oh-my-zsh's gp is `git push`); it would run in " + other},
+		{"f() { cat <(nosuch-gp); }; cd " + other + " && f", 2, "it would run in " + other},
+		{"f() { nosuch-tool; }; cd " + other + " && bash -c f", 2, "`nosuch-tool` is no program on PATH, builtin or function the command defines, so it may be an alias or function of the shell's setup, which can push (oh-my-zsh's gp is `git push`); it would run in " + other},
+		// A cd in the body moves the code after it; an absolute or unknown one is kept.
+		{"f() { cd " + other + " && nosuch-gp; }; f", 2, "it would run in " + other},
+		{"f() { (cd " + other + " && nosuch-gp); }; f", 2, "it would run in " + other},
+		{`f() { cd "$1" && nosuch-gp; }; f ` + other, 2, "a directory the hook cannot tell"},
+		{"f() { cd sub && nosuch-gp; }; f", 0, ""},
+		{"chpwd() { nosuch-gp; }; cd sub", 2, "a directory the hook cannot tell"}, // zsh calls it on each cd
+		// Nested substitutions run where their statement runs.
+		{"x=$(echo $(nosuch-tool))", 0, ""},
+		{"cd " + other + " || exit 1; x=$(echo $(nosuch-gp))", 2, "it would run in " + other},
 		{"cd sub && nosuch-gp origin main", 0, ""},
 		{"cd " + other + " && nosuch-gp origin main", 2, "it would run in " + other + ", outside " + root},
 		{"nosuch-z x && nosuch-gp origin main", 2, "a directory the hook cannot tell"},
@@ -119,6 +130,26 @@ func TestRunUnknownWords(t *testing.T) {
 		assert.Equal(t, tt.want, run(bytes.NewReader(in), &stderr, root), "%s: %s", tt.command, stderr.String())
 		assert.Contains(t, stderr.String(), tt.reason, tt.command)
 	}
+	// Nor while the gate's own files differ from what is committed: git would run the edited hook.
+	unread := func() (int, string) {
+		in, err := json.Marshal(map[string]any{"cwd": root, "tool_input": map[string]string{"command": "nosuch-gp origin main"}})
+		require.NoError(t, err)
+		var stderr bytes.Buffer
+		return run(bytes.NewReader(in), &stderr, root), stderr.String()
+	}
+	hook := filepath.Join(root, ".githooks", "pre-push")
+	require.NoError(t, os.WriteFile(hook, []byte("#!/bin/sh\nexit 0 # skips the gate\n"), 0o755))
+	rc, msg := unread()
+	assert.Equal(t, 2, rc)
+	assert.Contains(t, msg, "have uncommitted changes")
+	gitIn(t, root, "checkout", "-q", "--", ".githooks/pre-push")
+	gitIn(t, root, "update-index", "--skip-worktree", ".githooks/pre-push")
+	rc, msg = unread()
+	assert.Equal(t, 2, rc)
+	assert.Contains(t, msg, "skip-worktree")
+	gitIn(t, root, "update-index", "--no-skip-worktree", ".githooks/pre-push")
+	rc, _ = unread()
+	assert.Equal(t, 0, rc)
 }
 
 // The terminal tool gives its own directory: relative to the session's, absolute, or under ~.

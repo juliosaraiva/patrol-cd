@@ -225,6 +225,9 @@ func TestFindPushes(t *testing.T) {
 		{name: "HOME reaches a piped script", command: "HOME=/elsewhere && echo 'cd ~/r && git push origin a' | bash", want: []push{{Dir: "", Sources: []string{"a"}}}},
 		{name: "HOME reaches a heredoc script", command: "HOME=/elsewhere && bash <<'EOF'\ncd ~/r && git push origin a\nEOF", want: []push{{Dir: "", Sources: []string{"a"}}}},
 		{name: "zsh's cdpath set in the command", command: "cdpath=(/tmp/other); cd sub && git push origin a", want: []push{{Dir: "", Sources: []string{"a"}}}},
+		{name: "CDPATH set by a parameter expansion, before the cd", command: ": ${CDPATH:=/tmp/other}; cd sub && git push origin a", want: []push{{Dir: "", Sources: []string{"a"}}}},
+		{name: "CDPATH set in a test, before the cd", command: "[[ ${CDPATH:=/tmp/other} ]] && cd sub && git push origin a", want: []push{{Dir: "", Sources: []string{"a"}}}},
+		{name: "CDPATH set by a parameter expansion in a substitution", command: "x=$(: ${CDPATH:=/tmp/other}); cd sub && git push origin a", want: []push{{Dir: "/repo/sub", Sources: []string{"a"}}}},
 		{name: "CDPATH reaches a shell the command runs", command: "CDPATH=/tmp/other; bash -c 'cd sub && git push origin a'", want: []push{{Dir: "", Sources: []string{"a"}}}},
 		{name: "git -C", command: "git -C /x -c color.ui=never push origin HEAD", want: []push{{Dir: "/x", Sources: head}}},
 		{name: "git -C with a directory that is not literal", command: `git -C "$D" push origin main`, want: []push{{Dir: "", Sources: []string{"main"}}}},
@@ -847,6 +850,10 @@ func TestFindPushesUnknownWords(t *testing.T) {
 		{"nosuch-z x && nosuch-gp", []unknownRun{{Dir: "/repo", Word: "nosuch-z"}, {Dir: "", Word: "nosuch-gp"}}},
 		{"cd /other && cd /repo && - && true", []unknownRun{{Dir: "/repo", Word: "-"}}},
 		{"x=$(nosuch-gp)", []unknownRun{{Dir: "/repo", Word: "nosuch-gp"}}},
+		{"cd /other && v=$(nosuch-gp)", []unknownRun{{Dir: "/other", Word: "nosuch-gp"}}}, // once, where it runs
+		{"f() { cd sub && nosuch-gp; }; f", []unknownRun{{Dir: "/repo/sub", Word: "nosuch-gp"}}},
+		{"f() { cd /x && nosuch-gp; }; cd /other && f", []unknownRun{{Dir: "/x", Word: "nosuch-gp"}}},
+		{"f() { nosuch-gp; }; cd /other && f && cd /y && f", []unknownRun{{Dir: "/other", Word: "nosuch-gp"}, {Dir: "/y", Word: "nosuch-gp"}}},
 		{"cd /other && bash -c 'nosuch-gp origin main'", []unknownRun{{Dir: "/other", Word: "nosuch-gp"}}},
 		{"command nosuch-gp; env nosuch-gp; nohup nosuch-gp", nil},
 		{"f() { :; }; f; ls; true", nil},
@@ -897,12 +904,16 @@ func TestFindPushesAutoCD(t *testing.T) {
 	require.NoError(t, os.Mkdir(filepath.Join(root, "sub"), 0o755))
 	require.NoError(t, os.Mkdir(filepath.Join(root, "ls"), 0o755))
 	require.NoError(t, os.Mkdir(filepath.Join(root, "dirs"), 0o755))
+	require.NoError(t, os.Mkdir(filepath.Join(root, "eval"), 0o755))
+	require.NoError(t, os.Mkdir(filepath.Join(root, "stdstub"), 0o755))
 	for _, tt := range []struct{ command, dir string }{
-		{"ls && git push origin a", root},                     // a command on PATH runs, even with a directory of its name
-		{"dirs && git push origin a", root},                   // so does a builtin that is no program on PATH
-		{"sub() { :; }; sub && git push origin a", root},      // and a function the command defines
-		{"sub() { :; }; true | sub; git push origin a", root}, // also where only changesDir looks
-		{"true | ./sub; git push origin a", ""},               // a path to a directory is AUTO_CD there too
+		{"eval && git push origin a", root},                              // a builtin the walker handles by name
+		{"stdstub && git push origin a", filepath.Join(root, "stdstub")}, // a modeled program not installed
+		{"ls && git push origin a", root},                                // a command on PATH runs, even with a directory of its name
+		{"dirs && git push origin a", root},                              // so does a builtin that is no program on PATH
+		{"sub() { :; }; sub && git push origin a", root},                 // and a function the command defines
+		{"sub() { :; }; true | sub; git push origin a", root},            // also where only changesDir looks
+		{"true | ./sub; git push origin a", ""},                          // a path to a directory is AUTO_CD there too
 		{"sub && git push origin a", filepath.Join(root, "sub")},
 		{"./sub && git push origin a", filepath.Join(root, "sub")},
 		{"sub; git push origin a", ""},             // the cd may fail
