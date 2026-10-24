@@ -80,10 +80,9 @@ func run(stdin io.Reader, stderr io.Writer, root string) int {
 	}
 	a, err := findPushes(cmd, cwd)
 	if err != nil {
-		if mentionsGit(cmd) {
-			return refuse("cannot parse the command as bash (the Bash tool may run another shell, such as zsh), so what it does with git cannot be checked; run git in a command bash can parse")
-		}
-		return 0
+		// Unparsed, nothing in it is known: neither git nor an alias of the shell's setup that pushes
+		// (oh-my-zsh's gp) from another repository.
+		return refuse("cannot parse the command as bash (the Bash tool may run another shell, such as zsh), so what it runs, and where, cannot be checked; write the command in bash syntax")
 	}
 	if a.Blocked != "" {
 		return refuse(a.Blocked)
@@ -172,12 +171,16 @@ func gatePush(p push, root string) string {
 	return strings.Join(problems, "\n")
 }
 
-// gateUnknown returns why a command word the walker does not know may not run where it runs, or "".
-// It may be an alias or function of the shell's setup that pushes (oh-my-zsh's gp is `git push`), so
-// it runs only in a work tree of this repository, where git's own pre-push hook (which the wrapper
+// gateUnknown returns why code the walker could not read may not run where it runs, or "": a command
+// word it does not know, which may be an alias or function of the shell's setup that pushes
+// (oh-my-zsh's gp is `git push`), or a shell, source or eval whose script it did not read. Such code
+// runs only in a work tree of this repository, where git's own pre-push hook (which the wrapper
 // requires before any command) judges what it pushes.
 func gateUnknown(u unknownRun, root string) string {
 	what := "`" + u.Word + "` is no program on PATH, builtin or function the command defines, so it may be an alias or function of the shell's setup, which can push (oh-my-zsh's gp is `git push`)"
+	if u.What != "" {
+		what = u.What + ", which can push"
+	}
 	if u.Dir == "" {
 		return what + "; it would run in a directory the hook cannot tell: run it after a literal `cd` into this clone, or run the command it stands for"
 	}

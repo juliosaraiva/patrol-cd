@@ -179,9 +179,14 @@ Two hooks run it:
   3. **Where a push may run.** From Claude Code a push runs only in this clone or one of its
      worktrees (the same `git rev-parse --git-common-dir`): another clone, a bare repository, a `.git`
      directory or an unrelated repository may not run git's hook, so a push there is refused, dry runs
-     and deletions included. So is a command word the walker does not know (below), which may be an
-     alias that pushes (oh-my-zsh's `gp`): it runs only in this clone or its worktrees, where git's
-     hook judges what it pushes. In this clone a push is refused while `core.hooksPath` is not
+     and deletions included. So is code the walker could not read, which may push: a command word it
+     does not know (below), which may be an alias that pushes (oh-my-zsh's `gp`); a shell reading a
+     script from standard input it did not read (`(cd X && sh) <<EOF`, `… | env sh`, `sh < <(…)`), or
+     from the input of `xargs` or `parallel` (`xargs sh -c`, `xargs -I{} sh -c {}`, `parallel` with no
+     command); `source` of standard input or of a word it cannot read; an `eval` of a dynamic string;
+     a command word that is not literal. Such code runs only in this clone or its worktrees, where
+     git's hook judges what it pushes; a command that does not parse as bash is refused outright. In
+     this clone a push is refused while `core.hooksPath` is not
      `.githooks`, while `.githooks/pre-push` is missing or not executable, while the gate's own files
      (`.githooks/`, `hack/sdlc/`, `.claude/settings.json`) have uncommitted changes, and from a branch
      without `hack/sdlc/gate.sh`.
@@ -229,8 +234,9 @@ Two hooks run it:
     (`f() { …; } && cd /x`) is one element of the chain; the rest runs in this shell. It follows
     the command a wrapper runs (`timeout`, `nice`, `sudo`, `nohup`, `env`, `xargs`, `find -exec`,
     `kubectl`/`docker exec -- …`, `command`, `exec`, …) into that command, and parses `bash -c '…'`,
-    a heredoc or here-string given to `bash`/`sh`/`zsh`/`dash`/`ksh`/`mksh`, a literal script piped
-    to a shell (whatever the shell's options), `eval`, `watch` (its operands as `sh -c` runs them,
+    a heredoc or here-string given to `bash`/`sh`/`zsh`/`dash`/`ksh`/`mksh` or to `source
+    /dev/stdin`, a literal script piped to a shell (whatever the shell's options; `echo` text with a
+    backslash is not read as written, since zsh's echo expands `\n`), `eval`, `watch` (its operands as `sh -c` runs them,
     or its argv with `-x`), and the commands git runs for a subcommand (below). A `git push` found
     this way is gated like a direct one. A function body or `trap` action runs later, from wherever
     the shell is then: a push in it runs from an unknown directory, and a `cd` in it leaves the
@@ -261,8 +267,9 @@ Two hooks run it:
       -x`, `filter-branch`'s filters and `--setup`, `send-email`'s command options, `bisect run`,
       `submodule foreach`, `for-each-repo`, the upload-pack of `fetch`, `pull`, `clone` and
       `ls-remote`, push's receive-pack and `--exec`, `archive --exec`, `grep -O`;
-    - a write to the ref the gate measures a change from: `update-ref` (also `--stdin`) or
-      `symbolic-ref` under `refs/remotes/`, a `fetch` or `pull` refspec into `remotes/`,
+    - a write to the ref the gate measures a change from: `update-ref` or `symbolic-ref` under
+      `refs/remotes/`, a `fetch` or `pull` refspec into `remotes/`, any of them reading refs or
+      refspecs from standard input (`--stdin` in every abbreviation git accepts),
       `git remote add`, `remove`, `rename`, `set-url` or `set-branches`, and `git fast-import` and
       `git replace`;
     - a git subcommand that is not a git command: an alias, whose definition the command could
@@ -284,8 +291,10 @@ Two hooks run it:
     - a push it cannot resolve: inside `$(…)`, behind `eval` with a dynamic string, through a
       non-literal command word, git option or shell script, piped through `xargs` or `parallel`, in
       a script piped to a shell by a producer it cannot read (`printf`, a chain through `tee`), or
-      in a command that does not parse as bash and names git. Its text check for these reads git's
-      global options and their values (`git -C DIR push`, `git -c K=V push`) and git by its path.
+      in what `source` reads from a word it cannot read (`. <(…)`). Its text check for these reads
+      git's global options and their values (`git -C DIR push`, `git -c K=V push`) and git by its
+      path, and reads a backslash both as bash removes it and as printf and zsh's echo expand it
+      (`\n` a line break).
   - **What it refuses for a push in this clone:** an unknown `git push` option, and the forms the
     gate cannot check ref by ref: `--all`, `--branches`, `--mirror`, `--tags`, `:`, a glob.
 
@@ -320,7 +329,9 @@ A second hook (`hack/sdlc/claude-format.sh`, `PostToolUse` for Edit, MultiEdit a
 ## Limits
 
 - The records live in the clone's git directory: they show what ran on this machine, not on another
-  one, and CI does not read them. CI runs its own checks.
+  one, and CI does not read them. CI runs its own checks. They are plain files that anything running
+  as the user can write (a command, the Write tool), so the gate is only as honest as what writes
+  them; `check.sh` and `record-review.sh` are the only writers the SDLC uses.
 - The Claude Code hook catches mistakes and shortcuts, not deliberate evasion. It sees the command
   line, not what the command builds at run time or the files and programs it runs: a token or a git
   command assembled from variables or computed by a program; the content of script files and

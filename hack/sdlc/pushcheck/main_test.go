@@ -27,7 +27,9 @@ func TestRunFailsClosed(t *testing.T) {
 		reason  string
 	}{
 		{name: "not a push", command: "echo hi", want: 0},
-		{name: "unparseable without git", command: "echo 'push unterminated", want: 0},
+		{name: "unparseable without git", command: "echo 'push unterminated", want: 2, reason: "cannot parse the command as bash"},
+		{name: "unparseable, with an alias of the shell's setup", command: "cd / && nosuch-gp origin main; print -l ${(f)x}", want: 2, reason: "cannot parse the command as bash"},
+		{name: "a zsh glob qualifier bash cannot parse", command: "cd / && nosuch-gp origin main && ls *.go(.)", want: 2, reason: "cannot parse the command as bash"},
 		{name: "unparseable, git without push", command: "x=gi; ${=x}t status; git log", want: 2, reason: "cannot parse the command as bash"},
 		{name: "unparseable, git and push split by quotes", command: "git p''ush origin main; echo \"oops", want: 2, reason: "cannot parse the command as bash"},
 		{name: "a push before a syntax error runs anyway", command: "git push origin main\necho \"oops", want: 2, reason: "cannot parse the command as bash"},
@@ -83,6 +85,10 @@ func TestRunUnknownWords(t *testing.T) {
 		{"cd " + other + " && nosuch-gp origin main", 2, "it would run in " + other + ", outside " + root},
 		{"nosuch-z x && nosuch-gp origin main", 2, "a directory the hook cannot tell"},
 		{"cd " + other + " && command nosuch-gp origin main", 0, ""}, // command runs a program: no alias
+		// A shell whose script the walker did not read, in this clone and outside it.
+		{"echo 'git status' | env sh", 0, ""},
+		{"cd " + other + " && echo 'git status' | env sh", 2, "`sh` reads a script from standard input that the hook did not read, which can push; it would run in " + other},
+		{"cd " + other + " && echo 'git status' | xargs -0 sh -c", 2, "`sh` run by xargs or parallel takes its script from their input"},
 	} {
 		in, err := json.Marshal(map[string]any{"cwd": root, "tool_input": map[string]string{"command": tt.command}})
 		require.NoError(t, err)

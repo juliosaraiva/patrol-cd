@@ -25,12 +25,14 @@ type push struct {
 	Refused string // a form the gate cannot check; refused for a push from a clone of this project
 }
 
-// unknownRun is a command word the walker does not know (no program on PATH, builtin or function the
-// command defines), which may be an alias or function of the shell's setup that pushes (oh-my-zsh's
-// gp is `git push`), and the directory it runs in ("" when that is unknown).
+// unknownRun is code the walker could not read that may push, and the directory it runs in ("" when
+// that is unknown): a command word it does not know (no program on PATH, builtin or function the
+// command defines), which may be an alias or function of the shell's setup (oh-my-zsh's gp is `git
+// push`), or a shell, source or eval whose script it did not read.
 type unknownRun struct {
 	Dir  string
 	Word string
+	What string // what runs, when it is not an unknown word (a shell reading a script the hook did not read)
 }
 
 // analysis is what findPushes learned about a command.
@@ -59,10 +61,26 @@ var hookEvasion = regexp.MustCompile(`(?i:no-verify|hookspath)|GIT_[A-Z]`)
 // is git, or a path to it, followed by git's global options (with the values of those that take
 // one) and then push; or git-push; or push with something that would skip git's hook. Words are
 // split at whitespace and shell separators after the quotes and backslashes bash removes, and a
-// NAME=git or zsh =git word counts as git. It is the last, conservative net for a command the walker
-// could not parse or follow; the normal path parses the command.
+// NAME=git or zsh =git word counts as git. A backslash is read both ways (backslashRead): bash removes
+// it (`git p\ush`), and printf or zsh's echo turn `\n` into a newline (`true\ngit push`). It is the
+// last, conservative net for a command the walker could not parse or follow; the normal path parses
+// the command.
 func mentionsGitPush(s string) bool {
-	n := normalize(s)
+	return backslashRead(s, scanGitPush)
+}
+
+// backslashRead runs a textual test on s with its backslashes removed, as bash removes them, and with
+// each escape sequence read as a word break, as printf and zsh's echo turn `\n`, `\012` or `\x0a`
+// into a newline.
+func backslashRead(s string, test func(string) bool) bool {
+	return test(normalize(s)) || test(normalize(escapeSequence.ReplaceAllString(s, " ")))
+}
+
+// escapeSequence matches what printf and echo -e (zsh's echo by default) expand after a backslash.
+var escapeSequence = regexp.MustCompile(`\\(?:[0-7]{1,4}|x[0-9A-Fa-f]{1,2}|u[0-9A-Fa-f]{1,4}|U[0-9A-Fa-f]{1,8}|.)`)
+
+// scanGitPush is mentionsGitPush on normalized text.
+func scanGitPush(n string) bool {
 	words := strings.FieldsFunc(n, func(r rune) bool { // `:` too, for zsh's e:CODE: qualifier
 		return unicode.IsSpace(r) || strings.ContainsRune(";&|()<>{}`:", r)
 	})
@@ -103,8 +121,7 @@ var gitWord = regexp.MustCompile(`(^|[^A-Za-z0-9_.-])git([^A-Za-z0-9_]|$)`)
 
 // mentionsGit reports whether s names git as a word, or anything that would skip git's hook.
 func mentionsGit(s string) bool {
-	n := normalize(s)
-	return gitWord.MatchString(n) || hookEvasion.MatchString(n)
+	return backslashRead(s, func(n string) bool { return gitWord.MatchString(n) || hookEvasion.MatchString(n) })
 }
 
 // skipsHook reports whether a literal argument is --no-verify or an abbreviation git accepts for it.
@@ -251,8 +268,18 @@ type walker struct {
 	topFuncs   map[*syntax.FuncDecl]bool // definitions that certainly run in this shell
 	inEval     int                       // inside eval, whose definitions may sit in a branch
 	program    bool                      // the command runs as a program (a wrapper's), which no function shadows
+	input      inputArgs                 // xargs or parallel adds its input to the command's arguments
 	seen       map[*syntax.CallExpr]bool
 }
+
+// inputArgs is how xargs or parallel gives its input to the command it runs.
+type inputArgs int
+
+const (
+	_             inputArgs = iota // no input
+	inputAppended                  // after the command's own arguments
+	inputReplaced                  // in place of a replace string (xargs -I, parallel's {}), anywhere
+)
 
 func newWalker(dir, src string) *walker {
 	return &walker{dir: dir, src: src, seen: map[*syntax.CallExpr]bool{}, funcs: map[string]*syntax.Stmt{}, calling: map[string]bool{},
@@ -396,7 +423,8 @@ func pipedScript(c *syntax.BinaryCmd) (string, bool) {
 		var parts []string
 		for _, a := range left.Args[1:] {
 			v, ok := literalWord(a)
-			if !ok || strings.HasPrefix(v, "-") {
+			// zsh's echo expands escapes (`\n`) by default, bash's does not: such text is not read.
+			if !ok || strings.HasPrefix(v, "-") || strings.Contains(v, `\`) {
 				return "", false
 			}
 			parts = append(parts, v)
@@ -1269,6 +1297,7 @@ prefix:
 	}
 	if !lit[0] {
 		w.dynamicWord(args, lit)
+		w.unknown = append(w.unknown, unknownRun{Dir: w.dir, Word: args[0], What: "a command named by a word the hook cannot read"})
 		return
 	}
 	if fn := args[0]; !program {
@@ -1308,7 +1337,7 @@ prefix:
 	case name == "popd":
 		w.dir = ""
 	case name == "source" || name == ".":
-		w.dir, w.envUnknown = "", "a file sourced earlier in the command"
+		w.source(args[1:], lit[1:], redirs)
 	case name == "git":
 		w.git(args[1:], lit[1:])
 	case shells[name]:
@@ -1544,6 +1573,32 @@ func (w *walker) dynamicWord(args []string, lit []bool) {
 	}
 }
 
+// source walks what the shell sources. The text of standard input given in a heredoc or here-string
+// (`source /dev/stdin <<<…`) runs as eval runs its string. Anything else is out of reach: a file
+// leaves the directory and git's environment unknown after it, and standard input from elsewhere or
+// an operand the hook cannot read (`. <(…)`, whose text is checked for a push) may push, so it runs
+// only in this clone.
+func (w *walker) source(args []string, lit []bool, redirs []*syntax.Redirect) {
+	stdin := len(args) > 0 && lit[0] && (args[0] == "/dev/stdin" || args[0] == "/dev/fd/0")
+	if stdin {
+		for _, r := range redirs {
+			if r.Op == syntax.Hdoc || r.Op == syntax.DashHdoc || r.Op == syntax.WordHdoc {
+				if s, ok := heredocText(r, bodyOf(r)); ok {
+					w.eval([]string{s}, []bool{true})
+					return
+				}
+			}
+		}
+	}
+	if len(args) > 0 && !lit[0] {
+		w.blockText(w.cmdText, "source")
+	}
+	if stdin || len(args) > 0 && !lit[0] {
+		w.unknown = append(w.unknown, unknownRun{Dir: w.dir, Word: "source", What: "`source` of standard input or of a word the hook cannot read runs a script it did not read"})
+	}
+	w.dir, w.envUnknown = "", "a file sourced earlier in the command"
+}
+
 // inChild walks the command a child process runs, from dir: its cd and source do not reach this shell.
 func (w *walker) inChild(dir string, args []string, lit []bool, redirs []*syntax.Redirect) {
 	savedDir, envUnknown, program := w.dir, w.envUnknown, w.program
@@ -1749,6 +1804,7 @@ func (w *walker) eval(args []string, lit []bool) {
 	for _, l := range lit {
 		if !l {
 			w.blockText(w.cmdText, "eval")
+			w.unknown = append(w.unknown, unknownRun{Dir: w.dir, Word: "eval", What: "`eval` of a string the hook cannot read runs code it did not read"})
 			w.dir, w.envUnknown = "", "an eval of a dynamic string earlier in the command"
 			return
 		}
@@ -1763,6 +1819,17 @@ func (w *walker) eval(args []string, lit []bool) {
 	w.inEval++
 	w.run(f) // the same walker: eval runs in the current shell, so its cd and source carry back
 	w.inEval--
+}
+
+// replacesInput reports whether xargs' options put its input in place of a replace string (-I, -i,
+// --replace, BSD's -J) instead of after the command.
+func replacesInput(opts []string, lit []bool) bool {
+	for i, a := range opts {
+		if lit[i] && (strings.HasPrefix(a, "-I") || strings.HasPrefix(a, "-i") || strings.HasPrefix(a, "--replace") || strings.HasPrefix(a, "-J")) {
+			return true
+		}
+	}
+	return false
 }
 
 // xargsValue lists the options that take the next argument as their value: xargs' (GNU and BSD;
@@ -1790,18 +1857,27 @@ func (w *walker) xargs(name string, args []string, lit []bool) {
 	}
 	inner, innerLit := skipOptions(args, lit, xargsValue[name], 0)
 	if len(inner) == 0 {
-		return // the default command is echo
+		if name == "parallel" { // GNU parallel with no command runs each input line as a command
+			w.unknown = append(w.unknown, unknownRun{Dir: w.dir, Word: name, What: "`parallel` with no command runs each line of its input, which the hook did not read, as a command"})
+		}
+		return // xargs' default command is echo
 	}
 	if !innerLit[0] {
 		w.dynamicWord(inner, innerLit)
 		w.blockText(w.cmdText, name)
 		return
 	}
-	// Run the command on a fresh walker: a push there refuses the whole command, since the input
-	// adds arguments the gate cannot see; any other command (git branch, git add, grep) is allowed.
+	// Run the command on a fresh walker, as the program it is: a push there refuses the whole command,
+	// since the input adds arguments the gate cannot see; any other command (git branch, git add,
+	// grep) is allowed. A shell there may take its script from the input (shell()).
 	s := newWalker(w.dir, w.src)
+	s.program, s.input = true, inputAppended
+	if name == "parallel" || replacesInput(args[:len(args)-len(inner)], lit) {
+		s.input = inputReplaced
+	}
 	s.command(inner, innerLit, nil)
 	w.calls = append(w.calls, s.calls...)
+	w.unknown = append(w.unknown, s.unknown...)
 	if len(s.pushes) > 0 || s.blocked != "" || (path.Base(inner[0]) == "git" && gitSubcommand(inner[1:], innerLit[1:]) < 0) {
 		refuse()
 	}
@@ -1914,6 +1990,11 @@ options:
 		}
 	}
 	operands := args[min(i, len(args)):]
+	if w.input == inputReplaced || w.input == inputAppended && len(operands) == 0 {
+		// With no script (-c) or script file of its own, or one the input fills in, the input is the
+		// script or names it.
+		w.unknown = append(w.unknown, unknownRun{Dir: w.dir, Word: args[0], What: "`" + args[0] + "` run by xargs or parallel takes its script from their input, which the hook did not read"})
+	}
 	switch {
 	case command:
 		if len(operands) == 0 {
@@ -1951,9 +2032,10 @@ options:
 		}
 		return
 	}
-	// The script comes from a pipe or a file. A literal producer (echo/cat) piped in is handled by
-	// pipedScript in the pipeline branch; anything else is out of the hook's reach, like a script
-	// file, and left to git's own pre-push hook.
+	// The script comes from a pipe, a file or a redirection of an enclosing command (`(cd X && sh)
+	// <<EOF`, `exec 0<<<…`). A literal producer piped straight in is parsed by pipedScript in the
+	// pipeline branch; the rest is out of the hook's reach and may push, so it runs only in this clone.
+	w.unknown = append(w.unknown, unknownRun{Dir: w.dir, Word: args[0], What: "`" + args[0] + "` reads a script from standard input that the hook did not read"})
 }
 
 // heredocText returns the script a heredoc or here-string gives a shell, when it has no expansions.
@@ -2358,8 +2440,10 @@ func remoteRefWrite(sub string, args []string, lit []bool) string {
 		_, dst, isRefspec := strings.Cut(a, ":")
 		switch {
 		// remotes/ in any case: on a case-insensitive file system (macOS) refs/Remotes/… is that ref.
-		case (sub == "update-ref" || sub == "symbolic-ref") && (strings.Contains(strings.ToLower(a), "remotes/") || a == "--stdin"):
+		case (sub == "update-ref" || sub == "symbolic-ref") && strings.Contains(strings.ToLower(a), "remotes/"):
 			return "git " + sub + " " + a
+		case (sub == "update-ref" || sub == "symbolic-ref" || sub == "fetch" || sub == "pull") && len(a) >= len("--s") && strings.HasPrefix("--stdin", a):
+			return "git " + sub + " " + a // refs or refspecs read from standard input, in any abbreviation git accepts
 		case (sub == "fetch" || sub == "pull") && isRefspec && strings.Contains(strings.ToLower(dst), "remotes/"):
 			return "git " + sub + " " + a
 		case sub == "remote" && (a == "add" || a == "remove" || a == "rm" || a == "rename" || a == "set-url" || a == "set-branches"):

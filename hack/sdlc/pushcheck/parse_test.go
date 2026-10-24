@@ -159,6 +159,7 @@ func TestFindPushes(t *testing.T) {
 		{name: "a function maybe defined, named echo", command: "false && echo() { cd /x; }; echo hi; git push origin a", want: []push{{Dir: "", Sources: []string{"a"}}}},
 		{name: "a function that cds, in a shell the command runs", command: "ls() { cd /x; }; bash -c 'ls && git push origin a'", want: []push{{Dir: "", Sources: []string{"a"}}}},
 		{name: "a function without a cd, in a shell the command runs", command: "f() { :; }; bash -c 'cd /x && git push origin a'", want: []push{{Dir: "/x", Sources: []string{"a"}}}},
+		{name: "source of a heredoc runs it here", command: "cd /other && source /dev/stdin <<< 'git push origin main'", want: []push{{Dir: "/other", Sources: []string{"main"}}}},
 		{name: "a trap calls a function without a cd", command: "cleanup() { rm -f x; }; trap cleanup EXIT; git push origin a", want: []push{{Dir: "/repo", Sources: []string{"a"}}}},
 		{name: "a function without a cd is no unknown word in a shell", command: "f() { :; }; bash -c 'f; git push origin a'", want: []push{{Dir: "/repo", Sources: []string{"a"}}}},
 		{name: "a function maybe defined, in a shell the command runs", command: "false && ls() { cd /x; }; bash -c 'ls && git push origin a'", want: []push{{Dir: "", Sources: []string{"a"}}}},
@@ -532,7 +533,7 @@ func TestFindPushesBlocked(t *testing.T) {
 		{"echo *(e:'git push origin a':)", "a git push through a zsh glob qualifier that runs code"},
 		{"git update-ref refs/Remotes/origin/main HEAD", "can move origin/main"},
 		{"git fetch . HEAD:refs/Remotes/origin/main", "can move origin/main"},
-		{"source /dev/stdin <<< 'git push --no-verify origin main'", givenTo},
+		{"source /dev/stdin <<< 'git push --no-verify origin main'", "--no-verify skips the pre-push hook"},
 		{`python3 -c "import subprocess; subprocess.run(['git','push','--no-verify'])"`, givenTo},
 		{"go test ./x -run 'Blocked/--no-verify'", givenTo},
 		{"docker run --rm -e GIT_PUSH_OPTION=1 alpine echo push", givenTo},
@@ -624,6 +625,19 @@ func TestFindPushesBlocked(t *testing.T) {
 		{"x=(*(e:'git push origin a':)) &", "a git push through a zsh glob qualifier"},
 		// A trap action the hook cannot read may cd before any later command.
 		{`trap "$a" DEBUG; git push origin a`, "a trap action the hook cannot read"},
+		// printf and zsh's echo turn `\n` into a newline: a push on a later line of a piped script.
+		{`cd /other && printf 'true\ngit push origin main\n' | sh`, "a git push through a script piped to a shell"},
+		{`cd /other && echo -e 'true\ngit push origin main' | sh`, "a git push through a script piped to a shell"},
+		{`echo 'true\ncd /other\ngit push origin main' | sh`, "a git push through a script piped to a shell"},
+		{`printf 'true\012git push origin main' | sh`, "a git push through a script piped to a shell"},
+		{`printf 'true\x0agit push origin main' | sh`, "a git push through a script piped to a shell"},
+		// What source reads from a word the hook cannot read.
+		{`cd /other && . <(echo 'git push origin main')`, "a git push through source"},
+		// A ref or refspec read from standard input, in any abbreviation git accepts, can move origin/main.
+		{`git fetch -q --stdin . <<<'change:refs/remotes/origin/main'`, "can move origin/main"},
+		{`echo 'refs/heads/change:refs/remotes/origin/main' | git fetch --stdin .`, "can move origin/main"},
+		{`git update-ref --stdi <<<'update refs/remotes/origin/main HEAD'`, "can move origin/main"},
+		{`git update-ref --std <<<'update refs/remotes/origin/main HEAD'`, "can move origin/main"},
 		// One-letter abbreviations of a long option git accepts.
 		{"git ls-remote --u='git push origin main' .", runsStep},
 		{"git clone --u='git push origin main' /tmp/r.git d", runsStep},
@@ -639,7 +653,7 @@ func TestFindPushesBlocked(t *testing.T) {
 		{`eval "$E"; cd /repo && bash -c 'git push origin a'`, "an eval of a dynamic string earlier"},
 		// Tokens bash spells out of escapes, which only the expanded words show.
 		{`git push $'\x2d-no-verify' origin main`, noVerify},
-		{`source /dev/stdin <<< $'git push \x2d-no-verify origin main'`, givenTo},
+		{`source /dev/stdin <<< $'git push \x2d-no-verify origin main'`, "--no-verify skips the pre-push hook"},
 		{`export $'\x47IT_DIR=/x/.git'; git push origin a`, gitEnv},
 		{`git commit -m $'\x47IT_DIR'`, givenTo},
 		{`echo $'core.hooks\x50ath'`, givenTo},
@@ -809,6 +823,13 @@ func TestFindPushesCalls(t *testing.T) {
 // a wrapper) is no alias or function.
 func TestFindPushesUnknownWords(t *testing.T) {
 	t.Parallel()
+	stdinScript := func(sh string) string {
+		return "`" + sh + "` reads a script from standard input that the hook did not read"
+	}
+	inputScript := func(sh string) string {
+		return "`" + sh + "` run by xargs or parallel takes its script from their input, which the hook did not read"
+	}
+	sourced := "`source` of standard input or of a word the hook cannot read runs a script it did not read"
 	for _, tt := range []struct {
 		command string
 		want    []unknownRun
@@ -821,6 +842,25 @@ func TestFindPushesUnknownWords(t *testing.T) {
 		{"cd /other && bash -c 'nosuch-gp origin main'", []unknownRun{{Dir: "/other", Word: "nosuch-gp"}}},
 		{"command nosuch-gp; env nosuch-gp; nohup nosuch-gp", nil},
 		{"f() { :; }; f; ls; true", nil},
+		// A shell, source or eval whose script the walker did not read.
+		{"cd /other && echo x | env sh", []unknownRun{{Dir: "/other", Word: "sh", What: stdinScript("sh")}}},
+		{"(cd /other && bash) <<'EOF'\ngit push origin main\nEOF", []unknownRun{{Dir: "/other", Word: "bash", What: stdinScript("bash")}}},
+		{"cd /other && sh < <(echo x)", []unknownRun{{Dir: "/other", Word: "sh", What: stdinScript("sh")}}},
+		{"bash -s <<'EOF'\ntrue\nEOF", nil}, // read
+		{"echo x | xargs -0 sh -c", []unknownRun{{Dir: "/repo", Word: "sh", What: inputScript("sh")}}},
+		{"echo x | xargs -I{} sh -c {}", []unknownRun{{Dir: "/repo", Word: "sh", What: inputScript("sh")}}},
+		{"echo x | xargs -i sh -c 'echo {}'", []unknownRun{{Dir: "/repo", Word: "sh", What: inputScript("sh")}}},
+		{"echo x | xargs --replace sh -c 'echo {}'", []unknownRun{{Dir: "/repo", Word: "sh", What: inputScript("sh")}}},
+		{"echo x | xargs -J % sh -c 'echo %'", []unknownRun{{Dir: "/repo", Word: "sh", What: inputScript("sh")}}},
+		{`echo x | xargs sh -c 'echo "$0"'`, nil}, // the input is the script's arguments
+		{"echo x | xargs sh ./run.sh", nil},       // and here the script file's
+		{"echo x | xargs -0 sh", []unknownRun{{Dir: "/repo", Word: "sh", What: inputScript("sh")}, {Dir: "/repo", Word: "sh", What: stdinScript("sh")}}},
+		{"echo x | parallel", []unknownRun{{Dir: "/repo", Word: "parallel", What: "`parallel` with no command runs each line of its input, which the hook did not read, as a command"}}},
+		{"cd /other && source /dev/stdin", []unknownRun{{Dir: "/other", Word: "source", What: sourced}}},
+		{`. "$f"`, []unknownRun{{Dir: "/repo", Word: "source", What: sourced}}},
+		{"source /dev/stdin <<<'true'", nil}, // read
+		{`eval "$x"`, []unknownRun{{Dir: "/repo", Word: "eval", What: "`eval` of a string the hook cannot read runs code it did not read"}}},
+		{`cd /other && "$X" a`, []unknownRun{{Dir: "/other", Word: "", What: "a command named by a word the hook cannot read"}}},
 	} {
 		got, err := findPushes(tt.command, "/repo")
 		require.NoError(t, err)
@@ -941,5 +981,11 @@ func TestMain(m *testing.M) {
 	// global hooks directory, say); the tests are parallel, so not t.Setenv.
 	_ = os.Setenv("GIT_CONFIG_GLOBAL", os.DevNull)
 	_ = os.Setenv("GIT_CONFIG_NOSYSTEM", "1")
+	// Nor what check.sh (through lib.sh) exports, which would make the replace-ref and graft cases pass
+	// whatever the code does, or anything that points git at another repository, index or config.
+	for _, v := range []string{"GIT_NO_REPLACE_OBJECTS", "GIT_GRAFT_FILE", "GIT_DIR", "GIT_WORK_TREE",
+		"GIT_INDEX_FILE", "GIT_COMMON_DIR", "GIT_CONFIG", "GIT_CONFIG_COUNT", "GIT_CONFIG_PARAMETERS"} {
+		_ = os.Unsetenv(v)
+	}
 	os.Exit(m.Run())
 }
