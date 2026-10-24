@@ -12,7 +12,7 @@ if [[ ! -x hack/sdlc/gate.sh ]]; then
 	echo "sdlc pre-push: hack/sdlc/gate.sh is missing or not executable; restore it (git checkout -- hack/sdlc/gate.sh)" >&2
 	exit 1
 fi
-export GIT_NO_REPLACE_OBJECTS=1 # a replace ref must not change what counts as the change
+export GIT_NO_REPLACE_OBJECTS=1 GIT_GRAFT_FILE=/dev/null/no-grafts # history as it is (hack/sdlc/lib.sh)
 
 # base_gate COMMIT: a change to the gate's own files is judged by the gate of its base too (the merge
 # base with origin/main), so a gate the change breaks cannot pass the change; the base's gate asks for
@@ -25,14 +25,19 @@ base_gate() {
 		return 1
 	fi
 	git cat-file -e "$base:hack/sdlc/gate.sh" 2>/dev/null || return 0
-	git diff --quiet "$base" "$commit" -- .githooks hack/sdlc .claude/settings.json && return 0
+	# The gate that judges is the work tree's, which the branch checked out can have changed too.
+	if git diff --quiet "$base" "$commit" -- .githooks hack/sdlc .claude/settings.json &&
+		git diff --quiet "$base" HEAD -- .githooks hack/sdlc .claude/settings.json &&
+		git diff --quiet HEAD -- .githooks hack/sdlc .claude/settings.json; then
+		return 0
+	fi
 	common=$(git rev-parse --path-format=absolute --git-common-dir)
 	tmp=$(mktemp -d)
 	git archive "$base" hack/sdlc | tar -xf - -C "$tmp"
 	(cd "$tmp" && GIT_DIR=$common GIT_WORK_TREE=$tmp hack/sdlc/gate.sh "$commit") || rc=1
 	rm -rf "${tmp:?}"
 	if [[ $rc -ne 0 ]]; then
-		echo "sdlc pre-push: $commit changes the gate's own files, so the gate of its base $base judged it too, and refused it" >&2
+		echo "sdlc pre-push: $commit, or the gate checked out to judge it, changes the gate's own files, so the gate of its base $base judged it too, and refused it" >&2
 	fi
 	return $rc
 }

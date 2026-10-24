@@ -26,16 +26,18 @@ The machine was shared with up to 16 review and red-team agents during most runs
 |---------|--------|
 | `go vet ./hack/sdlc/...`; `golangci-lint run --no-config ./hack/sdlc/...` | passed, 0 issues |
 | `shellcheck hack/sdlc/*.sh hack/ci/lint-shell.sh`; `make ci-shell`; `actionlint` | passed |
-| `go test -race -count=1 ./hack/sdlc/...` | passed: `pushcheck` and `sarifgate`, 547 tests (counted with `-json`) |
-| `bash hack/sdlc/test-sdlc.sh` (the gate end to end in scratch repositories with a bare remote) | passed: 156 passed, 0 failed |
+| `go test -race -count=1 ./hack/sdlc/...` | passed: `pushcheck` and `sarifgate`, 564 tests (counted with `-json`) |
+| `bash hack/sdlc/test-sdlc.sh` (the gate end to end in scratch repositories with a bare remote) | passed: 164 passed, 0 failed |
+| `GOOS=linux CGO_ENABLED=0 GOWORK=off go vet ./...` on macOS (the step check.sh now adds off Linux) | passed, in 3 minutes from a cold cache |
+| A graft making HEAD a root and origin/main its child, in a scratch repository (`graft-check.sh` in the scratchpad), and pushcheck without its graft setting (`graftmut/mutate.py`) | without `hack/sdlc/lib.sh` the changed files are `[]`, with it `[main.go]`; the mutant fails `TestGatePushRunsTheBaseGate` |
 | `/bin/bash hack/ci/lint-shell.sh` (bash 3.2) in a scratch repository with no POSIX sh script | reports SC2086 in its bash script; the version before this change stopped with `sh_files[@]: unbound variable` |
-| Mutation sweep of `hack/sdlc/pushcheck` (a scratchpad script: each refusal, unknown-directory, environment and option-value site of `parse.go`, each `return true` of a predicate, each refusal or early allowing return of `main.go`, and its loop over the pushed sources, disabled or narrowed in turn through `go test -overlay`, the repository untouched) | 126 sites; 123 caught by a failing test, 2 do not compile (the base gate's refusal, which a test asserts, and the extraction's error path); the survivor is an error path of the environment in `baseGate` (git failing to name its directory right after it worked). The first sweep, on `0b31e0f`, covered refusal sites only and left 20 in `parse.go` and 5 in `main.go` uncaught; the eleventh and twelfth reviews found more kinds of site, which the sweep now covers. Each uncaught site got a test, and four that could not change the outcome were removed |
+| Mutation sweep of `hack/sdlc/pushcheck` (a scratchpad script: each refusal, unknown-directory, environment and option-value site of `parse.go`, each `return true` of a predicate, each refusal or early allowing return of `main.go`, and its loop over the pushed sources, disabled or narrowed in turn through `go test -overlay`, the repository untouched) | 128 sites; 125 caught by a failing test, 2 do not compile (the base gate's refusal, which a test asserts, and the extraction's error path); the survivor is an error path of the environment in `baseGate` (git failing to name its directory right after it worked). The first sweep, on `0b31e0f`, covered refusal sites only and left 20 in `parse.go` and 5 in `main.go` uncaught; the eleventh and twelfth reviews found more kinds of site, which the sweep now covers. Each uncaught site got a test, and four that could not change the outcome were removed |
 | A replace ref giving `origin/main` HEAD's tree, in a scratch repository (`replace-check.sh` in the scratchpad) | without `hack/sdlc/lib.sh` the changed files are `[]`; with it, `[main.go]` |
 | `PATH="$PWD/bin:$PATH" go test -race -count=1 ./internal/git/...` | passed on `c409428` (and `./internal/reposerver/...` on `6f9f985`); `internal/git` has not changed since |
 
 ## Agent review
 
-Thirteen runs of `.claude/workflows/sdlc-review.js` on successive trees, each verified finding fixed
+Fourteen runs of `.claude/workflows/sdlc-review.js` on successive trees, each verified finding fixed
 before the next run:
 
 | Tree | Blocking (verified) | Minor | Refuted |
@@ -53,6 +55,7 @@ before the next run:
 | `f794b5b` | 5 | 10 | 0 |
 | `e06316e` | 4 | 8 | 0 |
 | `ffaf3de` | 5 | 10 | 0 |
+| `d2b1a08` | 4 | 11 | 0 |
 
 Most findings were ways around the Claude Code hook (shell and git constructs it read differently
 from bash, zsh or git) and tests that could not fail. The seventh run's were six untested branches
@@ -126,8 +129,23 @@ as limits in the guide: a change that weakens `check.sh` writes the record the b
 and local tool versions are not checked. As every round found another way for the shell to move
 its directory unseen, the walker's default was flipped too: a command word that is no program on
 PATH (a function or alias of the user's shell, a builtin the walker does not know) now makes the
-directory unknown, so a push after it is refused instead of placed in this clone. The review of the
-tree that contains this record runs after it is written; its result is in the pull request.
+directory unknown, so a push after it is refused instead of placed in this clone.
+
+The fourteenth run found 4 blocking findings: the gate checked out on a branch that changed it
+judged pushes of other branches without the base's gate (now a change to the gate's files in the
+pushed commit or in HEAD sends the push to the base's gate, in both hooks); the new rule on unknown
+command words did not apply inside function bodies, loops, a pipeline's last element or a trap (it
+now does, through `changesDir`); a function defined in a subshell, a branch, a chain or eval
+exempted its name everywhere (now only a definition that certainly runs in this shell counts); and
+`check.sh` recorded a pass after HEAD moved away and back during the run (HEAD's reflog and the
+stash's are now compared). All 11 minor findings were fixed: a logical `cd ..` through a link from
+another repository into this clone (both readings are now compared and an unknown directory results
+when they differ), a nil-pointer panic on zsh's anonymous functions, `break`, `continue` and other
+builtins, an exit-guarded chain with two cds, `read -s` and `mapfile -t`, grafts (now ignored like
+replace refs), Linux-only files no step compiled on macOS (a Linux `go vet` now runs there), CLAUDE.md
+and AGENTS.md counted as documentation, and the shell suite building the hook's binary with a
+`go.work`. The review of the tree that contains this record runs after it is written; its result is
+in the pull request.
 
 ## Red team
 

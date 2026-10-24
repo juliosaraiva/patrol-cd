@@ -281,6 +281,28 @@ func TestGatePushRunsTheBaseGate(t *testing.T) {
 	assert.Contains(t, gatePush(push{Dir: root, Sources: []string{"HEAD"}}, root), "gate refused "+head, "pushed commit replaced")
 	gitIn(t, root, "replace", "-d", head)
 	ranIn()
+	// Nor do grafts: one making the pushed commit a root and the base its child would make the pushed
+	// commit its own base.
+	grafts := filepath.Join(root, ".git", "info", "grafts")
+	require.NoError(t, os.MkdirAll(filepath.Dir(grafts), 0o755))
+	require.NoError(t, os.WriteFile(grafts, []byte(head+"\n"+base+" "+head+"\n"), 0o644))
+	assert.Contains(t, gatePush(push{Dir: root, Sources: []string{"HEAD"}}, root), "gate refused "+head, "grafts")
+	require.NoError(t, os.Remove(grafts))
+	ranIn()
+
+	// The gate checked out (broken, on this branch) judges a push of another branch, whose own commit
+	// changes no gate file: the base's gate judges it too.
+	gitIn(t, root, "switch", "-q", "-c", "plain", "main")
+	require.NoError(t, os.WriteFile(filepath.Join(root, "PLAIN.md"), []byte("x\n"), 0o644))
+	gitIn(t, root, "add", "PLAIN.md")
+	gitIn(t, root, "commit", "-q", "-m", "refuse")
+	plain, err := gitOut(root, "rev-parse", "HEAD")
+	require.NoError(t, err)
+	gitIn(t, root, "switch", "-q", "broken")
+	got = gatePush(push{Dir: root, Sources: []string{"plain"}}, root)
+	assert.Contains(t, got, "or the gate checked out to judge it")
+	assert.Contains(t, got, "gate refused "+plain)
+	ranIn()
 
 	// Each of the gate's own paths sends the change to the base's gate, not only hack/sdlc.
 	for _, edit := range []struct{ path, content string }{

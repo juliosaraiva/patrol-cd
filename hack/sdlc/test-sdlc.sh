@@ -47,6 +47,8 @@ docs_only() { # docs_only FILE...: 0 when the gate counts the files as documenta
 check "a guide is documentation" 0 "$(docs_only docs/guides/x.md README.md)"
 check "a parity status file is not documentation" 1 "$(docs_only docs/parity/status/x.yaml)"
 check "the parity matrix is not documentation" 1 "$(docs_only docs/guides/x.md docs/parity/matrix.md)"
+check "CLAUDE.md is not documentation" 1 "$(docs_only CLAUDE.md)"
+check "AGENTS.md is not documentation" 1 "$(docs_only README.md AGENTS.md)"
 check "code is not documentation" 1 "$(docs_only main.go)"
 
 # CI's CodeQL bundle must be the one hack/sdlc/codeql.sh pins and checks: the workflow fetches it
@@ -113,7 +115,7 @@ else
 fi
 
 # Build the hook's binary (the wrapper builds it on first use).
-(cd "$src" && go build -o bin/sdlc-pushcheck ./hack/sdlc/pushcheck)
+(cd "$src" && GOWORK=off go build -o bin/sdlc-pushcheck ./hack/sdlc/pushcheck)
 
 # A clone with the gate scripts and the git hook on main, a bare remote, and a change branch.
 remote=$work/remote.git
@@ -395,6 +397,18 @@ git replace weak "$(git commit-tree "$(git rev-parse 'main^{tree}')" -p main -m 
 check "a broken gate behind a replace ref: git's hook" 1 "$(gitpush origin weak)"
 contains "reason: git's hook still names the base's gate" "$work/push.err" "judged it too"
 git replace -d weak >/dev/null
+# From a work tree whose branch broke the gate, a push of another branch, which changes no gate file
+# itself, is judged by the base's gate too: the gate that runs is the work tree's.
+git checkout -q -B plainb main
+echo plain >plain.txt
+git add plain.txt
+git commit -qm "chore: plain"
+git checkout -q weak
+check "a broken gate checked out: pushcheck asks the base's gate for another branch" 2 "$(hook 'git push origin plainb')"
+contains "reason: pushcheck names the checked-out gate" "$work/hook.err" "or the gate checked out to judge it"
+check "a broken gate checked out: git's hook asks the base's gate for another branch" 1 "$(gitpush origin plainb)"
+contains "reason: git's hook names the checked-out gate" "$work/push.err" "or the gate checked out to judge it"
+check "remote did not get the other branch" none "$(remote_has plainb)"
 # Each of the gate's own paths sends a change to the base's gate, in both hooks, which list the same.
 for path in .githooks/pre-push .claude/settings.json; do
 	git checkout -q -B edit main
@@ -410,7 +424,7 @@ done
 gate_paths=".githooks hack/sdlc .claude/settings.json"
 # shellcheck disable=SC2016 # the pattern matches the literal text of the hook
 check "git's hook sends the gate's paths to the base's gate" "$gate_paths" \
-	"$(sed -n 's/.*git diff --quiet "\$base" "\$commit" -- \(.*\) \&\& return 0/\1/p' "$src/.githooks/pre-push")"
+	"$(sed -n 's/.*git diff --quiet "\$base" "\$commit" -- \(.*\) \&\&$/\1/p' "$src/.githooks/pre-push")"
 check "pushcheck sends the same paths" "$gate_paths" \
 	"$(sed -n 's/^var gateFiles = \[\]string{\(.*\)}/\1/p' "$src/hack/sdlc/pushcheck/main.go" | tr -d '",')"
 # A change to the gate that has its records goes through: the base's gate (this repository's real
@@ -471,6 +485,12 @@ git replace "$mainsha" "$(git commit-tree "$(git rev-parse 'HEAD^{tree}')" -m fa
 check "replace refs do not change what counts as the change" main.go \
 	"$(source hack/sdlc/lib.sh && sdlc_changed "$(sdlc_base HEAD)" HEAD | paste -sd, -)"
 git replace -d "$mainsha" >/dev/null
+# Nor can a graft that makes HEAD a root commit and origin/main's child.
+printf '%s\n%s %s\n' "$(git rev-parse HEAD)" "$mainsha" "$(git rev-parse HEAD)" >.git/info/grafts
+# shellcheck source=hack/sdlc/lib.sh
+check "grafts do not change what counts as the change" main.go \
+	"$(source hack/sdlc/lib.sh && sdlc_changed "$(sdlc_base HEAD 2>/dev/null)" HEAD 2>/dev/null | paste -sd, -)"
+rm .git/info/grafts
 
 # check.sh records nothing when the environment can weaken a check (sdlc_weakened).
 printf 'GOLANGCI_LINT ?= golangci-lint\n' >"$work/w.mk"

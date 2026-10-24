@@ -55,6 +55,13 @@ done
 head=$(git rev-parse HEAD)
 tree=$(git rev-parse 'HEAD^{tree}')
 base=$(sdlc_base HEAD)
+# HEAD's reflog and the stash's, by length: a checkout, reset or stash during the run (to another
+# branch and back, say) can leave the end looking like the start while the steps in between checked
+# other files.
+moves() {
+	cat "$(git rev-parse --git-path logs/HEAD)" "$(git rev-parse --git-path logs/refs/stash)" 2>/dev/null | wc -l | tr -d ' '
+}
+start_moves=$(moves)
 changed=()
 while IFS= read -r f; do changed+=("$f"); done < <(sdlc_changed "$base" HEAD)
 record=1
@@ -143,6 +150,10 @@ else
 	if [[ ${#pkgs[@]} -gt 0 ]]; then
 		step "go tests (${#pkgs[@]} packages)" make --no-print-directory ci-unit CI_UNIT_PKGS="${pkgs[*]}"
 	fi
+	# Files built only for Linux (//go:build linux) compile in no other step off Linux: vet them too.
+	if any '\.go$|^go\.(mod|sum)$' && [[ $(go env GOOS) != linux ]]; then
+		step "go vet for linux" env GOOS=linux CGO_ENABLED=0 go vet ./...
+	fi
 	if any '^test/integration/'; then
 		step integration make --no-print-directory ci-integration
 	fi
@@ -178,9 +189,10 @@ fi
 
 echo
 if [[ $record -eq 1 ]]; then
-	# Nothing may have changed while the checks ran.
-	if [[ $(git rev-parse 'HEAD^{tree}') != "$tree" ]] || ! sdlc_clean; then
-		echo "sdlc-check: the tree changed while the checks ran; nothing recorded" >&2
+	# Nothing may have changed while the checks ran (an edit made and undone by hand in between is not
+	# seen: the guide's Limits).
+	if [[ $(git rev-parse 'HEAD^{tree}') != "$tree" ]] || ! sdlc_clean || [[ $(moves) != "$start_moves" ]]; then
+		echo "sdlc-check: the tree changed, or HEAD moved (a checkout, reset or stash), while the checks ran; nothing recorded" >&2
 		exit 1
 	fi
 	state=$(sdlc_state_dir)

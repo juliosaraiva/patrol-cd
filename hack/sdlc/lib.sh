@@ -1,9 +1,11 @@
 # Helpers shared by the hack/sdlc scripts (sourced, not run). See docs/guides/claude-code-sdlc.md.
 # shellcheck shell=bash
 
-# A replace ref (git replace) can make a commit read with another commit's tree or parents, and so
-# change what counts as the change: the gate's git commands ignore replace refs.
-export GIT_NO_REPLACE_OBJECTS=1
+# A replace ref (git replace) or a graft (.git/info/grafts) can make a commit read with another
+# commit's tree or parents, and so change what counts as the change: the gate's git commands read
+# history as it is. (The graft file is a path that cannot exist: git reads no grafts, and prints no
+# deprecation hint as it would for an empty file.)
+export GIT_NO_REPLACE_OBJECTS=1 GIT_GRAFT_FILE=/dev/null/no-grafts
 
 # sdlc_state_dir prints the directory that holds this clone's check and review records. It lives in
 # the git directory, so records are never committed, and in the common one, so every worktree of the
@@ -29,12 +31,13 @@ sdlc_changed() {
 
 # sdlc_docs_only reads file names on stdin and succeeds when every one is documentation: the rule
 # of docs_re in hack/ci/classify-changes.sh (hack/sdlc/test-sdlc.sh checks that they agree), except
-# docs/parity/, whose status files claim features complete: such a claim needs its evidence reviewed
-# (CLAUDE.md), so it is not documentation here. No file at all also counts (nothing to review).
+# docs/parity/, whose status files claim features complete (such a claim needs its evidence reviewed),
+# and CLAUDE.md and AGENTS.md, the instructions agents follow (this lifecycle among them). No file at
+# all also counts (nothing to review).
 sdlc_docs_only() {
 	local f
 	while IFS= read -r f; do
-		[[ $f != docs/parity/* ]] || return 1
+		[[ $f != docs/parity/* && $f != CLAUDE.md && $f != AGENTS.md ]] || return 1
 		[[ -z $f || $f =~ ^(docs/|[^/]+\.md$|\.gitignore$) ]] || return 1
 	done
 	return 0

@@ -115,6 +115,23 @@ func TestFindPushes(t *testing.T) {
 		{name: "a function the command defines", command: "f() { echo x; }; f && git push origin a", want: []push{{Dir: "/repo", Sources: []string{"a"}}}},
 		{name: "a builtin that keeps the directory", command: "set -e && setopt pipefail && git push origin a", want: []push{{Dir: "/repo", Sources: []string{"a"}}}},
 		{name: "in a subshell, it cannot reach the push", command: "(z other) && git push origin a", want: []push{{Dir: "/repo", Sources: []string{"a"}}}},
+		{name: "in a function body", command: "f() { z other; }; f && git push origin a", want: []push{{Dir: "", Sources: []string{"a"}}}},
+		{name: "the last pipeline element runs in zsh's shell", command: "true | z other; git push origin a", want: []push{{Dir: "", Sources: []string{"a"}}}},
+		{name: "the last pipeline element, then &&", command: "echo | z other && git push origin a", want: []push{{Dir: "", Sources: []string{"a"}}}},
+		{name: "in a trap action", command: "trap 'z other' DEBUG; git push origin a", want: []push{{Dir: "", Sources: []string{"a"}}}},
+		{name: "in a loop body", command: "for i in 1 2; do git push origin a; z other; done", want: []push{{Dir: "", Sources: []string{"a"}}}},
+		// A function counts as defined only where its definition certainly runs in this shell.
+		{name: "a function defined in a subshell", command: "(z() { :; }); z other && git push origin a", want: []push{{Dir: "", Sources: []string{"a"}}}},
+		{name: "a function defined in a branch", command: "if false; then z() { :; }; fi; z other && git push origin a", want: []push{{Dir: "", Sources: []string{"a"}}}},
+		{name: "a function defined in a chain", command: "false && z() { :; }; z other && git push origin a", want: []push{{Dir: "", Sources: []string{"a"}}}},
+		{name: "a function defined in eval", command: "eval 'z() { :; }'; z other && git push origin a", want: []push{{Dir: "", Sources: []string{"a"}}}},
+		{name: "zsh's anonymous function", command: "() echo hi; git push origin a", want: []push{{Dir: "/repo", Sources: []string{"a"}}}},
+		{name: "zsh's anonymous function with a cd", command: "() (cd /x); git push origin a", want: []push{{Dir: "/repo", Sources: []string{"a"}}}},
+		// Builtins that keep the directory, in a retry loop.
+		{name: "a retry loop with break", command: "for i in 1 2 3; do git fetch origin && break; sleep 5; done && git push origin a", want: []push{{Dir: "/repo", Sources: []string{"a"}}}},
+		{name: "a loop with continue", command: "for i in 1 2; do [ -f x ] || continue; echo $i; done && git push origin a", want: []push{{Dir: "/repo", Sources: []string{"a"}}}},
+		// A chain that ends in || exit keeps every cd of its && prefix.
+		{name: "two cds guarded by || exit", command: "cd /x && cd sub || exit 1; git push origin a", want: []push{{Dir: "/x/sub", Sources: []string{"a"}}}},
 		// zsh code that runs in this shell.
 		{name: "emulate -c, as eval", command: "emulate sh -c 'cd /x && git push origin a'", want: []push{{Dir: "/x", Sources: []string{"a"}}}},
 		{name: "emulate -c carries its cd", command: "emulate zsh -c 'cd /x' && git push origin a", want: []push{{Dir: "/x", Sources: []string{"a"}}}},
@@ -508,6 +525,8 @@ func TestFindPushesBlocked(t *testing.T) {
 		{"for EDITOR in 'git -C /other push origin main'; do git commit --amend; done", "shell code git runs"},
 		{"read -r EDITOR < f; git commit --amend", "shell code git runs"},
 		{"printf -v VISUAL '%s' 'git push origin main'; git commit", "shell code git runs"},
+		{"read -s PAGER; git log", "shell code git runs"},
+		{"mapfile -t PAGER < notes; git log", "shell code git runs"},
 		// Configuration under diff. or merge. with a subsection, and what rewrites refs or objects.
 		{"git -c diff.x.binary=true diff", config},
 		{"git -c merge.x.name=y merge z", config},
@@ -736,6 +755,34 @@ func TestReadsStdin(t *testing.T) {
 		assert.Equal(t, tt.want, readsStdin(tt.args, lit), "%q", tt.args)
 	}
 	assert.False(t, readsStdin([]string{"x"}, []bool{false}), "an argument that is not literal")
+}
+
+// A cd with `..` through a symbolic link: bash's logical cd and the kernel's physical one reach
+// different directories, so the push's directory is unknown; without a link they agree. git -C is
+// physical: its path stays as written, for gatePush's git to resolve.
+func TestFindPushesThroughLinks(t *testing.T) {
+	t.Parallel()
+	work, err := filepath.EvalSymlinks(t.TempDir())
+	require.NoError(t, err)
+	root, other := filepath.Join(work, "root"), filepath.Join(work, "other")
+	for _, d := range []string{filepath.Join(root, "sub"), filepath.Join(other, "sub")} {
+		require.NoError(t, os.MkdirAll(d, 0o755))
+	}
+	require.NoError(t, os.Symlink(filepath.Join(other, "sub"), filepath.Join(root, "out")))  // this clone into another
+	require.NoError(t, os.Symlink(filepath.Join(root, "sub"), filepath.Join(other, "back"))) // another into this clone
+	for _, tt := range []struct{ command, dir string }{
+		{"cd out && cd .. && git push origin a", ""},
+		{"cd out/.. && git push origin a", ""},
+		{"cd " + other + "/back && cd .. && git push origin a", ""},
+		{"cd sub && cd .. && git push origin a", root},
+		{"cd sub/.. && git push origin a", root},
+		{"git -C out/.. push origin a", root + "/out/.."},
+	} {
+		got, err := findPushes(tt.command, root)
+		require.NoError(t, err)
+		assert.Empty(t, got.Blocked, tt.command)
+		assert.Equal(t, []push{{Dir: tt.dir, Sources: []string{"a"}}}, got.Pushes, tt.command)
+	}
 }
 
 func TestFindPushesInvalidBash(t *testing.T) {

@@ -184,8 +184,12 @@ func baseGate(top, commit string) string {
 	if _, err := git("cat-file", "-e", base+":hack/sdlc/gate.sh"); err != nil {
 		return "" // the base has no gate yet
 	}
-	if _, err := git(append([]string{"diff", "--quiet", base, commit, "--"}, gateFiles...)...); err == nil {
-		return "" // the gate's files are the base's
+	// The gate that judges is the work tree's (HEAD's, checked clean above), which a branch checked
+	// out can have changed as much as the pushed commit can.
+	_, errCommit := git(append([]string{"diff", "--quiet", base, commit, "--"}, gateFiles...)...)
+	_, errHead := git(append([]string{"diff", "--quiet", base, "HEAD", "--"}, gateFiles...)...)
+	if errCommit == nil && errHead == nil {
+		return "" // the gate's files are the base's, in the pushed commit and in the gate that runs
 	}
 	common, err := git("rev-parse", "--path-format=absolute", "--git-common-dir")
 	if err != nil {
@@ -199,16 +203,16 @@ func baseGate(top, commit string) string {
 	// The base's hack/sdlc, run with this repository's git directory (its records and refs) and the
 	// extracted files as its work tree, so the base's gate sources the base's lib.sh.
 	extract := exec.Command("sh", "-c", `git -C "$1" archive "$2" hack/sdlc | tar -xf - -C "$3"`, "sh", top, base, tmp)
-	extract.Env = append(os.Environ(), "GIT_NO_REPLACE_OBJECTS=1")
+	extract.Env = append(os.Environ(), historyAsIs...)
 	if out, err := extract.CombinedOutput(); err != nil {
 		return "cannot extract the gate of the base " + base + ": " + strings.TrimSpace(string(out))
 	}
 	run := exec.Command(filepath.Join(tmp, "hack", "sdlc", "gate.sh"), commit)
 	run.Dir = tmp
-	run.Env = append(os.Environ(), "GIT_DIR="+common, "GIT_WORK_TREE="+tmp, "GIT_NO_REPLACE_OBJECTS=1")
+	run.Env = append(append(os.Environ(), "GIT_DIR="+common, "GIT_WORK_TREE="+tmp), historyAsIs...)
 	if out, err := run.CombinedOutput(); err != nil {
-		return "this change edits the gate's own files (" + strings.Join(gateFiles, ", ") + "), so the gate of its base " + base +
-			" judges it too, and refuses it:\n" + strings.TrimSpace(string(out))
+		return "this change, or the gate checked out to judge it, edits the gate's own files (" + strings.Join(gateFiles, ", ") +
+			"), so the gate of its base " + base + " judges it too, and refuses it:\n" + strings.TrimSpace(string(out))
 	}
 	return ""
 }
@@ -275,10 +279,15 @@ func quoteOrUnset(s string) string {
 	return fmt.Sprintf("%q", s)
 }
 
-// gitOut runs git in dir with replace refs ignored, as the gate's scripts do.
+// historyAsIs makes git read commits as they are, as the gate's scripts do (hack/sdlc/lib.sh): replace
+// refs and grafts can give a commit another tree or other parents, and so change what counts as the
+// change.
+var historyAsIs = []string{"GIT_NO_REPLACE_OBJECTS=1", "GIT_GRAFT_FILE=" + os.DevNull + "/no-grafts"}
+
+// gitOut runs git in dir, reading history as it is.
 func gitOut(dir string, args ...string) (string, error) {
 	cmd := exec.Command("git", append([]string{"-C", dir}, args...)...)
-	cmd.Env = append(os.Environ(), "GIT_NO_REPLACE_OBJECTS=1")
+	cmd.Env = append(os.Environ(), historyAsIs...)
 	out, err := cmd.Output()
 	return strings.TrimSpace(string(out)), err
 }

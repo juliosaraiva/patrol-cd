@@ -124,6 +124,15 @@ func findPushes(command, cwd string) (analysis, error) {
 // substitutions the statement walk does not reach (a git push there is refused), and the
 // assignments made inside words and arithmetic (${NAME:=value}, $((NAME=1)), let NAME=1).
 func (w *walker) run(f *syntax.File) {
+	// A function counts as defined only where its definition certainly runs in this shell: a
+	// statement of its own at the top (not in a subshell, a branch, a chain, the background or eval).
+	if w.inEval == 0 {
+		for _, s := range f.Stmts {
+			if fd, ok := s.Cmd.(*syntax.FuncDecl); ok && !s.Background && !s.Coprocess {
+				w.topFuncs[fd] = true
+			}
+		}
+	}
 	w.stmts(f.Stmts)
 	// The statements of a command or process substitution, with their pipelines, redirections and
 	// heredocs, on a walker of their own (they run in a child): a push there is refused, as is what
@@ -192,14 +201,17 @@ type walker struct {
 	// envUnknown says why git's environment and the directory may have changed in ways the walker
 	// cannot see (a sourced file, an eval of a dynamic string); a later push is refused.
 	envUnknown string
-	cdpath     bool            // CDPATH was set in the command: a relative cd may go elsewhere
-	homeSet    bool            // HOME was set in the command: a word starting with ~ is not literal
-	funcs      map[string]bool // functions the command defines (their cd is handled where they are)
+	cdpath     bool                      // CDPATH was set in the command: a relative cd may go elsewhere
+	homeSet    bool                      // HOME was set in the command: a word starting with ~ is not literal
+	funcs      map[string]bool           // functions the command defines (their cd is handled where they are)
+	topFuncs   map[*syntax.FuncDecl]bool // definitions that certainly run in this shell
+	inEval     int                       // inside eval, whose definitions may sit in a branch
 	seen       map[*syntax.CallExpr]bool
 }
 
 func newWalker(dir, src string) *walker {
-	return &walker{dir: dir, src: src, seen: map[*syntax.CallExpr]bool{}, funcs: map[string]bool{}}
+	return &walker{dir: dir, src: src, seen: map[*syntax.CallExpr]bool{}, funcs: map[string]bool{},
+		topFuncs: map[*syntax.FuncDecl]bool{}}
 }
 
 // child is a walker for code that runs in a child of this shell (a substitution, a shell the command
@@ -454,7 +466,7 @@ func (w *walker) cmd(s *syntax.Stmt) {
 				}
 				return
 			}
-			unknownAfter := false
+			unknownAfter, guarded := false, exitGuarded(s)
 			poisoned := false // once set, the directory is unknown for the rest of the chain
 			for i, seg := range segments {
 				if i > 0 && seg.op == syntax.OrStmt && !isExit(seg.stmt) {
@@ -469,9 +481,10 @@ func (w *walker) cmd(s *syntax.Stmt) {
 				before := w.dir
 				w.stmt(seg.stmt)
 				changed := w.dir != before
-				if changed && i > 0 {
+				if changed && i > 0 && !guarded {
 					// A cd that might be skipped: unknown for what follows the chain. (A first segment's cd
-					// is skipped only past an || that is not exit, which poisons the chain.)
+					// is skipped only past an || that is not exit, which poisons the chain; in a chain that
+					// ends in `|| exit`, reaching what follows means every cd in it worked.)
 					unknownAfter = true
 				}
 				if changed && seg.stmt.Negated {
@@ -544,7 +557,14 @@ func (w *walker) cmd(s *syntax.Stmt) {
 	case *syntax.FuncDecl:
 		// The body runs when the function is called, from wherever that is: a push in it is refused,
 		// and a cd in it makes the directory unknown from here on.
-		w.funcs[c.Name.Value] = true
+		if w.topFuncs[c] {
+			if c.Name != nil { // nil for zsh's anonymous `() CMD`
+				w.funcs[c.Name.Value] = true
+			}
+			for _, n := range c.Names { // zsh's `f g () { … }`
+				w.funcs[n.Value] = true
+			}
+		}
 		saved := w.dir
 		w.dir = ""
 		w.stmt(c.Body)
@@ -727,6 +747,8 @@ func (w *walker) changesDir(node syntax.Node) bool {
 				switch path.Base(strings.TrimPrefix(args[0], "=")) {
 				case "cd", "chdir", "pushd", "popd", "source", ".", "eval", "trap", "emulate", "repeat":
 					found = true
+				default:
+					found = found || w.unknownWord(args[0])
 				}
 			}
 		}
@@ -1181,16 +1203,35 @@ prefix:
 		if !dataCommands[name] && argvHasGitPush(args, lit) {
 			w.block("a git push run through " + name + " cannot be checked; " + runAlone)
 		}
-		// A program on PATH runs as a child, whose cd cannot move this shell. Any other word may be a
-		// function or alias of the user's shell setup, which the Bash tool loads (zoxide's z,
-		// oh-my-zsh's ... and take), or a builtin the walker does not know: it may cd.
-		if !strings.Contains(args[0], "/") && !shellBuiltins[name] && !w.funcs[name] {
-			if _, err := exec.LookPath(name); err != nil {
-				w.dir = ""
-			}
+		if w.unknownWord(args[0]) {
+			w.dir = ""
 		}
 	}
 }
+
+// unknownWord reports whether a command word may be a function or alias of the user's shell setup,
+// which the Bash tool loads (zoxide's z, oh-my-zsh's ... and take), or a builtin the walker does not
+// know, and so may cd: no program on PATH (which runs as a child, whose cd cannot move this shell),
+// no path, no builtin or command the walker knows, no function the command defines.
+func (w *walker) unknownWord(word string) bool {
+	name := path.Base(strings.TrimPrefix(word, "="))
+	if strings.Contains(word, "/") || shellBuiltins[name] || w.funcs[name] || namedCommands[name] || shells[name] ||
+		execRunners[name] || dataCommands[name] || pureOutput[name] {
+		return false
+	}
+	if _, ok := wrapperSkip[name]; ok {
+		return false
+	}
+	_, err := exec.LookPath(name)
+	return err != nil
+}
+
+// namedCommands are the commands command() handles by name that change no directory (those that do
+// are in changesDir's list).
+var namedCommands = map[string]bool{"git": true, "alias": true, "hash": true, "read": true, "mapfile": true,
+	"readarray": true, "getopts": true, "printf": true, "watch": true, "xargs": true, "parallel": true, "find": true,
+	"fish": true, "csh": true, "tcsh": true, "env": true, "command": true, "exec": true, "builtin": true,
+	"noglob": true, "nocorrect": true, "-": true}
 
 // shellBuiltins are bash and zsh builtins and keywords, not programs on PATH, that never change the
 // shell's directory (the ones that do, and those that run code, are handled by name above).
@@ -1202,7 +1243,8 @@ var shellBuiltins = map[string]bool{"export": true, "local": true, "declare": tr
 	"disown": true, "kill": true, "let": true, "ulimit": true, "umask": true, "times": true, "history": true,
 	"fc": true, "dirs": true, "autoload": true, "zmodload": true, "bindkey": true, "compdef": true, "zstyle": true,
 	"zparseopts": true, "enable": true, "disable": true, "caller": true, "help": true, "suspend": true, "limit": true,
-	"unlimit": true, "functions": true, "vared": true, "zle": true, "sched": true, "pwd": true, "echo": true}
+	"unlimit": true, "functions": true, "vared": true, "zle": true, "sched": true, "pwd": true, "echo": true,
+	"break": true, "continue": true, "complete": true, "compgen": true, "compopt": true, "bind": true, "unfunction": true}
 
 // envName matches the literal prefix of an env operand NAME=VALUE whose value is not literal.
 var envName = regexp.MustCompile(`^[A-Za-z_][A-Za-z0-9_]*=`)
@@ -1441,7 +1483,9 @@ func (w *walker) eval(args []string, lit []bool) {
 		}
 		return
 	}
+	w.inEval++
 	w.run(f) // the same walker: eval runs in the current shell, so its cd and source carry back
+	w.inEval--
 }
 
 // xargsValue lists the options that take the next argument as their value: xargs' (GNU and BSD;
@@ -1503,7 +1547,11 @@ func gitSubcommand(args []string, lit []bool) int {
 
 // setter checks the variable names a read, mapfile, readarray or getopts sets.
 func (w *walker) setter(name string, args []string, lit []bool) {
-	value := map[string]bool{"-d": true, "-n": true, "-N": true, "-p": true, "-t": true, "-u": true, "-i": true, "-a": true, "-C": true, "-c": true, "-O": true, "-s": true}
+	// The options that take a value, per builtin: read -s (silent) and mapfile -t (strip) are flags.
+	value := map[string]bool{"-d": true, "-n": true, "-N": true, "-p": true, "-t": true, "-u": true, "-i": true, "-a": true}
+	if name == "mapfile" || name == "readarray" {
+		value = map[string]bool{"-d": true, "-n": true, "-O": true, "-s": true, "-u": true, "-C": true, "-c": true}
+	}
 	// -a NAME (read into an array) and the trailing NAMEs are targets.
 	for i := 0; i < len(args); i++ {
 		if !lit[i] {
@@ -1693,12 +1741,32 @@ func (w *walker) resolve(dir string) string {
 	return w.resolveFrom(w.dir, dir)
 }
 
-// resolveFrom resolves dir from base. A path with `..` is kept as written, for gatePush's stat and
-// git to resolve as the kernel does: after a symbolic link, `..` is the parent of the link's target
-// where git -C, cd -P and a shell made physical (set -P, zsh's chase_dots) go, while bash's default
-// cd goes back lexically. Kept as written, a push through a link and back is refused, never placed
-// in this clone when it runs in another.
+// resolveFrom resolves the operand of a cd from base. With `..`, bash's and zsh's default cd goes back
+// lexically (`link/..` is base), while cd -P and a shell made physical (set -P, zsh's chase_dots,
+// which the walker cannot follow) go to the parent of the link's target, as the kernel does: when the
+// two readings reach different directories, the directory is unknown. A path that does not exist here
+// is kept as written (gatePush refuses a directory it cannot stat).
 func (w *walker) resolveFrom(base, dir string) string {
+	written := w.physicalFrom(base, dir)
+	if written == "" || !hasDotDot(written) {
+		return written
+	}
+	lexical := filepath.Clean(written)
+	physical, errP := filepath.EvalSymlinks(written)
+	logical, errL := filepath.EvalSymlinks(lexical)
+	switch {
+	case errP != nil || errL != nil:
+		return written
+	case physical != logical:
+		return ""
+	}
+	return lexical
+}
+
+// physicalFrom resolves dir from base as the kernel does for git -C, whose -C is a chdir(2): a path
+// with `..` is kept as written, for gatePush's stat and git to resolve (after a symbolic link, the
+// parent of its target).
+func (w *walker) physicalFrom(base, dir string) string {
 	switch {
 	case filepath.IsAbs(dir) && hasDotDot(dir):
 		return dir
@@ -1770,7 +1838,7 @@ func (w *walker) git(args []string, lit []bool) {
 		switch name {
 		case "-C":
 			if litVal {
-				dir = w.resolveFrom(dir, value)
+				dir = w.physicalFrom(dir, value)
 			} else {
 				dir = ""
 			}

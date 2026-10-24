@@ -26,7 +26,7 @@ const REVIEWERS = [
   { name: 'test-reviewer', match: /(_test\.go$|^test\/|\/testdata\/|^hack\/ci\/|\.test\.tsx?$|^ui\/e2e\/)/ },
   { name: 'api-reviewer', match: /^(internal\/apiserver\/|pkg\/apiclient\/|api\/openapi\/|internal\/cli\/|cmd\/patrol\/|ui\/src\/api\/|docs\/parity\/)/ },
   { name: 'ui-reviewer', match: /^ui\// },
-  { name: 'delivery-reviewer', match: /^(deploy\/|Dockerfile$|\.dockerignore$|Makefile$|hack\/[^/]+\.mk$|hack\/(images|kind|ci|release|sdlc)\/|test\/e2e\/|\.github\/|\.githooks\/|\.claude\/)/ },
+  { name: 'delivery-reviewer', match: /^(deploy\/|Dockerfile$|\.dockerignore$|Makefile$|hack\/[^/]+\.mk$|hack\/(images|kind|ci|release|sdlc)\/|test\/e2e\/|\.github\/|\.githooks\/|\.claude\/|CLAUDE\.md$|AGENTS\.md$)/ },
 ]
 
 const FINDINGS = {
@@ -71,8 +71,9 @@ if (input.docsOnly) {
   return { tree: input.tree, reviewers: [], blocking: [], minor: [], refuted: [], notes: 'documentation only' }
 }
 
-// Documentation: hack/sdlc/lib.sh sdlc_docs_only (the rule of hack/ci/classify-changes.sh; docs/parity/
-// is not documentation there, and the api-reviewer owns it here).
+// Documentation: hack/sdlc/lib.sh sdlc_docs_only (the rule of hack/ci/classify-changes.sh; docs/parity/,
+// CLAUDE.md and AGENTS.md are not documentation there, and the api-reviewer and delivery-reviewer own
+// them here).
 const DOCS = /^(docs\/|[^/]+\.md$|\.gitignore$)/
 
 let selected = REVIEWERS.map(r => ({ ...r, files: input.files.filter(f => r.match.test(f)) })).filter(r => r.files.length > 0)

@@ -32,7 +32,7 @@ this guide.
 | When | Check |
 |------|-------|
 | always | `make ci-static` (gofmt, `go mod tidy`, build, vet, golangci-lint, generated files, OpenAPI, parity matrix, test report rules, tier and SDLC gate tests, shell scripts, workflow lint, gitleaks) and `make release-lint-commits` |
-| Go files changed | `make ci-unit` on the changed packages (`-race`, envtest, the strict skip policy); all packages when `go.mod` or `go.sum` changed |
+| Go files changed | `make ci-unit` on the changed packages (`-race`, envtest, the strict skip policy); all packages when `go.mod` or `go.sum` changed; off Linux, `go vet` of every package for Linux too, since files built only for Linux compile in no other step there |
 | `test/integration/` | `make ci-integration` |
 | `deploy/` or `test/deploy/` | `make ci-deploy` |
 | `hack/kind/` or `test/e2e/` | `make ci-scripts` |
@@ -45,8 +45,10 @@ A documentation-only change (the rule of `hack/ci/classify-changes.sh`: `docs/`,
 The linters read no configuration from outside the tree (`golangci-lint run --no-config`,
 `shellcheck --norc` with `SHELLCHECK_OPTS` cleared), so a file in HOME or a parent directory cannot
 make a local run lenient where CI's is not; Go runs with `GOWORK=off`, so a `go.work` in a parent
-directory cannot replace the tree's modules; and the gate's scripts ignore replace refs
-(`GIT_NO_REPLACE_OBJECTS`), which could make a commit read with another commit's tree.
+directory cannot replace the tree's modules; and the gate's scripts ignore replace refs and grafts
+(`GIT_NO_REPLACE_OBJECTS`, `GIT_GRAFT_FILE`), which could make a commit read with another commit's
+tree or parents. A run records nothing when HEAD moved during it (a checkout, reset or stash, even
+one undone before the end, which HEAD's reflog shows).
 
 When every check passed on a **clean** tree, it writes a record for HEAD's tree
 (`git rev-parse HEAD^{tree}`) to `$(git rev-parse --git-common-dir)/patrol-sdlc/checks/<tree>`. A
@@ -123,12 +125,15 @@ replace them.
 
 - a passing check record, always;
 - a passing review record, unless the change since the merge base is documentation only (the rule
-  above, except that `docs/parity/` is not documentation here: a status file that marks a feature
-  complete needs its evidence reviewed).
+  above, except that `docs/parity/`, `CLAUDE.md` and `AGENTS.md` are not documentation here: a
+  status file that marks a feature complete needs its evidence reviewed, and the agents'
+  instructions their review).
 
 A change to the gate's own files (`.githooks/`, `hack/sdlc/`, `.claude/settings.json`) is judged by
 the gate of its base too (the merge base with `origin/main`, run from the base's files), so a gate
-the change breaks cannot pass the change; both hooks do this, each on its own. A push the base's gate
+the change breaks cannot pass the change; so is any push made while the checked-out branch has
+changed those files, since the gate that runs is the work tree's. Both hooks do this, each on its
+own. A push the base's gate
 refuses (because the change also changed what the records hold, say) is made by the owner. This
 covers the gate's decision, not the checks behind a record: a change that weakens
 `hack/sdlc/check.sh` writes a passing record with its own check.sh, which the base's gate accepts;
@@ -193,10 +198,11 @@ Two hooks run it:
     not run (after `||`, in an `if`, `case`, loop or function, or in an `if` or `while` condition,
     whose branches can run whether it worked or not) leaves the directory unknown; and so does a
     `cd` that may fail without stopping the command (`cd DIR; git push`), unless `&&` or `|| exit`
-    guards it; sudo's `-D`, `-R` and `-i` run the command from an unknown directory. A path with
-    `..` is kept as written, for `gatePush`'s stat and git to resolve as the kernel does (after a
-    symbolic link, the parent of its target, where `git -C`, `cd -P` and a shell made physical go):
-    a push through a link and back is refused rather than placed in this clone. zsh's `emulate -c`
+    guards it; sudo's `-D`, `-R` and `-i` run the command from an unknown directory. A `cd` operand
+    with `..` is resolved both ways, lexically as bash's default cd does and as the kernel does
+    (after a symbolic link, the parent of its target, where `cd -P` and a shell made physical go):
+    when the two differ, the directory is unknown. `git -C` is a chdir, so its path stays as written
+    for `gatePush`'s stat and git to resolve. zsh's `emulate -c`
     and `repeat` run their code in this shell, and a glob qualifier that runs code (`*(e:…:)`)
     leaves the directory unknown. A program on PATH runs as a child, whose cd cannot move the shell;
     any other command word (not a builtin the walker knows, not a function the command defines) may
@@ -320,6 +326,8 @@ A second hook (`hack/sdlc/claude-format.sh`, `PostToolUse` for Edit, MultiEdit a
   review (#25, #220). None applies yet: until the owner turns it on, a push to `main` that gets past
   the local hooks lands there directly, and the owner's merge decision on a pull request is the only
   other check.
+- A check run takes most of an hour, and records for the tree it started on. A file edited during
+  the run and restored by hand before its end is not seen (HEAD moving is).
 - The checks run the tools on PATH, `bin/` first (which the clean-tree rule does not inspect), and
   check no tool's version: off Linux, `hack/ci/install-tools.sh` does not install the pins of
   `hack/ci/tools.lock`, so a local golangci-lint or shellcheck of another version can pass what CI's
