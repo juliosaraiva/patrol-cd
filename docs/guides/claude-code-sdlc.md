@@ -198,7 +198,10 @@ Two hooks run it:
     symbolic link, the parent of its target, where `git -C`, `cd -P` and a shell made physical go):
     a push through a link and back is refused rather than placed in this clone. zsh's `emulate -c`
     and `repeat` run their code in this shell, and a glob qualifier that runs code (`*(e:…:)`)
-    leaves the directory unknown. It follows
+    leaves the directory unknown. A program on PATH runs as a child, whose cd cannot move the shell;
+    any other command word (not a builtin the walker knows, not a function the command defines) may
+    be a function or alias of the user's shell setup, which the Bash tool loads and which can cd
+    (zoxide's `z`, oh-my-zsh's `...` and `take`), so the directory after it is unknown. It follows
     the command a wrapper runs (`timeout`, `nice`, `sudo`, `nohup`, `env`, `xargs`, `find -exec`,
     `kubectl`/`docker exec -- …`, `command`, `exec`, …) into that command, and parses `bash -c '…'`,
     a heredoc or here-string given to `bash`/`sh`/`zsh`/`dash`/`ksh`/`mksh`, a literal script piped
@@ -288,9 +291,11 @@ A second hook (`hack/sdlc/claude-format.sh`, `PostToolUse` for Edit, MultiEdit a
   (`ssh host …`); and the user's shell setup, which the Bash tool loads (aliases and functions such
   as oh-my-zsh's `gp='git push'` or zoxide's `z`, options such as CDABLE_VARS). Its text net refuses
   a hook token anywhere in the command line, so a push through any of them still runs git's hook
-  unless the token is assembled at run time. git's pre-push hook (required before any command runs)
-  checks the pushes they make; a script or program that disables git's hook on purpose gets past
-  both.
+  unless the token is assembled at run time; and a command word that is no program on PATH makes the
+  directory unknown, so a function that cds to another clone does not place a push in this one. An
+  alias or function that shadows a program on PATH (`make`, `ls`) and cds is not seen. git's
+  pre-push hook (required before any command runs) checks the pushes they make in this clone; a
+  script or program that disables git's hook on purpose gets past both.
 - The Claude Code hook checks the gate, and `core.hooksPath`, as they are before the command runs. A
   command line that commits and also turns git's hook off on the way without naming it (a program
   or an editor that rewrites `.git/config` or the hook) pushes the new commit unchecked.

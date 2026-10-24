@@ -192,13 +192,14 @@ type walker struct {
 	// envUnknown says why git's environment and the directory may have changed in ways the walker
 	// cannot see (a sourced file, an eval of a dynamic string); a later push is refused.
 	envUnknown string
-	cdpath     bool // CDPATH was set in the command: a relative cd may go elsewhere
-	homeSet    bool // HOME was set in the command: a word starting with ~ is not literal
+	cdpath     bool            // CDPATH was set in the command: a relative cd may go elsewhere
+	homeSet    bool            // HOME was set in the command: a word starting with ~ is not literal
+	funcs      map[string]bool // functions the command defines (their cd is handled where they are)
 	seen       map[*syntax.CallExpr]bool
 }
 
 func newWalker(dir, src string) *walker {
-	return &walker{dir: dir, src: src, seen: map[*syntax.CallExpr]bool{}}
+	return &walker{dir: dir, src: src, seen: map[*syntax.CallExpr]bool{}, funcs: map[string]bool{}}
 }
 
 // child is a walker for code that runs in a child of this shell (a substitution, a shell the command
@@ -543,6 +544,7 @@ func (w *walker) cmd(s *syntax.Stmt) {
 	case *syntax.FuncDecl:
 		// The body runs when the function is called, from wherever that is: a push in it is refused,
 		// and a cd in it makes the directory unknown from here on.
+		w.funcs[c.Name.Value] = true
 		saved := w.dir
 		w.dir = ""
 		w.stmt(c.Body)
@@ -1179,8 +1181,28 @@ prefix:
 		if !dataCommands[name] && argvHasGitPush(args, lit) {
 			w.block("a git push run through " + name + " cannot be checked; " + runAlone)
 		}
+		// A program on PATH runs as a child, whose cd cannot move this shell. Any other word may be a
+		// function or alias of the user's shell setup, which the Bash tool loads (zoxide's z,
+		// oh-my-zsh's ... and take), or a builtin the walker does not know: it may cd.
+		if !strings.Contains(args[0], "/") && !shellBuiltins[name] && !w.funcs[name] {
+			if _, err := exec.LookPath(name); err != nil {
+				w.dir = ""
+			}
+		}
 	}
 }
+
+// shellBuiltins are bash and zsh builtins and keywords, not programs on PATH, that never change the
+// shell's directory (the ones that do, and those that run code, are handled by name above).
+var shellBuiltins = map[string]bool{"export": true, "local": true, "declare": true, "typeset": true,
+	"readonly": true, "integer": true, "float": true, "unset": true, "set": true, "setopt": true, "unsetopt": true,
+	"shopt": true, "shift": true, "return": true, "exit": true, "logout": true, "true": true, "false": true, ":": true,
+	"test": true, "[": true, "print": true, "type": true, "whence": true, "where": true, "which": true,
+	"unalias": true, "rehash": true, "unhash": true, "wait": true, "jobs": true, "bg": true, "fg": true,
+	"disown": true, "kill": true, "let": true, "ulimit": true, "umask": true, "times": true, "history": true,
+	"fc": true, "dirs": true, "autoload": true, "zmodload": true, "bindkey": true, "compdef": true, "zstyle": true,
+	"zparseopts": true, "enable": true, "disable": true, "caller": true, "help": true, "suspend": true, "limit": true,
+	"unlimit": true, "functions": true, "vared": true, "zle": true, "sched": true, "pwd": true, "echo": true}
 
 // envName matches the literal prefix of an env operand NAME=VALUE whose value is not literal.
 var envName = regexp.MustCompile(`^[A-Za-z_][A-Za-z0-9_]*=`)

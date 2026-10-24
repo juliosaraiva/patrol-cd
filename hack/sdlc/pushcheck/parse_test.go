@@ -107,6 +107,14 @@ func TestFindPushes(t *testing.T) {
 		{name: "push in a function", command: "f() { git push; }", want: []push{{Dir: "", Sources: head}}},
 		{name: "if without cd", command: "if make sdlc-gate; then git push; fi", want: []push{{Dir: "/repo", Sources: head}}},
 		{name: "chdir, zsh's synonym for cd", command: "chdir /other && git push origin b", want: []push{{Dir: "/other", Sources: []string{"b"}}}},
+		// A word that is no program on PATH may be a function or alias of the user's shell that cds.
+		{name: "a function of the user's shell (zoxide's z)", command: "z other && git push origin a", want: []push{{Dir: "", Sources: []string{"a"}}}},
+		{name: "oh-my-zsh's ... alias", command: "... && git push origin a", want: []push{{Dir: "", Sources: []string{"a"}}}},
+		{name: "a program on PATH runs as a child", command: "ls && git push origin a", want: []push{{Dir: "/repo", Sources: []string{"a"}}}},
+		{name: "a program by its path", command: "./build.sh && git push origin a", want: []push{{Dir: "/repo", Sources: []string{"a"}}}},
+		{name: "a function the command defines", command: "f() { echo x; }; f && git push origin a", want: []push{{Dir: "/repo", Sources: []string{"a"}}}},
+		{name: "a builtin that keeps the directory", command: "set -e && setopt pipefail && git push origin a", want: []push{{Dir: "/repo", Sources: []string{"a"}}}},
+		{name: "in a subshell, it cannot reach the push", command: "(z other) && git push origin a", want: []push{{Dir: "/repo", Sources: []string{"a"}}}},
 		// zsh code that runs in this shell.
 		{name: "emulate -c, as eval", command: "emulate sh -c 'cd /x && git push origin a'", want: []push{{Dir: "/x", Sources: []string{"a"}}}},
 		{name: "emulate -c carries its cd", command: "emulate zsh -c 'cd /x' && git push origin a", want: []push{{Dir: "/x", Sources: []string{"a"}}}},
@@ -685,8 +693,8 @@ func TestFindPushesAutoCD(t *testing.T) {
 		{"./sub && git push origin a", filepath.Join(root, "sub")},
 		{"sub; git push origin a", ""},             // the cd may fail
 		{"sub || true; git push origin a", ""},     // a chain with an AUTO_CD counts as a cd
-		{"nosuchdir && git push origin a", root},   // no such directory: an unknown command
-		{"sub x && git push origin a", root},       // with an argument it is a command, not a cd
+		{"nosuchdir && git push origin a", ""},     // no such directory, nor program: a function may cd
+		{"sub x && git push origin a", ""},         // with an argument it is a command, maybe a function
 		{"(sub && true); git push origin a", root}, // in a subshell
 		{"if true; then sub; fi; git push origin a", ""},
 		{"f() { sub; }; f && git push origin a", ""}, // a function that runs AUTO_CD

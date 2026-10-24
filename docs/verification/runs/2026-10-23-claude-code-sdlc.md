@@ -26,7 +26,7 @@ The machine was shared with up to 16 review and red-team agents during most runs
 |---------|--------|
 | `go vet ./hack/sdlc/...`; `golangci-lint run --no-config ./hack/sdlc/...` | passed, 0 issues |
 | `shellcheck hack/sdlc/*.sh hack/ci/lint-shell.sh`; `make ci-shell`; `actionlint` | passed |
-| `go test -race -count=1 ./hack/sdlc/...` | passed: `pushcheck` and `sarifgate`, 540 tests (counted with `-json`) |
+| `go test -race -count=1 ./hack/sdlc/...` | passed: `pushcheck` and `sarifgate`, 547 tests (counted with `-json`) |
 | `bash hack/sdlc/test-sdlc.sh` (the gate end to end in scratch repositories with a bare remote) | passed: 156 passed, 0 failed |
 | `/bin/bash hack/ci/lint-shell.sh` (bash 3.2) in a scratch repository with no POSIX sh script | reports SC2086 in its bash script; the version before this change stopped with `sh_files[@]: unbound variable` |
 | Mutation sweep of `hack/sdlc/pushcheck` (a scratchpad script: each refusal, unknown-directory, environment and option-value site of `parse.go`, each `return true` of a predicate, each refusal or early allowing return of `main.go`, and its loop over the pushed sources, disabled or narrowed in turn through `go test -overlay`, the repository untouched) | 126 sites; 123 caught by a failing test, 2 do not compile (the base gate's refusal, which a test asserts, and the extraction's error path); the survivor is an error path of the environment in `baseGate` (git failing to name its directory right after it worked). The first sweep, on `0b31e0f`, covered refusal sites only and left 20 in `parse.go` and 5 in `main.go` uncaught; the eleventh and twelfth reviews found more kinds of site, which the sweep now covers. Each uncaught site got a test, and four that could not change the outcome were removed |
@@ -123,8 +123,11 @@ findings, 8 were fixed (zsh's `emulate -c`, `repeat` and code-running glob quali
 value, `refs/Remotes/` on a case-insensitive file system, a refspec split at its last colon, replace
 refs in the base gate's extraction and their tests, the gate-file list's tests), and 2 are recorded
 as limits in the guide: a change that weakens `check.sh` writes the record the base's gate trusts,
-and local tool versions are not checked. The review of the tree that contains this record runs
-after it is written; its result is in the pull request.
+and local tool versions are not checked. As every round found another way for the shell to move
+its directory unseen, the walker's default was flipped too: a command word that is no program on
+PATH (a function or alias of the user's shell, a builtin the walker does not know) now makes the
+directory unknown, so a push after it is refused instead of placed in this clone. The review of the
+tree that contains this record runs after it is written; its result is in the pull request.
 
 ## Red team
 
