@@ -28,8 +28,9 @@ set -euo pipefail
 {
 # Drop any inherited make flags: `-i`/`-k` would make failing recipes (gofmt, vet, the test suite)
 # be ignored and let a broken run record a pass. MAKEFILES would read a makefile before ours, whose
-# `:=` beats our `?=` (a tool replaced by a no-op).
-unset MAKEFLAGS MFLAGS MAKELEVEL GNUMAKEFLAGS MAKEFILES
+# `:=` beats our `?=` (a tool replaced by a no-op). MAKE from the environment wins over make's own, so
+# `MAKE=true` would empty every recipe that runs $(MAKE) (ci-generated); make sets it itself.
+unset MAKEFLAGS MFLAGS MAKELEVEL GNUMAKEFLAGS MAKEFILES MAKE
 # A go.work in a parent directory, or GOWORK, would build and test against other modules than the
 # tree's go.mod and go.sum, as CI (which has none) never does.
 export GOWORK=off

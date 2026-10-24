@@ -53,15 +53,16 @@ func main() {
 }
 
 func run(stdin io.Reader, stderr io.Writer, root string) int {
-	var in hookInput
-	if err := json.NewDecoder(stdin).Decode(&in); err != nil {
-		return 0 // not a Bash tool call we understand; nothing to gate
-	}
-	cmd := in.ToolInput.Command
 	refuse := func(msg string) int {
 		_, _ = fmt.Fprintf(stderr, "sdlc pre-push hook: %s\n  (docs/guides/claude-code-sdlc.md)\n", msg)
 		return 2
 	}
+	var in hookInput
+	if err := json.NewDecoder(stdin).Decode(&in); err != nil {
+		// Input the hook cannot read could hold any command: refuse rather than let it through.
+		return refuse("cannot read the hook input (" + err.Error() + "), so the command cannot be checked")
+	}
+	cmd := in.ToolInput.Command
 	if token := hookToken(cmd); token != "" {
 		return refuse(tokenRefusal(token))
 	}
@@ -276,6 +277,9 @@ func checkSubcommands(calls []string, root string) string {
 	}
 	var aliases []string
 	for _, c := range calls {
+		if pushLike(c) { // a git command, but one that pushes without the pre-push hook
+			return "git " + c + " pushes without running git's pre-push hook; use `git push`"
+		}
 		if !known[c] && !slices.Contains(aliases, c) {
 			aliases = append(aliases, c)
 		}

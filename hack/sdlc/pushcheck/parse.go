@@ -278,6 +278,7 @@ type walker struct {
 	input      inputArgs                 // xargs or parallel adds its input to the command's arguments
 	body       []string                  // the names of the function whose body is being walked, at its definition
 	funcUnread map[string][]unknownRun   // the code each function's body runs that the walker could not read
+	defined    map[string]bool           // functions whose definition certainly ran in this shell (or its parent)
 }
 
 // bodyDir is the directory a function body is walked from: it stands for the directory of each call,
@@ -285,11 +286,15 @@ type walker struct {
 const bodyDir = "/\x00function-body"
 
 // callRun places code a function body runs, recorded relative to bodyDir, at a call of the function
-// from the current directory. A directory the body set itself (an absolute cd, an unknown one) stays.
+// from the current directory. A directory the body set itself (an absolute cd, an unknown one) stays,
+// unless CDPATH or HOME is set by the call, which may take the body's cd elsewhere.
 func (w *walker) callRun(u unknownRun) unknownRun {
 	switch {
 	case u.Dir == bodyDir:
 		u.Dir = w.dir
+	case u.Dir == "":
+	case w.cdpath || w.homeSet || os.Getenv("CDPATH") != "":
+		u.Dir = ""
 	case strings.HasPrefix(u.Dir, bodyDir+"/"):
 		u.Dir = w.resolve(strings.TrimPrefix(u.Dir, bodyDir+"/"))
 	}
@@ -307,7 +312,8 @@ const (
 
 func newWalker(dir, src string) *walker {
 	return &walker{dir: dir, src: src, funcs: map[string]*syntax.Stmt{}, calling: map[string]bool{},
-		cdFuncs: map[string]bool{}, topFuncs: map[*syntax.FuncDecl]bool{}, funcUnread: map[string][]unknownRun{}}
+		cdFuncs: map[string]bool{}, topFuncs: map[*syntax.FuncDecl]bool{}, funcUnread: map[string][]unknownRun{},
+		defined: map[string]bool{}}
 }
 
 // child is a walker for code that runs in a child of this shell (a substitution, a shell the command
@@ -323,6 +329,9 @@ func (w *walker) child(dir, src string) *walker {
 	}
 	for name, runs := range w.funcUnread {
 		c.funcUnread[name] = runs
+	}
+	for name := range w.defined {
+		c.defined[name] = true
 	}
 	for name, body := range w.funcs {
 		if w.unknownWord(name) {
@@ -369,11 +378,22 @@ func (w *walker) block(msg string) {
 func (w *walker) unread(runs ...unknownRun) {
 	if len(w.body) > 0 {
 		for _, name := range w.body {
-			w.funcUnread[name] = append(w.funcUnread[name], runs...)
+			w.funcUnread[name] = appendNew(w.funcUnread[name], runs...)
 		}
 		return
 	}
-	w.unknown = append(w.unknown, runs...)
+	w.unknown = appendNew(w.unknown, runs...)
+}
+
+// appendNew appends the runs list does not hold yet: a function called from several places, or from
+// other functions, records each place once.
+func appendNew(list []unknownRun, runs ...unknownRun) []unknownRun {
+	for _, u := range runs {
+		if !slices.Contains(list, u) {
+			list = append(list, u)
+		}
+	}
+	return list
 }
 
 // blockText blocks the command when text names a git push the walker could not resolve.
@@ -609,7 +629,13 @@ func (w *walker) cmd(s *syntax.Stmt) {
 					w.dir = ""
 				}
 				if i > 0 && seg.op == syntax.OrStmt && isExit(seg.stmt) {
-					continue // the exit runs only on failure; reaching past it keeps the predecessor's cd
+					// The exit runs only on failure, from wherever the chain got to: its commands are
+					// walked from an unknown directory, and reaching past it keeps the predecessor's cd.
+					before := w.dir
+					w.dir = ""
+					w.stmt(seg.stmt)
+					w.dir = before
+					continue
 				}
 				before := w.dir
 				w.stmt(seg.stmt)
@@ -712,6 +738,7 @@ func (w *walker) cmd(s *syntax.Stmt) {
 			switch {
 			case w.topFuncs[c]:
 				w.funcs[n.Value] = c.Body
+				w.defined[n.Value] = true
 			case mayCD:
 				w.cdFuncs[n.Value] = true
 			}
@@ -910,6 +937,8 @@ func (w *walker) changesDir(node syntax.Node) bool {
 		switch n := n.(type) {
 		case *syntax.Subshell, *syntax.CmdSubst, *syntax.ProcSubst:
 			return false
+		case *syntax.FuncDecl: // defining a function moves nothing; a call of it counts (unknownWord)
+			return n.Name == nil && len(n.Names) == 0 // zsh runs an anonymous one at once
 		case *syntax.Stmt:
 			if n.Background || n.Coprocess {
 				return false
@@ -999,12 +1028,12 @@ func (w *walker) autoCD(args []string, lit []bool) bool {
 	if _, err := exec.LookPath(args[0]); err == nil {
 		return false
 	}
-	if _, ok := w.funcs[args[0]]; ok || shellCommand(args[0]) {
+	if _, ok := w.funcs[args[0]]; ok || w.cdFuncs[args[0]] || shellCommand(args[0]) {
 		return false // a builtin (popd, eval …) or function, which zsh does not take for a directory
 	}
 	d := w.resolve(args[0])
-	if d == "" {
-		return true // relative to a directory already unknown
+	if d == "" || strings.HasPrefix(d, bodyDir+"/") {
+		return true // relative to a directory unknown here (already, or a function's call)
 	}
 	fi, err := os.Stat(d)
 	return err == nil && fi.IsDir()
@@ -1232,7 +1261,7 @@ func (w *walker) call(c *syntax.CallExpr, redirs []*syntax.Redirect) {
 var (
 	noVerifyToken = regexp.MustCompile(`(?i)no-verify|--no-v(e(r(i(f)?)?)?)?([^a-z]|$)`)
 	gitVarToken   = regexp.MustCompile(`(?:^|[^A-Za-z0-9_])(GIT_[A-Z0-9_]+)`)
-	plumbingToken = regexp.MustCompile(`(?i)(send|receive|upload)-pack|http-push`)
+	plumbingToken = regexp.MustCompile(`(?i)(send|receive|upload)-pack|http-push|git-remote-|remote-(https?|ftps?|ext|fd)\b`)
 )
 
 // hookToken returns what in text could keep git's pre-push hook from running, or "": --no-verify or
@@ -1362,7 +1391,12 @@ prefix:
 			w.unread(w.callRun(u))
 		}
 		if w.cdFuncs[fn] {
-			w.dir = "" // a function that may be defined, and may cd, may run instead
+			// A function that may cd runs instead. If its definition may not have run, the name may
+			// also be an alias or function of the shell's setup, which runs from here.
+			if !w.defined[fn] {
+				w.unread(unknownRun{Dir: w.dir, Word: fn})
+			}
+			w.dir = ""
 		}
 		if _, ok := w.funcs[fn]; ok {
 			if argvHasGitPush(args, lit) || mentionsGitPush(w.cmdText) {
@@ -1376,7 +1410,7 @@ prefix:
 		}
 	}
 	name := path.Base(strings.TrimPrefix(args[0], "=")) // zsh =cmd expands to the path of cmd
-	if sub, ok := strings.CutPrefix(name, "git-"); ok && (sub == "push" || sub == "config" || gitPushLike[sub] || gitRunners[sub] || cmdOptions[sub] != nil) {
+	if sub, ok := strings.CutPrefix(name, "git-"); ok && (sub == "push" || sub == "config" || pushLike(sub) || gitRunners[sub] || cmdOptions[sub] != nil) {
 		// git's dashed subcommand binaries: git-push is `git push`, so analyse it as git <sub>. Any
 		// other git-* program (git-seed, git-lfs) is run by its own name, never as an alias, so it is
 		// an ordinary command.
@@ -1517,8 +1551,11 @@ prefix:
 		if !program && w.unknownWord(args[0]) {
 			// An alias or function of the shell's setup (or a program not on PATH): it may cd, push
 			// (oh-my-zsh's gp is `git push`, which main.go lets run only in this clone, where git's hook
-			// judges it) or hand its arguments to git (a git alias among them is checked).
-			w.unread(unknownRun{Dir: w.dir, Word: args[0]})
+			// judges it) or hand its arguments to git (a git alias among them is checked). A function the
+			// command defines that may cd was recorded above, where it ran from.
+			if !w.cdFuncs[args[0]] {
+				w.unread(unknownRun{Dir: w.dir, Word: args[0]})
+			}
 			w.calls = append(w.calls, argvGitCalls(args, lit)...)
 			w.dir = ""
 		}
@@ -2228,6 +2265,12 @@ var gitGlobalWithValue = map[string]bool{"-C": true, "-c": true, "--git-dir": tr
 // gitPushLike lists git subcommands that push without running the pre-push hook; they are refused.
 var gitPushLike = map[string]bool{"send-pack": true, "http-push": true}
 
+// pushLike reports whether a git subcommand pushes without git's pre-push hook: send-pack, http-push,
+// and the remote helpers (remote-https, remote-ext …), which run send-pack themselves.
+func pushLike(sub string) bool {
+	return gitPushLike[sub] || strings.HasPrefix(sub, "remote-")
+}
+
 // gitGlobalSafe lists git's global options that change neither the repository nor its hooks; -c is
 // checked on its own. Any other global option before push refuses the command.
 var gitGlobalSafe = map[string]bool{"-C": true, "-c": true, "-p": true, "--paginate": true, "-P": true, "--no-pager": true,
@@ -2316,7 +2359,7 @@ func (w *walker) git(args []string, lit []bool) {
 	switch {
 	case sub == "push":
 		w.gitRunner(sub, rest, restLit) // --receive-pack and --exec run a command
-	case gitPushLike[sub]:
+	case pushLike(sub):
 		w.block("git " + sub + " pushes without running git's pre-push hook; use `git push`")
 		return
 	case sub == "config":

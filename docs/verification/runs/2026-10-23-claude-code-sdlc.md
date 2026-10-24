@@ -26,25 +26,26 @@ The machine was shared with up to 16 review and red-team agents during most runs
 |---------|--------|
 | `go vet ./hack/sdlc/...`; `golangci-lint run --no-config ./hack/sdlc/...` | passed, 0 issues |
 | `shellcheck hack/sdlc/*.sh hack/ci/lint-shell.sh`; `make ci-shell`; `actionlint` | passed |
-| `go test -race -count=1 ./hack/sdlc/...` | passed: `pushcheck` and `sarifgate`, 681 tests (counted with `-json`) |
+| `go test -race -count=1 ./hack/sdlc/...` | passed: `pushcheck` and `sarifgate`, 692 tests (counted with `-json`) |
 | `bash hack/sdlc/test-sdlc.sh` (the gate end to end in scratch repositories with a bare remote, and check.sh with stub make targets) | passed: 193 passed, 0 failed; also with `GOFLAGS=-mod=readonly` (as CI sets it), `PATROL_SDLC_BASE=HEAD~1` and `CI_GO_TEST_FLAGS=-short` set |
 | The suite in a scratch copy of the tree with the review diff's `--text --no-textconv` removed | its two new checks fail (`-diff` and a textconv driver hide main.go's content) |
 | `GOOS=linux CGO_ENABLED=0 GOWORK=off go vet ./...` on macOS (the step check.sh now adds off Linux) | passed, in 3 minutes from a cold cache |
 | A graft making HEAD a root and origin/main its child, in a scratch repository (`graft-check.sh` in the scratchpad), and pushcheck without its graft setting (`graftmut/mutate.py`) | without `hack/sdlc/lib.sh` the changed files are `[]`, with it `[main.go]`; the mutant fails `TestGatePushRunsTheBaseGate` |
 | `/bin/bash hack/ci/lint-shell.sh` (bash 3.2) in a scratch repository with no POSIX sh script | reports SC2086 in its bash script; the version before this change stopped with `sh_files[@]: unbound variable` |
-| Mutation sweep of `hack/sdlc/pushcheck` (a scratchpad script: each refusal, unknown-directory, environment and option-value site of `parse.go`, each `return true` of a predicate, each refusal or early allowing return of `main.go`, and its loop over the pushed sources, disabled or narrowed in turn through `go test -overlay`, the repository untouched) | 145 sites; 142 caught by a failing test, 2 do not compile (the base gate's refusal, which a test asserts, and the extraction's error path); the survivor is an error path of the environment in `baseGate` (git failing to name its directory right after it worked), and two, on the last runs, were code no test could reach: the value a `syntax.Walk` callback returned as it left a node, which Walk ignores, and then the whole after-the-walk probe of a call the statement walk had not reached, which the twentieth round's statement-time walk of words made dead; both were removed. The first sweep, on `0b31e0f`, covered refusal sites only and left 20 in `parse.go` and 5 in `main.go` uncaught; the eleventh and twelfth reviews found more kinds of site, which the sweep now covers. Each uncaught site got a test, and four that could not change the outcome were removed |
+| Mutation sweep of `hack/sdlc/pushcheck` (a scratchpad script: each refusal, unknown-directory, environment and option-value site of `parse.go`, each `return true` of a predicate, each refusal or early allowing return of `main.go`, and its loop over the pushed sources, disabled or narrowed in turn through `go test -overlay`, the repository untouched) | 148 sites; 145 caught by a failing test, 2 do not compile (the base gate's refusal, which a test asserts, and the extraction's error path); the survivor is an error path of the environment in `baseGate` (git failing to name its directory right after it worked), and two, on the last runs, were code no test could reach: the value a `syntax.Walk` callback returned as it left a node, which Walk ignores, and then the whole after-the-walk probe of a call the statement walk had not reached, which the twentieth round's statement-time walk of words made dead; both were removed. The first sweep, on `0b31e0f`, covered refusal sites only and left 20 in `parse.go` and 5 in `main.go` uncaught; the eleventh and twelfth reviews found more kinds of site, which the sweep now covers. Each uncaught site got a test, and four that could not change the outcome were removed |
 | Targeted mutants of the sixteenth round's structural changes (`structural16.py` in the scratchpad: the split of a chained definition, what a child walker inherits, the `program` flag of `env`, `command` and wrappers, a defined function's precedence and its return, zsh code parameters in `typeset`, `set -o NAME -A`, the `TRAP…` and may-cd conditions of hook functions, the text check of a function call's arguments) | 14 mutants (rerun after the seventeenth round, with a child walker's known functions split out), all caught; two more showed code no test could reach (a recursive split that `syntax.Walk` already does, a path check the exact-name lookup makes moot), which was removed |
 | Targeted mutants of the seventeenth round's changes (`structural17.py` in the scratchpad: each place an unknown word is recorded or merged from a child walker, the `program` exemption, the git subcommands taken from a function's or unknown word's arguments and their global-option skip, the names `functions`/`autoload` touch, each word position of the statement-level glob-qualifier check and its use in changesDir, the unreadable `trap` action, the gate-file paths and the unknown-directory branch of main.go) | 18 mutants, all caught |
 | Targeted mutants of the eighteenth round's changes (`structural18.py` in the scratchpad: the escape-sequence reading of the text check, echo text with a backslash, each new record of code the walker did not read (a stdin shell, xargs' or parallel's input, source, dynamic eval, a non-literal command word) and its merge from xargs' walker, the replace options, source's parse of a heredoc and its text check, the stdin refspec and ref forms for fetch and pull and their abbreviations, main.go's message) | 18 mutants, all caught |
 | Targeted mutants of the nineteenth round's changes (`structural19.py` in the scratchpad: the routing of a function body's unread code to the function and its record at a call, the statement context that places a substitution's probe, a child walker's copy of those functions, AUTO_CD's skip of known commands, the hook checks that unread code needs) | 11 mutants, all caught |
 | Targeted mutants of the twentieth round's changes (`structural20.py` in the scratchpad: the statement-time walk of a statement's words, its substitutions and the statements it leaves to stmt, the function body's placeholder directory and callRun's two placements, a body's pushes, hook functions, a call's and a child walker's use of the body's runs, AUTO_CD's builtin-only skip, the clean-gate-files condition for unread code, sarifgate's level `none` and numeric severity) | 16 mutants, all caught (two survived a first run and got tests: a probe repeated for nested statements, and a relative `cd` in a body) |
+| Targeted mutants of the twenty-first round's changes (`structural21.py` in the scratchpad: the walk of an exit fallback and its unknown directory, callRun under CDPATH and HOME, the dedup of recorded code, a maybe-defined function's record at the call and what a child walker knows, AUTO_CD in a body and beside a maybe-defined function, changesDir at named and anonymous function bodies, the remote helpers in the walker, the text net and checkSubcommands, the refusal of unreadable input) | 17 mutants, all caught (three survived a first run and got tests) |
 | A replace ref giving `origin/main` HEAD's tree, in a scratch repository (`replace-check.sh` in the scratchpad) | without `hack/sdlc/lib.sh` the changed files are `[]`; with it, `[main.go]` |
 | `PATH="$PWD/bin:$PATH" go test -race -count=1 ./internal/git/...` (git-lfs 3.7.1 in `bin/`) | passed on `c409428` (and `./internal/reposerver/...` on `6f9f985`); TestLFS passed again after its change to a git wrapper |
 | TestLFS against a client without its LFS filter settings (`go test -overlay`, `lfsmut.sh` in the scratchpad) | fails through the wrapper that skips the system gitconfig; passes when git reads a system config that sets the filter, as the test did before on GitHub's runner |
 
 ## Agent review
 
-Twenty runs of `.claude/workflows/sdlc-review.js` on successive trees, each verified finding fixed
+Twenty-one runs of `.claude/workflows/sdlc-review.js` on successive trees, each verified finding fixed
 before the next run:
 
 | Tree | Blocking (verified) | Minor | Refuted |
@@ -69,6 +70,7 @@ before the next run:
 | `355dcdb` | 6 | 2 | 1 |
 | `1d031ea` | 8 | 3 | 0 |
 | `ecce621` | 7 | 6 | 0 |
+| `03bda33` | 4 | 5 | 0 |
 
 Most findings were ways around the Claude Code hook (shell and git constructs it read differently
 from bash, zsh or git) and tests that could not fail. The seventh run's were six untested branches
@@ -277,8 +279,27 @@ findings were addressed: the hook functions and `CDPATH` above, AUTO_CD skips on
 functions (a modeled program that is not installed can still be a directory), sarifgate's tests
 cover level `none` and a numeric security-severity, and `make sdlc-git-hooks` sets the work tree's
 own value only with `extensions.worktreeConfig`, since git refuses `--worktree` without it in a
-clone with linked worktrees (the earlier recipe exited 128 there; a test covers it). The review of
-the tree that contains this record runs after it is written; its result is in the pull request.
+clone with linked worktrees (the earlier recipe exited 128 there; a test covers it).
+
+The twenty-first run found 4 blocking findings. One came from the twentieth round's removal of the
+after-the-walk probe: the fallback of a chain ending in `|| exit` (`cd X || { git push origin main;
+exit 1; }`) was skipped, not walked, so a push, an unknown word, a git alias or a write to
+origin/main in it went unseen; it is now walked from an unknown directory. CDPATH (or HOME) set
+between a function's definition and its call could take a `cd` in the body elsewhere; a call made
+after either is set now places the body's moved code in an unknown directory. git's remote helpers
+(`git remote-https`, `git-remote-*`) run send-pack themselves, without the pre-push hook; they are
+refused like `git send-pack`, in the walker, among a function's arguments and in the text net
+(`remote-http(s)`, `remote-ftp(s)`, `remote-ext`, `remote-fd`, `git-remote-`). And `MAKE` from the
+environment overrides make's own, so `MAKE=true make sdlc-check` emptied every `$(MAKE)` recipe
+(ci-generated) and still recorded a pass; check.sh drops it, and the shell suite runs check.sh with
+`MAKE=false` (without the fix, three of its checks fail). All 5 minor findings were fixed: a
+function's code is recorded once per place (a chain of helpers calling helpers grew the list
+exponentially, each entry costing several git runs); a function that may cd, called in a
+substitution or defined in a branch, is recorded where it is called rather than from an unknown
+directory (and a definition no longer counts as a cd for the statement holding it, `changesDir`
+stopping at a named function's body); AUTO_CD inside a function body is placed relative to the call;
+and hook input that does not decode is refused instead of let through. The review of the tree that
+contains this record runs after it is written; its result is in the pull request.
 
 ## Red team
 

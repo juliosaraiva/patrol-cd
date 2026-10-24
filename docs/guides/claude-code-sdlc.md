@@ -45,7 +45,8 @@ A documentation-only change (the rule of `hack/ci/classify-changes.sh`: `docs/`,
 The linters read no configuration from outside the tree (`golangci-lint run --no-config`,
 `shellcheck --norc` with `SHELLCHECK_OPTS` cleared), so a file in HOME or a parent directory cannot
 make a local run lenient where CI's is not; Go runs with `GOWORK=off`, so a `go.work` in a parent
-directory cannot replace the tree's modules; and the gate's scripts ignore replace refs and grafts
+directory cannot replace the tree's modules; inherited make flags and `MAKE` are dropped (`-k`, or
+`MAKE=true`, which would empty every recipe that runs `$(MAKE)`); and the gate's scripts ignore replace refs and grafts
 (`GIT_NO_REPLACE_OBJECTS`, `GIT_GRAFT_FILE`), which could make a commit read with another commit's
 tree or parents. A run records nothing when HEAD moved during it (a checkout, reset or stash, even
 one undone before the end, which HEAD's reflog shows).
@@ -168,7 +169,9 @@ Two hooks run it:
      `GIT_*` variable outside a short safe list (the author and committer variables,
      `GIT_TERMINAL_PROMPT`, `GIT_TRACE*`, `GIT_LFS_SKIP_SMUDGE` and a few more; `GIT_EDITOR`,
      `GIT_PAGER` and `GIT_SEQUENCE_EDITOR` with a literal value that is safe shell code), and git's
-     push plumbing (`send-pack`, `receive-pack`, `upload-pack`, `http-push`). The net reads the command
+     push plumbing (`send-pack`, `receive-pack`, `upload-pack`, `http-push`, and the remote helpers
+     `remote-http(s)`, `remote-ftp(s)`, `remote-ext`, `remote-fd` and `git-remote-*`, which run
+     send-pack themselves). Hook input it cannot read is refused too. The net reads the command
      line as written, and each command's words and heredoc bodies as bash expands them, so
      `$'\x2d-no-verify'` counts too. The hook cannot tell what a program, shell code, a shell alias or
      function (oh-my-zsh's `gp='git push'`) or an option it does not model does with such a token, so
@@ -190,8 +193,9 @@ Two hooks run it:
      git's hook runs the gate as committed (`core.hooksPath` is `.githooks`, the hook and
      `hack/sdlc/gate.sh` are there, and the gate's own files have no uncommitted or hidden change),
      which judges what it pushes. It is placed where it runs: code in a function body at each call
-     of the function, in the call's directory moved by any `cd` in the body before it (a function
-     the shell calls on its own, `chpwd` or `TRAPDEBUG`, from an unknown directory); code in a
+     of the function, in the call's directory moved by any `cd` in the body before it (from an
+     unknown directory once `CDPATH` or `HOME` is set, which may take that `cd` elsewhere, and for
+     a function the shell calls on its own, `chpwd` or `TRAPDEBUG`); code in a
      substitution in the directory of its statement. A
      command that does not parse as bash is refused outright. In
      this clone a push is refused while `core.hooksPath` is not
@@ -216,7 +220,8 @@ Two hooks run it:
     not run (after `||`, in an `if`, `case`, loop or function, or in an `if` or `while` condition,
     whose branches can run whether it worked or not) leaves the directory unknown; and so does a
     `cd` that may fail without stopping the command (`cd DIR; git push`), unless `&&` or `|| exit`
-    guards it; sudo's `-D`, `-R` and `-i` run the command from an unknown directory; a relative `cd`
+    guards it (the commands of such an exit fallback, `|| { …; exit 1; }`, run from an unknown
+    directory); sudo's `-D`, `-R` and `-i` run the command from an unknown directory; a relative `cd`
     after `CDPATH` (or zsh's `cdpath`) is set, in any form and also within a word (`${CDPATH:=…}`,
     taken in the order the shell expands it), goes to an unknown directory. A `cd` operand
     with `..` is resolved both ways, lexically as bash's default cd does and as the kernel does
@@ -270,8 +275,9 @@ Two hooks run it:
     - `git -c`, `git --config-env` and `git config` writes of keys outside a short safe list
       (`core.hooksPath`, `alias.*`, `include.*`, `core.pager`, `diff.external`,
       `diff.<driver>.command` …); `--git-dir`, `--work-tree`, `--bare`, `--shallow-file` and other
-      global options before `push`; `git send-pack` and `git http-push`, which push without the
-      hook;
+      global options before `push`; `git send-pack`, `git http-push` and git's remote helpers
+      (`git remote-*`, `git-remote-*`, also handed to a function or an unknown word), which push
+      without the hook;
     - a command git runs for a subcommand that holds a push, or that the hook cannot read:
       `rebase -x`/`--exec` in every spelling git accepts (`-x'…'`, `-ix …`, `--exe=…`), `difftool
       -x`, `filter-branch`'s filters and `--setup`, `send-email`'s command options, `bisect run`,

@@ -139,6 +139,7 @@ func TestFindPushes(t *testing.T) {
 		{name: "a function that cds, never called", command: "f() { cd /x; }; git push origin a", want: []push{{Dir: "/repo", Sources: []string{"a"}}}},
 		{name: "a program's name, maybe redefined to cd", command: "if true; then ls() { cd /x; }; fi; cd /repo && ls && git push origin a", want: []push{{Dir: "", Sources: []string{"a"}}}},
 		{name: "zsh runs an anonymous function at once", command: "() {cd /x} && git push origin a", want: []push{{Dir: "/x", Sources: []string{"a"}}}},
+		{name: "an anonymous function as a pipeline's last element", command: "true | () {cd /x}; git push origin a", want: []push{{Dir: "", Sources: []string{"a"}}}},
 		// A definition chained with && or || is one element of the chain (mvdan.cc/sh reads the chain
 		// as the body); the rest runs here.
 		{name: "a cd chained after a definition", command: "f() { :; } && cd /x; git push origin a", want: []push{{Dir: "", Sources: []string{"a"}}}},
@@ -180,6 +181,9 @@ func TestFindPushes(t *testing.T) {
 		{name: "a loop with continue", command: "for i in 1 2; do [ -f x ] || continue; echo $i; done && git push origin a", want: []push{{Dir: "/repo", Sources: []string{"a"}}}},
 		// A chain that ends in || exit keeps every cd of its && prefix.
 		{name: "two cds guarded by || exit", command: "cd /x && cd sub || exit 1; git push origin a", want: []push{{Dir: "/x/sub", Sources: []string{"a"}}}},
+		// The exit fallback runs, from wherever the chain got to, before it exits.
+		{name: "a push in an exit fallback", command: "cd /x || { git push origin main; exit 1; }", want: []push{{Dir: "", Sources: []string{"main"}}}},
+		{name: "an exit fallback keeps the cd for what follows", command: "cd /x || { echo failed; exit 1; }; git push origin a", want: []push{{Dir: "/x", Sources: []string{"a"}}}},
 		// zsh code that runs in this shell.
 		{name: "emulate -c, as eval", command: "emulate sh -c 'cd /x && git push origin a'", want: []push{{Dir: "/x", Sources: []string{"a"}}}},
 		{name: "emulate -c carries its cd", command: "emulate zsh -c 'cd /x' && git push origin a", want: []push{{Dir: "/x", Sources: []string{"a"}}}},
@@ -631,6 +635,12 @@ func TestFindPushesBlocked(t *testing.T) {
 		{"x=(*(e:'git push origin a':)) &", "a git push through a zsh glob qualifier"},
 		// A trap action the hook cannot read may cd before any later command.
 		{`trap "$a" DEBUG; git push origin a`, "a trap action the hook cannot read"},
+		// An exit fallback's commands are walked like any others.
+		{"cd /x || { git update-ref refs/remotes/origin/main HEAD; exit 1; }", "can move origin/main"},
+		{"cd /x || exit $(git push origin main)", "a git push inside a command or process substitution"},
+		// git's remote helpers run send-pack themselves, without the pre-push hook.
+		{"git remote-codecommit origin codecommit://x", "pushes without running git's pre-push hook"},
+		{"git -C . remote-ext origin 'ext::sh -c x'", "pushes without running git's pre-push hook"},
 		// printf and zsh's echo turn `\n` into a newline: a push on a later line of a piped script.
 		{`cd /other && printf 'true\ngit push origin main\n' | sh`, "a git push through a script piped to a shell"},
 		{`cd /other && echo -e 'true\ngit push origin main' | sh`, "a git push through a script piped to a shell"},
@@ -818,6 +828,7 @@ func TestFindPushesCalls(t *testing.T) {
 		`retry() { for i in 1 2 3; do "$@" && return 0; sleep 5; done; return 1; }; retry git ship origin main`,
 		`f() { "$@"; }; f git -C . ship origin main`,
 		"nosuch-runner git ship origin main",
+		"cd /x || { git ship origin main; exit 1; }",
 	} {
 		got, err := findPushes(command, "/repo")
 		require.NoError(t, err)
@@ -851,6 +862,19 @@ func TestFindPushesUnknownWords(t *testing.T) {
 		{"cd /other && cd /repo && - && true", []unknownRun{{Dir: "/repo", Word: "-"}}},
 		{"x=$(nosuch-gp)", []unknownRun{{Dir: "/repo", Word: "nosuch-gp"}}},
 		{"cd /other && v=$(nosuch-gp)", []unknownRun{{Dir: "/other", Word: "nosuch-gp"}}}, // once, where it runs
+		{"cd /x || { nosuch-gp; exit 1; }", []unknownRun{{Dir: "", Word: "nosuch-gp"}}},   // an exit fallback
+		{"f() { cd sub && ls; }; v=$(f)", nil},                                            // a function this shell defined, called in a substitution
+		// CDPATH or HOME set by a call may take the body's cd elsewhere; a body that does not cd stays.
+		{"f() { cd sub && nosuch-gp; }; CDPATH=/tmp/other; f", []unknownRun{{Dir: "", Word: "nosuch-gp"}}},
+		{"f() { cd sub && nosuch-gp; }; : ${CDPATH:=/tmp/other}; f", []unknownRun{{Dir: "", Word: "nosuch-gp"}}},
+		{"f() { cd ~/x && nosuch-gp; }; HOME=/tmp/h; f", []unknownRun{{Dir: "", Word: "nosuch-gp"}}},
+		{"f() { nosuch-gp; }; CDPATH=/tmp/other; f", []unknownRun{{Dir: "/repo", Word: "nosuch-gp"}}},
+		// AUTO_CD in a body is relative to the call.
+		{"f() { ../x && nosuch-gp; }; f", []unknownRun{{Dir: "/repo", Word: "../x"}, {Dir: "/repo/../x", Word: "nosuch-gp"}}},
+		// A function called from several places records each place once.
+		{"f() { nosuch-gp; }; cd /x && f; cd /x && f", []unknownRun{{Dir: "/x", Word: "nosuch-gp"}}},
+		// After a call that may cd, the next call runs from an unknown directory; nesting adds no more.
+		{"f() { nosuch-gp; }; g() { f; f; }; h() { g; g; }; h", []unknownRun{{Dir: "/repo", Word: "nosuch-gp"}, {Dir: "", Word: "nosuch-gp"}}},
 		{"f() { cd sub && nosuch-gp; }; f", []unknownRun{{Dir: "/repo/sub", Word: "nosuch-gp"}}},
 		{"f() { cd /x && nosuch-gp; }; cd /other && f", []unknownRun{{Dir: "/x", Word: "nosuch-gp"}}},
 		{"f() { nosuch-gp; }; cd /other && f && cd /y && f", []unknownRun{{Dir: "/other", Word: "nosuch-gp"}, {Dir: "/y", Word: "nosuch-gp"}}},

@@ -50,6 +50,9 @@ func TestRunFailsClosed(t *testing.T) {
 		{name: "core.hooksPath in any case", command: "grep -rn CORE.HOOKSPATH docs", want: 2, reason: tokenNet},
 		{name: "the hook's directory", command: "chmod -x .githooks/pre-push", want: 2, reason: tokenNet},
 		{name: "push plumbing", command: "git send-pack origin HEAD", want: 2, reason: tokenNet},
+		{name: "a remote helper", command: "printf 'push refs/heads/a:refs/heads/a\\n\\n' | git remote-https origin https://example.invalid/r.git", want: 2, reason: tokenNet},
+		{name: "a remote helper by its program", command: "git-remote-http origin https://example.invalid/r.git <<<x", want: 2, reason: tokenNet},
+		{name: "a remote helper handed to a function", command: `f() { "$@"; }; f git remote-codecommit origin x`, want: 2, reason: "git remote-codecommit pushes without running git's pre-push hook"},
 		{name: "a safe GIT_* variable", command: "GIT_AUTHOR_NAME=x GIT_EDITOR=true git commit --amend --no-edit", want: 0},
 		{name: "a git alias", command: "git ship origin main", want: 2, reason: "git ship: not a git command but an alias"},
 		{name: "a git alias through a function", command: `f() { "$@"; }; f git ship origin main`, want: 2, reason: "git ship: not a git command but an alias"},
@@ -103,6 +106,10 @@ func TestRunUnknownWords(t *testing.T) {
 		{"cd " + other + " || exit 1; out=$(nosuch-gp origin main); cd " + root + " || exit 1; echo \"$out\"", 2, "it would run in " + other},
 		{"v=$(nosuch-tool --version); cd sub; ls", 0, ""},
 		{"f() { v=$(nosuch-tool); }; echo hi", 0, ""}, // a substitution in a body runs where f is called
+		// A function that may cd, called in a substitution or defined in a branch, runs from here.
+		{"f() { cd sub && ls; }; v=$(f)", 0, ""},
+		{"if true; then f() { cd sub && ls; }; fi; f", 0, ""},
+		{"if true; then f() { cd sub && ls; }; fi; cd " + other + " && f", 2, "`f` is no program on PATH"},
 		{"f() { v=$(nosuch-gp origin main); }; cd " + other + " && f", 2, "`nosuch-gp` is no program on PATH, builtin or function the command defines, so it may be an alias or function of the shell's setup, which can push (oh-my-zsh's gp is `git push`); it would run in " + other},
 		{"f() { cat <(nosuch-gp); }; cd " + other + " && f", 2, "it would run in " + other},
 		{"f() { nosuch-tool; }; cd " + other + " && bash -c f", 2, "`nosuch-tool` is no program on PATH, builtin or function the command defines, so it may be an alias or function of the shell's setup, which can push (oh-my-zsh's gp is `git push`); it would run in " + other},
@@ -150,6 +157,16 @@ func TestRunUnknownWords(t *testing.T) {
 	gitIn(t, root, "update-index", "--no-skip-worktree", ".githooks/pre-push")
 	rc, _ = unread()
 	assert.Equal(t, 0, rc)
+}
+
+// Hook input the hook cannot read could hold any command, so it is refused.
+func TestRunUnreadableInput(t *testing.T) {
+	t.Parallel()
+	for _, in := range []string{"not json", `{"tool_input":{"command":"git push origin main","cwd":1}}`, ""} {
+		var stderr bytes.Buffer
+		assert.Equal(t, 2, run(strings.NewReader(in), &stderr, t.TempDir()), in)
+		assert.Contains(t, stderr.String(), "cannot read the hook input", in)
+	}
 }
 
 // The terminal tool gives its own directory: relative to the session's, absolute, or under ~.

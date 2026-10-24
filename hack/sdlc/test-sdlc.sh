@@ -557,7 +557,7 @@ marks=$work/chk-marks
 mkdir -p "$chk/hack/sdlc" "$chk/hack/kind" "$marks"
 cp "$src"/hack/sdlc/{check.sh,lib.sh} "$chk/hack/sdlc/"
 # shellcheck disable=SC2016 # make expands $(MARKS), not the shell
-printf 'ci-static release-lint-commits:\n\t@true\nci-scripts:\n\t@touch "$(MARKS)/started"; while [ ! -e "$(MARKS)/go" ]; do sleep 0.1; done; rm -f "$(MARKS)/started" "$(MARKS)/go"\n' >"$chk/Makefile"
+printf 'ci-static release-lint-commits:\n\t@[ "$(MAKE)" != false ]\nci-scripts:\n\t@touch "$(MARKS)/started"; while [ ! -e "$(MARKS)/go" ]; do sleep 0.1; done; rm -f "$(MARKS)/started" "$(MARKS)/go"\n' >"$chk/Makefile"
 touch "$chk/hack/none.mk"
 git -C "$chk" init -q -b main
 git -C "$chk" add -A
@@ -571,7 +571,8 @@ checkrun() { # checkrun N ACTION: commit kind script N, run check.sh, do ACTION 
 	local rc=0 tries=0
 	# Without what makes check.sh check but record nothing (CI's GOFLAGS, a PATROL_SDLC_BASE set for
 	# a local iteration, Go's env file), so the test asserts the recording path wherever it runs.
-	(cd "$chk" && env -u PATROL_SDLC_BASE -u CI_GO_TEST_FLAGS -u GOFLAGS GOENV=off MARKS="$marks" hack/sdlc/check.sh >"$work/chk.out" 2>&1) &
+	# MAKE=false too: check.sh must drop it, or the stub's ci-static fails (as $(MAKE) recipes would be emptied).
+	(cd "$chk" && env -u PATROL_SDLC_BASE -u CI_GO_TEST_FLAGS -u GOFLAGS GOENV=off MAKE=false MARKS="$marks" hack/sdlc/check.sh >"$work/chk.out" 2>&1) &
 	local pid=$!
 	while [[ ! -e $marks/started && $tries -lt 300 ]]; do
 		sleep 0.1
