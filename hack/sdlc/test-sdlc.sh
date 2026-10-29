@@ -15,6 +15,12 @@ src=$(cd "$here/../.." && pwd)
 work=$(mktemp -d)
 trap 'rm -rf "$work"' EXIT
 export GIT_CONFIG_GLOBAL=/dev/null GIT_CONFIG_SYSTEM=/dev/null
+# git's defaults for what the gate turns off itself (check.sh, which runs this suite, exports them),
+# so its replace-ref and graft tests can fail; and no function the caller exports (Fedora's which,
+# Lmod's module), which sdlc_weakened counts and every bash this suite starts would import.
+unset GIT_NO_REPLACE_OBJECTS GIT_GRAFT_FILE
+# shellcheck disable=SC2163 # un-exports the function named by $f
+while read -r _ _ f; do export -nf "$f"; done < <(declare -Fx)
 export GIT_AUTHOR_NAME=t GIT_AUTHOR_EMAIL=t@example.invalid GIT_COMMITTER_NAME=t GIT_COMMITTER_EMAIL=t@example.invalid
 
 passed=0

@@ -55,7 +55,8 @@ a check: a make variable the makefiles (and those they include) define with `?=`
 empty string, which make takes as defined (an empty `CI_RACE` drops `-race`, an empty `ACTIONLINT`
 lints nothing), `CI_GO_TEST_FLAGS`, `GOFLAGS` (also from Go's env file), or `BASH_ENV` or an
 exported bash function, which every bash the checks start reads, where a function can stand in for
-a tool.
+a tool. Some distributions export one in every login shell (Fedora's `which`, Lmod's `module`):
+un-export it (`export -nf which`) before the run.
 
 When every check passed on a **clean** tree, it writes a record for HEAD's tree
 (`git rev-parse HEAD^{tree}`) to `$(git rev-parse --git-common-dir)/patrol-sdlc/checks/<tree>`. A
@@ -315,8 +316,10 @@ Two hooks run it:
     - a push run in a container (`kubectl exec … -- git push`, `docker exec ctr git push`): it
       pushes the container's clone, whose commits the gate does not judge and where git's hook does
       not run. A shell run there (`docker exec ctr sh -c '…'`, `kubectl exec -i pod -- sh <<EOF`, a
-      script piped to it) is refused when the command's text names a push, with or without `--`; a
-      push given to `ssh` is refused as a push through a command it cannot check;
+      script piped to it, also behind a wrapper: `… | sudo docker exec -i ctr sh`) is refused when
+      the command's text names a push, with or without `--`, also as the command of `xargs`, `git
+      bisect run` or `submodule foreach`; a script piped to `ssh host sh` is refused as a push run
+      on another host, and a push given to `ssh` as a push through a command it cannot check;
     - a `GIT_*` variable outside a short safe list set in the shell (`GIT_DIR`, `GIT_WORK_TREE`,
       `GIT_CONFIG_*` …): inline, with `env` (also after `--`, and with a value that is not
       literal), `export`/`readonly`/`declare` (also quoted, `"NAME=VALUE"`, and through a

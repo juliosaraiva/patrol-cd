@@ -26,8 +26,8 @@ The machine was shared with up to 16 review and red-team agents during most runs
 |---------|--------|
 | `go vet ./hack/sdlc/...`; `golangci-lint run --no-config ./hack/sdlc/...` | passed, 0 issues |
 | `shellcheck hack/sdlc/*.sh hack/ci/lint-shell.sh`; `make ci-shell`; `actionlint` | passed |
-| `go test -race -count=1 ./hack/sdlc/...` | passed: `pushcheck` and `sarifgate`, 823 tests (counted with `-json`) |
-| `bash hack/sdlc/test-sdlc.sh` (the gate end to end in scratch repositories with a bare remote, and check.sh with stub make targets) | passed: 230 passed, 0 failed (also under /bin/bash 3.2); also with `GOFLAGS=-mod=readonly` (as CI sets it), `PATROL_SDLC_BASE=HEAD~1` and `CI_GO_TEST_FLAGS=-short` set |
+| `go test -race -count=1 ./hack/sdlc/...` | passed: `pushcheck` and `sarifgate`, 842 tests (counted with `-json`) |
+| `bash hack/sdlc/test-sdlc.sh` (the gate end to end in scratch repositories with a bare remote, and check.sh with stub make targets) | passed: 230 passed, 0 failed (also under /bin/bash 3.2, and with an exported function as Fedora's `which`); also with `GOFLAGS=-mod=readonly` (as CI sets it), `PATROL_SDLC_BASE=HEAD~1` and `CI_GO_TEST_FLAGS=-short` set |
 | The suite in a scratch copy of the tree with the review diff's `--text --no-textconv` removed | its two new checks fail (`-diff` and a textconv driver hide main.go's content) |
 | `GOOS=linux CGO_ENABLED=0 GOWORK=off go vet ./...` on macOS (the step check.sh now adds off Linux) | passed, in 3 minutes from a cold cache |
 | A graft making HEAD a root and origin/main its child, in a scratch repository (`graft-check.sh` in the scratchpad), and pushcheck without its graft setting (`graftmut/mutate.py`) | without `hack/sdlc/lib.sh` the changed files are `[]`, with it `[main.go]`; the mutant fails `TestGatePushRunsTheBaseGate` |
@@ -48,13 +48,14 @@ The machine was shared with up to 16 review and red-team agents during most runs
 | Targeted mutants of the twenty-eighth round's changes (`libmut28.py` in the scratchpad, through the shell suite in a mirror of the gate's files: an empty `?=` variable not counted as weakening a check, a `.env` under `ui/` exempted, every `.env` counted; through `go test -overlay`: the hook's `git status` with optional locks, and the reviewer's depth-first `funcMayCD` regression that keeps a verdict cut short by recursion, with the substitution's walker asking about functions in name order) | 5 mutants, all caught; the regression, which the two mutual-recursion cases caught in 38 and 35 runs of 40 while Go's map order chose, is caught in 40 of 40 |
 | Targeted mutants of the twenty-ninth round's changes (`mut29.py` in the scratchpad: through `go test -overlay`, a push in a container not refused, and placed in this clone again; through the shell suite in a mirror of the gate's files, `make sdlc-git-hooks` not let through without a binary, and sdlc_weakened not following included makefiles, following one level only, and not reading `-include`) | 6 mutants, all caught |
 | Targeted mutants of the thirtieth round's changes (`mut30.py` in the scratchpad: through `go test -overlay`, symbolic-ref read as a read in every form, in none, with two names, with an unknown option and with a dynamic word; a container's shell text not checked, its redirections not passed, a pipe into it not checked, an argv push in it not refused; submodule foreach's several words not walked; `-c` editors and pagers refused, their code not checked, and allowed through `--config-env`; through the shell suite in a mirror of the gate's files, BASH_ENV and exported functions not counted as weakening) | 15 mutants, all caught |
+| Targeted mutants of the thirty-first round's changes (`mut31.py` in the scratchpad: through `go test -overlay`, the command's text not given to the walkers of xargs and git's runners, a wrapped remote shell read as a local one, only a first-word runner taken as remote, ssh not remote, and hookRuns passing when git cannot list the gate's files; through the shell suite in a mirror of the gate's files, run with an exported function, the suite not un-exporting it) | 7 mutants, all caught (one did not compile and was rewritten) |
 | A replace ref giving `origin/main` HEAD's tree, in a scratch repository (`replace-check.sh` in the scratchpad) | without `hack/sdlc/lib.sh` the changed files are `[]`; with it, `[main.go]` |
 | `PATH="$PWD/bin:$PATH" go test -race -count=1 ./internal/git/...` (git-lfs 3.7.1 in `bin/`) | passed on `c409428` (and `./internal/reposerver/...` on `6f9f985`); TestLFS passed again after its change to a git wrapper |
 | TestLFS against a client without its LFS filter settings (`go test -overlay`, `lfsmut.sh` in the scratchpad) | fails through the wrapper that skips the system gitconfig; passes when git reads a system config that sets the filter, as the test did before on GitHub's runner |
 
 ## Agent review
 
-Thirty runs of `.claude/workflows/sdlc-review.js` on successive trees, each verified finding fixed
+Thirty-one runs of `.claude/workflows/sdlc-review.js` on successive trees, each verified finding fixed
 before the next run:
 
 | Tree | Blocking (verified) | Minor | Refuted |
@@ -89,6 +90,7 @@ before the next run:
 | `4816846` | 1 | 4 | 0 |
 | `fe1ba6a` | 2 | 2 | 0 |
 | `37ab45e` | 2 | 6 | 0 |
+| `6874d84` | 3 | 6 | 0 |
 
 Most findings were ways around the Claude Code hook (shell and git constructs it read differently
 from bash, zsh or git) and tests that could not fail. The seventh run's were six untested branches
@@ -478,6 +480,21 @@ piped shell (`| grep sh`) has tests; `BASH_ENV` and exported bash functions coun
 check, since every bash the checks start reads them; and the refusal of a word after a sourced file
 says the `cd` must come after the `source`. The sixth, that the local CodeQL database is built for
 the host's OS (on macOS, Linux-only files are not analyzed), is in the guide's Limits.
+
+The thirty-first run found 3 blocking findings, two of them missing tests of the previous commit's
+new rules: symbolic-ref's `--` and `-m VALUE` forms, whose miscounting would have read a write as a
+read, and the literal value `git -c core.editor` needs. The third was the gate's own suite: run
+where the environment exports a bash function (Fedora's which2.sh does in every login shell), its
+weakening checks, and check.sh's recording, failed; the suite now un-exports inherited functions,
+and unsets the replace-ref and graft settings check.sh exports, so its tests of them can fail. Of
+the 6 minor findings, all were fixed: a script piped to a container's shell behind a wrapper, or to
+`ssh host sh`, is refused instead of read as this clone's push; the walkers of `xargs` and git's
+runners keep the command's text, which the container check reads; the remaining branches of the
+container check and hookRuns' refusal when git cannot list the gate's files have tests; and a CodeQL
+bundle counts as installed only once its last step wrote a marker, so a partial unpack is not used.
+During this round the clone's git hook setting was found changed to an absolute path while
+worktrees were being created for other agents (the cause was not established in the transcripts);
+`make sdlc-git-hooks` restored it, and worktrees are now created with plain `git worktree add`.
 
 ## Red team
 

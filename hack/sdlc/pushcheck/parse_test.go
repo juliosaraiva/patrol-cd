@@ -550,7 +550,18 @@ func TestFindPushesBlocked(t *testing.T) {
 		{"kubectl exec pod -- git push origin a", "a git push run in a container"},
 		{"docker exec ctr -- git push origin feature", "a git push run in a container"},
 		{"kubectl -n x exec toolbox -- sh -c 'cd /tmp/gb && git push origin smoke'", "a git push run in a container"},
-		{"docker exec ctr sh -c 'git push origin feature'", "a git push run in a container"}, // docker's form has no --
+		{"docker exec ctr sh -c 'git push origin feature'", "a git push run in a container"},      // docker's form has no --
+		{"docker exec ctr /bin/sh -c 'git push origin feature'", "a git push run in a container"}, // a shell by path
+		{`kubectl exec pod -- git submodule foreach "git push origin $B"`, "a git push through git submodule"},
+		// ... also as the command of a runner git or xargs starts, which reads the command's text.
+		{"git bisect run docker exec ctr sh -c 'git push origin feature'", "a git push through git bisect"},
+		{"git submodule foreach docker exec ctr sh -c 'git push origin feature'", "a git push through git submodule"},
+		{"xargs -I{} docker exec {} sh -c 'git push origin feature' < ctrs", "a git push through xargs"},
+		// ... and a script piped to a container's shell, or another host's, behind a wrapper.
+		{"echo 'git push origin feature' | sudo docker exec -i ctr sh", "a git push run in a container"},
+		{"echo 'git push origin feature' | env docker exec -i ctr sh", "a git push run in a container"},
+		{"echo 'git push origin feature' | timeout 60 kubectl exec -i pod -- sh", "a git push run in a container"},
+		{"echo 'git push origin feature' | ssh host sh", "a git push run on another host"},
 		{"docker exec -w /src -it ctr bash -lc 'git push origin feature'", "a git push run in a container"},
 		{"kubectl exec -i pod -- sh <<'EOF'\ngit push origin feature\nEOF", "a git push run in a container"},
 		{"kubectl exec -i pod -- sh -s <<<'git push origin feature'", "a git push run in a container"},
@@ -563,6 +574,9 @@ func TestFindPushesBlocked(t *testing.T) {
 		{"git symbolic-ref -d refs/remotes/origin/HEAD", "can move origin/main"},
 		{"git symbolic-ref --delete -q refs/remotes/origin/HEAD", "can move origin/main"},
 		{"git symbolic-ref --del refs/remotes/origin/HEAD", "can move origin/main"}, // an abbreviation
+		{"git symbolic-ref -- refs/remotes/origin/main refs/heads/x", "can move origin/main"},
+		{"git symbolic-ref -m moved refs/remotes/origin/main refs/heads/x", "can move origin/main"}, // -m takes a value
+		{"git symbolic-ref -mmoved refs/remotes/origin/HEAD refs/heads/x", "can move origin/main"},
 		{`git symbolic-ref "$R" refs/remotes/origin/x`, "can move origin/main"},
 		// submodule foreach runs several words as the command.
 		{"git submodule foreach git push origin main", "a git push through git submodule"},
@@ -570,6 +584,10 @@ func TestFindPushesBlocked(t *testing.T) {
 		// An editor or pager that runs git or a push is refused, as in GIT_EDITOR.
 		{"git -c core.editor='git push origin main' rebase --continue", "core.editor"},
 		{"git -c core.pager=less --config-env=core.editor=ED log", "core.editor"},
+		// ... and so is one the hook cannot read.
+		{`git -c core.editor="$ED" rebase --continue`, "core.editor"},
+		{`git -c core.pager=$(echo cat) log -1`, "core.pager"},
+		{`git -c sequence.editor="$E" rebase -i origin/main`, "sequence.editor"},
 		{"declare -x GIT_DIR; git push", gitEnv},
 		{"(( GIT_DIR++ )); git push", gitEnv},
 		// Code the command defines under a name, run later through it.
@@ -839,6 +857,8 @@ func TestFindPushesAllowed(t *testing.T) {
 		"git symbolic-ref --short refs/remotes/origin/HEAD",
 		"git symbolic-ref refs/remotes/origin/HEAD | sed 's@^refs/remotes/origin/@@'",
 		"git symbolic-ref -q --short refs/remotes/origin/HEAD || echo main",
+		"git symbolic-ref -m r refs/remotes/origin/HEAD",
+		"git symbolic-ref -- refs/remotes/origin/HEAD",
 		// An editor or pager as literal code that runs no git, as GIT_EDITOR may be.
 		"git -c core.editor=true rebase --continue",
 		"git -c sequence.editor=: rebase -i --autosquash origin/main",
@@ -849,6 +869,8 @@ func TestFindPushesAllowed(t *testing.T) {
 		// A shell in a container with no push.
 		"docker exec ctr sh -c 'git status'",
 		"kubectl exec -i pod -- sh <<'EOF'\ngit log -1\nEOF",
+		"echo 'git status' | kubectl exec -i pod -- sh",
+		"echo 'git status' | sudo docker exec -i ctr sh",
 		"git submodule foreach git status",
 		"git rebase --onto origin/main main fix/push-gate-abbrev",
 		"git rebase --exec 'go test ./hack/sdlc/pushcheck/...' origin/main",

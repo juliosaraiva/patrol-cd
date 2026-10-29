@@ -54,7 +54,9 @@ fetch() {
 }
 
 install() {
-	[[ -x $codeql ]] && return 0
+	# The marker is written last: an unpack or move that stopped part way (an interrupt, a full disk)
+	# is not taken for an install, so a query pack missing files cannot run fewer queries unnoticed.
+	[[ -x $codeql && -f $dir/.installed ]] && return 0
 	command -v zstd >/dev/null 2>&1 || {
 		echo "codeql: zstd is needed to unpack the bundle (brew install zstd / apt-get install zstd)" >&2
 		exit 1
@@ -68,6 +70,7 @@ install() {
 	mkdir -p "$dir"
 	mv "$tmp/x/codeql" "$dir/codeql"
 	"$codeql" version --format=terse
+	printf '%s\n' "$sha256" >"$dir/.installed"
 }
 
 analyze() {

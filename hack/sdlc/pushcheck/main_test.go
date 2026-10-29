@@ -186,6 +186,17 @@ func TestRunUnknownWords(t *testing.T) {
 	gitIn(t, root, "update-index", "--no-skip-worktree", ".githooks/pre-push")
 	rc, _ = unread()
 	assert.Equal(t, 0, rc)
+	// Nor when git cannot list them (a corrupt index): it fails closed.
+	index := filepath.Join(root, ".git", "index")
+	saved, err := os.ReadFile(index)
+	require.NoError(t, err)
+	require.NoError(t, os.WriteFile(index, []byte("not an index"), 0o644))
+	rc, msg = unread()
+	assert.Equal(t, 2, rc)
+	assert.Contains(t, msg, "git cannot list them")
+	require.NoError(t, os.WriteFile(index, saved, 0o644))
+	rc, _ = unread()
+	assert.Equal(t, 0, rc)
 }
 
 // Hook input the hook cannot read could hold any command, so it is refused.

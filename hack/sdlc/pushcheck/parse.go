@@ -601,17 +601,28 @@ func pipesToShell(c *syntax.BinaryCmd) bool {
 	// The shell may come behind a command that runs it (env, command, nice, sudo, timeout 60, a
 	// program the walker does not model): it still reads the pipe. One that reads its input as data
 	// (grep sh), or hands it to the command as arguments (xargs), runs no shell on it.
+	// A shell behind a container runner or ssh, after any wrapper (sudo docker exec -i ctr sh), runs
+	// elsewhere: pipesToContainer reads that pipe.
 	args, lit := fields(right.Args)
-	if len(args) > 0 && lit[0] && (dataCommands[path.Base(args[0])] || execRunners[path.Base(args[0])] ||
+	if len(args) > 0 && lit[0] && (dataCommands[path.Base(args[0])] ||
 		path.Base(args[0]) == "xargs" || path.Base(args[0]) == "parallel") {
 		return false
 	}
 	for i := range args {
+		if lit[i] && remoteRunners(path.Base(args[i])) {
+			return false
+		}
 		if lit[i] && shells[path.Base(args[i])] {
 			return readsStdin(args[i+1:], lit[i+1:])
 		}
 	}
 	return false
+}
+
+// remoteRunners reports whether name runs its command in a container or on another host: an exec
+// runner (kubectl, docker …) or ssh.
+func remoteRunners(name string) bool {
+	return execRunners[name] || name == "ssh"
 }
 
 // readsStdin reports whether a shell given these arguments reads its script from standard input:
@@ -2494,7 +2505,11 @@ func sudoMoves(opts []string) bool {
 // containerPush is why a git push run in a container is refused: it pushes the container's clone,
 // whose commits the gate does not judge, and git's pre-push hook does not run there.
 func containerPush(runner string) string {
-	return "a git push run in a container (" + runner + " … git push) cannot be checked: the gate judges this clone's commits, and git's pre-push hook does not run there; push from this clone, or run it outside Claude Code"
+	where := "in a container"
+	if runner == "ssh" {
+		where = "on another host"
+	}
+	return "a git push run " + where + " (" + runner + " … git push) cannot be checked: the gate judges this clone's commits, and git's pre-push hook does not run there; push from this clone, or run it outside Claude Code"
 }
 
 // execRunner reads a command run in a container (kubectl exec POD -- CMD, docker exec CTR CMD), where
@@ -2532,8 +2547,9 @@ func (w *walker) execRunner(args []string, lit []bool, redirs []*syntax.Redirect
 	}
 }
 
-// pipesToContainer returns the runner when a pipeline's last element runs a shell in a container (`…
-// | kubectl exec -i pod -- sh`), which reads its script from the pipe.
+// pipesToContainer returns the runner when a pipeline's last element runs a shell in a container or
+// on another host (`… | kubectl exec -i pod -- sh`, `… | sudo docker exec -i ctr sh`, `… | ssh host
+// sh`), which reads its script from the pipe.
 func pipesToContainer(c *syntax.BinaryCmd) (string, bool) {
 	if c.Op != syntax.Pipe && c.Op != syntax.PipeAll {
 		return "", false
@@ -2543,12 +2559,14 @@ func pipesToContainer(c *syntax.BinaryCmd) (string, bool) {
 		return "", false
 	}
 	args, lit := fields(right.Args)
-	if len(args) == 0 || !lit[0] || !execRunners[path.Base(args[0])] {
-		return "", false
-	}
-	for i := 1; i < len(args); i++ {
-		if lit[i] && shells[path.Base(args[i])] {
-			return path.Base(args[0]), true
+	runner := ""
+	for i := range args {
+		switch {
+		case !lit[i]:
+		case runner == "" && remoteRunners(path.Base(args[i])):
+			runner = path.Base(args[i]) // after any wrapper: sudo docker exec -i ctr sh
+		case runner != "" && shells[path.Base(args[i])]:
+			return runner, true
 		}
 	}
 	return "", false
@@ -2686,6 +2704,7 @@ func (w *walker) xargs(name string, args []string, lit []bool, redirs []*syntax.
 	// since the input adds arguments the gate cannot see; any other command (git branch, git add,
 	// grep) is allowed. A shell there may take its script from the input (shell()).
 	s := newWalker(w.dir, w.src)
+	s.cmdText = w.cmdText // the command's text, which a container's shell check reads
 	s.program, s.input = true, inputAppended
 	if name == "parallel" || replacesInput(args[:len(args)-len(inner)], lit) {
 		s.input = inputReplaced
@@ -3222,6 +3241,7 @@ func (w *walker) gitRunner(sub string, args []string, lit []bool) {
 	// carries runs probe on a fresh walker; a push or refusal it finds refuses the whole command.
 	carries := func(probe func(*walker)) {
 		s := newWalker(w.dir, w.src)
+		s.cmdText = w.cmdText
 		probe(s)
 		w.calls = append(w.calls, s.calls...)
 		if len(s.pushes) > 0 || s.blocked != "" {
