@@ -269,7 +269,8 @@ stale` until the orchestrator regenerates the document with the new services (ex
 document generates without errors).
 
 Resource health from the tree (issue #11), run on 2026-10-29 (macOS arm64, Go 1.27.3, envtest
-kube-apiserver 1.36.0):
+kube-apiserver 1.36.0); the exact commands and results, with the later runs and the review's
+mutation checks, are V-0044 in [`docs/verification/log.md`](../../verification/log.md):
 
 ```bash
 go vet ./internal/apiserver/services/applications/ ./internal/cli/app/ ./internal/compare/   # ok
@@ -288,8 +289,10 @@ go run ./hack/parity && go run ./hack/parity -check                           # 
 
 Without the change (`go test -overlay` with the previous `crud.go`, `watch.go` and
 `operations.go`), `TestApplicationResourceHealthFromTree` fails in get, refresh, watch, sync,
-rollback, unavailable and slow controller (list and inline pass: they guard upstream List and
-inline health), and `TestE2EAppResourceHealthFromTree` fails (empty HEALTH column, then `app
-wait --health --resource :ConfigMap:cfg` times out after 15 s). With the watch pause disabled the
-slow-controller subtest counts 6 tree reads instead of 1; with a fill that writes into its
-argument `TestWithTreeHealth` fails and `-race` reports a data race in the watch subtest.
+rollback, unavailable, slow controller and watch deleted (list and inline pass: they guard
+upstream List and inline health), and `TestE2EAppResourceHealthFromTree` fails (empty HEALTH
+column, then `app wait --health --resource :ConfigMap:cfg` times out after 15 s). With the
+watch pause disabled the slow-controller subtest counts 6 tree reads instead of 1; with a fill
+that writes into its argument `TestWithTreeHealth` fails and `-race` reports a data race in the
+watch subtest; with `DELETED` events filled too, the watch deleted subtest fails (the event
+carries the tree's health and the tree is read once more).
