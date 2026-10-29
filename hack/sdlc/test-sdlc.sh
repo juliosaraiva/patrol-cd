@@ -578,7 +578,7 @@ rm .git/info/grafts
 printf 'GOLANGCI_LINT ?= golangci-lint\n' >"$work/w.mk"
 printf 'GOFLAGS=-skip=TestX\n' >"$work/goenv"
 # shellcheck source=hack/sdlc/lib.sh
-check "weakened: nothing set" "" "$(unset CI_GO_TEST_FLAGS GOLANGCI_LINT && source "$src/hack/sdlc/lib.sh" && GOENV=off GOFLAGS='' sdlc_weakened "$work/w.mk")"
+check "weakened: nothing set" "" "$(unset CI_GO_TEST_FLAGS GOLANGCI_LINT BASH_ENV && source "$src/hack/sdlc/lib.sh" && GOENV=off GOFLAGS='' sdlc_weakened "$work/w.mk")"
 # shellcheck source=hack/sdlc/lib.sh
 check "weakened: a ?= variable" GOLANGCI_LINT "$(unset CI_GO_TEST_FLAGS && source "$src/hack/sdlc/lib.sh" && GOENV=off GOFLAGS='' GOLANGCI_LINT=true sdlc_weakened "$work/w.mk")"
 # Set to the empty string, a ?= variable is defined for make, so its default does not apply.
@@ -596,6 +596,12 @@ check "weakened: a ?= variable of an included makefile" "NESTED_A,NESTED_B" "$(u
 check "weakened: the project's makefiles include hack/kind/kind.mk's" KIND_IMAGES "$(cd "$src" && unset CI_GO_TEST_FLAGS && source hack/sdlc/lib.sh && GOENV=off GOFLAGS='' KIND_IMAGES=x sdlc_weakened Makefile hack/*.mk | grep -x KIND_IMAGES)"
 # shellcheck source=hack/sdlc/lib.sh
 check "weakened: GOFLAGS in Go's env file" "GOFLAGS (go env)" "$(unset CI_GO_TEST_FLAGS GOLANGCI_LINT && source "$src/hack/sdlc/lib.sh" && GOENV=$work/goenv GOFLAGS='' sdlc_weakened "$work/w.mk")"
+# BASH_ENV, and an exported function, reach every bash the checks start, where a function can stand
+# in for a tool.
+# shellcheck source=hack/sdlc/lib.sh
+check "weakened: BASH_ENV" BASH_ENV "$(unset CI_GO_TEST_FLAGS GOLANGCI_LINT && source "$src/hack/sdlc/lib.sh" && GOENV=off GOFLAGS='' BASH_ENV=/dev/null sdlc_weakened "$work/w.mk")"
+# shellcheck source=hack/sdlc/lib.sh disable=SC2329 # gofmt is called by the checks, not here
+check "weakened: an exported function" "exported function gofmt" "$(unset CI_GO_TEST_FLAGS GOLANGCI_LINT BASH_ENV && source "$src/hack/sdlc/lib.sh" && gofmt() { :; } && export -f gofmt && GOENV=off GOFLAGS='' sdlc_weakened "$work/w.mk")"
 
 # check.sh end to end, in a scratch repository (a Go module of two packages) whose make targets are
 # stubs that log what they were asked to run: the step for a kind script waits for a marker when
@@ -627,9 +633,9 @@ checkrun() { # checkrun N ACTION: commit kind script N, run check.sh, do ACTION 
 	git -C "$chk" commit -q -m "chore: kind script $1"
 	local rc=0 tries=0
 	# Without what makes check.sh check but record nothing (CI's GOFLAGS, a PATROL_SDLC_BASE set for
-	# a local iteration, Go's env file), so the test asserts the recording path wherever it runs.
+	# a local iteration, Go's env file, BASH_ENV), so the test asserts the recording path wherever it runs.
 	# MAKE=false too: check.sh must drop it, or the stub's ci-static fails (as $(MAKE) recipes would be emptied).
-	(cd "$chk" && env -u PATROL_SDLC_BASE -u CI_GO_TEST_FLAGS -u GOFLAGS GOENV=off MAKE=false MARKS="$marks" LOG="$work/chk.log" hack/sdlc/check.sh >"$work/chk.out" 2>&1) &
+	(cd "$chk" && env -u PATROL_SDLC_BASE -u CI_GO_TEST_FLAGS -u GOFLAGS -u BASH_ENV GOENV=off MAKE=false MARKS="$marks" LOG="$work/chk.log" hack/sdlc/check.sh >"$work/chk.out" 2>&1) &
 	local pid=$!
 	while [[ ! -e $marks/started && $tries -lt 300 ]]; do
 		sleep 0.1
@@ -664,7 +670,7 @@ selected() { # selected FILE...: from the base, commit a change to each FILE and
 	git -C "$chk" add -A
 	git -C "$chk" commit -q -m "chore: change"
 	: >"$work/chk.log"
-	(cd "$chk" && env -u PATROL_SDLC_BASE -u CI_GO_TEST_FLAGS -u GOFLAGS -u MARKS GOENV=off LOG="$work/chk.log" hack/sdlc/check.sh --no-codeql >"$work/sel.out" 2>&1) || echo "check.sh failed: $(tail -n 3 "$work/sel.out")"
+	(cd "$chk" && env -u PATROL_SDLC_BASE -u CI_GO_TEST_FLAGS -u GOFLAGS -u BASH_ENV -u MARKS GOENV=off LOG="$work/chk.log" hack/sdlc/check.sh --no-codeql >"$work/sel.out" 2>&1) || echo "check.sh failed: $(tail -n 3 "$work/sel.out")"
 	paste -sd ';' "$work/chk.log"
 }
 all="ci-unit example.com/chk/a example.com/chk/b"

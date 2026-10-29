@@ -170,7 +170,7 @@ func gateUnknown(u unknownRun, root string) string {
 		what = u.What + ", which can push"
 	}
 	if u.Dir == "" {
-		return what + "; it would run in a directory the hook cannot tell: run it after a literal `cd` into this clone, or run the command it stands for"
+		return what + "; it would run in a directory the hook cannot tell: run it after a literal `cd` into this clone (placed after any `source`, `eval` or function call that may cd), or run the command it stands for"
 	}
 	top, err := gitOut(u.Dir, "rev-parse", "--show-toplevel")
 	if err != nil || !sameRepository(top, root) {

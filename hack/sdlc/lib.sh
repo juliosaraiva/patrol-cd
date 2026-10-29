@@ -56,7 +56,9 @@ sdlc_docs_only() {
 # env file (`go env -w`, GOENV), which can skip tests. The list is derived, so a new `?=` variable,
 # or a new included makefile, is covered. A variable set to the empty string counts too: make takes
 # it as defined, so `?=` does not apply (an empty CI_RACE drops -race, an empty ACTIONLINT lints
-# nothing).
+# nothing). So do BASH_ENV and exported bash functions: every non-interactive bash, make's recipes
+# (SHELL is bash), check.sh and the scripts they run, sources the one and imports the others, where a
+# function can stand in for a tool (gofmt() { :; }).
 sdlc_weakened() {
 	local v f i=0 seen
 	local -a files=("$@")
@@ -75,6 +77,8 @@ sdlc_weakened() {
 	done < <(sed -nE 's/^[[:space:]]*([A-Z][A-Z0-9_]*)[[:space:]]*\?=.*/\1/p' "${files[@]}" | sort -u
 		printf '%s\n' CI_GO_TEST_FLAGS)
 	[[ -z $(go env GOFLAGS 2>/dev/null) ]] || printf '%s\n' "GOFLAGS (go env)"
+	[[ -z ${BASH_ENV+set} ]] || printf '%s\n' BASH_ENV
+	declare -Fx | sed 's/^declare -fx /exported function /'
 }
 
 # sdlc_ignored prints the ignored files and directories the checks could read although HEAD's tree

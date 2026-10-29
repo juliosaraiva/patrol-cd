@@ -151,6 +151,11 @@ func TestRunUnknownWords(t *testing.T) {
 		{"cd " + other + " && bash --version", 0, ""},
 		// A push in a container: a branch this clone does not have is no reason to let it through.
 		{"kubectl exec pod -- git push origin feature", 2, "a git push run in a container"},
+		{"docker exec ctr sh -c 'git push origin feature'", 2, "a git push run in a container"},
+		{"git symbolic-ref --short refs/remotes/origin/HEAD", 0, ""}, // a read
+		// A sourced file may cd: a literal cd after it places what follows.
+		{". ./x.sh && nosuch-gp", 2, "placed after any `source`"},
+		{". ./x.sh && cd " + root + " && nosuch-gp", 0, ""},
 		// A runner in either order of definition, or maybe defined, given a cd.
 		{`step() { run "$@"; }; run() { "$@"; }; step cd ` + other + ` && git push origin HEAD`, 2, "cannot tell which directory `git push` runs in"},
 		{`log() { "$@"; } && log cd ` + other + ` && git push origin HEAD`, 2, "cannot tell which directory `git push` runs in"},

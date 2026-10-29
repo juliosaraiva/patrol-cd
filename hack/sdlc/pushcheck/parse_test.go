@@ -544,12 +544,32 @@ func TestFindPushesBlocked(t *testing.T) {
 		{"echo push origin main | xargs --replace git", "through xargs"},
 		{"git difftool -y -x 'git push --no-verify origin a' HEAD~1", "git difftool"},
 		{"git difftool --extcmd='git push origin a' HEAD~1", "git difftool"},
-		{"docker exec c git push --no-verify origin main", "run through docker"},
+		{"docker exec c git push --no-verify origin main", "a git push run in a container"},
 		// A push in a container is the container's clone's: the gate judges this clone's commits, and
 		// git's hook does not run there.
 		{"kubectl exec pod -- git push origin a", "a git push run in a container"},
 		{"docker exec ctr -- git push origin feature", "a git push run in a container"},
 		{"kubectl -n x exec toolbox -- sh -c 'cd /tmp/gb && git push origin smoke'", "a git push run in a container"},
+		{"docker exec ctr sh -c 'git push origin feature'", "a git push run in a container"}, // docker's form has no --
+		{"docker exec -w /src -it ctr bash -lc 'git push origin feature'", "a git push run in a container"},
+		{"kubectl exec -i pod -- sh <<'EOF'\ngit push origin feature\nEOF", "a git push run in a container"},
+		{"kubectl exec -i pod -- sh -s <<<'git push origin feature'", "a git push run in a container"},
+		{"kubectl exec -i pod -- sh <<'EOF'\ngit -c alias.ship=push ship origin a\nEOF", config}, // the heredoc is read
+		{"docker exec -i ctr sh <<'EOF'\ngit push origin feature\nEOF", "a git push run in a container"},
+		{"echo 'git push origin feature' | kubectl exec -i pod -- sh", "a git push run in a container"},
+		{"printf 'git push origin feature\\n' | docker exec -i ctr sh", "a git push run in a container"},
+		// symbolic-ref writes a remotes/ ref with a second name or with -d.
+		{"git symbolic-ref refs/remotes/origin/HEAD refs/remotes/origin/x", "can move origin/main"},
+		{"git symbolic-ref -d refs/remotes/origin/HEAD", "can move origin/main"},
+		{"git symbolic-ref --delete -q refs/remotes/origin/HEAD", "can move origin/main"},
+		{"git symbolic-ref --del refs/remotes/origin/HEAD", "can move origin/main"}, // an abbreviation
+		{`git symbolic-ref "$R" refs/remotes/origin/x`, "can move origin/main"},
+		// submodule foreach runs several words as the command.
+		{"git submodule foreach git push origin main", "a git push through git submodule"},
+		{"git submodule foreach --recursive sh -c 'git push origin main'", "a git push through git submodule"},
+		// An editor or pager that runs git or a push is refused, as in GIT_EDITOR.
+		{"git -c core.editor='git push origin main' rebase --continue", "core.editor"},
+		{"git -c core.pager=less --config-env=core.editor=ED log", "core.editor"},
 		{"declare -x GIT_DIR; git push", gitEnv},
 		{"(( GIT_DIR++ )); git push", gitEnv},
 		// Code the command defines under a name, run later through it.
@@ -815,6 +835,21 @@ func TestFindPushesAllowed(t *testing.T) {
 	for _, command := range []string{
 		// git subcommands that run a command, with the push only in a ref, path or pattern.
 		"git rebase origin/main docs/ci-docs-only-push",
+		// symbolic-ref with one name reads it.
+		"git symbolic-ref --short refs/remotes/origin/HEAD",
+		"git symbolic-ref refs/remotes/origin/HEAD | sed 's@^refs/remotes/origin/@@'",
+		"git symbolic-ref -q --short refs/remotes/origin/HEAD || echo main",
+		// An editor or pager as literal code that runs no git, as GIT_EDITOR may be.
+		"git -c core.editor=true rebase --continue",
+		"git -c sequence.editor=: rebase -i --autosquash origin/main",
+		"git -c core.pager=cat log -1",
+		// A program that reads piped text as data runs no shell on it.
+		"echo 'git push origin a' | grep -c sh",
+		"cat <<'EOF' | grep bash\ngit push origin a\nEOF",
+		// A shell in a container with no push.
+		"docker exec ctr sh -c 'git status'",
+		"kubectl exec -i pod -- sh <<'EOF'\ngit log -1\nEOF",
+		"git submodule foreach git status",
 		"git rebase --onto origin/main main fix/push-gate-abbrev",
 		"git rebase --exec 'go test ./hack/sdlc/pushcheck/...' origin/main",
 		"git bisect run go test ./hack/sdlc/pushcheck/",

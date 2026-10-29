@@ -53,7 +53,9 @@ tree or parents. A run records nothing when HEAD moved during it (a checkout, re
 one undone before the end, which HEAD's reflog shows), or when the environment sets what can weaken
 a check: a make variable the makefiles (and those they include) define with `?=`, even to the
 empty string, which make takes as defined (an empty `CI_RACE` drops `-race`, an empty `ACTIONLINT`
-lints nothing), `CI_GO_TEST_FLAGS`, or `GOFLAGS` (also from Go's env file).
+lints nothing), `CI_GO_TEST_FLAGS`, `GOFLAGS` (also from Go's env file), or `BASH_ENV` or an
+exported bash function, which every bash the checks start reads, where a function can stand in for
+a tool.
 
 When every check passed on a **clean** tree, it writes a record for HEAD's tree
 (`git rev-parse HEAD^{tree}`) to `$(git rev-parse --git-common-dir)/patrol-sdlc/checks/<tree>`. A
@@ -310,10 +312,11 @@ Two hooks run it:
   - **What it refuses wherever the command runs**, because it can point git elsewhere, run a push the
     gate cannot see, or move what the gate measures from:
     - a push with an argument that is not literal (it could be `--no-verify`);
-    - a push run in a container (`kubectl exec … -- git push`, `docker exec … --`): it pushes the
-      container's clone, whose commits the gate does not judge and where git's hook does not run
-      (a push given to `ssh` or to an exec runner without `--` is refused as a push through a
-      command it cannot check);
+    - a push run in a container (`kubectl exec … -- git push`, `docker exec ctr git push`): it
+      pushes the container's clone, whose commits the gate does not judge and where git's hook does
+      not run. A shell run there (`docker exec ctr sh -c '…'`, `kubectl exec -i pod -- sh <<EOF`, a
+      script piped to it) is refused when the command's text names a push, with or without `--`; a
+      push given to `ssh` is refused as a push through a command it cannot check;
     - a `GIT_*` variable outside a short safe list set in the shell (`GIT_DIR`, `GIT_WORK_TREE`,
       `GIT_CONFIG_*` …): inline, with `env` (also after `--`, and with a value that is not
       literal), `export`/`readonly`/`declare` (also quoted, `"NAME=VALUE"`, and through a
@@ -323,8 +326,9 @@ Two hooks run it:
       falls back to; set from a value the hook does not read (`read`, `printf -v`, a `for` loop),
       they are refused;
     - `git -c`, `git --config-env` and `git config` writes of keys outside a short safe list
-      (`core.hooksPath`, `alias.*`, `include.*`, `core.pager`, `diff.external`,
-      `diff.<driver>.command` …), read as git reads them (without a subcommand, an option after the
+      (`core.hooksPath`, `alias.*`, `include.*`, `diff.external`, `diff.<driver>.command` …; `git
+      -c` may set `core.editor`, `core.pager` and `sequence.editor` as their `GIT_*` variables may
+      be set), read as git reads them (without a subcommand, an option after the
       key is a value: `git config KEY VALUE --get` writes); `--git-dir`, `--work-tree`, `--bare`, `--shallow-file` and other
       global options before `push`; `git send-pack`, `git http-push` and git's remote helpers
       (`git remote-*`, `git-remote-*`, also handed to a function or an unknown word), which push
@@ -332,10 +336,10 @@ Two hooks run it:
     - a command git runs for a subcommand that holds a push, or that the hook cannot read:
       `rebase -x`/`--exec` in every spelling git accepts (`-x'…'`, `-ix …`, `--exe=…`), `difftool
       -x`, `filter-branch`'s filters and `--setup`, `send-email`'s command options, `bisect run`,
-      `submodule foreach`, `for-each-repo`, the upload-pack of `fetch`, `pull`, `clone` and
+      `submodule foreach` (one word as a script, several as the command), `for-each-repo`, the upload-pack of `fetch`, `pull`, `clone` and
       `ls-remote`, push's receive-pack and `--exec`, `archive --exec`, `grep -O`;
     - a write to the ref the gate measures a change from: `update-ref` or `symbolic-ref` under
-      `refs/remotes/`, a `fetch` or `pull` refspec into `remotes/`, any of them reading refs or
+      `refs/remotes/` (`symbolic-ref` with one name and no `-d` reads it, and passes), a `fetch` or `pull` refspec into `remotes/`, any of them reading refs or
       refspecs from standard input (`--stdin` in every abbreviation git accepts),
       `git remote add`, `remove`, `rename`, `set-url` or `set-branches`, and `git fast-import` and
       `git replace`;
@@ -480,3 +484,9 @@ A second hook (`hack/sdlc/claude-format.sh`, `PostToolUse` for Edit, MultiEdit a
 - The checks run the tests of the changed packages, not of the packages that import them; CI's full
   tier runs everything on every push to `main`.
 - CodeQL `security-extended` finds known vulnerability patterns; it does not prove their absence.
+- CodeQL's local Go database is built for the host: on macOS, files built only for Linux
+  (`internal/sandbox/rlimit_linux.go`) are not in it, and the darwin variants are. A new alert in
+  Linux-only code shows first in CI's CodeQL upload, which gates nothing until branch protection does.
+- A function or program a sourced file defines (`source hack/kind/lib.sh && patrol::cluster_exists
+  x`) runs from a directory the hook cannot tell, since the file may cd: in this clone it is refused
+  unless a literal `cd` into the clone comes after the `source`, which the refusal says.

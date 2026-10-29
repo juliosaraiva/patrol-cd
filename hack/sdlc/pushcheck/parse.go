@@ -763,6 +763,13 @@ func (w *walker) cmd(s *syntax.Stmt) {
 				var b bytes.Buffer
 				_ = syntax.NewPrinter().Print(&b, c.X)
 				w.blockText(b.String(), "a script piped to a shell")
+			} else if runner, ok := pipesToContainer(c); ok {
+				// A script piped to a shell in a container: a push in it is the container's.
+				var b bytes.Buffer
+				_ = syntax.NewPrinter().Print(&b, c.X)
+				if mentionsGitPush(b.String()) {
+					w.block(containerPush(runner))
+				}
 			}
 			saved := w.dir
 			w.stmt(c.X)
@@ -2039,7 +2046,7 @@ prefix:
 	case isWrapper:
 		w.wrapped(name, args, lit, redirs)
 	case execRunners[name]:
-		w.execRunner(args, lit)
+		w.execRunner(args, lit, redirs)
 	case name == "find":
 		w.findExec(args, lit)
 	case name == "watch":
@@ -2484,30 +2491,67 @@ func sudoMoves(opts []string) bool {
 	return false
 }
 
-// execRunner parses the command run after a `--` (kubectl exec POD -- CMD); without one, only a
-// plain adjacent `git push` in the arguments is refused (so a `--push` flag or a git_push.json file
-// name does not trip it), and anything else is left to git's hook.
-func (w *walker) execRunner(args []string, lit []bool) {
+// containerPush is why a git push run in a container is refused: it pushes the container's clone,
+// whose commits the gate does not judge, and git's pre-push hook does not run there.
+func containerPush(runner string) string {
+	return "a git push run in a container (" + runner + " … git push) cannot be checked: the gate judges this clone's commits, and git's pre-push hook does not run there; push from this clone, or run it outside Claude Code"
+}
+
+// execRunner reads a command run in a container (kubectl exec POD -- CMD, docker exec CTR CMD), where
+// a git push is the container's clone's (containerPush). It parses the command after a `--`, with the
+// statement's heredocs and here-strings; a shell among the arguments, with or without `--`, runs a
+// script of the command's own words or redirections there, so a push in that text is refused; and
+// without either, only a plain adjacent `git push` in the arguments is (so a `--push` flag or a
+// git_push.json file name does not trip it). Anything else is left to git's hook.
+func (w *walker) execRunner(args []string, lit []bool, redirs []*syntax.Redirect) {
+	runner := path.Base(args[0])
+	for i := 1; i < len(args); i++ {
+		if lit[i] && shells[path.Base(args[i])] && mentionsGitPush(w.cmdText) {
+			w.block(containerPush(runner))
+			break
+		}
+	}
 	for i := 1; i < len(args); i++ {
 		if lit[i] && args[i] == "--" {
 			if i+1 < len(args) {
-				// It runs in a container: its cd stays there, and its git reads the container's
-				// configuration (so its subcommands are not checked for aliases here). A refusal
-				// still counts; a push is the container's clone's, which neither the gate (it judges
-				// this clone's commits) nor git's hook (not there) checks, so it is refused.
+				// Its cd stays in the container, and its git reads the container's configuration (so
+				// its subcommands are not checked for aliases here). A refusal still counts.
 				s := newWalker(w.dir, w.src)
-				s.command(args[i+1:], lit[i+1:], nil)
+				s.cmdText = w.cmdText
+				s.command(args[i+1:], lit[i+1:], redirs)
 				w.block(s.blocked)
 				if len(s.pushes) > 0 {
-					w.block("a git push run in a container (" + path.Base(args[0]) + " … -- git push) cannot be checked: the gate judges this clone's commits, and git's pre-push hook does not run there; push from this clone, or run it outside Claude Code")
+					w.block(containerPush(runner))
 				}
 			}
 			return
 		}
 	}
 	if argvHasGitPush(args, lit) {
-		w.block("a git push run through " + path.Base(args[0]) + " cannot be checked; " + runAlone)
+		w.block(containerPush(runner))
 	}
+}
+
+// pipesToContainer returns the runner when a pipeline's last element runs a shell in a container (`…
+// | kubectl exec -i pod -- sh`), which reads its script from the pipe.
+func pipesToContainer(c *syntax.BinaryCmd) (string, bool) {
+	if c.Op != syntax.Pipe && c.Op != syntax.PipeAll {
+		return "", false
+	}
+	right, ok := c.Y.Cmd.(*syntax.CallExpr)
+	if !ok || len(right.Args) == 0 {
+		return "", false
+	}
+	args, lit := fields(right.Args)
+	if len(args) == 0 || !lit[0] || !execRunners[path.Base(args[0])] {
+		return "", false
+	}
+	for i := 1; i < len(args); i++ {
+		if lit[i] && shells[path.Base(args[i])] {
+			return path.Base(args[0]), true
+		}
+	}
+	return "", false
 }
 
 // watch runs its command again and again: through `sh -c` with its operands joined, or, with
@@ -3013,6 +3057,9 @@ func (w *walker) git(args []string, lit []bool) {
 				w.block("git " + name + " with a key the hook cannot read is refused in a command; set git configuration in a command of its own")
 				return
 			case safeConfigKey(key):
+			case name == "-c" && litVal && configCommands[strings.ToLower(key)] && safeCommand(configValue(value)):
+				// An editor or pager given as literal code that runs no git, as GIT_EDITOR,
+				// GIT_SEQUENCE_EDITOR and GIT_PAGER may be (`git -c core.editor=true rebase --continue`).
 			default:
 				w.block(name + " " + key + ": " + refuseConfig(key))
 				return
@@ -3210,9 +3257,14 @@ func (w *walker) gitRunner(sub string, args []string, lit []bool) {
 			if len(rest) == 0 {
 				return
 			}
-			if restLit[0] {
+			// One word is a script for the shell (`foreach 'git push'`); several are the command
+			// and its arguments (`foreach git push origin main`).
+			switch {
+			case len(rest) == 1 && restLit[0]:
 				carries(func(s *walker) { s.script(rest[0]) })
-			} else {
+			case !slices.Contains(restLit, false):
+				carries(func(s *walker) { s.command(rest, restLit, nil) })
+			default:
 				w.blockText(w.cmdText, how)
 			}
 			return
@@ -3229,6 +3281,9 @@ func (w *walker) gitRunner(sub string, args []string, lit []bool) {
 func remoteRefWrite(sub string, args []string, lit []bool) string {
 	if sub == "fast-import" || sub == "replace" {
 		return "git " + sub
+	}
+	if sub == "symbolic-ref" && symbolicRefReads(args, lit) {
+		return "" // it prints the ref (git symbolic-ref --short refs/remotes/origin/HEAD)
 	}
 	for i, a := range args {
 		if !lit[i] {
@@ -3248,6 +3303,31 @@ func remoteRefWrite(sub string, args []string, lit []bool) string {
 		}
 	}
 	return ""
+}
+
+// symbolicRefReads reports whether `git symbolic-ref ARGS` only reads a ref: one name, no -d or
+// --delete, and only the options of a read (-q, --short, --recurse, --no-recurse, -m and its value).
+// Anything else, a word that is not literal included, may write.
+func symbolicRefReads(args []string, lit []bool) bool {
+	names := 0
+	for i := 0; i < len(args); i++ {
+		a := args[i]
+		switch {
+		case !lit[i]:
+			return false
+		case a == "--":
+			names += len(args) - i - 1
+			i = len(args)
+		case a == "-m":
+			i++ // its value
+		case a == "-q" || a == "--quiet" || a == "--short" || a == "--recurse" || a == "--no-recurse" || strings.HasPrefix(a, "-m"):
+		case strings.HasPrefix(a, "-"):
+			return false
+		default:
+			names++
+		}
+	}
+	return names == 1
 }
 
 // safeConfig lists the configuration keys (lower case) that `git -c` and `git config` may set in a
@@ -3294,6 +3374,18 @@ func safeConfigKey(key string) bool {
 		return true
 	}
 	return false
+}
+
+// configCommands are the configuration keys (lower case) whose value is an editor or pager git runs:
+// `git -c` may set them as their environment variables may be set (gitEnvCommands, safeCommand).
+var configCommands = map[string]bool{"core.editor": true, "core.pager": true, "sequence.editor": true}
+
+// configValue returns the value of a `git -c` KEY=VALUE; a key alone is a boolean true.
+func configValue(kv string) string {
+	if _, v, ok := strings.Cut(kv, "="); ok {
+		return v
+	}
+	return "true"
 }
 
 func refuseConfig(key string) string {
