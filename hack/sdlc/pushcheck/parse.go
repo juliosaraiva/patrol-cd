@@ -288,6 +288,7 @@ type walker struct {
 	// command from here on (DEBUG, ERR, chpwd), so no later directory is known, even after a cd.
 	dirLost    bool
 	shifts     map[string]bool           // functions whose body shifts its arguments or slices them (${@:2})
+	passes     map[string][]string       // the command words each function passes its arguments to (run "$@")
 	paths      map[string]bool           // whether each name is a program on PATH (onPath), shared with children
 	cdFuncs    map[string]bool           // functions defined where the definition may not run, whose body may cd
 	topFuncs   map[*syntax.FuncDecl]bool // definitions that certainly run in this shell
@@ -352,7 +353,7 @@ const (
 func newWalker(dir, src string) *walker {
 	return &walker{dir: dir, src: src, funcs: map[string]*syntax.Stmt{}, maybeFuncs: map[string][]*syntax.Stmt{},
 		cdMemo: map[string]map[string]cdVerdict{}, reachMemo: map[cdKey]bool{}, gen: map[string]int{}, hooks: map[string]bool{},
-		refs: map[string]map[string]int{}, paths: map[string]bool{}, shifts: map[string]bool{}, cdFuncs: map[string]bool{},
+		refs: map[string]map[string]int{}, paths: map[string]bool{}, shifts: map[string]bool{}, passes: map[string][]string{}, cdFuncs: map[string]bool{},
 		topFuncs: map[*syntax.FuncDecl]bool{}, funcUnread: map[string][]unknownRun{}, defined: map[string]bool{}}
 }
 
@@ -373,7 +374,7 @@ func (w *walker) child(dir, src string) *walker {
 	for name := range w.defined {
 		c.defined[name] = true
 	}
-	c.gen, c.gens, c.hooks, c.shifts = maps.Clone(w.gen), w.gens, maps.Clone(w.hooks), maps.Clone(w.shifts)
+	c.gen, c.gens, c.hooks, c.shifts, c.passes = maps.Clone(w.gen), w.gens, maps.Clone(w.hooks), maps.Clone(w.shifts), maps.Clone(w.passes)
 	for name, refs := range w.refs {
 		c.refs[name] = maps.Clone(refs)
 	}
@@ -595,11 +596,20 @@ func pipesToShell(c *syntax.BinaryCmd) bool {
 	if !ok || len(right.Args) == 0 {
 		return false
 	}
-	if name, ok := literalWord(right.Args[0]); !ok || !shells[path.Base(name)] {
+	// The shell may come behind a command that runs it (env, command, nice, sudo, timeout 60, a
+	// program the walker does not model): it still reads the pipe. One that reads its input as data
+	// (grep sh), or hands it to the command as arguments (xargs), runs no shell on it.
+	args, lit := fields(right.Args)
+	if len(args) > 0 && lit[0] && (dataCommands[path.Base(args[0])] || execRunners[path.Base(args[0])] ||
+		path.Base(args[0]) == "xargs" || path.Base(args[0]) == "parallel") {
 		return false
 	}
-	args, lit := fields(right.Args[1:])
-	return readsStdin(args, lit)
+	for i := range args {
+		if lit[i] && shells[path.Base(args[i])] {
+			return readsStdin(args[i+1:], lit[i+1:])
+		}
+	}
+	return false
 }
 
 // readsStdin reports whether a shell given these arguments reads its script from standard input:
@@ -825,6 +835,7 @@ func (w *walker) cmd(s *syntax.Stmt) {
 				w.refs[n.Value] = map[string]int{} // it replaces the earlier definition
 				delete(w.funcUnread, n.Value)
 				delete(w.shifts, n.Value)
+				delete(w.passes, n.Value)
 			} else {
 				w.maybeFuncs[n.Value] = append(w.maybeFuncs[n.Value], c.Body)
 				if w.refs[n.Value] == nil {
@@ -835,6 +846,11 @@ func (w *walker) cmd(s *syntax.Stmt) {
 			if shiftsArgs(c.Body) {
 				w.shifts[n.Value] = true
 			}
+			for _, to := range passedTo(c.Body) {
+				if !slices.Contains(w.passes[n.Value], to) {
+					w.passes[n.Value] = append(w.passes[n.Value], to)
+				}
+			}
 		}
 		w.redefined()
 		saved, body, pushes := w.dir, w.body, len(w.pushes)
@@ -843,6 +859,29 @@ func (w *walker) cmd(s *syntax.Stmt) {
 			w.body = append(w.body, n.Value)
 		}
 		w.stmt(c.Body)
+		// A redirection on the definition applies at each call (`f() { sh; } <<'EOF' … EOF`): a heredoc
+		// or here-string there is input a shell in the body runs as a script, read as part of the body.
+		// The parser puts it on the body (one before the name is zsh's, which does not parse as bash).
+		runsShell := runsAShell(c.Body)
+		for _, r := range c.Body.Redirs {
+			if r.Op != syntax.Hdoc && r.Op != syntax.DashHdoc && r.Op != syntax.WordHdoc {
+				continue
+			}
+			body := bodyOf(r)
+			if body == nil {
+				continue
+			}
+			text, ok := heredocText(r, body)
+			switch {
+			case ok && runsShell:
+				w.dir = bodyDir
+				w.script(text)
+			case ok:
+				w.blockText(text, "a redirection of a function definition")
+			default:
+				w.blockText(wordText(body), "a redirection of a function definition")
+			}
+		}
 		w.dir, w.body = saved, body
 		for i := pushes; i < len(w.pushes); i++ {
 			w.pushes[i].Dir = "" // a push in it runs from wherever the function is called
@@ -908,9 +947,16 @@ func (w *walker) bodyRefs(refs map[string]int, body syntax.Node) {
 // commandWord returns a simple command's command word, after the precommands that run the rest in
 // this shell (noglob, nocorrect, builtin, command, exec, zsh's repeat N), and whether it is literal.
 func commandWord(args []*syntax.Word) (string, bool) {
-	if len(args) == 0 { // assignments only
+	cw, _ := commandWordAt(args)
+	if cw == nil { // assignments only
 		return "", false
 	}
+	return literalWord(cw)
+}
+
+// commandWordAt returns a simple command's command word, after the precommands commandWord skips, and
+// the words after it; nil for assignments only.
+func commandWordAt(args []*syntax.Word) (*syntax.Word, []*syntax.Word) {
 	for len(args) > 1 {
 		word, ok := literalWord(args[0])
 		switch {
@@ -919,10 +965,13 @@ func commandWord(args []*syntax.Word) (string, bool) {
 		case ok && word == "repeat" && len(args) > 2:
 			args = args[2:]
 		default:
-			return literalWord(args[0])
+			return args[0], args[1:]
 		}
 	}
-	return literalWord(args[0])
+	if len(args) == 0 {
+		return nil, nil
+	}
+	return args[0], nil
 }
 
 // ref notes in refs that a body runs the command word name (anyName: any), with its definition as it
@@ -979,7 +1028,8 @@ func (w *walker) redefined() {
 				continue
 			}
 			for _, b := range w.maybeFuncs[name] {
-				if w.changesDir(b) {
+				// One that may cd, or that runs its arguments (log cd DIR), whichever name it has.
+				if w.changesDir(b) || w.runsArgs(name) {
 					w.cdFuncs[name] = true
 					w.invalidate(name)
 					changed = true
@@ -1218,8 +1268,22 @@ func (w *walker) changesDirCalls(node syntax.Node, calls *[]string) bool {
 // shell (`r cd DIR`, `r r cd DIR`), or, if its body shifts them, any literal tail of them (`r : cd DIR`).
 func (w *walker) argvMayCD(args []string, lit []bool, calls *[]string) bool {
 	args, lit = stripBraces(args, lit)
-	memo := map[int]bool{}
+	memo, anyMemo := map[int]bool{}, map[int]bool{}
 	var from func(i int) bool // whether args[i:], as a command, may cd
+	// anyFrom: whether some literal tail args[j:], j >= i, may: each is asked once, so a shifting
+	// runner given many words costs time linear in them.
+	var anyFrom func(i int) bool
+	anyFrom = func(i int) bool {
+		if i >= len(args) {
+			return false
+		}
+		v, ok := anyMemo[i]
+		if !ok {
+			v = lit[i] && from(i) || anyFrom(i+1)
+			anyMemo[i] = v
+		}
+		return v
+	}
 	from = func(i int) bool {
 		if v, ok := memo[i]; ok {
 			return v
@@ -1236,12 +1300,10 @@ func (w *walker) argvMayCD(args []string, lit []bool, calls *[]string) bool {
 				_, isFunc := w.funcs[name]
 				isFunc = isFunc && !w.cdFuncs[name] && !strings.Contains(args[i], "/")
 				if isFunc && w.runsArgs(name) {
-					last := i + 1
-					if w.shifts[name] {
-						last = len(args) - 1
-					}
-					for j := i + 1; j <= last && j < len(args) && !found; j++ {
-						found = lit[j] && from(j)
+					if w.shiftsOf(name) {
+						found = anyFrom(i + 1)
+					} else {
+						found = i+1 < len(args) && lit[i+1] && from(i+1)
 					}
 				}
 				if isFunc && calls != nil {
@@ -1257,15 +1319,67 @@ func (w *walker) argvMayCD(args []string, lit []bool, calls *[]string) bool {
 	return from(0)
 }
 
-// shiftsArgs reports whether a body shifts its arguments, or takes a slice of them (${@:2}): then
-// the code it runs from them may start at any of them.
+// runsAShell reports whether a body runs a shell, which may read its input as a script.
+func runsAShell(body syntax.Node) bool {
+	found := false
+	syntax.Walk(body, func(n syntax.Node) bool {
+		if c, ok := n.(*syntax.CallExpr); ok {
+			args, lit := fields(c.Args)
+			for i := range args {
+				found = found || lit[i] && shells[path.Base(args[i])]
+			}
+		}
+		return !found
+	})
+	return found
+}
+
+// fromFirstArg are the words that run, or pass on, a function's arguments from the first ("$@", $1);
+// any other expansion of them ("$2", "${@:2}", "${a[@]:1}", zsh's ${argv[2,-1]}) may start later.
+var fromFirstArg = map[string]bool{`"$@"`: true, `$@`: true, `"${@}"`: true, `${@}`: true, `"$*"`: true,
+	`$*`: true, `"${*}"`: true, `${*}`: true, `$1`: true, `"$1"`: true, `${1}`: true, `"${1}"`: true}
+
+// wordText prints a word as written.
+func wordText(word *syntax.Word) string {
+	var b bytes.Buffer
+	_ = syntax.NewPrinter().Print(&b, word)
+	return b.String()
+}
+
+// usesArgs reports whether a word expands the function's arguments ($@, $*, $N, zsh's $argv).
+func usesArgs(word *syntax.Word) bool {
+	found := false
+	syntax.Walk(word, func(n syntax.Node) bool {
+		if p, ok := n.(*syntax.ParamExp); ok && p.Param != nil {
+			v := p.Param.Value
+			found = found || v == "@" || v == "*" || v == "argv" || isUnsigned(v) && v != "0"
+		}
+		return !found
+	})
+	return found
+}
+
+// shiftsArgs reports whether a body may run its arguments from one after the first: it shifts them,
+// takes a slice of them (${@:2}), runs a command word other than "$@" or $1 that the walker cannot
+// read ("$2", "${a[@]:1}"), or passes such an expansion of them to another command. Then the code
+// it runs from them may start at any of them.
 func shiftsArgs(body syntax.Node) bool {
 	found := false
 	syntax.Walk(body, func(n syntax.Node) bool {
 		switch n := n.(type) {
 		case *syntax.CallExpr:
-			if word, ok := commandWord(n.Args); ok && word == "shift" { // "" for assignments only
+			cw, rest := commandWordAt(n.Args)
+			if cw == nil { // assignments only
+				break
+			}
+			if word, ok := literalWord(cw); !ok {
+				found = !fromFirstArg[wordText(cw)]
+			} else if word == "shift" {
 				found = true
+			} else {
+				for _, a := range rest {
+					found = found || usesArgs(a) && !fromFirstArg[wordText(a)]
+				}
 			}
 		case *syntax.ParamExp:
 			if n.Slice != nil && n.Param != nil && (n.Param.Value == "@" || n.Param.Value == "*") {
@@ -1277,11 +1391,54 @@ func shiftsArgs(body syntax.Node) bool {
 	return found
 }
 
+// passedTo returns the command words a body runs with its arguments among theirs (`run "$@"`): if one
+// is a function that runs its arguments, so does the body.
+func passedTo(body syntax.Node) []string {
+	var names []string
+	syntax.Walk(body, func(n syntax.Node) bool {
+		if c, ok := n.(*syntax.CallExpr); ok {
+			cw, rest := commandWordAt(c.Args)
+			if word, ok := literalWord(cw); cw != nil && ok && slices.ContainsFunc(rest, usesArgs) && !slices.Contains(names, word) {
+				names = append(names, word)
+			}
+		}
+		return true
+	})
+	return names
+}
+
 // runsArgs reports whether the function name runs code given at run time ("$@", $1, eval, source),
-// which may be its arguments.
+// which may be its arguments, itself or through a function it passes them to (as each is defined
+// now).
 func (w *walker) runsArgs(name string) bool {
-	_, ok := w.refs[name][anyName]
-	return ok
+	return w.passesArgs(name, map[string]bool{}, func(n string) bool {
+		_, ok := w.refs[n][anyName]
+		return ok
+	})
+}
+
+// shiftsOf reports whether the function name may run its arguments from one after the first,
+// itself or through a function it passes them to.
+func (w *walker) shiftsOf(name string) bool {
+	return w.passesArgs(name, map[string]bool{}, func(n string) bool { return w.shifts[n] })
+}
+
+// passesArgs reports whether has holds for the function name or for a function it passes its
+// arguments to, followed through the functions the command defines (seen: looked at already).
+func (w *walker) passesArgs(name string, seen map[string]bool, has func(string) bool) bool {
+	if seen[name] {
+		return false
+	}
+	seen[name] = true
+	if has(name) {
+		return true
+	}
+	for _, n := range w.passes[name] {
+		if w.passesArgs(n, seen, has) {
+			return true
+		}
+	}
+	return false
 }
 
 // codeQualifier matches the zsh glob qualifiers that run code (e:…:, e{…}, +function): zsh evaluates
@@ -1870,7 +2027,7 @@ prefix:
 			w.block("hash can make the name git run another program; " + runAlone)
 		}
 	case name == "xargs" || name == "parallel":
-		w.xargs(name, args[1:], lit[1:])
+		w.xargs(name, args[1:], lit[1:], redirs)
 	case name == "read" || name == "mapfile" || name == "readarray" || name == "getopts":
 		w.setter(name, args[1:], lit[1:])
 	case name == "printf":
@@ -2456,7 +2613,7 @@ var xargsValue = map[string]map[string]bool{
 // a git push there (the input adds refs and could add --no-verify), a git with no subcommand (it
 // would come from input) and a non-literal command word are all refused. parallel also runs its
 // ::: arguments as commands, so a git push anywhere in its words is refused.
-func (w *walker) xargs(name string, args []string, lit []bool) {
+func (w *walker) xargs(name string, args []string, lit []bool, redirs []*syntax.Redirect) {
 	refuse := func() {
 		w.block("a git push through " + name + " cannot be checked (it appends arguments from standard input); " + runAlone)
 	}
@@ -2487,6 +2644,20 @@ func (w *walker) xargs(name string, args []string, lit []bool) {
 	s.command(inner, innerLit, nil)
 	w.calls = append(w.calls, s.calls...)
 	w.unread(s.unknown...)
+	// A shell it runs may take its script from the input (shell()): a heredoc or here-string given to
+	// it is that script, read as one (`xargs -0 sh -c <<< '…'`).
+	if shells[path.Base(inner[0])] {
+		for _, r := range redirs {
+			if r.Op != syntax.Hdoc && r.Op != syntax.DashHdoc && r.Op != syntax.WordHdoc {
+				continue
+			}
+			if text, ok := heredocText(r, bodyOf(r)); ok {
+				w.script(text)
+			} else {
+				w.blockText(w.cmdText, name)
+			}
+		}
+	}
 	if len(s.pushes) > 0 || s.blocked != "" || (path.Base(inner[0]) == "git" && gitSubcommand(inner[1:], innerLit[1:]) < 0) {
 		refuse()
 	}
@@ -2576,10 +2747,13 @@ options:
 		switch {
 		case !lit[i]:
 			w.blockText(w.cmdText, "a shell argument that is not literal")
+			w.unread(unknownRun{Dir: w.dir, Word: args[0], What: "`" + args[0] + "` runs a script the hook cannot read"})
 			return
 		case a == "--" || a == "-":
 			i++
 			break options
+		case a == "--version" || a == "--help":
+			return // it prints and runs nothing
 		case shellWithValue[a]:
 			i++
 		case strings.HasPrefix(a, "--"):
@@ -2611,12 +2785,14 @@ options:
 		}
 		if !lit[i] {
 			w.blockText(w.cmdText, "a shell script that is not literal")
+			w.unread(unknownRun{Dir: w.dir, Word: args[0], What: "`" + args[0] + "` runs a script the hook cannot read"})
 			return
 		}
 		w.script(operands[0])
 		return
 	case !stdin && len(operands) > 0 && !lit[i]:
 		w.blockText(w.cmdText, "a shell script that is not literal")
+		w.unread(unknownRun{Dir: w.dir, Word: args[0], What: "`" + args[0] + "` runs a script the hook cannot read"})
 		return
 	case !stdin && len(operands) > 0 && operands[0] != "/dev/stdin" && operands[0] != "/dev/fd/0":
 		return // a script file
@@ -2638,6 +2814,7 @@ options:
 			w.script(s)
 		} else {
 			w.blockText(w.cmdText, "a shell script that is not literal")
+			w.unread(unknownRun{Dir: w.dir, Word: args[0], What: "`" + args[0] + "` runs a script the hook cannot read"})
 		}
 		return
 	}

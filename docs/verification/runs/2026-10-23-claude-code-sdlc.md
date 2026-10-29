@@ -11,7 +11,7 @@ guide is [docs/guides/claude-code-sdlc.md](../../guides/claude-code-sdlc.md).
 
 | Item | Value |
 |------|-------|
-| Host | macOS arm64 (Darwin 27.0.0) |
+| Host | macOS arm64 (Darwin 27.0.0; 27.2.0 for the twenty-seventh round) |
 | Go | go1.27.3 darwin/arm64 |
 | git | 2.56.0 (Homebrew); git-lfs 3.7.1 in `bin/` only |
 | Shell of the Bash tool | zsh 5.9.2 with the user's oh-my-zsh setup (aliases such as `gp='git push'`, AUTO_CD on) |
@@ -26,13 +26,13 @@ The machine was shared with up to 16 review and red-team agents during most runs
 |---------|--------|
 | `go vet ./hack/sdlc/...`; `golangci-lint run --no-config ./hack/sdlc/...` | passed, 0 issues |
 | `shellcheck hack/sdlc/*.sh hack/ci/lint-shell.sh`; `make ci-shell`; `actionlint` | passed |
-| `go test -race -count=1 ./hack/sdlc/...` | passed: `pushcheck` and `sarifgate`, 769 tests (counted with `-json`) |
-| `bash hack/sdlc/test-sdlc.sh` (the gate end to end in scratch repositories with a bare remote, and check.sh with stub make targets) | passed: 213 passed, 0 failed; also with `GOFLAGS=-mod=readonly` (as CI sets it), `PATROL_SDLC_BASE=HEAD~1` and `CI_GO_TEST_FLAGS=-short` set |
+| `go test -race -count=1 ./hack/sdlc/...` | passed: `pushcheck` and `sarifgate`, 793 tests (counted with `-json`) |
+| `bash hack/sdlc/test-sdlc.sh` (the gate end to end in scratch repositories with a bare remote, and check.sh with stub make targets) | passed: 217 passed, 0 failed; also with `GOFLAGS=-mod=readonly` (as CI sets it), `PATROL_SDLC_BASE=HEAD~1` and `CI_GO_TEST_FLAGS=-short` set |
 | The suite in a scratch copy of the tree with the review diff's `--text --no-textconv` removed | its two new checks fail (`-diff` and a textconv driver hide main.go's content) |
 | `GOOS=linux CGO_ENABLED=0 GOWORK=off go vet ./...` on macOS (the step check.sh now adds off Linux) | passed, in 3 minutes from a cold cache |
 | A graft making HEAD a root and origin/main its child, in a scratch repository (`graft-check.sh` in the scratchpad), and pushcheck without its graft setting (`graftmut/mutate.py`) | without `hack/sdlc/lib.sh` the changed files are `[]`, with it `[main.go]`; the mutant fails `TestGatePushRunsTheBaseGate` |
 | `/bin/bash hack/ci/lint-shell.sh` (bash 3.2) in a scratch repository with no POSIX sh script | reports SC2086 in its bash script; the version before this change stopped with `sh_files[@]: unbound variable` |
-| Mutation sweep of `hack/sdlc/pushcheck` (a scratchpad script: each refusal, unknown-directory, environment and option-value site of `parse.go`, each `return true` of a predicate, each refusal or early allowing return of `main.go`, and its loop over the pushed sources, disabled or narrowed in turn through `go test -overlay`, the repository untouched) | 161 sites; 158 caught by a failing test, 2 do not compile (the base gate's refusal, which a test asserts, and the extraction's error path); the survivor is an error path of the environment in `baseGate` (git failing to name its directory right after it worked), and two, on the last runs, were code no test could reach: the value a `syntax.Walk` callback returned as it left a node, which Walk ignores, and then the whole after-the-walk probe of a call the statement walk had not reached, which the twentieth round's statement-time walk of words made dead; both were removed. On the twenty-second round's tree, checkSubcommands' refusal of git's commands that push without the hook survived: the walker now refuses them wherever it finds them, before they reach the list; it stays as a second line, with a unit test. The first sweep, on `0b31e0f`, covered refusal sites only and left 20 in `parse.go` and 5 in `main.go` uncaught; the eleventh and twelfth reviews found more kinds of site, which the sweep now covers. Each uncaught site got a test, and four that could not change the outcome were removed |
+| Mutation sweep of `hack/sdlc/pushcheck` (a scratchpad script: each refusal, unknown-directory, environment and option-value site of `parse.go`, each `return true` of a predicate, each refusal or early allowing return of `main.go`, and its loop over the pushed sources, disabled or narrowed in turn through `go test -overlay`, the repository untouched) | 172 sites; 169 caught by a failing test, 2 do not compile (the base gate's refusal, which a test asserts, and the extraction's error path); the survivor is an error path of the environment in `baseGate` (git failing to name its directory right after it worked). On the twenty-seventh round's tree, the slice of `"$@"` in shiftsArgs survived, as the new rule for a command word or argument other than `"$@"` or `$1` covers it; zsh's `argv=("${@:2}")`, which shifts the arguments, reaches only that case and got a test. Before, two, on the last runs, were code no test could reach: the value a `syntax.Walk` callback returned as it left a node, which Walk ignores, and then the whole after-the-walk probe of a call the statement walk had not reached, which the twentieth round's statement-time walk of words made dead; both were removed. On the twenty-second round's tree, checkSubcommands' refusal of git's commands that push without the hook survived: the walker now refuses them wherever it finds them, before they reach the list; it stays as a second line, with a unit test. The first sweep, on `0b31e0f`, covered refusal sites only and left 20 in `parse.go` and 5 in `main.go` uncaught; the eleventh and twelfth reviews found more kinds of site, which the sweep now covers. Each uncaught site got a test, and four that could not change the outcome were removed |
 | Targeted mutants of the sixteenth round's structural changes (`structural16.py` in the scratchpad: the split of a chained definition, what a child walker inherits, the `program` flag of `env`, `command` and wrappers, a defined function's precedence and its return, zsh code parameters in `typeset`, `set -o NAME -A`, the `TRAP…` and may-cd conditions of hook functions, the text check of a function call's arguments) | 14 mutants (rerun after the seventeenth round, with a child walker's known functions split out), all caught; two more showed code no test could reach (a recursive split that `syntax.Walk` already does, a path check the exact-name lookup makes moot), which was removed |
 | Targeted mutants of the seventeenth round's changes (`structural17.py` in the scratchpad: each place an unknown word is recorded or merged from a child walker, the `program` exemption, the git subcommands taken from a function's or unknown word's arguments and their global-option skip, the names `functions`/`autoload` touch, each word position of the statement-level glob-qualifier check and its use in changesDir, the unreadable `trap` action, the gate-file paths and the unknown-directory branch of main.go) | 18 mutants, all caught |
 | Targeted mutants of the eighteenth round's changes (`structural18.py` in the scratchpad: the escape-sequence reading of the text check, echo text with a backslash, each new record of code the walker did not read (a stdin shell, xargs' or parallel's input, source, dynamic eval, a non-literal command word) and its merge from xargs' walker, the replace options, source's parse of a heredoc and its text check, the stdin refspec and ref forms for fetch and pull and their abbreviations, main.go's message) | 18 mutants, all caught |
@@ -44,13 +44,14 @@ The machine was shared with up to 16 review and red-team agents during most runs
 | Targeted mutants of the twenty-fourth round's changes (`structural24.py` in the scratchpad: the reachability that decides whether a call may cd (a callee's body, each body once, the calls a body collects, in a pipeline too, the verdicts by directory and cleared at a definition), the generations and references that make a call stale (per name and in all, through a callee, for a dynamic word, eval and source, the words of a body and those its walk meets, a certain definition replacing what was noted), the stale call's record and its directory, autoload, what a definition rereads (a definition that may not run, a hook that may cd or is stale), functions among the arguments of one that runs code given at run time or of an unknown word, a shell given a script among an unmodeled program's arguments, and through the shell suite the agents' files in any case) | 35 mutants (32 in Go, 3 in lib.sh), all caught (five survived a first run and got tests: calls at the end of a pipeline, a stale callee's callee, eval "$@" given a function, a substitution's call in a body, a replaced definition; two did not compile and were rewritten) |
 | Targeted mutants of the twenty-fifth round's changes (`structural25.py` in the scratchpad: a cd among the arguments of a function that runs `"$@"`, the precommands and `repeat N` before a body's command word, the record of a possible alias at a function's call and its two exemptions, a trap action kept and read again, `${ …; }`, a shell's long options with a value and the text check for options the walker does not read, the cap on unread places, the verdicts dropped for a name and for the bodies that run it, the hook functions noted, and sarifgate's suppression status) | 20 mutants (17 in pushcheck, 3 in sarifgate), all caught (four survived a first run: the dynamic-word note in command(), redundant with the precommand reading of bodyRefs and hiding its two mutants, was removed; the alias rule's exemptions got cases that reach each one; two did not compile and were rewritten) |
 | Targeted mutants of the twenty-sixth round's changes (`structural26.py` in the scratchpad: the directory lost for good to a trap or hook function that may cd, trap resets (`-`, one operand, a signal number), the cap on trap actions, `functions -c` reading the traps again, the `"$@"` runner rule wherever a command is read for a cd and its tails when the body shifts or slices, the shift noted and reset, the body's own cd for the functions among a runner's arguments, a command of assignments only) | 18 mutants, all caught (four survived a first run: the lost directory copied to a child walker, redundant since the parent records what a child returns, was removed; the cap on trap actions, the slice of "$@" and the shift reset got tests) |
+| Targeted mutants of the twenty-seventh round's changes (`structural27.py` in the scratchpad: a script piped into a shell behind a wrapper and the commands that read the pipe as data or arguments, the functions a body passes its arguments to (noted, reset by a definition, copied to a substitution's walker, followed both ways), a function definition's heredoc (read for a shell, checked, refused when dynamic), a maybe-defined runner, the runner rule for later positionals, slices and dynamic command words, the shifting runner's memo of tails, xargs' heredoc, a shell's `--version`, the record of a script a shell cannot read, and through the shell suite git's hook's refusal of hidden gate files) | 33 mutants (29 in Go, 4 in git's hook), all caught (thirteen survived a first run: two runner tests passed an unknown word, which makes any directory unknown, and now pass `true`; tests were added for the arguments passed on that a substitution inherits and a definition resets, a shifting runner reached through another, a function's heredoc to a program that is no shell, xargs' dynamic heredoc and three forms of a script a shell cannot read; the statement's own redirections of a definition, which do not parse as bash, were removed; one did not compile and was rewritten) |
 | A replace ref giving `origin/main` HEAD's tree, in a scratch repository (`replace-check.sh` in the scratchpad) | without `hack/sdlc/lib.sh` the changed files are `[]`; with it, `[main.go]` |
 | `PATH="$PWD/bin:$PATH" go test -race -count=1 ./internal/git/...` (git-lfs 3.7.1 in `bin/`) | passed on `c409428` (and `./internal/reposerver/...` on `6f9f985`); TestLFS passed again after its change to a git wrapper |
 | TestLFS against a client without its LFS filter settings (`go test -overlay`, `lfsmut.sh` in the scratchpad) | fails through the wrapper that skips the system gitconfig; passes when git reads a system config that sets the filter, as the test did before on GitHub's runner |
 
 ## Agent review
 
-Twenty-six runs of `.claude/workflows/sdlc-review.js` on successive trees, each verified finding fixed
+Twenty-seven runs of `.claude/workflows/sdlc-review.js` on successive trees, each verified finding fixed
 before the next run:
 
 | Tree | Blocking (verified) | Minor | Refuted |
@@ -81,6 +82,7 @@ before the next run:
 | `a1cedf4` | 2 | 3 | 0 |
 | `07433c2` | 5 | 4 | 0 |
 | `71d6613` | 5 | 5 | 0 |
+| `cc0f6e2` | 6 | 5 | 1 |
 
 Most findings were ways around the Claude Code hook (shell and git constructs it read differently
 from bash, zsh or git) and tests that could not fail. The seventh run's were six untested branches
@@ -408,6 +410,31 @@ traps and hook functions again, as a definition does. The fifth, an alias of the
 given the name of a function the command defines, is listed in the guide's Limits: making the
 directory unknown after every call of such a function would refuse most commands that define and
 call one before a push.
+
+The twenty-seventh run found 6 blocking findings, all in the walker. A literal script piped into a
+shell behind a wrapper (`env sh`, `nice sh`, `timeout 5 sh`, `sudo sh`), or given as a here-string
+to a shell that `xargs` runs, was not read; it now is, and one the hook cannot read is refused. A
+`"$@"` runner whose definition may not run (in a chain or a branch), that runs a later positional
+or a slice of an array (`"$2" "$3"`, `"${a[@]:1}"`), or that passes its arguments to another runner
+(`step() { run "$@"; }`, in either order of definition) still placed a later push here: such a
+function now counts as a runner, and as one that may start from any of its arguments when it runs
+or passes on anything but `"$@"` or `$1`. The other two were missing tests: what a command
+substitution's walker inherits from this shell (functions defined again, runners, hook functions),
+and the `${*:N}` slice. The 5 minor findings were all fixed: a heredoc on a function definition is
+read at each call, or refused when the hook cannot read it; a shell given a script the hook cannot
+read (`sh -c "$X"`) is recorded as code it did not read, so it runs only in this clone; `bash
+--version` and `--help` are no longer read as a shell reading standard input; git's hook refuses a
+push while a gate file is marked assume-unchanged or skip-worktree, as the Claude Code hook did; and
+the tails of a shifting runner's arguments are each read once, so a long call takes linear time.
+The refuted finding, a command word that is not literal and may be `cd`, is the documented design.
+
+After this round, as each review kept finding new commands built to get past the walker, the owner
+set its scope: a misreading that needs such a command (a script piped into a wrapped shell, chains of
+runner functions, a function defined again between calls, runners of positional or sliced
+arguments, an alias that shadows a function) is a documented limit, rated minor; an ordinary command
+that pushes from another clone or skips git's hook, an ordinary command wrongly refused, a fault in
+the gate itself and a missing test still block (the guide's Limits,
+`.claude/agents/review-verifier.md`).
 
 ## Red team
 

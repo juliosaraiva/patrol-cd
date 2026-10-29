@@ -23,4 +23,14 @@ problem is real but the severity is wrong, confirm it and give the right severit
 behaviour, data loss, security hole, CI that will fail), major (real defect with limited reach,
 changed behaviour without a test, a project rule broken), minor (does not block a push).
 
+The Claude Code hook's command walker (`hack/sdlc/pushcheck`) catches mistakes and shortcuts, not
+deliberate evasion (the guide's Limits, `docs/guides/claude-code-sdlc.md`; the owner's decision). A
+misreading that takes a command built to get past it - a script piped into a wrapped shell, chains
+of runner functions, a function redefined between calls, runners of positional or sliced arguments,
+an alias that shadows a function - is minor. It stays a blocker or major when an ordinary command
+(one a developer or agent would write for its own sake) pushes from another clone or skips git's
+hook unseen, when ordinary commands are wrongly refused, when the gate itself is wrong (`gate.sh`,
+git's pre-push hook, the hook's gates in `main.go`, the text net), or when changed behaviour has no
+test.
+
 Return the verdict in the format the caller asks for, with what you read or ran.

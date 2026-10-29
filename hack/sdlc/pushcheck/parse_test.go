@@ -171,6 +171,21 @@ func TestFindPushes(t *testing.T) {
 		{name: "a runner that shifts", command: `run_logged() { local log=$1; shift; "$@" >"$log" 2>&1; }; run_logged /tmp/x.log cd /other && git push origin a`, want: []push{{Dir: "", Sources: []string{"a"}}}},
 		{name: "a runner that shifts a word away", command: `r() { shift; "$@"; }; r true cd /other && git push origin a`, want: []push{{Dir: "", Sources: []string{"a"}}}},
 		{name: "a runner that slices its arguments", command: `r() { "${@:2}"; }; r true cd /other && git push origin a`, want: []push{{Dir: "", Sources: []string{"a"}}}},
+		{name: "a runner that slices $*", command: `r() { ${*:2}; }; r true cd /other && git push origin a`, want: []push{{Dir: "", Sources: []string{"a"}}}},
+		{name: "a runner that sets zsh's argv to a slice", command: `r() { argv=("${@:2}"); "$@"; }; r true cd /other && git push origin a`, want: []push{{Dir: "", Sources: []string{"a"}}}},
+		{name: "a runner of later positionals", command: `r() { "$2" "$3"; }; r true cd /other && git push origin a`, want: []push{{Dir: "", Sources: []string{"a"}}}},
+		{name: "a runner of an array slice", command: `r() { a=("$@"); "${a[@]:1}"; }; r true cd /other && git push origin a`, want: []push{{Dir: "", Sources: []string{"a"}}}},
+		{name: "a runner maybe defined in a chain", command: `log() { "$@"; } && log cd /other && git push origin a`, want: []push{{Dir: "", Sources: []string{"a"}}}},
+		{name: "a runner maybe defined in an if", command: `if true; then log() { "$@"; }; fi; log cd /other && git push origin a`, want: []push{{Dir: "", Sources: []string{"a"}}}},
+		{name: "a runner named echo", command: `echo() { "$@"; }; echo cd /other && git push origin a`, want: []push{{Dir: "", Sources: []string{"a"}}}},
+		// A function that passes its arguments to a runner is a runner, in either order of definition.
+		{name: "a runner through one defined after it", command: `step() { run "$@"; }; run() { "$@"; }; step cd /other && git push origin a`, want: []push{{Dir: "", Sources: []string{"a"}}}},
+		{name: "a runner through one defined before it", command: `run() { "$@"; }; step() { run "$@"; }; step cd /other && git push origin a`, want: []push{{Dir: "", Sources: []string{"a"}}}},
+		{name: "a runner passing $1 on", command: `run() { "$@"; }; r() { run "$1" "$2"; }; r cd /other && git push origin a`, want: []push{{Dir: "", Sources: []string{"a"}}}},
+		{name: "a runner passing later positionals on", command: `run() { "$@"; }; r() { run "$2" "$3"; }; r true cd /other && git push origin a`, want: []push{{Dir: "", Sources: []string{"a"}}}},
+		{name: "a runner through one that shifts", command: `run() { shift; "$@"; }; step() { run "$@"; }; step true cd /other && git push origin a`, want: []push{{Dir: "", Sources: []string{"a"}}}},
+		{name: "a runner of runners defined again to run nothing", command: `run() { "$@"; }; step() { run "$@"; }; step() { :; }; step cd /other && git push origin a`, want: []push{{Dir: "/repo", Sources: []string{"a"}}}},
+		{name: "a function's heredoc to a shell runs at each call", command: "f() { sh; } <<'EOF'\ngit push origin a\nEOF\ncd /other && f", want: []push{{Dir: "", Sources: []string{"a"}}}},
 		{name: "a runner defined again without a shift", command: `r() { shift; "$@"; }; r() { "$@"; }; r git fetch origin && git push origin a`, want: []push{{Dir: "/repo", Sources: []string{"a"}}}},
 		{name: "a runner that does not shift: later arguments are data", command: `retry() { for i in 1 2 3; do "$@" && return 0; sleep 5; done; return 1; }; retry git fetch origin && git push origin a`, want: []push{{Dir: "/repo", Sources: []string{"a"}}}},
 		// `trap - SIG`, `trap SIG` and `trap N…` reset signals; they run nothing.
@@ -342,6 +357,8 @@ func TestFindPushes(t *testing.T) {
 		{name: "echo piped to a shell", command: "echo 'git push origin a' | sh", want: []push{{Dir: "/repo", Sources: []string{"a"}}}},
 		{name: "cat heredoc piped to a shell", command: "cat <<'EOF' | bash\ngit push origin a\nEOF", want: []push{{Dir: "/repo", Sources: []string{"a"}}}},
 		{name: "echo of a push piped to a shell", command: "echo 'cd /y && git push origin main' | bash", want: []push{{Dir: "/y", Sources: []string{"main"}}}},
+		{name: "cat heredoc piped to a shell behind env", command: "cd /other && cat <<'EOF' | env bash\ngit push origin a\nEOF", want: []push{{Dir: "/other", Sources: []string{"a"}}}},
+		{name: "a here-string to a shell xargs runs", command: "cd /other && xargs sh <<<'git push origin a'", want: []push{{Dir: "/other", Sources: []string{"a"}}}},
 
 		// git push options.
 		{name: "delete flag", command: "git push --delete origin old other", want: []push{{Dir: "/repo", Deletes: true}}},
@@ -710,6 +727,17 @@ func TestFindPushesBlocked(t *testing.T) {
 		{`printf 'true\x0agit push origin main' | sh`, "a git push through a script piped to a shell"},
 		{`printf 'true\u000agit push origin main' | sh`, "a git push through a script piped to a shell"},
 		{`printf 'true\U0000000agit push origin main' | sh`, "a git push through a script piped to a shell"},
+		// A script piped to a shell behind a wrapper.
+		{`cd /other && printf 'git push origin a\n' | env sh`, "a git push through a script piped to a shell"},
+		{`cd /other && printf 'git push origin a\n' | command bash`, "a git push through a script piped to a shell"},
+		{`cd /other && printf 'git push origin a\n' | nice -n 5 sh`, "a git push through a script piped to a shell"},
+		{`cd /other && printf 'git push origin a\n' | timeout 5 sh`, "a git push through a script piped to a shell"},
+		{`cd /other && printf 'git push origin a\n' | sudo sh`, "a git push through a script piped to a shell"},
+		// A function definition's heredoc the hook cannot read.
+		{"f() { sh; } <<EOF\ngit push origin $X\nEOF\nf", "a git push through a redirection of a function definition"},
+		{"f() { cat; } <<'EOF'\ngit push origin main\nEOF", "a git push through a redirection of a function definition"},
+		// A here-string to a shell xargs runs, which the hook cannot read.
+		{`cd /other && xargs sh <<<"git push origin $X"`, "a git push through xargs"},
 		// What source reads from a word the hook cannot read.
 		{`cd /other && . <(echo 'git push origin main')`, "a git push through source"},
 		// A ref or refspec read from standard input, in any abbreviation git accepts, can move origin/main.
@@ -1071,7 +1099,7 @@ func TestFindPushesUnknownWords(t *testing.T) {
 		{"command nosuch-gp; env nosuch-gp; nohup nosuch-gp", nil},
 		{"f() { :; }; f; ls; true", nil},
 		// A shell, source or eval whose script the walker did not read.
-		{"cd /other && echo x | env sh", []unknownRun{{Dir: "/other", Word: "sh", What: stdinScript("sh")}}},
+		{"cd /other && echo x | env sh", []unknownRun{{Dir: "/other", Word: "x"}, {Dir: "/other", Word: "sh", What: stdinScript("sh")}}}, // the piped script read, behind env
 		{"(cd /other && bash) <<'EOF'\ngit push origin main\nEOF", []unknownRun{{Dir: "/other", Word: "bash", What: stdinScript("bash")}}},
 		{"cd /other && sh < <(echo x)", []unknownRun{{Dir: "/other", Word: "sh", What: stdinScript("sh")}}},
 		{"bash -s <<'EOF'\ntrue\nEOF", nil}, // read
@@ -1092,6 +1120,18 @@ func TestFindPushesUnknownWords(t *testing.T) {
 		{"source /dev/stdin <<<'true'", nil}, // read
 		{`eval "$x"`, []unknownRun{{Dir: "/repo", Word: "eval", What: "`eval` of a string the hook cannot read runs code it did not read"}}},
 		{`cd /other && "$X" a`, []unknownRun{{Dir: "/other", Word: "", What: "a command named by a word the hook cannot read"}}},
+		{`cd /other && sh -c "$X"`, []unknownRun{{Dir: "/other", Word: "sh", What: "`sh` runs a script the hook cannot read"}}},
+		{"bash --version; sh --help", nil}, // no script
+		{`cd /other && sh -c -- "$X"`, []unknownRun{{Dir: "/other", Word: "sh", What: "`sh` runs a script the hook cannot read"}}},
+		{`cd /other && sh -- "$f"`, []unknownRun{{Dir: "/other", Word: "sh", What: "`sh` runs a script the hook cannot read"}}},
+		{"cd /other && sh <<EOF\n$X\nEOF", []unknownRun{{Dir: "/other", Word: "sh", What: "`sh` runs a script the hook cannot read"}}},
+		// A command substitution's subshell starts with this shell's functions, runners and hooks.
+		{"g() { :; }; f() { g; }; v=$(g() { nosuch-gp; }; cd /other && f)", []unknownRun{{Dir: "", Word: "f", What: staleRun("f")}}},
+		{`r() { "$@"; }; v=$(r cd /other && nosuch-gp)`, []unknownRun{{Dir: "/repo", What: "a command named by a word the hook cannot read"}, {Dir: "", Word: "nosuch-gp"}}},
+		{`run() { "$@"; }; step() { run "$@"; }; v=$(step cd /other && nosuch-gp)`, []unknownRun{{Dir: "/repo", What: "a command named by a word the hook cannot read"}, {Dir: "/repo", Word: "run", What: staleRun("run")}, {Dir: "/repo", Word: "step", What: staleRun("step")}, {Dir: "", Word: "nosuch-gp"}}},
+		{`r() { shift; "$@"; }; v=$(r true cd /other && nosuch-gp)`, []unknownRun{{Dir: "/repo", What: "a command named by a word the hook cannot read"}, {Dir: "", Word: "nosuch-gp"}}},
+		{`true && r() { "$@"; }; v=$(r cd /other && nosuch-gp)`, []unknownRun{{Dir: "/repo", What: "a command named by a word the hook cannot read"}, {Dir: "/repo", Word: "r"}, {Dir: "", Word: "nosuch-gp"}}},
+		{"chpwd() { cd /other; }; v=$(cd /x && nosuch-gp)", []unknownRun{{Dir: "", Word: "nosuch-gp"}}},
 	} {
 		got, err := findPushes(tt.command, "/repo")
 		require.NoError(t, err)

@@ -433,6 +433,15 @@ printf '#!/usr/bin/env bash\nexit 0\n' >hack/sdlc/gate.sh
 check "an uncommitted broken gate: git's hook asks the base's gate" 1 "$(gitpush origin plainb)"
 contains "reason: git's hook names the base's gate for an uncommitted change" "$work/push.err" "judged it too"
 git checkout -q -- hack/sdlc/gate.sh
+# An edit of the gate that git status is told not to show would run unseen: git's hook refuses it.
+for mark in assume-unchanged skip-worktree; do
+	git update-index --"$mark" hack/sdlc/gate.sh
+	printf '#!/usr/bin/env bash\nexit 0\n' >hack/sdlc/gate.sh
+	check "a gate edit hidden by $mark: git's hook refuses" 1 "$(gitpush origin plainb)"
+	contains "reason: a hidden gate edit ($mark)" "$work/push.err" "is marked assume-unchanged or skip-worktree"
+	git update-index --no-"$mark" hack/sdlc/gate.sh
+	git checkout -q -- hack/sdlc/gate.sh
+done
 # And when the checked-out branch changes only the settings, or only git's hook.
 for path in .claude/settings.json .githooks/pre-push; do
 	git checkout -q -B "only-$(basename "$path")" main

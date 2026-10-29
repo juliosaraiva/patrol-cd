@@ -143,7 +143,8 @@ A change to the gate's own files (`.githooks/`, `hack/sdlc/`, `.claude/settings.
 the gate of its base too (the merge base with `origin/main`, run from the base's files), so a gate
 the change breaks cannot pass the change; so is any push made while the checked-out branch has
 changed those files, since the gate that runs is the work tree's. Both hooks do this, each on its
-own. A push the base's gate
+own, and both refuse a push while one of those files is marked assume-unchanged or skip-worktree,
+which would hide an edit of it from that comparison. A push the base's gate
 refuses (because the change also changed what the records hold, say) is made by the owner. This
 covers the gate's decision, not the checks behind a record: a change that weakens
 `hack/sdlc/check.sh` writes a passing record with its own check.sh, which the base's gate accepts;
@@ -196,10 +197,11 @@ Two hooks run it:
      does not know (below), which may be an alias that pushes (oh-my-zsh's `gp`); a shell reading a
      script from standard input it did not read (`(cd X && sh) <<EOF`, `… | env sh`, `sh < <(…)`), or
      from the input of `xargs` or `parallel` (`xargs sh -c`, `xargs -I{} sh -c {}`, `parallel` with no
-     command); `source` of standard input or of a word it cannot read; an `eval` of a dynamic string;
-     a command word that is not literal. Such code runs only in a work tree of this clone where
-     git's hook runs the gate as committed (`core.hooksPath` is `.githooks`, the hook and
-     `hack/sdlc/gate.sh` are there, and the gate's own files have no uncommitted or hidden change),
+     command); a shell given a script it cannot read (`sh -c "$X"`); `source` of standard input or of
+     a word it cannot read; an `eval` of a dynamic string; a command word that is not literal. Such
+     code runs only in a work tree of this clone where git's hook runs the gate as committed
+     (`core.hooksPath` is `.githooks`, the hook and `hack/sdlc/gate.sh` are there, and the gate's own
+     files have no uncommitted or hidden change),
      which judges what it pushes. It is placed where it runs: code in a function body at each call
      of the function, in the call's directory moved by any `cd` in the body before it (from an
      unknown directory once `CDPATH` or `HOME` is set, which may take that `cd` elsewhere, and for
@@ -260,8 +262,10 @@ Two hooks run it:
     given a script among the arguments of a program it does not model (`arch -arm64 sh -c '…'`,
     `script -q /dev/null bash -c '…'`, from an unknown directory after a word it does not know), and parses `bash -c '…'`,
     a heredoc or here-string given to `bash`/`sh`/`zsh`/`dash`/`ksh`/`mksh` or to `source
-    /dev/stdin`, a literal script piped to a shell (whatever the shell's options; `echo` text with a
-    backslash is not read as written, since zsh's echo expands `\n`), `eval`, `watch` (its operands as `sh -c` runs them,
+    /dev/stdin` (also one `xargs` runs, and a function definition's heredoc, read at each call of the
+    function), a literal script piped to a shell (whatever the shell's options, also behind a wrapper:
+    `env sh`, `nice sh`; `echo` text with a backslash is not read as written, since zsh's echo
+    expands `\n`), `eval`, `watch` (its operands as `sh -c` runs them,
     or its argv with `-x`), and the commands git runs for a subcommand (below). A `git push` found
     this way is gated like a direct one. A function body or `trap` action runs later, from wherever
     the shell is then: a push in it runs from an unknown directory, and a `cd` in it leaves the
@@ -272,8 +276,10 @@ Two hooks run it:
     it may cd, from an unknown directory. A function that runs code given at run time (`"$@"`, `$1`,
     `eval`, also through `noglob`, `builtin` or `repeat N`) runs its arguments as a command in this
     shell: a `cd` among them (`r cd DIR`) moves the directory, wherever the call is (in a body, at a
-    pipeline's end, given to another such function), and from any of them when the body shifts them or
-    slices `"${@:N}"`; a function named there, as among
+    pipeline's end, given to another such function), and from any of them when the body shifts them,
+    slices `"${@:N}"` or runs later positionals (`"$2"`); a function that passes its arguments to
+    such a function is one too, whichever is defined first, and so is one that may be defined (in a
+    chain or a branch); a function named there, as among
     the arguments of a word the walker does not know, runs there too. A call of a function the
     command defines whose name is no program on PATH or builtin is also a word the walker does not
     know, so it runs only in this clone: an alias of that name in the shell's setup would run
@@ -401,6 +407,14 @@ A second hook (`hack/sdlc/claude-format.sh`, `PostToolUse` for Edit, MultiEdit a
   is an alias of the setup that skips git's hook on its own (one that runs `git push --no-verify`). git's
   pre-push hook (required before any command runs) checks the pushes they make in this clone's work
   trees; a script or program that disables git's hook on purpose gets past both.
+- Scope of the walker (the owner's decision, after reviews kept finding new constructed evasions): it
+  is held to the commands a developer or agent writes for their own sake. A misreading that needs a
+  command built to get past it (a script piped into a wrapped shell, chains of runner functions, a
+  function redefined between calls, runners of positional or sliced arguments, an alias that shadows
+  a function) is a documented limit: the review rates it minor, and git's hook still checks every
+  push from this clone. An ordinary command that pushes from another clone or skips git's hook
+  unseen, an ordinary command wrongly refused, or a fault in the gate itself (`gate.sh`, git's hook,
+  the hook's gates, the text net) still blocks a push (`.claude/agents/review-verifier.md`).
 - `core.hooksPath` is the relative `.githooks`, which git resolves against the directory it runs
   hooks from: the top of the work tree it found or, when it is given the git directory (`--git-dir`,
   `GIT_DIR`) without a work tree, its current directory; inside `.git` it has no work tree. So git's

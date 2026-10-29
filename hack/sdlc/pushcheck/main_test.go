@@ -145,6 +145,12 @@ func TestRunUnknownWords(t *testing.T) {
 		{"echo 'git status' | env sh", 0, ""},
 		{"cd " + other + " && echo 'git status' | env sh", 2, "`sh` reads a script from standard input that the hook did not read, which can push; it would run in " + other},
 		{"cd " + other + " && echo 'git status' | xargs -0 sh -c", 2, "`sh` run by xargs or parallel takes its script from their input"},
+		{"cd " + other + ` && sh -c "$X"`, 2, "`sh` runs a script the hook cannot read, which can push; it would run in " + other},
+		{`sh -c "$X"`, 0, ""},
+		{"cd " + other + " && bash --version", 0, ""},
+		// A runner in either order of definition, or maybe defined, given a cd.
+		{`step() { run "$@"; }; run() { "$@"; }; step cd ` + other + ` && git push origin HEAD`, 2, "cannot tell which directory `git push` runs in"},
+		{`log() { "$@"; } && log cd ` + other + ` && git push origin HEAD`, 2, "cannot tell which directory `git push` runs in"},
 	} {
 		in, err := json.Marshal(map[string]any{"cwd": root, "tool_input": map[string]string{"command": tt.command}})
 		require.NoError(t, err)

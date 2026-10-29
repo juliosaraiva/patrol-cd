@@ -14,6 +14,15 @@ if [[ ! -x hack/sdlc/gate.sh ]]; then
 fi
 export GIT_NO_REPLACE_OBJECTS=1 GIT_GRAFT_FILE=/dev/null/no-grafts # history as it is (hack/sdlc/lib.sh)
 
+# An edit of the gate's own files that git status is told not to show (assume-unchanged,
+# skip-worktree: a lower-case or S tag in git ls-files -v) would run here unseen and keep base_gate
+# from judging it. Refuse, as the Claude Code hook does; the listing must succeed (fail closed).
+tags=$(git ls-files -v -- .githooks hack/sdlc .claude/settings.json)
+if grep -E '^([a-z]|S) ' <<<"$tags" >/dev/null; then
+	echo "sdlc pre-push: a file of the gate (.githooks/, hack/sdlc/, .claude/settings.json) is marked assume-unchanged or skip-worktree, which hides an edit of it; clear the marks (git update-index --no-assume-unchanged / --no-skip-worktree FILE) before pushing" >&2
+	exit 1
+fi
+
 # base_gate COMMIT: a change to the gate's own files is judged by the gate of its base too (the merge
 # base with origin/main), so a gate the change breaks cannot pass the change; the base's gate asks for
 # the same records. It runs from the base's files, with this repository's git directory. A base
