@@ -547,6 +547,17 @@ that contains this record is in the pull request.
 - **#228:** `TestWaitForCRDsTimesOutNamingTheMissingKinds` needs a discovery call within 100 ms;
   under load none finished. `go test -race -count=10 -run
   'TestWaitForCRDsTimesOutNamingTheMissingKinds$' ./internal/server/` alone passed 10 of 10.
+- **CI-F25 and CI-F26, fixed in this branch:** pull request #232's first CI run (run 40959651460,
+  head `f218d82`) failed in two places that the change does not touch.
+  - The envtest helper of `make ci-scripts` lost a port race: `bind: address already in use`. With
+    `scratchpad/ci232/port-collision.sh`, which holds the first port the helper chooses for the API
+    server, the old helper fails the same way, and the new one starts on its second attempt in 15 s
+    (6 port choices). `make ci-scripts` then passed (exit 0; 49 objects validated).
+  - `TestDeletion` read the Application twice, and the deletion completed between the reads. With a
+    2 s pause between them (`go test -overlay`), the old test fails with the CI message
+    (`"cascade" not found`). `KUBEBUILDER_ASSETS=bin/envtest/k8s/1.36.0-darwin-arm64
+    PATROL_INTEGRATION=1 go test -race -count=3 -run '^TestDeletion$' ./test/integration/` passed
+    (89 s).
 - **No protection on `main`:** `gh api repos/juliosaraiva/patrol-cd/rules/branches/main` returns
   `[]`; the only ruleset targets no branch. The guide says so (#25, #220).
 
