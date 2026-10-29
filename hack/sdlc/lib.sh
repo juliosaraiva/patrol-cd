@@ -51,16 +51,28 @@ sdlc_docs_only() {
 }
 
 # sdlc_weakened MAKEFILE... prints what in the environment could weaken a check, one per line: a
-# make variable the makefiles define with `?=` (replace a tool with a no-op, drop -race, change the
-# commit range), CI_GO_TEST_FLAGS, and GOFLAGS from the environment or Go's env file (`go env -w`,
-# GOENV), which can skip tests. The list is derived, so a new `?=` variable is covered. A variable
-# set to the empty string counts too: make takes it as defined, so `?=` does not apply (an empty
-# CI_RACE drops -race, an empty ACTIONLINT lints nothing).
+# make variable the makefiles, or those they include, define with `?=` (replace a tool with a no-op,
+# drop -race, change the commit range), CI_GO_TEST_FLAGS, and GOFLAGS from the environment or Go's
+# env file (`go env -w`, GOENV), which can skip tests. The list is derived, so a new `?=` variable,
+# or a new included makefile, is covered. A variable set to the empty string counts too: make takes
+# it as defined, so `?=` does not apply (an empty CI_RACE drops -race, an empty ACTIONLINT lints
+# nothing).
 sdlc_weakened() {
-	local v
+	local v f i=0 seen
+	local -a files=("$@")
+	seen=$(printf '%s\n' "$@")
+	# And the makefiles they include, at any depth (named from the top of the tree, as make reads them).
+	while [[ $i -lt ${#files[@]} ]]; do
+		while IFS= read -r f; do
+			[[ -f $f && $'\n'$seen$'\n' != *$'\n'$f$'\n'* ]] || continue
+			files+=("$f")
+			seen+=$'\n'$f
+		done < <(sed -nE 's/^(-|s)?include[[:space:]]+//p' "${files[i]}" | tr -s '[:blank:]' '\n')
+		i=$((i + 1))
+	done
 	while IFS= read -r v; do
 		[[ -n ${!v+set} ]] && printf '%s\n' "$v"
-	done < <(sed -nE 's/^[[:space:]]*([A-Z][A-Z0-9_]*)[[:space:]]*\?=.*/\1/p' "$@" | sort -u
+	done < <(sed -nE 's/^[[:space:]]*([A-Z][A-Z0-9_]*)[[:space:]]*\?=.*/\1/p' "${files[@]}" | sort -u
 		printf '%s\n' CI_GO_TEST_FLAGS)
 	[[ -z $(go env GOFLAGS 2>/dev/null) ]] || printf '%s\n' "GOFLAGS (go env)"
 }

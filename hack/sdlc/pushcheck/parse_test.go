@@ -75,8 +75,6 @@ func TestFindPushes(t *testing.T) {
 		// What a child process sources or evals does not reach the shell; what the shell does, does.
 		{name: "env runs a source in a child", command: "env . ./x.sh && git push origin a", want: []push{{Dir: "/repo", Sources: []string{"a"}}}},
 		{name: "a wrapper runs a source in a child", command: "nohup . ./x.sh && git push origin a", want: []push{{Dir: "/repo", Sources: []string{"a"}}}},
-		{name: "a sourced file can cd", command: ". ./x.sh && kubectl exec p -- git push origin a", want: []push{{Dir: "", Sources: []string{"a"}}}},
-		{name: "a dynamic eval can cd", command: `eval "$E" && kubectl exec p -- git push origin a`, want: []push{{Dir: "", Sources: []string{"a"}}}},
 		{name: "sudo -D runs the command elsewhere", command: "sudo -D /tmp/other git push origin a", want: []push{{Dir: "", Sources: []string{"a"}}}},
 		{name: "sudo --chdir", command: "sudo --chdir=/tmp/other git push origin a", want: []push{{Dir: "", Sources: []string{"a"}}}},
 		{name: "sudo -i runs in the target user's home", command: "sudo -i git push origin a", want: []push{{Dir: "", Sources: []string{"a"}}}},
@@ -335,16 +333,16 @@ func TestFindPushes(t *testing.T) {
 		{name: "a shell script through arch", command: "arch -arm64 sh -c 'cd /other && git push origin a'", want: []push{{Dir: "/other", Sources: []string{"a"}}}},
 		{name: "a shell script with options through arch", command: "arch -arm64 bash -o pipefail -ec 'git -C /other push origin a'", want: []push{{Dir: "/other", Sources: []string{"a"}}}},
 		{name: "a shell script through an unknown word", command: "nosuch-wrapper bash -lc 'git push origin a'", want: []push{{Dir: "", Sources: []string{"a"}}}},
-		{name: "a shell's name as data", command: "arch -arm64 sh ./build.sh; git push origin a", want: []push{{Dir: "/repo", Sources: []string{"a"}}}},
+		{name: "a shell's name as data", command: "/usr/bin/arch -arm64 sh ./build.sh; git push origin a", want: []push{{Dir: "/repo", Sources: []string{"a"}}}},
 		{name: "find -exec with +", command: "find . -maxdepth 0 -exec git push origin a {} +", want: []push{{Dir: "/repo", Sources: []string{"a", "{}"}}}},
 		{name: "find -okdir runs from each file's directory", command: "find /tmp/other -maxdepth 0 -okdir git push origin a \\; <<< y", want: []push{{Dir: "", Sources: []string{"a"}}}},
-		{name: "kubectl exec a push", command: "kubectl exec pod -- git push origin a", want: []push{{Dir: "/repo", Sources: []string{"a"}}}},
 		// A cd run by a child process (env, a wrapper, find -exec, kubectl exec) does not move the shell.
 		{name: "env cd", command: "env cd /tmp && git push origin a", want: []push{{Dir: "/repo", Sources: []string{"a"}}}},
 		{name: "sudo cd", command: "sudo cd /tmp; git push origin a", want: []push{{Dir: "/repo", Sources: []string{"a"}}}},
 		{name: "nohup cd", command: "nohup cd /tmp; git push origin a", want: []push{{Dir: "/repo", Sources: []string{"a"}}}},
 		{name: "find -exec cd", command: "find . -maxdepth 0 -exec cd /tmp ';' ; git push origin a", want: []push{{Dir: "/repo", Sources: []string{"a"}}}},
 		{name: "kubectl exec cd", command: "kubectl exec p -- cd /tmp; git push origin a", want: []push{{Dir: "/repo", Sources: []string{"a"}}}},
+		{name: "kubectl exec git, then a push", command: "kubectl exec p -- git status && git push origin a", want: []push{{Dir: "/repo", Sources: []string{"a"}}}},
 		{name: "in a while loop", command: "while false; do git push; done", want: []push{{Dir: "/repo", Sources: head}}},
 		{name: "in a case", command: "case x in x) git push;; esac", want: []push{{Dir: "/repo", Sources: head}}},
 		{name: "bash -c", command: `bash -lc 'cd /y && git push origin d'`, want: []push{{Dir: "/y", Sources: []string{"d"}}}},
@@ -547,6 +545,11 @@ func TestFindPushesBlocked(t *testing.T) {
 		{"git difftool -y -x 'git push --no-verify origin a' HEAD~1", "git difftool"},
 		{"git difftool --extcmd='git push origin a' HEAD~1", "git difftool"},
 		{"docker exec c git push --no-verify origin main", "run through docker"},
+		// A push in a container is the container's clone's: the gate judges this clone's commits, and
+		// git's hook does not run there.
+		{"kubectl exec pod -- git push origin a", "a git push run in a container"},
+		{"docker exec ctr -- git push origin feature", "a git push run in a container"},
+		{"kubectl -n x exec toolbox -- sh -c 'cd /tmp/gb && git push origin smoke'", "a git push run in a container"},
 		{"declare -x GIT_DIR; git push", gitEnv},
 		{"(( GIT_DIR++ )); git push", gitEnv},
 		// Code the command defines under a name, run later through it.
@@ -1044,6 +1047,10 @@ func TestFindPushesUnknownWords(t *testing.T) {
 		want    []unknownRun
 	}{
 		{"nosuch-gp origin main", []unknownRun{{Dir: "/repo", Word: "nosuch-gp"}}},
+		// What the shell sources or evals can cd; what a child process does, cannot.
+		{". ./x.sh && nosuch-gp", []unknownRun{{Dir: "", Word: "nosuch-gp"}}},
+		{`eval "$E" && nosuch-gp`, []unknownRun{{Dir: "/repo", Word: "eval", What: "`eval` of a string the hook cannot read runs code it did not read"}, {Dir: "", Word: "nosuch-gp"}}},
+		{"env . ./x.sh && nosuch-gp", []unknownRun{{Dir: "/repo", Word: "nosuch-gp"}}},
 		{"cd /other && nosuch-gp origin main", []unknownRun{{Dir: "/other", Word: "nosuch-gp"}}},
 		{"nosuch-z x && nosuch-gp", []unknownRun{{Dir: "/repo", Word: "nosuch-z"}, {Dir: "", Word: "nosuch-gp"}}},
 		{"cd /other && cd /repo && - && true", []unknownRun{{Dir: "/repo", Word: "-"}}},

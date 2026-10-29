@@ -51,9 +51,9 @@ directory cannot replace the tree's modules; inherited make flags and `MAKE` are
 (`GIT_NO_REPLACE_OBJECTS`, `GIT_GRAFT_FILE`), which could make a commit read with another commit's
 tree or parents. A run records nothing when HEAD moved during it (a checkout, reset or stash, even
 one undone before the end, which HEAD's reflog shows), or when the environment sets what can weaken
-a check: a make variable the makefiles define with `?=`, even to the empty string, which make takes
-as defined (an empty `CI_RACE` drops `-race`, an empty `ACTIONLINT` lints nothing),
-`CI_GO_TEST_FLAGS`, or `GOFLAGS` (also from Go's env file).
+a check: a make variable the makefiles (and those they include) define with `?=`, even to the
+empty string, which make takes as defined (an empty `CI_RACE` drops `-race`, an empty `ACTIONLINT`
+lints nothing), `CI_GO_TEST_FLAGS`, or `GOFLAGS` (also from Go's env file).
 
 When every check passed on a **clean** tree, it writes a record for HEAD's tree
 (`git rev-parse HEAD^{tree}`) to `$(git rev-parse --git-common-dir)/patrol-sdlc/checks/<tree>`. A
@@ -168,8 +168,10 @@ Two hooks run it:
   `.claude/settings.json` for the tools that run commands: Bash, Monitor, the terminal, and the browser
   pane's `preview_start`, whose command is the `.claude/launch.json` configuration it names). While
   git's hook is not enabled it refuses every command but `make sdlc-git-hooks`, so git's hook runs
-  whatever Claude Code pushes. Then every command goes to `hack/sdlc/pushcheck` (built into `bin/` on
-  first use). Claude Code blocks a command only when a hook exits with status 2, so any other failure
+  whatever Claude Code pushes; that command runs even when the hook's binary cannot be built (a
+  fresh clone offline, Go missing from the hook's PATH). Then every command goes to
+  `hack/sdlc/pushcheck` (built into `bin/` on first use; while it cannot be built, a command that
+  mentions git or what would skip its hook is refused, and the others run). Claude Code blocks a command only when a hook exits with status 2, so any other failure
   is turned into 2: the wrapper's, when the binary dies, and the settings' hook command's, which runs
   the wrapper with `bash` (an executable bit does not matter) and lets commands run only where the
   checkout has no wrapper (a commit from before the gate). Its job is to keep git's hook from being
@@ -263,7 +265,8 @@ Two hooks run it:
     starts (a subshell, bash's `export -f`). A definition chained with `&&`, `||` or a pipe
     (`f() { …; } && cd /x`) is one element of the chain; the rest runs in this shell. It follows
     the command a wrapper runs (`timeout`, `nice`, `sudo`, `nohup`, `env`, `xargs`, `find -exec`
-    and `-ok`, `kubectl`/`docker exec -- …`, `command`, `exec`, …) into that command, and a shell
+    and `-ok`, `kubectl`/`docker exec -- …` (where a push is refused, below), `command`, `exec`, …)
+    into that command, and a shell
     given a script among the arguments of a program it does not model (`arch -arm64 sh -c '…'`,
     `script -q /dev/null bash -c '…'`, from an unknown directory after a word it does not know), and parses `bash -c '…'`,
     a heredoc or here-string given to `bash`/`sh`/`zsh`/`dash`/`ksh`/`mksh` or to `source
@@ -307,6 +310,10 @@ Two hooks run it:
   - **What it refuses wherever the command runs**, because it can point git elsewhere, run a push the
     gate cannot see, or move what the gate measures from:
     - a push with an argument that is not literal (it could be `--no-verify`);
+    - a push run in a container (`kubectl exec … -- git push`, `docker exec … --`): it pushes the
+      container's clone, whose commits the gate does not judge and where git's hook does not run
+      (a push given to `ssh` or to an exec runner without `--` is refused as a push through a
+      command it cannot check);
     - a `GIT_*` variable outside a short safe list set in the shell (`GIT_DIR`, `GIT_WORK_TREE`,
       `GIT_CONFIG_*` …): inline, with `env` (also after `--`, and with a value that is not
       literal), `export`/`readonly`/`declare` (also quoted, `"NAME=VALUE"`, and through a

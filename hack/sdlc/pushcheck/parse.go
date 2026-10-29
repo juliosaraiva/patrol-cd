@@ -2492,12 +2492,15 @@ func (w *walker) execRunner(args []string, lit []bool) {
 		if lit[i] && args[i] == "--" {
 			if i+1 < len(args) {
 				// It runs in a container: its cd stays there, and its git reads the container's
-				// configuration (so its subcommands are not checked for aliases here). A push or a
-				// refusal still counts.
+				// configuration (so its subcommands are not checked for aliases here). A refusal
+				// still counts; a push is the container's clone's, which neither the gate (it judges
+				// this clone's commits) nor git's hook (not there) checks, so it is refused.
 				s := newWalker(w.dir, w.src)
 				s.command(args[i+1:], lit[i+1:], nil)
-				w.pushes = append(w.pushes, s.pushes...)
 				w.block(s.blocked)
+				if len(s.pushes) > 0 {
+					w.block("a git push run in a container (" + path.Base(args[0]) + " … -- git push) cannot be checked: the gate judges this clone's commits, and git's pre-push hook does not run there; push from this clone, or run it outside Claude Code")
+				}
 			}
 			return
 		}

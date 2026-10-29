@@ -226,7 +226,16 @@ contains "reason: a bare clone" "$work/hook.err" "which is not a work tree of $r
 git clone -q --no-checkout "$remote" "$work/nocheckout"
 check "clone without a checkout" 2 "$(hook 'git push origin main:other' "$work/nocheckout")"
 contains "reason: a clone without a checkout" "$work/hook.err" "which is not a work tree of $repo"
+# Without a binary and with a build that fails (this clone has no pushcheck sources; a fresh clone
+# offline or without Go on the hook's PATH), the command that enables git's hook still runs.
+mv bin/sdlc-pushcheck "$work/pushcheck.saved"
+check "no binary, git hook not enabled: make sdlc-git-hooks runs" 0 "$(wrapper 'make sdlc-git-hooks')"
+check "no binary, git hook not enabled: any other command" 2 "$(wrapper 'ls')"
 git config core.hooksPath .githooks
+check "no binary, a failed build: a command without git runs" 0 "$(wrapper 'ls')"
+check "no binary, a failed build: a command with git is refused" 2 "$(wrapper 'git status')"
+contains "reason: the build failed" "$work/hook.err" "cannot build hack/sdlc/pushcheck"
+mv "$work/pushcheck.saved" bin/sdlc-pushcheck
 check "git hook enabled: any command" 0 "$(wrapper 'ls')"
 # A pushcheck binary that dies refuses the command instead of letting it run unchecked.
 cp bin/sdlc-pushcheck "$work/pushcheck.good"
@@ -577,6 +586,14 @@ check "weakened: a ?= variable" GOLANGCI_LINT "$(unset CI_GO_TEST_FLAGS && sourc
 check "weakened: a ?= variable set empty" GOLANGCI_LINT "$(unset CI_GO_TEST_FLAGS && source "$src/hack/sdlc/lib.sh" && GOENV=off GOFLAGS='' GOLANGCI_LINT='' sdlc_weakened "$work/w.mk")"
 # shellcheck source=hack/sdlc/lib.sh
 check "weakened: CI_GO_TEST_FLAGS set empty" CI_GO_TEST_FLAGS "$(unset GOLANGCI_LINT && source "$src/hack/sdlc/lib.sh" && GOENV=off GOFLAGS='' CI_GO_TEST_FLAGS='' sdlc_weakened "$work/w.mk")"
+# A ?= variable of an included makefile (the root Makefile includes hack/kind/kind.mk), at any depth.
+printf 'include %s/w2.mk\n' "$work" >>"$work/w.mk"
+printf -- '-include %s/w3.mk %s/missing.mk\nNESTED_A ?= a\n' "$work" "$work" >"$work/w2.mk"
+printf 'include %s/w.mk\nNESTED_B ?= b\n' "$work" >"$work/w3.mk" # a cycle, read once
+# shellcheck source=hack/sdlc/lib.sh
+check "weakened: a ?= variable of an included makefile" "NESTED_A,NESTED_B" "$(unset CI_GO_TEST_FLAGS GOLANGCI_LINT && source "$src/hack/sdlc/lib.sh" && GOENV=off GOFLAGS='' NESTED_A=x NESTED_B='' sdlc_weakened "$work/w.mk" | paste -sd, -)"
+# shellcheck source=hack/sdlc/lib.sh
+check "weakened: the project's makefiles include hack/kind/kind.mk's" KIND_IMAGES "$(cd "$src" && unset CI_GO_TEST_FLAGS && source hack/sdlc/lib.sh && GOENV=off GOFLAGS='' KIND_IMAGES=x sdlc_weakened Makefile hack/*.mk | grep -x KIND_IMAGES)"
 # shellcheck source=hack/sdlc/lib.sh
 check "weakened: GOFLAGS in Go's env file" "GOFLAGS (go env)" "$(unset CI_GO_TEST_FLAGS GOLANGCI_LINT && source "$src/hack/sdlc/lib.sh" && GOENV=$work/goenv GOFLAGS='' sdlc_weakened "$work/w.mk")"
 

@@ -10,7 +10,7 @@
 # push) and runs the gate. The binary is built into bin/ on first use and rebuilt when its sources or
 # go.sum change; while a change does not build, the last binary that did is used, and without one,
 # commands that mention git or what would skip its hook are refused and the others run, so the build
-# can be fixed. The browser pane's preview_start runs the command a .claude/launch.json configuration
+# can be fixed (`make sdlc-git-hooks` runs in any case). The browser pane's preview_start runs the command a .claude/launch.json configuration
 # names; that command is checked the same way (which needs jq). Without jq the whole hook input
 # stands in for the command, so `make sdlc-git-hooks` must then be run outside Claude Code. Exit 2
 # blocks the command and shows stderr to Claude Code.
@@ -46,6 +46,10 @@ if [[ -f $root/.githooks/pre-push && $command != "make sdlc-git-hooks" ]] && git
 	echo "sdlc pre-push hook: git's pre-push hook is not enabled in $root (core.hooksPath is not .githooks): run \`make sdlc-git-hooks\` once, then run the command again" >&2
 	exit 2
 fi
+# That one command runs even when the binary cannot be built (a fresh clone offline, or Go missing
+# from the hook's PATH), so the build can then be fixed: it carries no other shell code, and
+# pushcheck, which does not read Makefiles, would let it run too.
+[[ $command != "make sdlc-git-hooks" ]] || exit 0
 
 bin=$root/bin/sdlc-pushcheck
 if [[ ! -x $bin || -n $(find "$root/hack/sdlc/pushcheck" "$root/go.sum" -newer "$bin" -print 2>/dev/null | head -n 1) ]]; then

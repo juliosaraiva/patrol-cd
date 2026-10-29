@@ -133,7 +133,7 @@ func TestRunUnknownWords(t *testing.T) {
 		{`run() { "$@"; }; deploy() { run cd ` + other + `; }; deploy && git push origin HEAD`, 2, "cannot tell which directory `git push` runs in"},
 		// A shell script handed to a program the walker does not model runs as written.
 		{"arch -arm64 sh -c 'cd " + other + " && nosuch-gp'", 2, "it would run in " + other},
-		{"arch -arm64 sh -c 'nosuch-gp'", 0, ""},
+		{"/usr/bin/arch -arm64 sh -c 'nosuch-gp'", 0, ""}, // by path, a program on any host
 		{`r() { "$@"; }; d() { cd ` + other + ` && nosuch-gp; }; r d`, 2, "it would run in " + other},
 		// Nested substitutions run where their statement runs.
 		{"x=$(echo $(nosuch-tool))", 0, ""},
@@ -149,6 +149,8 @@ func TestRunUnknownWords(t *testing.T) {
 		{"cd " + other + ` && sh -c "$X"`, 2, "`sh` runs a script the hook cannot read, which can push; it would run in " + other},
 		{`sh -c "$X"`, 0, ""},
 		{"cd " + other + " && bash --version", 0, ""},
+		// A push in a container: a branch this clone does not have is no reason to let it through.
+		{"kubectl exec pod -- git push origin feature", 2, "a git push run in a container"},
 		// A runner in either order of definition, or maybe defined, given a cd.
 		{`step() { run "$@"; }; run() { "$@"; }; step cd ` + other + ` && git push origin HEAD`, 2, "cannot tell which directory `git push` runs in"},
 		{`log() { "$@"; } && log cd ` + other + ` && git push origin HEAD`, 2, "cannot tell which directory `git push` runs in"},
