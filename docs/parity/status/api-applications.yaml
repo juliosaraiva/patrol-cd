@@ -389,3 +389,27 @@ API-027:
     - internal/apiserver/services/applications/manifests_test.go:TestResourceLinksWithoutLiveAccess
   notes: >-
     ListLinks complete; ListResourceLinks works for the Application itself and through the LiveResources interface, whose controller-backed implementation belongs to the resource routes.
+
+DIFF-064:
+  status: implemented
+  impl:
+    - internal/apiserver/services/applications/health.go
+    - internal/apiserver/services/applications/crud.go
+    - internal/apiserver/services/applications/watch.go
+    - internal/apiserver/services/applications/operations.go
+  tests:
+    - internal/apiserver/services/applications/health_internal_test.go:TestTreeHealthByKey
+    - internal/apiserver/services/applications/health_internal_test.go:TestWithTreeHealth
+    - internal/apiserver/services/applications/health_internal_test.go:TestPausesTreeHealth
+    - internal/apiserver/services/applications/health_test.go:TestApplicationResourceHealthFromTree
+    - internal/cli/app/e2e_test.go:TestE2EAppResourceHealthFromTree
+  notes: >-
+    API part (APP-031 is an alias): with status.resourceHealthSource appTree, Get (with and
+    without refresh), Watch (ADDED and MODIFIED events), Sync and Rollback responses fill
+    status.resources[].health from the controller tree API: node health by key, Missing
+    "Resource has not been created" for a node without health, UID, resourceVersion and
+    createdAt, nil otherwise; orphaned nodes do not count. List does not fill (upstream). Inline
+    health is returned as stored, without a tree read. A tree read is bounded (5 s); when it
+    fails the health stays nil, the request succeeds and no refresh is requested; a watch stream
+    whose controller does not answer stops reading for 30 s. Nothing is written to the
+    Application.
