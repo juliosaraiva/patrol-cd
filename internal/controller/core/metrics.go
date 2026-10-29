@@ -30,6 +30,9 @@ type Metrics struct {
 	AutoSyncTotal *prometheus.CounterVec
 	// DeletionTotal counts cascade-deletion passes by outcome.
 	DeletionTotal *prometheus.CounterVec
+	// OrphanedResources is the number of orphaned resources per Application whose project
+	// monitors them (argocd_app_orphaned_resources_count).
+	OrphanedResources *prometheus.GaugeVec
 }
 
 // NewMetrics creates the collectors and registers them with reg (nil: not registered).
@@ -65,12 +68,16 @@ func NewMetrics(reg prometheus.Registerer) (*Metrics, error) {
 			Name: "patrol_app_deletion_passes_total",
 			Help: "Application deletion (finalizer) passes by outcome.",
 		}, []string{"outcome"}),
+		OrphanedResources: prometheus.NewGaugeVec(prometheus.GaugeOpts{
+			Name: "patrol_app_orphaned_resources_count",
+			Help: "Number of orphaned resources per Application.",
+		}, []string{"namespace", "name", "project"}),
 	}
 	if reg == nil {
 		return m, nil
 	}
 	var errs []error
-	for _, c := range []prometheus.Collector{m.SyncTotal, m.SyncDuration, m.ReconcileDuration, m.OperationStepDuration, m.K8sRequests, m.AutoSyncTotal, m.DeletionTotal} {
+	for _, c := range []prometheus.Collector{m.SyncTotal, m.SyncDuration, m.ReconcileDuration, m.OperationStepDuration, m.K8sRequests, m.AutoSyncTotal, m.DeletionTotal, m.OrphanedResources} {
 		if err := reg.Register(c); err != nil {
 			var are prometheus.AlreadyRegisteredError
 			if errors.As(err, &are) {
@@ -94,6 +101,27 @@ func (m *Metrics) ObserveSync(namespace, name, project, server, phase string, dr
 	if d > 0 {
 		m.SyncDuration.WithLabelValues(namespace, name, project, server).Add(d.Seconds())
 	}
+}
+
+// SetOrphanedResources records the orphaned resources found by an Application's latest tree
+// build. The series exists only while the project monitors orphaned resources (monitored).
+func (m *Metrics) SetOrphanedResources(namespace, name, project string, monitored bool, n int) {
+	if m == nil {
+		return
+	}
+	if !monitored {
+		m.OrphanedResources.DeleteLabelValues(namespace, name, project)
+		return
+	}
+	m.OrphanedResources.WithLabelValues(namespace, name, project).Set(float64(n))
+}
+
+// ForgetApplication removes the per-Application series of a deleted Application.
+func (m *Metrics) ForgetApplication(namespace, name string) {
+	if m == nil {
+		return
+	}
+	m.OrphanedResources.DeletePartialMatch(prometheus.Labels{"namespace": namespace, "name": name})
 }
 
 // WrapConfig returns a copy of cfg whose requests are counted in K8sRequests under server.

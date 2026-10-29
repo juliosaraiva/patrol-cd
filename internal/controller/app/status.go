@@ -176,6 +176,9 @@ func (a *appRun) compareAndPersist(ctx context.Context, d refreshDecision, rec s
 	}
 
 	a.storeComparison(ctx, res)
+	if res.Tree != nil {
+		a.r.cfg.Metrics.SetOrphanedResources(app.Namespace, app.Name, app.Spec.GetProject(), project.OrphanedResourcesEnabled(proj), res.OrphanedResources)
+	}
 	if err := a.updateDeleteHookFinalizers(ctx, res); err != nil {
 		return reconcile.Result{}, err
 	}

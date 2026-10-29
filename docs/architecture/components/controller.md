@@ -80,12 +80,24 @@ automated sync for `SyncError`, deletion for `DeletionError`. Aggregates: `Recon
 (ReconcileSucceeded/ReconcileFailed), `Synced` (Synced/OutOfSync/SyncStatusUnknown),
 `Healthy` (reason = health code).
 
-Live-state events (`OnResourceUpdated` of every cluster cache): a changed managed root object
-requests a recent comparison of the Application tracking it; a changed descendant (owner
-chain, `compare.AppOf`) requests a tree-only refresh (tree rebuilt from the managed resources of
-the last comparison, `summary` and `OrphanedResourceWarning` persisted; falls back to a recent
-comparison after a restart). Updates hidden by `ignoreResourceUpdates` rules
-(`compare.SkipResourceUpdate`) and changes of the Application object itself are ignored.
+Live-state events (`OnResourceUpdated` of every cluster cache, registered with the cache key
+by `OnClusterCacheCreated`), in upstream order: an update (never a create or a delete) hidden by
+the `ignoreResourceUpdates` rules (`compare.SkipResourceUpdate`: equal update hashes and equal
+health) is dropped first, before attribution, so the rules also cover untracked descendants
+annotated with `cd.patrol.example/ignore-resource-updates` (APP-110). The Applications of the
+old and of the new object are then collected (tracking of a root, else the owner chain,
+`compare.AppOf`), so an object moving between Applications refreshes both; core Endpoints
+count for none (DIFF-037). The Application whose root object (tracked, no owners) changed gets
+a recent comparison; one whose descendant changed gets a tree-only refresh (tree rebuilt from
+the managed resources of the last comparison, `summary` and `OrphanedResourceWarning`
+persisted; falls back to a recent comparison after a restart). The changed Application object
+itself and Applications outside the allowed namespaces are skipped. A namespaced object
+attributed to no Application gives a tree-only refresh to the Applications that monitor
+orphaned resources in its namespace on the same cluster (APP-085, DIFF-078): two in-memory
+field indexes (AppProjects with `spec.orphanedResources`, Applications by destination
+namespace) find them without API calls, and Applications of other shards are skipped. The
+handler runs on the cache's event goroutine, so it reads only the informer cache and the
+cluster registry, and logs at debug level (object identity only).
 
 Watches: Applications; Operations (mapped by `spec.application`); AppProjects, Clusters and
 Repositories (Applications found through field indexes on project, destination server/name
@@ -210,7 +222,10 @@ completed tasks as done; no in-memory state is required.
 `patrol_app_operation_step_duration_seconds{phase}`,
 `patrol_app_k8s_request_total{server,verb,response_code}` (every request of the engines,
 deletion clients and live-state caches built by `Run`), `patrol_app_auto_sync_total{outcome}`,
-`patrol_app_deletion_passes_total{outcome}`.
+`patrol_app_deletion_passes_total{outcome}`,
+`patrol_app_orphaned_resources_count{namespace,name,project}` (set after every tree build; only
+for Applications whose project monitors orphaned resources; removed when the Application is
+deleted).
 
 ## Failure modes
 
@@ -248,9 +263,9 @@ deletion clients and live-state caches built by `Run`), `patrol_app_auto_sync_to
 ## Parity IDs
 
 `docs/parity/status/controller.yaml`: APP-002, 032..037, 042, 044, 046, 057..060, 063, 066,
-067, 078..088 (085..087 in-progress), 141 (in-progress); SYNC-001, 003, 006, 013..028, 031
-(deletion confirmation), 051, 052, 070, 076..079, 087, 089..091, 093, 094; TEN-010; REPO-097
-(in-progress); APP-045 different-by-design.
+067, 078..088 (086, 087 in-progress), 110, 141 (in-progress); DIFF-036, 037; OPS-073;
+SYNC-001, 003, 006, 013..028, 031 (deletion confirmation), 051, 052, 070, 076..079, 087,
+089..091, 093, 094; TEN-010; REPO-097 (in-progress); APP-045 different-by-design.
 
 ## Known gaps and deliberate differences
 
@@ -270,8 +285,13 @@ deletion clients and live-state caches built by `Run`), `patrol_app_auto_sync_to
   (`OperationSpec.sync.syncOptions` contract), so Operations created with kubectl inherit them.
 - **Refresh after a completed operation** is also derived from state (`finishedAt` after
   `reconciledAt`) so it survives restarts; it is also triggered for dry runs.
-- **Orphaned-resource refreshes** (unmanaged objects in the destination namespace refreshing
-  Applications that monitor orphans) are not implemented (APP-085 in-progress).
+- **Orphaned-resource refreshes**: an unattributed object refreshes the orphan-monitoring
+  Applications with a tree-only refresh (upstream: `CompareWithRecent`); the tree, summary,
+  `OrphanedResourceWarning` and gauge are the same, only a sync status affected by such an
+  object waits for the next comparison. Monitors are matched by namespace and by the event's
+  cluster (upstream: namespace only).
+- **`patrol_app_orphaned_resources_count`** is not emitted for Applications whose project does
+  not monitor orphaned resources (upstream sets 0) and is removed on Application deletion.
 - **Repo error grace** handling is implemented but not exercised by controller tests (the
   harness runs with no grace period).
 - **Status size fallback** (APP-087) is implemented but not tested (envtest does not reach

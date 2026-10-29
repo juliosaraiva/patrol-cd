@@ -13,6 +13,7 @@ import (
 	"github.com/juliosaraiva/patrol-cd/api/v1alpha1"
 	"github.com/juliosaraiva/patrol-cd/internal/compare"
 	"github.com/juliosaraiva/patrol-cd/internal/controller/core"
+	"github.com/juliosaraiva/patrol-cd/internal/project"
 )
 
 // AppState is the in-memory result of an Application's latest comparison: the resource tree
@@ -102,6 +103,7 @@ func (a *appRun) refreshTree(ctx context.Context) (reconcile.Result, error) {
 		return reconcile.Result{}, nil
 	}
 	a.r.state.set(key, AppState{Tree: tr.Tree, Managed: prev.Managed, ComparedAt: a.now()})
+	a.r.cfg.Metrics.SetOrphanedResources(a.app.Namespace, a.app.Name, a.app.Spec.GetProject(), project.OrphanedResourcesEnabled(proj), tr.OrphanedResources)
 	now := metav1.NewTime(a.now())
 	_, err = core.PatchStatus(ctx, a.r.c, a.r.cfg.APIReader, a.app, func(app *v1alpha1.Application) error {
 		app.Status.Summary = tr.Summary

@@ -59,15 +59,18 @@ DIFF-031:
     (managed resources, GetResource, ServerSideDiff API) are not implemented here.
 
 DIFF-033:
-  status: in-progress
-  impl: [internal/compare/info.go, internal/compare/livestate.go]
+  status: implemented
+  impl: [internal/compare/info.go, internal/compare/livestate.go, internal/controller/app/liveevents.go]
   tests:
     - internal/compare/info_test.go:TestAppOfAndSkipResourceUpdate
     - internal/compare/info_test.go:TestShouldHashManifest
+    - internal/controller/app/liveevents_test.go:TestOnResourceUpdated
+    - internal/controller/app/liveevents_test.go:TestOnResourceUpdatedPopulatedInfo
   notes: >-
     The cache populator hashes tracked resources, Applications and annotated untracked ones
     with the ignoreResourceUpdates rules; SkipResourceUpdate compares hash and health. The
-    controller's update handler that drops refreshes does not exist yet.
+    controller's live-event handler (internal/controller/app/liveevents.go) drops an update
+    with equal hashes and health before attribution; creates and deletes are never dropped.
 
 DIFF-009:
   status: in-progress
@@ -145,15 +148,18 @@ DIFF-077:
     - internal/compare/envtest_test.go:TestEnvOrphanedResources
 
 DIFF-078:
-  status: in-progress
-  impl: [internal/compare/treebuild.go]
+  status: implemented
+  impl: [internal/compare/treebuild.go, internal/controller/app/liveevents.go, internal/controller/core/metrics.go]
   tests:
     - internal/compare/envtest_test.go:TestEnvOrphanedResources
+    - internal/controller/app/liveevents_test.go:TestRefreshOrphanMonitors
+    - internal/controller/integration/orphans_test.go:TestOrphanedResourcesRefresh
   notes: >-
     Orphans from the destination namespace's top-level resources (not managed, permitted, not
     excepted, not attributed to an existing Application) with descendants;
-    OrphanedResourceWarning when warn is true. Metric and orphan-triggered tree refreshes are
-    controller work.
+    OrphanedResourceWarning when warn is true. A change of an unattributed namespaced object
+    gives the orphan-monitoring Applications of its namespace and cluster a tree-only refresh;
+    patrol_app_orphaned_resources_count is set after each tree build (OPS-073).
 
 DIFF-079:
   status: implemented
@@ -171,12 +177,15 @@ DIFF-080:
   notes: Served through the controller tree API (not implemented here).
 
 DIFF-087:
-  status: in-progress
-  impl: [internal/compare/info.go]
+  status: implemented
+  impl: [internal/compare/info.go, internal/controller/app/liveevents.go]
   tests:
     - internal/compare/info_test.go:TestAppOfAndSkipResourceUpdate
     - internal/compare/info_test.go:TestPopulateResourceInfoAttribution
-  notes: Attribution helpers only; refresh triggering is the controller's.
+    - internal/controller/app/liveevents_test.go:TestOnResourceUpdated
+  notes: >-
+    Attribution helpers here; refresh triggering in internal/controller/app/liveevents.go
+    (the Applications of the old and the new object are both refreshed).
 
 DIFF-089:
   status: implemented
@@ -364,10 +373,11 @@ APP-040:
     - internal/compare/envtest_test.go:TestEnvExcludedResources
 
 APP-041:
-  status: in-progress
-  impl: [internal/compare/treebuild.go]
+  status: implemented
+  impl: [internal/compare/treebuild.go, internal/controller/app/state.go]
   tests:
     - internal/compare/envtest_test.go:TestEnvOrphanedResources
+    - internal/controller/integration/orphans_test.go:TestOrphanedResourcesRefresh
 
 APP-043:
   status: in-progress

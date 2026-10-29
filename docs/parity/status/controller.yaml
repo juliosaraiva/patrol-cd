@@ -200,15 +200,70 @@ APP-084:
     observed requests latest (upstream reacts to the specific spec differences listed).
 
 APP-085:
-  status: in-progress
-  impl: [internal/controller/app/liveevents.go]
+  status: implemented
+  impl: [internal/controller/app/liveevents.go, internal/controller/app/reconciler.go]
   tests:
+    - internal/controller/app/liveevents_test.go:TestOnResourceUpdated
+    - internal/controller/app/liveevents_test.go:TestRefreshOrphanMonitors
+    - internal/controller/app/reconciler_test.go:TestIndexKeys
     - internal/controller/integration/autosync_test.go:TestSelfHeal
     - internal/controller/integration/reconcile_test.go:TestRefreshAnnotationAndRecentRefresh
+    - internal/controller/integration/orphans_test.go:TestOrphanedResourcesRefresh
   notes: >-
-    Managed resources → recent comparison; descendants → tree-only refresh; ignoreResourceUpdates
-    and self-managed Applications respected. Refreshing Applications that monitor orphaned
-    resources on unmanaged changes is not implemented.
+    Managed (root) resources → recent comparison; descendants → tree-only refresh. Suppression
+    by ignoreResourceUpdates runs before attribution; the Applications of the old and the new
+    object are both refreshed; the changed Application object itself is skipped. A namespaced
+    object attributed to no Application gives the orphan-monitoring Applications of its
+    namespace and cluster a tree-only refresh (upstream: CompareWithRecent; the tree, summary,
+    condition and gauge are the same), found through in-memory field indexes (Applications by
+    destination namespace, AppProjects with spec.orphanedResources); Applications outside the
+    allowed namespaces or of other shards are skipped. Upstream matches orphan monitors by
+    namespace on any cluster; Patrol also matches the event's cluster.
+
+APP-110:
+  status: implemented
+  impl: [internal/compare/info.go, internal/controller/app/liveevents.go]
+  tests:
+    - internal/compare/info_test.go:TestShouldHashManifest
+    - internal/controller/app/liveevents_test.go:TestOnResourceUpdated
+    - internal/controller/app/liveevents_test.go:TestOnResourceUpdatedPopulatedInfo
+  notes: >-
+    cd.patrol.example/ignore-resource-updates parsed with strconv.ParseBool makes an untracked
+    object hashed; the live-event handler applies the suppression before attribution, so an
+    annotated Pod whose /status changes without a health change triggers no refresh.
+
+DIFF-036:
+  status: implemented
+  impl: [internal/compare/info.go, internal/controller/app/liveevents.go]
+  tests:
+    - internal/compare/info_test.go:TestShouldHashManifest
+    - internal/controller/app/liveevents_test.go:TestOnResourceUpdated
+    - internal/controller/app/liveevents_test.go:TestOnResourceUpdatedPopulatedInfo
+
+DIFF-037:
+  status: implemented
+  impl: [internal/diff/compareoptions.go, internal/controller/app/liveevents.go]
+  tests:
+    - internal/diff/compareoptions_test.go:TestResourceUpdateRulesAndHash
+    - internal/controller/app/liveevents_test.go:TestOnResourceUpdated
+    - internal/controller/app/liveevents_test.go:TestRefreshOrphanMonitors
+  notes: >-
+    resourceVersion, generation and managedFields are always ignored by the update hash. Core
+    Endpoints never refresh the Application they belong to; as upstream (handleObjectUpdated),
+    an Endpoints change that leaves no Application to refresh is treated like any unattributed
+    object and refreshes the orphan-monitoring Applications of its namespace.
+
+OPS-073:
+  status: implemented
+  impl: [internal/controller/core/metrics.go, internal/controller/app/status.go, internal/controller/app/state.go, internal/controller/app/reconciler.go]
+  tests:
+    - internal/controller/core/metrics_test.go:TestOrphanedResourcesMetric
+    - internal/controller/integration/orphans_test.go:TestOrphanedResourcesRefresh
+  notes: >-
+    patrol_app_orphaned_resources_count{namespace,name,project}, set after every tree build
+    (comparison or tree-only refresh). Not emitted for Applications whose project does not
+    monitor orphaned resources (upstream sets 0). Beyond upstream, the series is removed when
+    the Application is deleted.
 
 APP-086:
   status: in-progress

@@ -82,10 +82,10 @@ TEN-014:
     - internal/project/resources_test.go:TestIsGroupKindNamePermitted
     - internal/project/resources_test.go:TestValidateSyncPermissions
 TEN-015:
-  status: in-progress
+  status: implemented
   impl: [internal/project/orphaned.go]
   tests: [internal/project/orphaned_integrity_test.go:TestOrphanedResources]
-  notes: Settings evaluation, candidate filter and warning message only; namespace listing, hierarchy walk and ownership checks belong to the controller.
+  notes: Settings evaluation, candidate filter and warning message here; namespace listing, hierarchy walk and ownership checks are internal/compare (treebuild.go), refreshes and the metric internal/controller.
 TEN-016:
   status: implemented
   impl: [internal/project/orphaned.go]
@@ -319,7 +319,7 @@ APP-036:
     - internal/project/validate_app_test.go:TestValidatePermissionsLookupFailure
     - internal/project/effective_test.go:TestResolveAppProject
 APP-041:
-  status: in-progress
+  status: implemented
   impl: [internal/project/orphaned.go]
   tests: [internal/project/orphaned_integrity_test.go:TestOrphanedResources]
 APP-068:
