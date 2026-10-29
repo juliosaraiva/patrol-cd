@@ -1,7 +1,9 @@
 package app
 
 import (
+	"context"
 	"log/slog"
+	"sync"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
@@ -242,6 +244,84 @@ func TestOnResourceUpdatedPopulatedInfo(t *testing.T) {
 	assert.Equal(t, health.StatusProgressing, healthOf(pod(true, "Pending", "one")))
 	assert.Equal(t, health.StatusDegraded, healthOf(pod(true, "Failed", "one")))
 	assert.Empty(t, compare.InfoOf(pod(false, "Pending", "one")).ManifestHash, "unannotated untracked objects are not hashed")
+}
+
+// logRecord is a log record: its level, message and attributes as strings.
+type logRecord struct {
+	level slog.Level
+	msg   string
+	attrs map[string]string
+}
+
+// recordingHandler is a slog.Handler that records every record at every level.
+type recordingHandler struct {
+	mu      sync.Mutex
+	records []logRecord
+}
+
+func (h *recordingHandler) Enabled(context.Context, slog.Level) bool { return true }
+
+func (h *recordingHandler) Handle(_ context.Context, rec slog.Record) error {
+	attrs := map[string]string{}
+	rec.Attrs(func(a slog.Attr) bool {
+		attrs[a.Key] = a.Value.String()
+		return true
+	})
+	h.mu.Lock()
+	defer h.mu.Unlock()
+	h.records = append(h.records, logRecord{level: rec.Level, msg: rec.Message, attrs: attrs})
+	return nil
+}
+
+func (h *recordingHandler) WithAttrs([]slog.Attr) slog.Handler { return h }
+func (h *recordingHandler) WithGroup(string) slog.Handler      { return h }
+
+// TestLiveRefreshLogLevel checks the refresh-cause log of a live event (OPS-061, DIFF-037): a
+// root (managed) object's change, which requests a comparison, is logged at info as upstream;
+// descendant and orphan changes, which refresh the tree only, at debug.
+func TestLiveRefreshLogLevel(t *testing.T) {
+	t.Parallel()
+	const msg = "requesting app refresh caused by object update"
+	depA := liveRes("apps", "Deployment", "web", "da", &compare.ResourceInfo{AppName: "a", ManifestHash: "da"})
+	ns := nsResources(depA)
+	cm := func(appName, hash string) *cache.Resource {
+		return liveRes("", "ConfigMap", "web", "cm", &compare.ResourceInfo{AppName: appName, ManifestHash: hash})
+	}
+	pod := liveRes("", "Pod", "web", "p", nil, ownedBy("apps/v1", "Deployment", "da"))
+	stray := liveRes("", "ConfigMap", "web", "stray", nil)
+	objs := []client.Object{
+		&v1alpha1.Cluster{ObjectMeta: metav1.ObjectMeta{Name: "k8s", Namespace: "patrol"}, Spec: v1alpha1.ClusterSpec{Server: testServer, Name: "k8s"}},
+		&v1alpha1.AppProject{ObjectMeta: metav1.ObjectMeta{Name: "watch", Namespace: "patrol"},
+			Spec: v1alpha1.AppProjectSpec{OrphanedResources: &v1alpha1.OrphanedResourcesMonitorSettings{}}},
+		&v1alpha1.Application{ObjectMeta: metav1.ObjectMeta{Name: "mon", Namespace: "patrol"},
+			Spec: v1alpha1.ApplicationSpec{Project: "watch", Destination: v1alpha1.ApplicationDestination{Server: testServer, Namespace: "web"}}},
+	}
+	attrs := func(app, level, kind, name string) map[string]string {
+		return map[string]string{"application": "patrol/" + app, "comparisonLevel": level,
+			"server": testServer, "group": "", "kind": kind, "namespace": "web", "name": name}
+	}
+
+	for _, tc := range []struct {
+		name           string
+		newRes, oldRes *cache.Resource
+		want           []logRecord
+	}{
+		{name: "managed root changed", newRes: cm("a", "2"), oldRes: cm("a", "1"),
+			want: []logRecord{{level: slog.LevelInfo, msg: msg, attrs: attrs("a", "recent", "ConfigMap", "cm")}}},
+		{name: "descendant changed", newRes: pod, oldRes: pod,
+			want: []logRecord{{level: slog.LevelDebug, msg: msg, attrs: attrs("a", "tree", "Pod", "p")}}},
+		{name: "unmanaged object changed", newRes: stray,
+			want: []logRecord{{level: slog.LevelDebug, msg: msg, attrs: attrs("mon", "tree", "ConfigMap", "stray")}}},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+			r := liveEventsReconciler(t, nil, objs...)
+			h := &recordingHandler{}
+			r.log = slog.New(h)
+			r.onResourceUpdated(testServer, tc.newRes, tc.oldRes, ns)
+			assert.Equal(t, tc.want, h.records)
+		})
+	}
 }
 
 func TestRefreshOrphanMonitors(t *testing.T) {

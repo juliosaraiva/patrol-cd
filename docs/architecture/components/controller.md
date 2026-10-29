@@ -97,7 +97,9 @@ orphaned resources in its namespace on the same cluster (APP-085, DIFF-078): two
 field indexes (AppProjects with `spec.orphanedResources`, Applications by destination
 namespace) find them without API calls, and Applications of other shards are skipped. The
 handler runs on the cache's event goroutine, so it reads only the informer cache and the
-cluster registry, and logs at debug level (object identity only).
+cluster registry. Each refresh request is logged (`requesting app refresh caused by object
+update`, object identity only): at info for a root object's change, which requests a
+comparison, and at debug for descendant and orphan changes, as upstream (OPS-061).
 
 Watches: Applications; Operations (mapped by `spec.application`); AppProjects, Clusters and
 Repositories (Applications found through field indexes on project, destination server/name

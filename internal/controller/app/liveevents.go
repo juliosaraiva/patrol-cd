@@ -39,9 +39,10 @@ func (r *Reconciler) OnClusterCacheCreated(clusterKey string, cc cache.ClusterCa
 //  2. The Applications of the old and of the new object are collected: a tracked root's own
 //     tracking, else the owner chain within the namespace (compare.AppOf). An object that moved
 //     from one Application to another refreshes both. Core Endpoints count for none.
-//  3. An Application whose root (managed) resource changed is compared at level recent; one
-//     whose descendant changed gets a tree-only refresh. The changed Application object itself
-//     and Applications outside the allowed namespaces are skipped.
+//  3. An Application whose root (managed) resource changed is compared at level recent (logged
+//     at info); one whose descendant changed gets a tree-only refresh (logged at debug). The
+//     changed Application object itself and Applications outside the allowed namespaces are
+//     skipped.
 //  4. A namespaced object attributed to no Application refreshes the tree of the Applications
 //     that monitor orphaned resources in its namespace on this cluster (refreshOrphanMonitors).
 //
@@ -139,18 +140,21 @@ func (r *Reconciler) refreshOrphanMonitors(ctx context.Context, clusterKey strin
 	}
 }
 
-// requestLiveRefresh requests a recent comparison (root) or a tree-only refresh of key.
+// requestLiveRefresh requests a recent comparison (root) or a tree-only refresh of key. As
+// upstream, the request is logged at info for a root (managed) object, whose change triggers a
+// comparison, and at debug otherwise, to keep descendant and orphan churn out of info logs.
 func (r *Reconciler) requestLiveRefresh(ctx context.Context, key types.NamespacedName, root bool, clusterKey string, changed cache.ResourceKey) {
-	level := "tree"
+	level, logLevel := "tree", slog.LevelDebug
 	if root {
 		r.refresh.RequestRefresh(key, core.CompareRecent, 0)
-		level = core.CompareRecent.String()
+		level, logLevel = core.CompareRecent.String(), slog.LevelInfo
 	} else {
 		r.refresh.RequestTreeRefresh(key)
 	}
-	if r.log.Enabled(ctx, slog.LevelDebug) {
-		r.log.Debug("requesting app refresh caused by object update",
-			append([]any{"application", key.String(), "level", level}, objectAttrs(clusterKey, changed)...)...)
+	if r.log.Enabled(ctx, logLevel) {
+		// Not "level": the JSON handler already writes the record level under that key.
+		r.log.Log(ctx, logLevel, "requesting app refresh caused by object update",
+			append([]any{"application", key.String(), "comparisonLevel", level}, objectAttrs(clusterKey, changed)...)...)
 	}
 }
 

@@ -191,13 +191,17 @@ APP-083:
 
 APP-084:
   status: implemented
-  impl: [internal/controller/app/refresh.go, internal/controller/app/status.go, internal/controller/app/state.go]
+  impl: [internal/controller/app/refresh.go, internal/controller/app/status.go, internal/controller/app/state.go, internal/controller/app/liveevents.go]
   tests:
     - internal/controller/app/refresh_test.go:TestNeedRefresh
     - internal/controller/integration/reconcile_test.go:TestRefreshAnnotationAndRecentRefresh
+    - internal/controller/app/liveevents_test.go:TestLiveRefreshLogLevel
   notes: >-
     Levels recent/latest/force-resolve plus tree-only refreshes; a spec generation not yet
-    observed requests latest (upstream reacts to the specific spec differences listed).
+    observed requests latest (upstream reacts to the specific spec differences listed). A live
+    object change is logged as the refresh cause at info for a root (managed) object and at
+    debug otherwise; the attributes are named differently (comparisonLevel, group/kind/name,
+    server as the cluster key).
 
 APP-085:
   status: implemented
@@ -247,11 +251,13 @@ DIFF-037:
     - internal/diff/compareoptions_test.go:TestResourceUpdateRulesAndHash
     - internal/controller/app/liveevents_test.go:TestOnResourceUpdated
     - internal/controller/app/liveevents_test.go:TestRefreshOrphanMonitors
+    - internal/controller/app/liveevents_test.go:TestLiveRefreshLogLevel
   notes: >-
     resourceVersion, generation and managedFields are always ignored by the update hash. Core
     Endpoints never refresh the Application they belong to; as upstream (handleObjectUpdated),
     an Endpoints change that leaves no Application to refresh is treated like any unattributed
-    object and refreshes the orphan-monitoring Applications of its namespace.
+    object and refreshes the orphan-monitoring Applications of its namespace. As upstream, the
+    refresh request is logged at info for a root (managed) object and at debug otherwise.
 
 OPS-073:
   status: implemented
