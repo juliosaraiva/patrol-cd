@@ -51,10 +51,9 @@ base_gate() {
 	return $rc
 }
 
-zero=0000000000000000000000000000000000000000
 status=0
 while read -r _local_ref local_sha _remote_ref _remote_sha; do
-	[[ $local_sha == "$zero" ]] && continue # a deletion
+	[[ $local_sha =~ ^0+$ ]] && continue # a deletion: the null id, of SHA-1 or SHA-256 length
 	hack/sdlc/gate.sh "$local_sha" || status=1
 	base_gate "$local_sha" || status=1
 done

@@ -173,6 +173,7 @@ ci-unit: $(SETUP_ENVTEST) $(KUSTOMIZE) ## go test (-race unless CI_RACE=0) over 
 .PHONY: ci-scripts
 ci-scripts: $(SETUP_ENVTEST) ## Offline tests of the kind scripts (envtest API servers, no Docker).
 	@echo "==> ci-scripts"
+	test/e2e/fixtures/test-envtest.sh
 	KUBEBUILDER_ASSETS="$(ENVTEST_ASSETS)" test/e2e/fixtures/test-scripts.sh
 	KUBEBUILDER_ASSETS="$(ENVTEST_ASSETS)" test/e2e/fixtures/validate.sh
 

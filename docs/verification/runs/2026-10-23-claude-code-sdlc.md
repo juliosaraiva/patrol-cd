@@ -26,8 +26,8 @@ The machine was shared with up to 16 review and red-team agents during most runs
 |---------|--------|
 | `go vet ./hack/sdlc/...`; `golangci-lint run --no-config ./hack/sdlc/...` | passed, 0 issues |
 | `shellcheck hack/sdlc/*.sh hack/ci/lint-shell.sh`; `make ci-shell`; `actionlint` | passed |
-| `go test -race -count=1 ./hack/sdlc/...` | passed: `pushcheck` and `sarifgate`, 842 tests (counted with `-json`) |
-| `bash hack/sdlc/test-sdlc.sh` (the gate end to end in scratch repositories with a bare remote, and check.sh with stub make targets) | passed: 230 passed, 0 failed (also under /bin/bash 3.2, and with an exported function as Fedora's `which`); also with `GOFLAGS=-mod=readonly` (as CI sets it), `PATROL_SDLC_BASE=HEAD~1` and `CI_GO_TEST_FLAGS=-short` set |
+| `go test -race -count=1 ./hack/sdlc/...` | passed: `pushcheck` and `sarifgate`, 848 tests (counted with `-json`) |
+| `bash hack/sdlc/test-sdlc.sh` (the gate end to end in scratch repositories with a bare remote, and check.sh with stub make targets) | passed: 232 passed, 0 failed (also under /bin/bash 3.2, and with an exported function as Fedora's `which`); also with `GOFLAGS=-mod=readonly` (as CI sets it), `PATROL_SDLC_BASE=HEAD~1` and `CI_GO_TEST_FLAGS=-short` set |
 | The suite in a scratch copy of the tree with the review diff's `--text --no-textconv` removed | its two new checks fail (`-diff` and a textconv driver hide main.go's content) |
 | `GOOS=linux CGO_ENABLED=0 GOWORK=off go vet ./...` on macOS (the step check.sh now adds off Linux) | passed, in 3 minutes from a cold cache |
 | A graft making HEAD a root and origin/main its child, in a scratch repository (`graft-check.sh` in the scratchpad), and pushcheck without its graft setting (`graftmut/mutate.py`) | without `hack/sdlc/lib.sh` the changed files are `[]`, with it `[main.go]`; the mutant fails `TestGatePushRunsTheBaseGate` |
@@ -49,13 +49,14 @@ The machine was shared with up to 16 review and red-team agents during most runs
 | Targeted mutants of the twenty-ninth round's changes (`mut29.py` in the scratchpad: through `go test -overlay`, a push in a container not refused, and placed in this clone again; through the shell suite in a mirror of the gate's files, `make sdlc-git-hooks` not let through without a binary, and sdlc_weakened not following included makefiles, following one level only, and not reading `-include`) | 6 mutants, all caught |
 | Targeted mutants of the thirtieth round's changes (`mut30.py` in the scratchpad: through `go test -overlay`, symbolic-ref read as a read in every form, in none, with two names, with an unknown option and with a dynamic word; a container's shell text not checked, its redirections not passed, a pipe into it not checked, an argv push in it not refused; submodule foreach's several words not walked; `-c` editors and pagers refused, their code not checked, and allowed through `--config-env`; through the shell suite in a mirror of the gate's files, BASH_ENV and exported functions not counted as weakening) | 15 mutants, all caught |
 | Targeted mutants of the thirty-first round's changes (`mut31.py` in the scratchpad: through `go test -overlay`, the command's text not given to the walkers of xargs and git's runners, a wrapped remote shell read as a local one, only a first-word runner taken as remote, ssh not remote, and hookRuns passing when git cannot list the gate's files; through the shell suite in a mirror of the gate's files, run with an exported function, the suite not un-exporting it) | 7 mutants, all caught (one did not compile and was rewritten) |
+| Targeted mutants of the thirty-third round's changes (`mut33.py` and `ci232/mut33` in the scratchpad: a retry that stops every server, a taken port not seen, no retry, a token step whose failure goes on, through `test/e2e/fixtures/test-envtest.sh`; the hook taking only the SHA-1 null id for a deletion, through the shell suite in a mirror of the gate's files; an ssh command's text not checked, through `go test -overlay`) | 7 mutants, all caught (one survived a first run, because the fake openssl failed every step; it now fails only the token step) |
 | A replace ref giving `origin/main` HEAD's tree, in a scratch repository (`replace-check.sh` in the scratchpad) | without `hack/sdlc/lib.sh` the changed files are `[]`; with it, `[main.go]` |
 | `PATH="$PWD/bin:$PATH" go test -race -count=1 ./internal/git/...` (git-lfs 3.7.1 in `bin/`) | passed on `c409428` (and `./internal/reposerver/...` on `6f9f985`); TestLFS passed again after its change to a git wrapper |
 | TestLFS against a client without its LFS filter settings (`go test -overlay`, `lfsmut.sh` in the scratchpad) | fails through the wrapper that skips the system gitconfig; passes when git reads a system config that sets the filter, as the test did before on GitHub's runner |
 
 ## Agent review
 
-Thirty-one runs of `.claude/workflows/sdlc-review.js` on successive trees, each verified finding fixed
+Thirty-three runs of `.claude/workflows/sdlc-review.js` on successive trees, each verified finding fixed
 before the next run:
 
 | Tree | Blocking (verified) | Minor | Refuted |
@@ -91,6 +92,8 @@ before the next run:
 | `fe1ba6a` | 2 | 2 | 0 |
 | `37ab45e` | 2 | 6 | 0 |
 | `6874d84` | 3 | 6 | 0 |
+| `d51a31d` | 0 | 7 | 0 |
+| `af25f5e` | 3 | 3 | 0 |
 
 Most findings were ways around the Claude Code hook (shell and git constructs it read differently
 from bash, zsh or git) and tests that could not fail. The seventh run's were six untested branches
@@ -496,6 +499,16 @@ During this round the clone's git hook setting was found changed to an absolute 
 worktrees were being created for other agents (the cause was not established in the transcripts);
 `make sdlc-git-hooks` restored it, and worktrees are now created with plain `git worktree add`.
 
+The thirty-second run found no blocking findings; its seven minor findings are listed in pull request
+#232. CI on that pull request then failed in two places the change does not touch (CI-F25, CI-F26),
+which the next commit fixed. The thirty-third run found 3 blocking findings, all in that commit's
+envtest fix: a retry stopped every API server the caller had started, not only the failed attempt's,
+and the retry had no test (found twice). The retry now stops only its own attempt, and
+`test/e2e/fixtures/test-envtest.sh` covers it. Of the 3 minor findings, all were fixed: each setup
+step of a start returns on failure (the retry's `|| rc=$?` turned errexit off inside it), a push in
+any `ssh` command is refused as a push run on another host, and git's hook takes the null id of
+either hash length for a deletion, so a SHA-256 repository can delete a branch.
+
 ## Red team
 
 Four runs of a red-team workflow (lenses: bash and zsh language, git's surface, the gate around the
@@ -552,7 +565,11 @@ that contains this record is in the pull request.
   - The envtest helper of `make ci-scripts` lost a port race: `bind: address already in use`. With
     `scratchpad/ci232/port-collision.sh`, which holds the first port the helper chooses for the API
     server, the old helper fails the same way, and the new one starts on its second attempt in 15 s
-    (6 port choices). `make ci-scripts` then passed (exit 0; 49 objects validated).
+    (6 port choices). `make ci-scripts` then passed (exit 0; 49 objects validated). The thirty-third
+    review found that the retry stopped every server the caller had started (test-scripts.sh starts
+    a control and a target), and that a failing setup step no longer stopped a start; both were fixed,
+    and `test/e2e/fixtures/test-envtest.sh` (14 checks, fake binaries, also under /bin/bash 3.2) now
+    covers the retry in `make ci-scripts`.
   - `TestDeletion` read the Application twice, and the deletion completed between the reads. With a
     2 s pause between them (`go test -overlay`), the old test fails with the CI message
     (`"cascade" not found`). `KUBEBUILDER_ASSETS=bin/envtest/k8s/1.36.0-darwin-arm64

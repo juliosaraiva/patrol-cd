@@ -319,7 +319,7 @@ Two hooks run it:
       script piped to it, also behind a wrapper: `… | sudo docker exec -i ctr sh`) is refused when
       the command's text names a push, with or without `--`, also as the command of `xargs`, `git
       bisect run` or `submodule foreach`; a script piped to `ssh host sh` is refused as a push run
-      on another host, and a push given to `ssh` as a push through a command it cannot check;
+      on another host, as is a push in any `ssh` command (a quoted command, `sh -c`, a heredoc);
     - a `GIT_*` variable outside a short safe list set in the shell (`GIT_DIR`, `GIT_WORK_TREE`,
       `GIT_CONFIG_*` …): inline, with `env` (also after `--`, and with a value that is not
       literal), `export`/`readonly`/`declare` (also quoted, `"NAME=VALUE"`, and through a

@@ -32,21 +32,26 @@ envtest_free_port() {
 
 # A port is free when it is chosen and taken when the process binds it, so another process (or a
 # parallel test) can take it in between: the API server or etcd then exits with "address already in
-# use". Start again on other ports, a few times.
+# use". Start again on other ports, a few times. A retry stops only what the failed attempt started:
+# the caller may run other servers started before (test-scripts.sh starts a control and a target).
 envtest_start() {
-	local attempt rc
+	local attempt rc before
 	for attempt in 1 2 3; do
 		rc=0
+		before=$ENVTEST_PIDS
 		envtest_start_once "$@" || rc=$?
 		[[ $rc -eq 2 && $attempt -lt 3 ]] || return "$rc"
 		echo "envtest: a port chosen for $1 was taken; starting again on other ports" >&2
+		ENVTEST_PIDS=${ENVTEST_PIDS#"$before"}
 		envtest_stop
+		ENVTEST_PIDS=$before
 		rm -rf "${1:?}/etcd" "${1:?}/certs"
 	done
 }
 
 # envtest_start_once DIR [CONTEXT]: one start; returns 2 when etcd or the API server could not bind
-# a port it was given.
+# a port it was given, 1 on any other failure. It is called as `… || rc=$?`, which turns errexit off
+# inside it, so each step returns on failure itself.
 envtest_start_once() {
 	local dir=$1 ctx=${2:-envtest} assets=${KUBEBUILDER_ASSETS:?KUBEBUILDER_ASSETS is not set}
 	local etcd_port peer_port api_port api_pid token
@@ -54,10 +59,10 @@ envtest_start_once() {
 		echo "envtest: etcd/kube-apiserver not found in $assets" >&2
 		return 1
 	}
-	mkdir -p "$dir/etcd" "$dir/certs"
-	etcd_port=$(envtest_free_port)
-	peer_port=$(envtest_free_port "$etcd_port")
-	api_port=$(envtest_free_port "$etcd_port $peer_port")
+	mkdir -p "$dir/etcd" "$dir/certs" || return 1
+	etcd_port=$(envtest_free_port) || return 1
+	peer_port=$(envtest_free_port "$etcd_port") || return 1
+	api_port=$(envtest_free_port "$etcd_port $peer_port") || return 1
 
 	"$assets/etcd" --data-dir "$dir/etcd" \
 		--listen-client-urls "http://127.0.0.1:$etcd_port" --advertise-client-urls "http://127.0.0.1:$etcd_port" \
@@ -66,11 +71,11 @@ envtest_start_once() {
 		--unsafe-no-fsync --log-level error >"$dir/etcd.log" 2>&1 &
 	ENVTEST_PIDS="$ENVTEST_PIDS $!"
 
-	openssl genrsa -out "$dir/certs/sa.key" 2048 2>/dev/null
-	openssl rsa -in "$dir/certs/sa.key" -pubout -out "$dir/certs/sa.pub" 2>/dev/null
-	token=$(openssl rand -hex 32)
-	printf '%s,envtest-admin,envtest-admin,system:masters\n' "$token" >"$dir/certs/tokens.csv"
-	chmod 600 "$dir/certs/tokens.csv"
+	openssl genrsa -out "$dir/certs/sa.key" 2048 2>/dev/null || return 1
+	openssl rsa -in "$dir/certs/sa.key" -pubout -out "$dir/certs/sa.pub" 2>/dev/null || return 1
+	token=$(openssl rand -hex 32) || return 1
+	printf '%s,envtest-admin,envtest-admin,system:masters\n' "$token" >"$dir/certs/tokens.csv" || return 1
+	chmod 600 "$dir/certs/tokens.csv" || return 1
 
 	"$assets/kube-apiserver" \
 		--etcd-servers "http://127.0.0.1:$etcd_port" \
@@ -104,11 +109,11 @@ envtest_start_once() {
 		return 1
 	}
 	kubectl config --kubeconfig "$ENVTEST_KUBECONFIG" set-cluster "$ctx" --server "$ENVTEST_SERVER" \
-		--certificate-authority "$dir/certs/apiserver.crt" --embed-certs=true >/dev/null
-	kubectl config --kubeconfig "$ENVTEST_KUBECONFIG" set-credentials "$ctx" --token "$token" >/dev/null
-	kubectl config --kubeconfig "$ENVTEST_KUBECONFIG" set-context "$ctx" --cluster "$ctx" --user "$ctx" >/dev/null
-	kubectl config --kubeconfig "$ENVTEST_KUBECONFIG" use-context "$ctx" >/dev/null
-	chmod 600 "$ENVTEST_KUBECONFIG"
+		--certificate-authority "$dir/certs/apiserver.crt" --embed-certs=true >/dev/null || return 1
+	kubectl config --kubeconfig "$ENVTEST_KUBECONFIG" set-credentials "$ctx" --token "$token" >/dev/null || return 1
+	kubectl config --kubeconfig "$ENVTEST_KUBECONFIG" set-context "$ctx" --cluster "$ctx" --user "$ctx" >/dev/null || return 1
+	kubectl config --kubeconfig "$ENVTEST_KUBECONFIG" use-context "$ctx" >/dev/null || return 1
+	chmod 600 "$ENVTEST_KUBECONFIG" || return 1
 
 	for _ in $(seq 1 120); do
 		if kubectl --kubeconfig "$ENVTEST_KUBECONFIG" --context "$ctx" get --raw /readyz >/dev/null 2>&1; then

@@ -2058,6 +2058,12 @@ prefix:
 		w.wrapped(name, args, lit, redirs)
 	case execRunners[name]:
 		w.execRunner(args, lit, redirs)
+	case name == "ssh":
+		// Its command runs on another host, whatever form it takes (a quoted command, sh -c, a
+		// heredoc or here-string): a push in the command's text is that host's clone's.
+		if mentionsGitPush(w.cmdText) {
+			w.block(containerPush("ssh"))
+		}
 	case name == "find":
 		w.findExec(args, lit)
 	case name == "watch":

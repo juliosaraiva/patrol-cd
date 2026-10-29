@@ -457,6 +457,19 @@ for mark in assume-unchanged skip-worktree; do
 	git update-index --no-"$mark" hack/sdlc/gate.sh
 	git checkout -q -- hack/sdlc/gate.sh
 done
+# git hands its hook the null id for a deletion, 64 zeros in a SHA-256 repository: a deletion runs no
+# gate, whatever the hash.
+git init -q --bare --object-format=sha256 "$work/r256.git"
+git init -q --object-format=sha256 -b main "$work/c256"
+mkdir -p "$work/c256/.githooks" "$work/c256/hack/sdlc"
+cp "$src/.githooks/pre-push" "$work/c256/.githooks/"
+cp "$src"/hack/sdlc/{gate.sh,lib.sh} "$work/c256/hack/sdlc/"
+git -C "$work/c256" add -A
+git -C "$work/c256" commit -q -m base
+git -C "$work/c256" push -q "$work/r256.git" main main:old # before git's hook is enabled
+git -C "$work/c256" config core.hooksPath .githooks
+check "a deletion in a SHA-256 repository: git's hook lets it through" 0 "$(git -C "$work/c256" push -q "$work/r256.git" --delete old >/dev/null 2>"$work/push256.err" && echo 0 || echo 1)"
+check "  and the branch is gone" none "$(git --git-dir="$work/r256.git" rev-parse --verify --quiet refs/heads/old || echo none)"
 # And when the checked-out branch changes only the settings, or only git's hook.
 for path in .claude/settings.json .githooks/pre-push; do
 	git checkout -q -B "only-$(basename "$path")" main
