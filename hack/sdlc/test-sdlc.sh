@@ -517,6 +517,18 @@ rm kubeconfig.go
 touch bin/tool.out
 # shellcheck source=hack/sdlc/lib.sh
 check "ignored build outputs are clean" 0 "$(source hack/sdlc/lib.sh && sdlc_clean && echo 0 || echo 1)"
+# An ignored .env file is no check's input, but under ui/ Vite and vitest read it.
+printf '.env\n.env.*\n' >>.git/info/exclude
+touch .env hack/.env.local
+# shellcheck source=hack/sdlc/lib.sh
+check "an ignored .env outside ui/ is clean" 0 "$(source hack/sdlc/lib.sh && sdlc_clean && echo 0 || echo 1)"
+mkdir ui
+touch ui/keep ui/.env.test.local
+git add ui/keep # ui/ holds a tracked file, as in the project, so git names the ignored one in it
+# shellcheck source=hack/sdlc/lib.sh
+check "an ignored .env under ui/ is read by the checks" "ui/.env.test.local" "$(source hack/sdlc/lib.sh && sdlc_ignored)"
+git rm -q --cached ui/keep
+rm -r .env hack/.env.local ui
 # A tracked file git status is told not to look at hides its changes, so it leaves the tree unclean.
 git update-index --skip-worktree main.go
 # shellcheck source=hack/sdlc/lib.sh
@@ -557,11 +569,16 @@ rm .git/info/grafts
 printf 'GOLANGCI_LINT ?= golangci-lint\n' >"$work/w.mk"
 printf 'GOFLAGS=-skip=TestX\n' >"$work/goenv"
 # shellcheck source=hack/sdlc/lib.sh
-check "weakened: nothing set" "" "$(source "$src/hack/sdlc/lib.sh" && GOENV=off GOFLAGS='' CI_GO_TEST_FLAGS='' sdlc_weakened "$work/w.mk")"
+check "weakened: nothing set" "" "$(unset CI_GO_TEST_FLAGS GOLANGCI_LINT && source "$src/hack/sdlc/lib.sh" && GOENV=off GOFLAGS='' sdlc_weakened "$work/w.mk")"
 # shellcheck source=hack/sdlc/lib.sh
-check "weakened: a ?= variable" GOLANGCI_LINT "$(source "$src/hack/sdlc/lib.sh" && GOENV=off GOFLAGS='' CI_GO_TEST_FLAGS='' GOLANGCI_LINT=true sdlc_weakened "$work/w.mk")"
+check "weakened: a ?= variable" GOLANGCI_LINT "$(unset CI_GO_TEST_FLAGS && source "$src/hack/sdlc/lib.sh" && GOENV=off GOFLAGS='' GOLANGCI_LINT=true sdlc_weakened "$work/w.mk")"
+# Set to the empty string, a ?= variable is defined for make, so its default does not apply.
 # shellcheck source=hack/sdlc/lib.sh
-check "weakened: GOFLAGS in Go's env file" "GOFLAGS (go env)" "$(source "$src/hack/sdlc/lib.sh" && GOENV=$work/goenv GOFLAGS='' CI_GO_TEST_FLAGS='' sdlc_weakened "$work/w.mk")"
+check "weakened: a ?= variable set empty" GOLANGCI_LINT "$(unset CI_GO_TEST_FLAGS && source "$src/hack/sdlc/lib.sh" && GOENV=off GOFLAGS='' GOLANGCI_LINT='' sdlc_weakened "$work/w.mk")"
+# shellcheck source=hack/sdlc/lib.sh
+check "weakened: CI_GO_TEST_FLAGS set empty" CI_GO_TEST_FLAGS "$(unset GOLANGCI_LINT && source "$src/hack/sdlc/lib.sh" && GOENV=off GOFLAGS='' CI_GO_TEST_FLAGS='' sdlc_weakened "$work/w.mk")"
+# shellcheck source=hack/sdlc/lib.sh
+check "weakened: GOFLAGS in Go's env file" "GOFLAGS (go env)" "$(unset CI_GO_TEST_FLAGS GOLANGCI_LINT && source "$src/hack/sdlc/lib.sh" && GOENV=$work/goenv GOFLAGS='' sdlc_weakened "$work/w.mk")"
 
 # check.sh end to end, in a scratch repository (a Go module of two packages) whose make targets are
 # stubs that log what they were asked to run: the step for a kind script waits for a marker when

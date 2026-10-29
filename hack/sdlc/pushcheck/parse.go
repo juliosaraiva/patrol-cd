@@ -381,11 +381,13 @@ func (w *walker) child(dir, src string) *walker {
 	for name, bodies := range w.maybeFuncs {
 		c.maybeFuncs[name] = slices.Clone(bodies)
 	}
-	for name, body := range w.funcs {
+	// In a fixed order, as each verdict found settles those of the functions searched on the way: a
+	// run must not depend on Go's map order.
+	for _, name := range slices.Sorted(maps.Keys(w.funcs)) {
 		if w.unknownWord(name) {
 			c.cdFuncs[name] = true
 		} else {
-			c.funcs[name] = body
+			c.funcs[name] = w.funcs[name]
 		}
 	}
 	return c

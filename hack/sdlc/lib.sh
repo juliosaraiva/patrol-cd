@@ -53,11 +53,13 @@ sdlc_docs_only() {
 # sdlc_weakened MAKEFILE... prints what in the environment could weaken a check, one per line: a
 # make variable the makefiles define with `?=` (replace a tool with a no-op, drop -race, change the
 # commit range), CI_GO_TEST_FLAGS, and GOFLAGS from the environment or Go's env file (`go env -w`,
-# GOENV), which can skip tests. The list is derived, so a new `?=` variable is covered.
+# GOENV), which can skip tests. The list is derived, so a new `?=` variable is covered. A variable
+# set to the empty string counts too: make takes it as defined, so `?=` does not apply (an empty
+# CI_RACE drops -race, an empty ACTIONLINT lints nothing).
 sdlc_weakened() {
 	local v
 	while IFS= read -r v; do
-		[[ -n ${!v:-} ]] && printf '%s\n' "$v"
+		[[ -n ${!v+set} ]] && printf '%s\n' "$v"
 	done < <(sed -nE 's/^[[:space:]]*([A-Z][A-Z0-9_]*)[[:space:]]*\?=.*/\1/p' "$@" | sort -u
 		printf '%s\n' CI_GO_TEST_FLAGS)
 	[[ -z $(go env GOFLAGS 2>/dev/null) ]] || printf '%s\n' "GOFLAGS (go env)"
@@ -67,11 +69,13 @@ sdlc_weakened() {
 # lacks them: a .gitignore pattern such as kubeconfig* or coverage.* can hide a source file, and an
 # ignored dot file can configure a linter (.shellcheckrc, .golangci.yml, .github/actionlint.yaml).
 # The build's outputs and caches (bin/, dist/, ui/dist/, node_modules/, test reports, *.test, *.out
-# ...) and the state directories of the tools that work on the tree (.cache/, .agents/, .codex/,
-# .claude/worktrees/, Claude Code's .claude/settings.local.json) do not count.
+# ...), the state directories of the tools that work on the tree (.cache/, .agents/, .codex/,
+# .claude/worktrees/, Claude Code's .claude/settings.local.json) and .env files outside ui/ do not
+# count; Vite and vitest read ui/'s (.env, .env.test.local ...) into the UI's build and tests.
 sdlc_ignored() {
 	git ls-files --others --ignored --exclude-standard --directory --no-empty-directory |
-		grep -Ev '^(\.(cache|agents|codex)/|\.claude/(worktrees/|settings\.local\.json$)|bin/|dist/|ui/dist/|test/e2e/artifacts/)|(^|/)(node_modules|coverage|test-results|playwright-report)/|(^|/)(\.DS_Store|\.env(\..*)?)$|\.(test|out|swp|tsbuildinfo)$' || true
+		grep -Ev '^(\.(cache|agents|codex)/|\.claude/(worktrees/|settings\.local\.json$)|bin/|dist/|ui/dist/|test/e2e/artifacts/)|(^|/)(node_modules|coverage|test-results|playwright-report)/|(^|/)\.DS_Store$|\.(test|out|swp|tsbuildinfo)$' |
+		awk '!/(^|\/)\.env(\..*)?$/ || /^ui\//' || true
 }
 
 # sdlc_clean succeeds when the working tree has no tracked changes, no untracked files that git

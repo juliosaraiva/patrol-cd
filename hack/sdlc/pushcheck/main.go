@@ -196,8 +196,10 @@ func hookRuns(top string) string {
 		return "git's pre-push hook in " + top + " is missing or not executable, so git would push without it: restore it before pushing"
 	}
 	// No change git status shows, and none it hides (a file marked assume-unchanged or skip-worktree:
-	// a lower-case or S tag in git ls-files -v).
-	status, errStatus := gitOut(top, append([]string{"status", "--porcelain", "--"}, gateFiles...)...)
+	// a lower-case or S tag in git ls-files -v). Without optional locks status only reads the index:
+	// it would otherwise write back refreshed stat data under index.lock, failing a git add or commit
+	// that Claude Code runs at the same time.
+	status, errStatus := gitOut(top, append([]string{"--no-optional-locks", "status", "--porcelain", "--"}, gateFiles...)...)
 	tags, errTags := gitOut(top, append([]string{"ls-files", "-v", "--"}, gateFiles...)...)
 	if errStatus != nil || errTags != nil || status != "" || hidesChanges(tags) {
 		return "the gate's own files in " + top + " (" + strings.Join(gateFiles, ", ") + ") have uncommitted changes, are marked assume-unchanged or skip-worktree, or git cannot list them: commit or restore them, and clear the marks, before pushing"

@@ -140,7 +140,7 @@ func TestFindPushes(t *testing.T) {
 		{name: "a recursive function without a cd", command: "f() { f; }; f && git push origin a", want: []push{{Dir: "/repo", Sources: []string{"a"}}}},
 		// A "no" for a function found while a function that calls it was cut short (recursion) is not
 		// kept: called on its own, it reaches that function's cd. The substitution's walker asks about
-		// each function, f first, so g's verdict is first found inside f's.
+		// each function in name order, f first, so g's verdict is first found inside f's.
 		{name: "mutual recursion, the cd after the call", command: "f() { g; cd /x; }; g() { f; }; v=$(true); g && git push origin a", want: []push{{Dir: "", Sources: []string{"a"}}}},
 		{name: "mutual recursion through a third function", command: "f() { g; cd /x; }; g() { h; }; h() { f; }; v=$(true); g && git push origin a", want: []push{{Dir: "", Sources: []string{"a"}}}},
 		{name: "mutual recursion, the cd in the callee", command: "f() { g; g; }; g() { f; cd /x; }; f && git push origin a", want: []push{{Dir: "", Sources: []string{"a"}}}},

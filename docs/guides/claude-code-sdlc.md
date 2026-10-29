@@ -50,14 +50,17 @@ directory cannot replace the tree's modules; inherited make flags and `MAKE` are
 `MAKE=true`, which would empty every recipe that runs `$(MAKE)`); and the gate's scripts ignore replace refs and grafts
 (`GIT_NO_REPLACE_OBJECTS`, `GIT_GRAFT_FILE`), which could make a commit read with another commit's
 tree or parents. A run records nothing when HEAD moved during it (a checkout, reset or stash, even
-one undone before the end, which HEAD's reflog shows).
+one undone before the end, which HEAD's reflog shows), or when the environment sets what can weaken
+a check: a make variable the makefiles define with `?=`, even to the empty string, which make takes
+as defined (an empty `CI_RACE` drops `-race`, an empty `ACTIONLINT` lints nothing),
+`CI_GO_TEST_FLAGS`, or `GOFLAGS` (also from Go's env file).
 
 When every check passed on a **clean** tree, it writes a record for HEAD's tree
 (`git rev-parse HEAD^{tree}`) to `$(git rev-parse --git-common-dir)/patrol-sdlc/checks/<tree>`. A
 dirty tree is checked but not recorded; the run lists what makes it dirty: a change, an untracked
 file, a file marked assume-unchanged or skip-worktree, or an ignored file the checks read, which
 `git status` does not show (a UI build that `make ui-build` copied into `internal/ui/dist`, which Go
-embeds: `make ui-clean` removes it). `--no-codeql` (`make sdlc-check SDLC_CHECK_FLAGS=--no-codeql`,
+embeds: `make ui-clean` removes it; a `.env` file under `ui/`, which Vite and vitest read). `--no-codeql` (`make sdlc-check SDLC_CHECK_FLAGS=--no-codeql`,
 for quick iterations) records nothing either. Records are keyed by tree, so amending a commit or
 adding one needs a new run, and rebasing onto a new `main` changes the tree too.
 
@@ -125,7 +128,9 @@ would need a GitHub Code Security license.
 
 The reviewers and the verifier are language models: their agreement is evidence that a defect
 exists, not proof that none is left. They complement the deterministic checks and CI; they do not
-replace them.
+replace them. They run as the change has them: a change to the workflow, the agents' instructions
+(the verifier's severity rules among them), the skill or the scripts that prepare and record the
+review is reviewed by its own version, not the base's (the Limits).
 
 ## The push gate
 
@@ -407,6 +412,11 @@ A second hook (`hack/sdlc/claude-format.sh`, `PostToolUse` for Edit, MultiEdit a
   is an alias of the setup that skips git's hook on its own (one that runs `git push --no-verify`). git's
   pre-push hook (required before any command runs) checks the pushes they make in this clone's work
   trees; a script or program that disables git's hook on purpose gets past both.
+- The agent review runs the workflow, agents and skill of the change under review, not those of its
+  base: unlike the gate, which a change to the gate's own files also faces in its base's version, a
+  change that loosens the reviewers or the verifier (what counts as minor, say) is judged by the
+  loosened rules. A change that weakens both `hack/sdlc/check.sh` and the review has no local check
+  behind it; CI's own checks and the owner's review of the pull request stand behind it.
 - Scope of the walker (the owner's decision, after reviews kept finding new constructed evasions): it
   is held to the commands a developer or agent writes for their own sake. A misreading that needs a
   command built to get past it (a script piped into a wrapped shell, chains of runner functions, a

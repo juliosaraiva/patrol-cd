@@ -26,8 +26,8 @@ The machine was shared with up to 16 review and red-team agents during most runs
 |---------|--------|
 | `go vet ./hack/sdlc/...`; `golangci-lint run --no-config ./hack/sdlc/...` | passed, 0 issues |
 | `shellcheck hack/sdlc/*.sh hack/ci/lint-shell.sh`; `make ci-shell`; `actionlint` | passed |
-| `go test -race -count=1 ./hack/sdlc/...` | passed: `pushcheck` and `sarifgate`, 793 tests (counted with `-json`) |
-| `bash hack/sdlc/test-sdlc.sh` (the gate end to end in scratch repositories with a bare remote, and check.sh with stub make targets) | passed: 217 passed, 0 failed; also with `GOFLAGS=-mod=readonly` (as CI sets it), `PATROL_SDLC_BASE=HEAD~1` and `CI_GO_TEST_FLAGS=-short` set |
+| `go test -race -count=1 ./hack/sdlc/...` | passed: `pushcheck` and `sarifgate`, 794 tests (counted with `-json`) |
+| `bash hack/sdlc/test-sdlc.sh` (the gate end to end in scratch repositories with a bare remote, and check.sh with stub make targets) | passed: 221 passed, 0 failed (also under /bin/bash 3.2); also with `GOFLAGS=-mod=readonly` (as CI sets it), `PATROL_SDLC_BASE=HEAD~1` and `CI_GO_TEST_FLAGS=-short` set |
 | The suite in a scratch copy of the tree with the review diff's `--text --no-textconv` removed | its two new checks fail (`-diff` and a textconv driver hide main.go's content) |
 | `GOOS=linux CGO_ENABLED=0 GOWORK=off go vet ./...` on macOS (the step check.sh now adds off Linux) | passed, in 3 minutes from a cold cache |
 | A graft making HEAD a root and origin/main its child, in a scratch repository (`graft-check.sh` in the scratchpad), and pushcheck without its graft setting (`graftmut/mutate.py`) | without `hack/sdlc/lib.sh` the changed files are `[]`, with it `[main.go]`; the mutant fails `TestGatePushRunsTheBaseGate` |
@@ -45,13 +45,14 @@ The machine was shared with up to 16 review and red-team agents during most runs
 | Targeted mutants of the twenty-fifth round's changes (`structural25.py` in the scratchpad: a cd among the arguments of a function that runs `"$@"`, the precommands and `repeat N` before a body's command word, the record of a possible alias at a function's call and its two exemptions, a trap action kept and read again, `${ …; }`, a shell's long options with a value and the text check for options the walker does not read, the cap on unread places, the verdicts dropped for a name and for the bodies that run it, the hook functions noted, and sarifgate's suppression status) | 20 mutants (17 in pushcheck, 3 in sarifgate), all caught (four survived a first run: the dynamic-word note in command(), redundant with the precommand reading of bodyRefs and hiding its two mutants, was removed; the alias rule's exemptions got cases that reach each one; two did not compile and were rewritten) |
 | Targeted mutants of the twenty-sixth round's changes (`structural26.py` in the scratchpad: the directory lost for good to a trap or hook function that may cd, trap resets (`-`, one operand, a signal number), the cap on trap actions, `functions -c` reading the traps again, the `"$@"` runner rule wherever a command is read for a cd and its tails when the body shifts or slices, the shift noted and reset, the body's own cd for the functions among a runner's arguments, a command of assignments only) | 18 mutants, all caught (four survived a first run: the lost directory copied to a child walker, redundant since the parent records what a child returns, was removed; the cap on trap actions, the slice of "$@" and the shift reset got tests) |
 | Targeted mutants of the twenty-seventh round's changes (`structural27.py` in the scratchpad: a script piped into a shell behind a wrapper and the commands that read the pipe as data or arguments, the functions a body passes its arguments to (noted, reset by a definition, copied to a substitution's walker, followed both ways), a function definition's heredoc (read for a shell, checked, refused when dynamic), a maybe-defined runner, the runner rule for later positionals, slices and dynamic command words, the shifting runner's memo of tails, xargs' heredoc, a shell's `--version`, the record of a script a shell cannot read, and through the shell suite git's hook's refusal of hidden gate files) | 33 mutants (29 in Go, 4 in git's hook), all caught (thirteen survived a first run: two runner tests passed an unknown word, which makes any directory unknown, and now pass `true`; tests were added for the arguments passed on that a substitution inherits and a definition resets, a shifting runner reached through another, a function's heredoc to a program that is no shell, xargs' dynamic heredoc and three forms of a script a shell cannot read; the statement's own redirections of a definition, which do not parse as bash, were removed; one did not compile and was rewritten) |
+| Targeted mutants of the twenty-eighth round's changes (`libmut28.py` in the scratchpad, through the shell suite in a mirror of the gate's files: an empty `?=` variable not counted as weakening a check, a `.env` under `ui/` exempted, every `.env` counted; through `go test -overlay`: the hook's `git status` with optional locks, and the reviewer's depth-first `funcMayCD` regression that keeps a verdict cut short by recursion, with the substitution's walker asking about functions in name order) | 5 mutants, all caught; the regression, which the two mutual-recursion cases caught in 38 and 35 runs of 40 while Go's map order chose, is caught in 40 of 40 |
 | A replace ref giving `origin/main` HEAD's tree, in a scratch repository (`replace-check.sh` in the scratchpad) | without `hack/sdlc/lib.sh` the changed files are `[]`; with it, `[main.go]` |
 | `PATH="$PWD/bin:$PATH" go test -race -count=1 ./internal/git/...` (git-lfs 3.7.1 in `bin/`) | passed on `c409428` (and `./internal/reposerver/...` on `6f9f985`); TestLFS passed again after its change to a git wrapper |
 | TestLFS against a client without its LFS filter settings (`go test -overlay`, `lfsmut.sh` in the scratchpad) | fails through the wrapper that skips the system gitconfig; passes when git reads a system config that sets the filter, as the test did before on GitHub's runner |
 
 ## Agent review
 
-Twenty-seven runs of `.claude/workflows/sdlc-review.js` on successive trees, each verified finding fixed
+Twenty-eight runs of `.claude/workflows/sdlc-review.js` on successive trees, each verified finding fixed
 before the next run:
 
 | Tree | Blocking (verified) | Minor | Refuted |
@@ -83,6 +84,7 @@ before the next run:
 | `07433c2` | 5 | 4 | 0 |
 | `71d6613` | 5 | 5 | 0 |
 | `cc0f6e2` | 6 | 5 | 1 |
+| `4816846` | 1 | 4 | 0 |
 
 Most findings were ways around the Claude Code hook (shell and git constructs it read differently
 from bash, zsh or git) and tests that could not fail. The seventh run's were six untested branches
@@ -435,6 +437,18 @@ arguments, an alias that shadows a function) is a documented limit, rated minor;
 that pushes from another clone or skips git's hook, an ordinary command wrongly refused, a fault in
 the gate itself and a missing test still block (the guide's Limits,
 `.claude/agents/review-verifier.md`).
+
+The twenty-eighth run, the first under that rule, found no walker misreading and 1 blocking finding:
+check.sh recorded a pass from a run whose environment set a `?=` make variable to the empty string,
+which make takes as defined, so its default does not apply (`CI_RACE=` drops `-race`, `ACTIONLINT=`
+lints nothing, an empty `CI_GO_TEST_FLAGS` drops `-race`, `-count=1` and `-p 1`); such a variable
+now counts as weakening a check, and the gate suite tests both. Of the 4 minor findings, three were
+fixed: the Claude Code hook's `git status` runs without optional locks, so it never writes the index
+under `index.lock` while another command runs; the substitution's walker asks about functions in
+name order, so the mutual-recursion cases catch their regression in every run rather than as Go's
+map order falls; and a `.env` file under `ui/`, which Vite and vitest read, leaves the tree unclean.
+The fourth, that the review runs the change's own workflow and agents, so a change that loosens the
+reviewers is judged by the loosened rules, is in the guide's Limits.
 
 ## Red team
 

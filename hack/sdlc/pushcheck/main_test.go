@@ -8,6 +8,7 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -206,6 +207,29 @@ func TestRunTerminalDirectory(t *testing.T) {
 		assert.Equal(t, 2, run(bytes.NewReader(in), &stderr, t.TempDir()), tt.cwd)
 		assert.Contains(t, stderr.String(), tt.want+", which is not a directory here", tt.cwd)
 	}
+}
+
+// hookRuns only reads the index: a git status that refreshed a gate file's stale stat data would
+// write the index back under index.lock while another command of Claude Code's may be using it.
+func TestHookRunsLeavesTheIndex(t *testing.T) {
+	t.Parallel()
+	root := t.TempDir()
+	gitIn(t, root, "init", "-q")
+	for _, f := range []string{".githooks/pre-push", "hack/sdlc/gate.sh"} {
+		require.NoError(t, os.MkdirAll(filepath.Dir(filepath.Join(root, f)), 0o755))
+		require.NoError(t, os.WriteFile(filepath.Join(root, f), []byte("#!/bin/sh\nexit 0\n"), 0o755))
+	}
+	gitIn(t, root, "add", "-A")
+	gitIn(t, root, "commit", "-q", "-m", "gate")
+	gitIn(t, root, "config", "core.hooksPath", ".githooks")
+	later, earlier := time.Now().Add(time.Hour), time.Now().Add(-time.Hour)
+	require.NoError(t, os.Chtimes(filepath.Join(root, "hack/sdlc/gate.sh"), later, later)) // stale stat data
+	index := filepath.Join(root, ".git", "index")
+	require.NoError(t, os.Chtimes(index, earlier, earlier))
+	assert.Empty(t, hookRuns(root))
+	fi, err := os.Stat(index)
+	require.NoError(t, err)
+	assert.True(t, fi.ModTime().Before(time.Now().Add(-30*time.Minute)), "the index was written at %v", fi.ModTime())
 }
 
 // gitIn runs git in dir with no global or system configuration.
