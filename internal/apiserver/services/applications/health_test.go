@@ -50,9 +50,10 @@ func nextFor(t *testing.T, ch <-chan watchResult, name string) apiclient.Applica
 // With controller.resource.health.persist=false (resourceHealthSource appTree) the stored
 // Application has no resource health; Get (with and without refresh), Watch, Sync and
 // Rollback responses fill it from the controller's resource tree (upstream
-// inferResourcesStatusHealth), List does not, inline health is returned as stored, and a
-// tree that cannot be read leaves the health empty without failing the request, triggering
-// a refresh or, on a watch stream, being asked again for resourceHealthPause.
+// inferResourcesStatusHealth), List and DELETED watch events do not, inline health is
+// returned as stored, and a tree that cannot be read leaves the health empty without failing
+// the request, triggering a refresh or, on a watch stream, being asked again for
+// resourceHealthPause.
 func TestApplicationResourceHealthFromTree(t *testing.T) {
 	gate := &gatedTree{}
 	re := newResEnv(t, resEnvOptions{resources: func(rd *applications.ResourceDeps) {
@@ -272,5 +273,41 @@ func TestApplicationResourceHealthFromTree(t *testing.T) {
 			}
 		}
 		assert.Equal(t, int64(1), gate.calls.Load()-before, "tree reads of the stream")
+	})
+
+	t.Run("watch deleted", func(t *testing.T) {
+		// The controller drops the state of a deleted Application: its DELETED event is sent
+		// as stored, without a tree read, although the tree here still has the Application.
+		// (Runs after "slow controller", whose stream, if still open, reads no tree.)
+		gone := re.createApp(re.newApp("gone", "proj-a"))
+		gone.Status.ResourceHealthSource = v1alpha1.ResourceHealthLocationAppTree
+		gone.Status.Resources = []v1alpha1.ResourceStatus{{Version: "v1", Kind: "ConfigMap", Namespace: ns, Name: "cfg", Status: v1alpha1.SyncStatusCodeSynced}}
+		require.NoError(t, re.kube.Status().Update(re.ctx, gone))
+		re.state.setTree(treeapi.AppKey{Namespace: gone.Namespace, Name: gone.Name}, &compare.ApplicationTree{
+			Nodes: []compare.ResourceNode{{ResourceRef: compare.ResourceRef{Version: "v1", Kind: "ConfigMap", Namespace: ns, Name: "cfg", UID: "u-gone-cfg"}, Health: &healthy}},
+		})
+
+		ctx, cancel := context.WithCancel(re.ctx)
+		defer cancel()
+		s, err := alice.WatchApplications(ctx, &apiclient.ApplicationQuery{Name: "gone"}, nil)
+		require.NoError(t, err)
+		ch := watchEvents(t, s)
+		// The stored state with its resources (the first event may predate the status update)
+		// is filled from the tree.
+		ev := next(t, ch)
+		for len(ev.Object.Status.Resources) == 0 {
+			ev = next(t, ch)
+		}
+		assert.NotEqual(t, apiclient.EventDeleted, ev.Type)
+		require.Len(t, ev.Object.Status.Resources, 1)
+		assert.Equal(t, &healthy, ev.Object.Status.Resources[0].Health)
+
+		before := gate.calls.Load()
+		require.NoError(t, re.kube.Delete(re.ctx, re.getApp(re.ns, "gone")))
+		ev = next(t, ch)
+		assert.Equal(t, apiclient.EventDeleted, ev.Type)
+		require.Len(t, ev.Object.Status.Resources, 1)
+		assert.Nil(t, ev.Object.Status.Resources[0].Health)
+		assert.Equal(t, before, gate.calls.Load(), "no tree read for the DELETED event")
 	})
 }
