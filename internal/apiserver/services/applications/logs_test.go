@@ -4,6 +4,7 @@ import (
 	"context"
 	"io"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
@@ -121,6 +122,35 @@ func TestApplicationLogs(t *testing.T) {
 	// Invalid input.
 	_, err = logger.StreamApplicationLogs(re.ctx, &apiclient.ApplicationLogsQuery{Name: "guestbook", UntilTime: "tomorrow"})
 	requireProblem(t, err, 400, "invalid untilTime parameter value")
+}
+
+// A pod whose log answers late is still merged by timestamp: no line of the other pod goes out
+// before it (issue #223: under load web-abc-2's lines came first).
+func TestApplicationLogsWaitsForADelayedPod(t *testing.T) {
+	re := newResEnv(t, resEnvOptions{})
+	re.fixture("guestbook", "proj-a")
+	ns := re.appNS
+	release := make(chan struct{})
+	answer := sync.OnceFunc(func() { close(release) })
+	t.Cleanup(answer) // runs before the fake cluster closes
+	// web-abc-1 answers 200 ms (ten times the harness's former merge window) after web-abc-2's
+	// lines were sent.
+	re.cluster.updateLog(ns+"/web-abc-1", func(pl *fakePodLog) { pl.hold = release })
+	re.cluster.updateLog(ns+"/web-abc-2", func(pl *fakePodLog) {
+		pl.served = sync.OnceFunc(func() { time.AfterFunc(200*time.Millisecond, answer) })
+	})
+
+	s, err := re.rclient("logger").StreamApplicationLogs(re.ctx, &apiclient.ApplicationLogsQuery{Name: "guestbook", Kind: "Deployment", Group: "apps", ResourceName: "web", TailLines: ptrInt64(100)})
+	require.NoError(t, err)
+	entries, err := readAllLogs(t, s)
+	require.NoError(t, err)
+	assert.Equal(t, []string{
+		"web-abc-1: web1 started", "web-abc-2: web2 started", "web-abc-1: GET /healthz 200",
+		"web-abc-2: GET /healthz 200", "web-abc-1: web1 ERROR boom",
+	}, contents(entries))
+	require.NotEmpty(t, entries)
+	assert.Equal(t, "2026-01-01T00:00:01Z", entries[0].TimeStampStr)
+	assert.Len(t, re.cluster.seen(func(r seenRequest) bool { return strings.HasSuffix(r.path, "/log") }), 2)
 }
 
 func TestApplicationLogsAuthorization(t *testing.T) {

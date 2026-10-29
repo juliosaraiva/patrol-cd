@@ -173,6 +173,11 @@ type fakePodLog struct {
 	// status answers with this HTTP status and message instead (e.g. a container not running).
 	status  int
 	message string
+	// hold, when set, delays the response (status and lines) until it is closed or the client
+	// gives up: a kubelet that answers late.
+	hold <-chan struct{}
+	// served, when set, is called after the lines were written and flushed.
+	served func()
 }
 
 // fakeCluster is a destination cluster: requests are proxied to envtest (with envtest's
@@ -261,12 +266,22 @@ func (f *fakeCluster) serveLog(w http.ResponseWriter, r *http.Request, key strin
 		writeStatus(w, http.StatusBadRequest, "timestamps expected")
 		return
 	}
+	if pl.hold != nil {
+		select {
+		case <-pl.hold:
+		case <-r.Context().Done():
+			return
+		}
+	}
 	w.Header().Set("Content-Type", "text/plain")
 	w.WriteHeader(http.StatusOK)
 	for _, l := range pl.lines {
 		_, _ = io.WriteString(w, l+"\n")
 	}
 	w.(http.Flusher).Flush()
+	if pl.served != nil {
+		pl.served()
+	}
 	if !pl.follow || r.URL.Query().Get("follow") != "true" {
 		return
 	}
@@ -353,6 +368,15 @@ func (f *fakeCluster) setLog(key string, pl fakePodLog) {
 	f.logs[key] = pl
 }
 
+// updateLog changes the log configuration of one pod.
+func (f *fakeCluster) updateLog(key string, update func(*fakePodLog)) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	pl := f.logs[key]
+	update(&pl)
+	f.logs[key] = pl
+}
+
 // clusterConfigs returns the fake cluster's configuration for every destination.
 type clusterConfigs struct {
 	host  string
@@ -404,8 +428,13 @@ func newResEnv(t *testing.T, o resEnvOptions) *resEnv {
 	rd := applications.ResourceDeps{
 		Tree: tc, Clusters: re.configs, Auditor: re.sessions,
 		TreePollInterval: 100 * time.Millisecond,
-		Logs:             applications.LogsConfig{MergeWindow: 20 * time.Millisecond},
-		Terminal:         applications.TerminalConfig{PingInterval: time.Second},
+		// The merge window is an hour, so the merged order of several pods depends on their lines
+		// alone: a line goes out once every open stream has one buffered or has ended. With a short
+		// window, a pod whose log answered later than one window was merged after the others (issue
+		// #223). TestMergeLogs covers the window's flush. A multi-pod follow test in this harness
+		// would wait until every pod has written a line.
+		Logs:     applications.LogsConfig{MergeWindow: time.Hour},
+		Terminal: applications.TerminalConfig{PingInterval: time.Second},
 	}
 	if o.resources != nil {
 		o.resources(&rd)
