@@ -292,7 +292,9 @@ func (s *Service) overrideSources(ctx context.Context, app *v1alpha1.Application
 }
 
 // syncApplication serves POST /applications/{name}/sync: it creates an Operation whose
-// spec.sync mirrors the request (upstream ApplicationService.Sync).
+// spec.sync mirrors the request (upstream ApplicationService.Sync). The returned
+// Application carries the resource health kept in the controller's resource tree
+// (withTreeHealth).
 func (s *Service) syncApplication(ctx context.Context, req *pubapi.ApplicationSyncRequest) (*pubapi.ApplicationOperationResponse, error) {
 	if err := checkBodyName(req.Name, req.BodyName); err != nil {
 		return nil, err
@@ -486,7 +488,8 @@ func (s *Service) syncApplication(ctx context.Context, req *pubapi.ApplicationSy
 	} else {
 		auditApp(ctx, app, rbac.ActionSync, s.rbacObject(app), reasonOperationStarted, "initiated %ssync to %s", partial, target)
 	}
-	return &pubapi.ApplicationOperationResponse{Application: app, Operation: maskOperation(op, sensitiveAnnotations(st))}, nil
+	filled, _ := s.withTreeHealth(ctx, app)
+	return &pubapi.ApplicationOperationResponse{Application: filled, Operation: maskOperation(op, sensitiveAnnotations(st))}, nil
 }
 
 // revisionOverride enforces applications, override for a revision override when
@@ -524,7 +527,8 @@ func (s *Service) createOperation(ctx context.Context, c client.Client, app *v1a
 
 // rollbackApplication serves POST /applications/{name}/rollback: it creates a rollback
 // Operation for a status.history entry (apply strategy, no hooks, the Application's sync
-// options, no retry).
+// options, no retry). The returned Application carries the resource health kept in the
+// controller's resource tree (withTreeHealth).
 func (s *Service) rollbackApplication(ctx context.Context, req *pubapi.ApplicationRollbackRequest) (*pubapi.ApplicationOperationResponse, error) {
 	if err := checkBodyName(req.Name, req.BodyName); err != nil {
 		return nil, err
@@ -581,7 +585,8 @@ func (s *Service) rollbackApplication(ctx context.Context, req *pubapi.Applicati
 		return nil, err
 	}
 	auditApp(ctx, app, rbac.ActionSync, s.rbacObject(app), reasonOperationStarted, "initiated rollback to %d", req.ID)
-	return &pubapi.ApplicationOperationResponse{Application: app, Operation: op}, nil
+	filled, _ := s.withTreeHealth(ctx, app)
+	return &pubapi.ApplicationOperationResponse{Application: filled, Operation: op}, nil
 }
 
 // terminateOperation serves DELETE /applications/{name}/operation: spec.cancel=true is

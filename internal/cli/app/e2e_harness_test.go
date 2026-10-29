@@ -64,6 +64,11 @@ const (
 	// holdAnnotation makes the controller stand-in keep new Operations of the Application
 	// Running until they are canceled (terminate-op).
 	holdAnnotation = "clitest.patrol/hold-operations"
+	// treeHealthAnnotation makes the controller stand-in keep the Application's resource
+	// health only in the resource tree (controller.resource.health.persist=false, the
+	// default of the real controller): status.resourceHealthSource appTree, no health in
+	// status.resources, and tree nodes with Missing health for resources not created yet.
+	treeHealthAnnotation = "clitest.patrol/health-in-tree"
 )
 
 // e2ePolicy: alice is read-only; bob manages applications and ApplicationSets of project
@@ -516,8 +521,16 @@ func (s *treeState) Tree(ctx context.Context, k treeapi.AppKey) (*compare.Applic
 		return nil, err
 	}
 	tree := &compare.ApplicationTree{}
+	healthInTree := a.Annotations[treeHealthAnnotation] == "true"
 	for _, m := range managed {
 		if m.Live == nil {
+			if healthInTree {
+				// A managed target without a live object (the controller's tree builder).
+				tree.Nodes = append(tree.Nodes, compare.ResourceNode{
+					ResourceRef: compare.ResourceRef{Group: m.Key.Group, Version: m.Version, Kind: m.Key.Kind, Namespace: m.Key.Namespace, Name: m.Key.Name},
+					Health:      &v1alpha1.HealthStatus{Status: v1alpha1.HealthStatusMissing},
+				})
+			}
 			continue
 		}
 		created := m.Live.GetCreationTimestamp()
@@ -645,6 +658,11 @@ func (x *e2eEnv) reconcileApp(ctx context.Context, a *v1alpha1.Application, forc
 	now := metav1.Now()
 	st := &a.Status
 	st.Resources = nil
+	healthInTree := a.Annotations[treeHealthAnnotation] == "true"
+	st.ResourceHealthSource = v1alpha1.ResourceHealthLocationInline
+	if healthInTree {
+		st.ResourceHealthSource = v1alpha1.ResourceHealthLocationAppTree
+	}
 	synced, healthy := true, true
 	for _, m := range managed {
 		rs := v1alpha1.ResourceStatus{Group: m.Key.Group, Version: m.Version, Kind: m.Key.Kind, Namespace: m.Key.Namespace, Name: m.Key.Name,
@@ -654,6 +672,9 @@ func (x *e2eEnv) reconcileApp(ctx context.Context, a *v1alpha1.Application, forc
 		}
 		if m.Live == nil {
 			rs.Health, healthy = &v1alpha1.HealthStatus{Status: v1alpha1.HealthStatusMissing}, false
+		}
+		if healthInTree {
+			rs.Health = nil
 		}
 		st.Resources = append(st.Resources, rs)
 	}
