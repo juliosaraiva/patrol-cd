@@ -77,6 +77,8 @@ func settle(t *testing.T, b *blocker) {
 // round settles, then starts as many evaluations as are missing: since the stalled count equals
 // the entered ones when a round starts, and each evaluation adds at most one, the count reaches n
 // only with the round's last evaluation, so no evaluation is refused with ErrOverloaded early.
+// The round's calls must return while their evaluations are blocked: returnsWhileBlocked guards
+// the wait, and the calls' goroutines only store their errors, as they outlive a failed guard.
 func stallExactly(t *testing.T, b *blocker, n int) {
 	t.Helper()
 	for range 100 {
@@ -89,14 +91,20 @@ func stallExactly(t *testing.T, b *blocker, n int) {
 		for i := range objs {
 			objs[i] = obj(t, rolloutYAML)
 		}
+		errs := make([]error, missing)
 		var wg sync.WaitGroup
-		for _, o := range objs {
+		for i, o := range objs {
 			wg.Go(func() {
-				_, err := b.rt.ExecuteHealth(context.Background(), o, blockScript, false)
-				assert.ErrorIs(t, err, ErrTimeout)
+				_, errs[i] = b.rt.ExecuteHealth(context.Background(), o, blockScript, false)
 			})
 		}
-		wg.Wait()
+		_ = returnsWhileBlocked(t, func() error {
+			wg.Wait()
+			return nil
+		})
+		for _, err := range errs {
+			assert.ErrorIs(t, err, ErrTimeout)
+		}
 	}
 	t.Fatalf("only %d of %d evaluations reached block() in 100 rounds", b.entered.Load(), n)
 }
