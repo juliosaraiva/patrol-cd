@@ -109,7 +109,7 @@ With `controller.resource.health.persist=false` (the default) the controller sto
 the controller's resource tree. `withTreeHealth` (`health.go`, upstream
 `inferResourcesStatusHealth`) fills it into a copy of the Application for
 `GET /applications/{name}` (with and without `refresh`), the `ADDED`/`MODIFIED` events of
-`GET /stream/applications`, and the Application of the sync and rollback responses. `GET
+`GET /stream/applications`, and the Application of the sync, rollback and terminate responses. `GET
 /applications` does not fill it (upstream List).
 
 - Only Applications with `resourceHealthSource: appTree` and at least one resource are read;
@@ -195,7 +195,7 @@ the controller's resource tree. `withTreeHealth` (`health.go`, upstream
 | Upsert after a lost create race checks `update` only on the new object | project change rules applied to the winning Application | TEN-043 / APP-055 |
 | JSON patch `copy` accumulation unlimited, no operation cap | 1000 operations, 1 MiB copied, 4 MiB result (413) | memory exhaustion from a sub-KiB body |
 | Resource health read from the Redis tree cache | read from the controller tree API, bounded (5 s) | no shared cache; the controller owns the tree |
-| Sync/Rollback fill a copy that `SetAppOperation`'s result replaces, so success responses carry no resource health | the returned (pre-operation) Application carries it | responses are `{application, operation}` (ADR-0011) |
+| Sync/Rollback fill a copy that `SetAppOperation`'s result replaces, so success responses carry no resource health; Terminate returns no Application | the Application of the sync, rollback and terminate responses carries it | responses are `{application, operation}` (ADR-0011), and the UI writes their Application into its detail cache |
 | Every watch event is filled | `DELETED` events are not | the controller drops the state of deleted Applications |
 | Watch reads the cache for every event | a stream stops reading for 30 s after the controller did not answer | a remote call per event must not stall a stream |
 

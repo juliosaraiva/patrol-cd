@@ -405,8 +405,10 @@ DIFF-064:
     - internal/cli/app/e2e_test.go:TestE2EAppResourceHealthFromTree
   notes: >-
     API part (APP-031 is an alias): with status.resourceHealthSource appTree, Get (with and
-    without refresh), Watch (ADDED and MODIFIED events), Sync and Rollback responses fill
-    status.resources[].health from the controller tree API: node health by key, Missing
+    without refresh) and Watch (ADDED and MODIFIED events) responses fill
+    status.resources[].health from the controller tree API, and so do the Application of Sync,
+    Rollback and Terminate responses (upstream's carry none; the UI writes it into its detail
+    cache): node health by key, Missing
     "Resource has not been created" for a node without health, UID, resourceVersion and
     createdAt, nil otherwise; orphaned nodes do not count. List does not fill (upstream). Inline
     health is returned as stored, without a tree read. A tree read is bounded (5 s); when it

@@ -590,7 +590,9 @@ func (s *Service) rollbackApplication(ctx context.Context, req *pubapi.Applicati
 }
 
 // terminateOperation serves DELETE /applications/{name}/operation: spec.cancel=true is
-// merge-patched on every non-terminal Operation of the Application.
+// merge-patched on every non-terminal Operation of the Application. The returned Application
+// carries the resource health kept in the controller's resource tree (withTreeHealth), as the
+// sync and rollback responses do.
 func (s *Service) terminateOperation(ctx context.Context, req *pubapi.ApplicationRef) (*pubapi.ApplicationOperationResponse, error) {
 	c, err := s.kube()
 	if err != nil {
@@ -622,7 +624,8 @@ func (s *Service) terminateOperation(ctx context.Context, req *pubapi.Applicatio
 	}
 	auditApp(ctx, app, rbac.ActionSync, s.rbacObject(app), rest.ReasonResourceUpdated, "terminated running operation")
 	st, _ := s.settings()
-	return &pubapi.ApplicationOperationResponse{Application: app, Operation: maskOperation(&active[0], sensitiveAnnotations(st))}, nil
+	filled, _ := s.withTreeHealth(ctx, app)
+	return &pubapi.ApplicationOperationResponse{Application: filled, Operation: maskOperation(&active[0], sensitiveAnnotations(st))}, nil
 }
 
 // sortOperations orders Operations newest first (creation time, then name).

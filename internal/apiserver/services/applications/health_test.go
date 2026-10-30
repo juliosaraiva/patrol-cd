@@ -48,8 +48,8 @@ func nextFor(t *testing.T, ch <-chan watchResult, name string) apiclient.Applica
 }
 
 // With controller.resource.health.persist=false (resourceHealthSource appTree) the stored
-// Application has no resource health; Get (with and without refresh), Watch, Sync and
-// Rollback responses fill it from the controller's resource tree (upstream
+// Application has no resource health; Get (with and without refresh), Watch, Sync, Rollback
+// and Terminate responses fill it from the controller's resource tree (upstream
 // inferResourcesStatusHealth), List and DELETED watch events do not, inline health is
 // returned as stored, and a tree that cannot be read leaves the health empty without failing
 // the request, triggering a refresh or, on a watch stream whose controller did not answer,
@@ -223,6 +223,17 @@ func TestApplicationResourceHealthFromTree(t *testing.T) {
 		re.finishOperations(re.ns, "health")
 	})
 
+	t.Run("terminate", func(t *testing.T) {
+		setTree(healthy)
+		_, err := alice.SyncApplication(re.ctx, &apiclient.ApplicationSyncRequest{Name: "health"})
+		require.NoError(t, err)
+		resp, err := alice.TerminateApplicationOperation(re.ctx, &apiclient.ApplicationRef{Name: "health"})
+		require.NoError(t, err)
+		require.NotNil(t, resp.Operation)
+		requireFilled(t, resp.Application, healthy)
+		re.finishOperations(re.ns, "health")
+	})
+
 	t.Run("inline", func(t *testing.T) {
 		// controller.resource.health.persist=true: health is stored inline and returned as
 		// stored, without a tree read.
@@ -280,10 +291,13 @@ func TestApplicationResourceHealthFromTree(t *testing.T) {
 		}
 		empty := func(a *v1alpha1.Application) { requireEmpty(t, a) }
 
+		// The stream's first event (its List) comes before any write.
+		ev := next(t, ch)
+		require.Equal(t, apiclient.EventAdded, ev.Type)
+		requireEmpty(t, &ev.Object)
 		re.updateApp("health", func(a *v1alpha1.Application) { a.Annotations = map[string]string{"slow": "answer"} })
 		_, events := until("answer", empty)
-		assert.GreaterOrEqual(t, events, int64(2), "the ADDED event and the update")
-		assert.Equal(t, events, gate.calls.Load()-before, "one tree read per event")
+		assert.Equal(t, 1+events, gate.calls.Load()-before, "one tree read per event")
 		re.state.setMissing(key, false)
 
 		// The controller does not answer: the first read waits for ResourceHealthTimeout, then
@@ -303,7 +317,7 @@ func TestApplicationResourceHealthFromTree(t *testing.T) {
 		skew.Add(int64(31 * time.Second))
 		before = gate.calls.Load()
 		re.updateApp("health", func(a *v1alpha1.Application) { a.Annotations = map[string]string{"slow": "after"} })
-		ev, _ := until("after", func(*v1alpha1.Application) {})
+		ev, _ = until("after", func(*v1alpha1.Application) {})
 		requireFilled(t, &ev.Object, healthy)
 		assert.Equal(t, int64(1), gate.calls.Load()-before, "tree reads after the pause")
 	})
