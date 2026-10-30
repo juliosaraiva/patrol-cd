@@ -13,6 +13,7 @@ import (
 	"github.com/juliosaraiva/patrol-cd/api/v1alpha1"
 	"github.com/juliosaraiva/patrol-cd/internal/compare"
 	"github.com/juliosaraiva/patrol-cd/internal/controller/core"
+	"github.com/juliosaraiva/patrol-cd/internal/project"
 )
 
 // AppState is the in-memory result of an Application's latest comparison: the resource tree
@@ -26,6 +27,11 @@ type AppState struct {
 	Managed []compare.ManagedResource
 	// ComparedAt is when the comparison or tree refresh completed.
 	ComparedAt time.Time
+	// SpecInvalid: the latest refresh found spec errors and compared nothing; Tree is empty
+	// and Managed nil, a tree-only refresh compares again instead, and managed resources are
+	// reported as unavailable (upstream stores an empty tree and deletes the managed
+	// resources from its cache).
+	SpecInvalid bool
 }
 
 // TreeBuilder rebuilds an Application's tree from the managed resources of its last
@@ -83,12 +89,13 @@ func (a *appRun) storeComparison(ctx context.Context, res *compare.Result) {
 // refreshTree rebuilds the resource tree from the managed resources of the last comparison
 // (upstream comparison level "nothing": a descendant of a managed resource changed) and
 // persists the summary and the orphaned-resource condition. Without a stored comparison
-// (after a restart) it falls back to a comparison at level recent.
+// (after a restart, or when the latest refresh found spec errors) it falls back to a
+// comparison at level recent.
 func (a *appRun) refreshTree(ctx context.Context) (reconcile.Result, error) {
 	key := client.ObjectKeyFromObject(a.app)
 	prev, ok := a.r.state.get(key)
 	tb, isBuilder := a.r.cfg.Comparer.(TreeBuilder)
-	if !ok || !isBuilder || a.destErr != nil {
+	if !ok || prev.SpecInvalid || !isBuilder || a.destErr != nil {
 		a.r.refresh.RequestRefresh(key, core.CompareRecent, 0)
 		return reconcile.Result{}, nil
 	}
@@ -102,6 +109,7 @@ func (a *appRun) refreshTree(ctx context.Context) (reconcile.Result, error) {
 		return reconcile.Result{}, nil
 	}
 	a.r.state.set(key, AppState{Tree: tr.Tree, Managed: prev.Managed, ComparedAt: a.now()})
+	a.r.cfg.Metrics.SetOrphanedResources(a.app.Namespace, a.app.Name, a.app.Spec.GetProject(), project.OrphanedResourcesEnabled(proj), tr.OrphanedResources)
 	now := metav1.NewTime(a.now())
 	_, err = core.PatchStatus(ctx, a.r.c, a.r.cfg.APIReader, a.app, func(app *v1alpha1.Application) error {
 		app.Status.Summary = tr.Summary

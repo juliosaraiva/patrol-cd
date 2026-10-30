@@ -6,6 +6,7 @@ import (
 	"log/slog"
 	"net/http"
 	"net/http/httptest"
+	"sync"
 	"sync/atomic"
 	"testing"
 	"time"
@@ -67,6 +68,33 @@ var allPatrolKinds = []string{
 	"Repository", "RepositoryCredential", "SCMProvider",
 }
 
+// expiringContext is a parent context whose deadline passes when the test closes expired, not on
+// a clock. waitForCRDs derives its own context.WithTimeout from it, and the context package
+// cancels a child with the parent's Err once the parent is done, so the wait sees
+// context.DeadlineExceeded and takes its timeout path exactly when the test decides. The tests
+// pass crdWaitTimeout as the wait's own timeout, which does not fire first.
+type expiringContext struct {
+	context.Context
+	expired <-chan struct{}
+}
+
+func (c expiringContext) Done() <-chan struct{} { return c.expired }
+
+func (c expiringContext) Err() error {
+	select {
+	case <-c.expired:
+		return context.DeadlineExceeded
+	default:
+		return nil
+	}
+}
+
+// newExpiry returns a context whose deadline passes when expire is called (once or more).
+func newExpiry() (ctx context.Context, expire func()) {
+	expired := make(chan struct{})
+	return expiringContext{Context: context.Background(), expired: expired}, sync.OnceFunc(func() { close(expired) })
+}
+
 func TestWaitForCRDsReturnsOnceEveryKindIsServed(t *testing.T) {
 	t.Parallel()
 	cfg, n := discoveryServer(t, func(n int) []string {
@@ -92,26 +120,48 @@ func TestWaitForCRDsNoWaitWhenServed(t *testing.T) {
 	assert.EqualValues(t, 1, n.Load())
 }
 
+// The deadline passes during the second attempt, after the first answer: the error names the
+// kinds that answer lacked, and the interrupted attempt changes nothing (CI-F13). Issue #228: with
+// a 100 ms deadline, a loaded machine got no answer in time and every kind was reported missing.
 func TestWaitForCRDsTimesOutNamingTheMissingKinds(t *testing.T) {
 	t.Parallel()
-	cfg, _ := discoveryServer(t, func(int) []string { return []string{"Application", "AppProject"} })
-	err := waitForCRDs(t.Context(), cfg, slog.New(slog.DiscardHandler), 100*time.Millisecond, 10*time.Millisecond)
-	require.Error(t, err)
-	assert.Contains(t, err.Error(), "not served after 100ms")
-	assert.Contains(t, err.Error(), "ApplicationSet")
-	assert.NotContains(t, err.Error(), " AppProject", "served kinds are not reported missing")
+	ctx, expire := newExpiry()
+	stop := make(chan struct{})
+	cfg, n := discoveryServer(t, func(n int) []string {
+		if n > 1 {
+			expire()
+			<-stop // never answered: the attempt is cut short by the deadline
+		}
+		return []string{"Application", "AppProject"}
+	})
+	t.Cleanup(func() { close(stop) }) // runs before the server's Close, which waits for the handler
+	err := waitForCRDs(ctx, cfg, slog.New(slog.DiscardHandler), crdWaitTimeout, 10*time.Millisecond)
+	require.EqualError(t, err, "the Patrol CRDs (cd.patrol.example/v1alpha1) are not served after 1m0s: "+
+		"missing ApplicationSet, Cluster, Operation, Repository, RepositoryCredential, SCMProvider")
+	assert.GreaterOrEqual(t, n.Load(), int32(2))
 }
 
+// The last real error survives an attempt the deadline interrupted.
 func TestWaitForCRDsKeepsTheLastDiscoveryError(t *testing.T) {
 	t.Parallel()
+	ctx, expire := newExpiry()
+	stop := make(chan struct{})
+	var n atomic.Int32
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		if n.Add(1) > 1 {
+			expire()
+			<-stop
+			return
+		}
 		http.Error(w, "boom", http.StatusInternalServerError)
 	}))
 	t.Cleanup(srv.Close)
-	err := waitForCRDs(t.Context(), &krest.Config{Host: srv.URL}, slog.New(slog.DiscardHandler), 100*time.Millisecond, 10*time.Millisecond)
+	t.Cleanup(func() { close(stop) }) // runs before srv.Close
+	err := waitForCRDs(ctx, &krest.Config{Host: srv.URL}, slog.New(slog.DiscardHandler), crdWaitTimeout, 10*time.Millisecond)
 	require.Error(t, err)
-	assert.Contains(t, err.Error(), "not served after")
+	assert.Contains(t, err.Error(), "not served after "+crdWaitTimeout.String())
 	assert.Contains(t, err.Error(), "boom")
+	assert.NotContains(t, err.Error(), "context", "the interrupted attempt's error is not reported")
 }
 
 func TestWaitForCRDsStopsWhenTheContextEnds(t *testing.T) {
@@ -123,17 +173,31 @@ func TestWaitForCRDsStopsWhenTheContextEnds(t *testing.T) {
 	require.ErrorIs(t, err, context.Canceled)
 }
 
+// The deadline passes while a probe hangs: the probe ends with the wait.
 func TestWaitForCRDsDoesNotWaitForAHangingProbe(t *testing.T) {
 	t.Parallel()
+	ctx, expire := newExpiry()
+	expiredAt := make(chan time.Time, 1)
 	release := make(chan struct{})
-	srv := httptest.NewServer(http.HandlerFunc(func(http.ResponseWriter, *http.Request) { <-release }))
+	srv := httptest.NewServer(http.HandlerFunc(func(http.ResponseWriter, *http.Request) {
+		select {
+		case expiredAt <- time.Now():
+		default:
+		}
+		expire()
+		<-release
+	}))
 	t.Cleanup(srv.Close)
 	t.Cleanup(func() { close(release) }) // runs before srv.Close
-	start := time.Now()
-	err := waitForCRDs(t.Context(), &krest.Config{Host: srv.URL}, slog.New(slog.DiscardHandler), 100*time.Millisecond, 10*time.Millisecond)
+	err := waitForCRDs(ctx, &krest.Config{Host: srv.URL}, slog.New(slog.DiscardHandler), crdWaitTimeout, 10*time.Millisecond)
 	require.Error(t, err)
-	assert.Contains(t, err.Error(), "not served after 100ms")
-	assert.Less(t, time.Since(start), 5*time.Second, "the request in flight must end with the wait, not after its own 10 s timeout")
+	assert.Contains(t, err.Error(), "not served after "+crdWaitTimeout.String())
+	select {
+	case at := <-expiredAt:
+		assert.Less(t, time.Since(at), crdProbeTimeout/2, "the request in flight must end with the wait, not after its own 10 s timeout")
+	default:
+		t.Fatal("no probe reached the server")
+	}
 }
 
 // startRecorder returns a component whose run records that it was called.
@@ -159,10 +223,11 @@ func TestStartWaitsForTheCRDsOfKubeComponentsOnly(t *testing.T) {
 	})
 	t.Run("not served: does not run, a stop is clean", func(t *testing.T) {
 		t.Parallel()
-		cfg, n := discoveryServer(t, func(int) []string { return nil })
-		c, ran := startRecorder(true)
-		ctx, cancel := context.WithTimeout(t.Context(), 200*time.Millisecond)
+		ctx, cancel := context.WithCancel(t.Context())
 		defer cancel()
+		// The stop arrives while discovery says the CRDs are not served.
+		cfg, n := discoveryServer(t, func(int) []string { cancel(); return nil })
+		c, ran := startRecorder(true)
 		require.NoError(t, c.start(ctx, &Runtime{Rest: cfg, Log: log}, time.Now()))
 		assert.False(t, ran.Load(), "the component must not start before its CRDs are served")
 		assert.Positive(t, n.Load())
@@ -175,9 +240,10 @@ func TestStartWaitsForTheCRDsOfKubeComponentsOnly(t *testing.T) {
 		start := time.Now()
 		err := c.start(t.Context(), &Runtime{Rest: cfg, Log: log}, began)
 		require.Error(t, err)
-		assert.Contains(t, err.Error(), "not served after")
+		assert.Contains(t, err.Error(), "not served after "+crdWaitInterval.String()+":", "the wait gets one interval, not the full timeout")
 		assert.False(t, ran.Load())
-		assert.Less(t, time.Since(start), 3*crdWaitInterval)
+		// Generous: the wait ends at its own deadline, long before the full timeout.
+		assert.Less(t, time.Since(start), crdWaitTimeout/2)
 	})
 	t.Run("no Kubernetes access: runs without a check", func(t *testing.T) {
 		t.Parallel()

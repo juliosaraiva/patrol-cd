@@ -24,6 +24,9 @@ const (
 	DefaultTreePollInterval = 3 * time.Second
 	// DefaultClusterCallTimeout bounds one non-streaming call to a destination cluster.
 	DefaultClusterCallTimeout = time.Minute
+	// DefaultResourceHealthTimeout bounds the tree read that fills resource health in
+	// Application responses.
+	DefaultResourceHealthTimeout = 5 * time.Second
 	// DefaultMaxEvents caps the Events returned by the events route.
 	DefaultMaxEvents = 1000
 	// MaxServerSideDiffResources caps the resources of one server-side diff request (the
@@ -170,6 +173,10 @@ type ResourceDeps struct {
 	// ClusterCallTimeout bounds non-streaming destination cluster calls
 	// (DefaultClusterCallTimeout).
 	ClusterCallTimeout time.Duration
+	// ResourceHealthTimeout bounds the tree read that fills status.resources[].health of
+	// Applications whose resource health lives in the tree (resourceHealthSource appTree)
+	// in get, watch, sync, rollback and terminate responses (DefaultResourceHealthTimeout).
+	ResourceHealthTimeout time.Duration
 	// MaxEvents caps listed Events (DefaultMaxEvents).
 	MaxEvents int64
 	Logs      LogsConfig
@@ -185,6 +192,9 @@ func (r *ResourceDeps) normalize() {
 	}
 	if r.ClusterCallTimeout <= 0 {
 		r.ClusterCallTimeout = DefaultClusterCallTimeout
+	}
+	if r.ResourceHealthTimeout <= 0 {
+		r.ResourceHealthTimeout = DefaultResourceHealthTimeout
 	}
 	if r.MaxEvents <= 0 {
 		r.MaxEvents = DefaultMaxEvents

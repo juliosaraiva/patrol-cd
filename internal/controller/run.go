@@ -224,6 +224,7 @@ func Run(ctx context.Context, rc RunConfig) error {
 	cmp, err := compare.New(compare.Deps{
 		RepoServer: rc.RepoServer, Repositories: resolver, Settings: settingsMgr, Clusters: registry,
 		LiveState: live, ServerSideDiff: ssd, ControlPlaneNamespace: rc.Namespace,
+		ApplicationExists:     app.ApplicationExists(mgr.GetClient(), matcher),
 		ServerSideDiffEnabled: rc.ServerSideDiff, PersistResourceHealth: rc.PersistResourceHealth,
 		RepoErrorGracePeriod: grace, JQTimeout: rc.JQTimeout, Registerer: rc.Registerer, Logger: log,
 	})
