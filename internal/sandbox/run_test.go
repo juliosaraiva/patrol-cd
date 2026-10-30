@@ -552,13 +552,18 @@ func TestRunHelperHandshake(t *testing.T) {
 		script := filepath.Join(dir, "not-a-helper")
 		// Holds the inherited status descriptor open and never writes to it.
 		require.NoError(t, os.WriteFile(script, []byte("#!/bin/sh\necho $$ > '"+pidFile+"'\nexec /bin/sleep 300\n"), 0o755))
-		withHelperState(t, script, true, 500*time.Millisecond)
+		// Long enough for a new script to record its pid, so that the kill can be checked.
+		withHelperState(t, script, true, 5*time.Second)
 		start := time.Now()
 		_, err := Run(t.Context(), Cmd{Path: "/bin/echo", Args: []string{"hello"}, Limits: Limits{CPUSeconds: 5, Timeout: 5 * time.Minute}})
 		require.ErrorIs(t, err, ErrInvalidCommand)
 		require.NotErrorIs(t, err, ErrTimeout)
 		assert.Less(t, time.Since(start), slowBound)
-		requireGone(t, readPID(t, pidFile))
+		// Run reaps what it kills, so nothing writes the file after this: on a loaded machine
+		// the timeout can fire before the first line ran, and then there is no process to find.
+		if data, err := os.ReadFile(pidFile); err == nil && len(bytes.TrimSpace(data)) > 0 {
+			requireGone(t, readPID(t, pidFile))
+		}
 	})
 
 	t.Run("default helper requires MaybeHelperMain in this process", func(t *testing.T) {
