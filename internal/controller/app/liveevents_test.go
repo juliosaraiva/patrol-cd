@@ -177,6 +177,9 @@ func TestOnResourceUpdated(t *testing.T) {
 			want: map[types.NamespacedName]requested{}},
 		{name: "endpoints of a managed service", newRes: endpoints("2"), oldRes: endpoints("1"),
 			want: map[types.NamespacedName]requested{}},
+		{name: "kind named endpoints of another group", newRes: liveRes("example.com", "Endpoints", "web", "e", &compare.ResourceInfo{AppName: "a", ManifestHash: "2"}),
+			oldRes: liveRes("example.com", "Endpoints", "web", "e", &compare.ResourceInfo{AppName: "a", ManifestHash: "1"}),
+			want:   map[types.NamespacedName]requested{appKey("a"): recentReq}},
 		{name: "tracked object with an inferred owner", newRes: pvc("2"), oldRes: pvc("1"),
 			want: map[types.NamespacedName]requested{appKey("a"): treeReq}},
 		// Old and new object of one Application: a root on either side compares it.
@@ -326,6 +329,10 @@ func TestLiveRefreshLogLevel(t *testing.T) {
 			want: []logRecord{{level: slog.LevelDebug, msg: msg, attrs: attrs("a", "tree", "Pod", "p")}}},
 		{name: "unmanaged object changed", newRes: stray,
 			want: []logRecord{{level: slog.LevelDebug, msg: msg, attrs: attrs("mon", "tree", "ConfigMap", "stray")}}},
+		{name: "cluster-scoped root changed", newRes: liveRes("", "Namespace", "", "web", &compare.ResourceInfo{AppName: "a", ManifestHash: "2"}),
+			oldRes: liveRes("", "Namespace", "", "web", &compare.ResourceInfo{AppName: "a", ManifestHash: "1"}),
+			want: []logRecord{{level: slog.LevelInfo, msg: msg, attrs: map[string]string{"application": "patrol/a", "comparisonLevel": "recent",
+				"server": testServer, "group": "", "kind": "Namespace", "namespace": "(cluster-scoped)", "name": "web"}}}},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			t.Parallel()

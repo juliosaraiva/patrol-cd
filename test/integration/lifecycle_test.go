@@ -770,14 +770,24 @@ func TestObjectOfMissingApplicationIsOrphan(t *testing.T) {
 	require.NoError(t, err)
 	monitor := s.NewApp("monitor", repo, "monitor", d, ns)
 	monitor.Spec.Project = "orphans"
-	for _, a := range []*v1alpha1.Application{monitor, s.NewApp("peer", repo, "peer", d, ns)} {
-		s.CreateApp(t, a)
-		requireSucceeded(t, syncAndWait(t, s, &apiclient.ApplicationSyncRequest{Name: a.Name}))
-		s.WaitSyncedHealthy(t, a.Name, "")
-	}
-	got := s.RefreshUntil(t, "monitor", "the object of peer is no orphan", func(a *v1alpha1.Application) bool {
-		return a.Status.Sync.Status == v1alpha1.SyncStatusCodeSynced
+	// The API server and the controller read projects from their own informers, which may not
+	// hold the new project yet.
+	stack.Eventually(t, time.Minute, "the API server to accept an Application of the new project", func() (bool, string) {
+		_, err := s.API(t).CreateApplication(t.Context(), &apiclient.ApplicationCreateRequest{Application: monitor})
+		if err != nil {
+			return false, err.Error()
+		}
+		return true, ""
 	})
+	s.RefreshUntil(t, "monitor", "the first comparison", func(a *v1alpha1.Application) bool {
+		return a.Status.Sync.Status == v1alpha1.SyncStatusCodeOutOfSync
+	})
+	s.CreateApp(t, s.NewApp("peer", repo, "peer", d, ns))
+	for _, name := range []string{"monitor", "peer"} {
+		requireSucceeded(t, syncAndWait(t, s, &apiclient.ApplicationSyncRequest{Name: name}))
+		s.WaitSyncedHealthy(t, name, "")
+	}
+	got := s.Refresh(t, "monitor", false)
 	require.Nil(t, stack.Condition(got, v1alpha1.ApplicationConditionOrphanedResourceWarning), stack.DescribeApp(got))
 
 	d.Apply(t, ns, configMap("ghost", nil, map[string]string{

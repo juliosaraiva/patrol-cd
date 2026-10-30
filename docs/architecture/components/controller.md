@@ -296,10 +296,10 @@ SYNC-001, 003, 006, 013..028, 031 (deletion confirmation), 051, 052, 070, 076..0
 - **Refresh after a completed operation** is also derived from state (`finishedAt` after
   `reconciledAt`) so it survives restarts; it is also triggered for dry runs.
 - **Orphaned-resource refreshes**: an unattributed object refreshes the orphan-monitoring
-  Applications with a tree-only refresh (upstream: `CompareWithRecent`); the tree, summary,
-  `OrphanedResourceWarning` and gauge are the same, only a sync status affected by such an
-  object waits for the next comparison. Monitors are matched by namespace and by the event's
-  cluster (upstream: namespace only).
+  Applications with a tree-only refresh (upstream: `CompareWithRecent`); the orphaned nodes,
+  `OrphanedResourceWarning` and gauge are the same. A managed resource that was Missing at the
+  last comparison, and a sync status affected by such an object, wait for the next comparison.
+  Monitors are matched by namespace and by the event's cluster (upstream: namespace only).
 - **`patrol_app_orphaned_resources_count`** has one series per Application, under its current
   project (upstream keeps an old project's series). It is not emitted for Applications whose
   project does not monitor orphaned resources (upstream sets 0), and is removed when the

@@ -36,12 +36,17 @@ func TestApplicationExists(t *testing.T) {
 	t.Parallel()
 	inControlPlane := &v1alpha1.Application{ObjectMeta: metav1.ObjectMeta{Namespace: "patrol", Name: "a"}}
 	inTeam := &v1alpha1.Application{ObjectMeta: metav1.ObjectMeta{Namespace: "team", Name: "b"}}
-	exists := ApplicationExists(liveEventsReconciler(t, nil, inControlPlane, inTeam).c, "patrol")
+	clusterWide := core.NewNamespaceMatcher("patrol", []string{"team"})
+	exists := ApplicationExists(liveEventsReconciler(t, nil, inControlPlane, inTeam).c, clusterWide)
 	assert.True(t, exists("a"), "control-plane namespace")
 	assert.True(t, exists("team_b"), "another namespace")
 	assert.False(t, exists("gone"))
 	assert.False(t, exists("team_a"), "the name in another namespace")
-	assert.True(t, ApplicationExists(failingReader{}, "patrol")("a"), "a failed read is not a missing Application")
+	assert.True(t, ApplicationExists(failingReader{}, clusterWide)("team_b"), "a failed read is not a missing Application")
+
+	controlPlaneOnly := core.NewNamespaceMatcher("patrol", nil)
+	assert.True(t, ApplicationExists(failingReader{}, controlPlaneOnly)("a"), "a failed read is not a missing Application")
+	assert.False(t, ApplicationExists(failingReader{}, controlPlaneOnly)("team_b"), "a namespace the cache does not hold")
 }
 
 // failingReader fails every read.

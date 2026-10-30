@@ -221,8 +221,9 @@ APP-085:
     object are both refreshed; the changed Application object itself (same UID, as upstream) is
     skipped. A namespaced
     object attributed to no Application gives the orphan-monitoring Applications of its
-    namespace and cluster a tree-only refresh (upstream: CompareWithRecent; the tree, summary,
-    condition and gauge are the same), found through in-memory field indexes (Applications by
+    namespace and cluster a tree-only refresh (upstream: CompareWithRecent; the orphaned nodes,
+    condition and gauge are the same, but a managed resource that was Missing at the last
+    comparison stays Missing until the next one), found through in-memory field indexes (Applications by
     destination namespace, AppProjects with spec.orphanedResources); Applications outside the
     allowed namespaces or of other shards are skipped. Upstream matches orphan monitors by
     namespace on any cluster; Patrol also matches the event's cluster.

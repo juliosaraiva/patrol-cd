@@ -101,11 +101,16 @@ func (r *Reconciler) onResourceUpdated(clusterKey string, newRes, oldRes *cache.
 // Application of an instance name exists (upstream getResourceTree), read from c, the manager's
 // cached client. A resource tracked by an Application that does not exist is an orphan; a
 // failed read counts as existing, so that no resource is reported as an orphan on a guess.
-func ApplicationExists(c client.Reader, namespace string) func(instanceName string) bool {
+func ApplicationExists(c client.Reader, namespaces *core.NamespaceMatcher) func(instanceName string) bool {
 	return func(instanceName string) bool {
+		name, ns := tracking.ParseInstanceName(instanceName, namespaces.ControlPlane())
+		// Without application namespaces the cache holds the control-plane namespace only, and
+		// a read of another one fails for good instead of answering NotFound.
+		if !namespaces.ClusterWide() && ns != namespaces.ControlPlane() {
+			return false
+		}
 		ctx, cancel := context.WithTimeout(context.Background(), lookupTimeout)
 		defer cancel()
-		name, ns := tracking.ParseInstanceName(instanceName, namespace)
 		// Shared with the informer cache: read only.
 		app := &v1alpha1.Application{}
 		return !apierrors.IsNotFound(c.Get(ctx, types.NamespacedName{Namespace: ns, Name: name}, app, client.UnsafeDisableDeepCopy))

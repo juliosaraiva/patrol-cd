@@ -206,7 +206,12 @@ func (q *refreshQueue) takeAll(key types.NamespacedName) (core.CompareLevel, boo
 
 // restore puts back a taken level after a failed reconcile.
 func (q *refreshQueue) restore(key types.NamespacedName, level core.CompareLevel) {
-	if level == core.CompareNone {
+	q.restoreAll(key, level, false)
+}
+
+// restoreAll is restore that also puts back a taken tree-only refresh.
+func (q *refreshQueue) restoreAll(key types.NamespacedName, level core.CompareLevel, tree bool) {
+	if level == core.CompareNone && !tree {
 		return
 	}
 	q.mu.Lock()
@@ -218,6 +223,7 @@ func (q *refreshQueue) restore(key types.NamespacedName, level core.CompareLevel
 	if !ok {
 		p.due = q.clock.Now()
 	}
+	p.tree = p.tree || tree
 	q.pending[key] = p
 }
 

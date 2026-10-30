@@ -1,6 +1,7 @@
 package integration
 
 import (
+	"fmt"
 	"slices"
 	"testing"
 	"time"
@@ -91,16 +92,19 @@ func TestOrphanedResourcesRefresh(t *testing.T) {
 	// An object tracked by an Application that does not exist is an orphan, unlike the objects
 	// of plain. Its event is attributed to the missing Application, so nothing refreshes the
 	// monitors (as upstream), and the live-state cache sees it asynchronously: refresh until a
-	// comparison has it.
-	ghost := configMap("ghost", nil, map[string]string{v1alpha1.AnnotationKeyTrackingID: "gone-app:/ConfigMap:" + e.dest + "/ghost"})
-	_, err = e.dyn.Resource(gvrConfigMap).Namespace(e.dest).Create(e.ctx, ghost, metav1.CreateOptions{})
-	require.NoError(t, err)
-	for deadline := time.Now().Add(waitTimeout); ; time.Sleep(5 * pollEvery) {
-		e.refresh(mon, v1alpha1.RefreshTypeNormal)
-		if v, ok := gaugeValue(t, ctl.registry, e.ns, mon.Name); ok && v == 1 {
-			break
+	// comparison has it. The second Application is in a namespace this cache does not hold.
+	for i, instance := range []string{"gone-app", "elsewhere_gone-app"} {
+		name := fmt.Sprintf("ghost-%d", i)
+		ghost := configMap(name, nil, map[string]string{v1alpha1.AnnotationKeyTrackingID: instance + ":/ConfigMap:" + e.dest + "/" + name})
+		_, err = e.dyn.Resource(gvrConfigMap).Namespace(e.dest).Create(e.ctx, ghost, metav1.CreateOptions{})
+		require.NoError(t, err)
+		for deadline := time.Now().Add(waitTimeout); ; time.Sleep(5 * pollEvery) {
+			e.refresh(mon, v1alpha1.RefreshTypeNormal)
+			if v, ok := gaugeValue(t, ctl.registry, e.ns, mon.Name); ok && v == float64(i+1) {
+				break
+			}
+			require.True(t, time.Now().Before(deadline), "the object of %s never counted as an orphan", instance)
 		}
-		require.True(t, time.Now().Before(deadline), "the object of the missing Application never counted as an orphan")
 	}
 
 	// Deleting the Application removes its series.

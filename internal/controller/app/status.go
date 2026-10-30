@@ -69,11 +69,11 @@ func (a *appRun) refreshApp(ctx context.Context) (reconcile.Result, error) {
 	// feeds the automated sync decision.
 	fresh := &v1alpha1.Application{}
 	if err := a.r.cfg.APIReader.Get(ctx, key, fresh); err != nil {
-		a.r.refresh.restore(key, requested)
+		a.r.refresh.restoreAll(key, requested, tree)
 		return reconcile.Result{}, client.IgnoreNotFound(err)
 	}
 	if fresh.DeletionTimestamp != nil || core.SkipReconcile(fresh.Annotations) {
-		a.r.refresh.restore(key, requested)
+		a.r.refresh.restoreAll(key, requested, tree)
 		return requeueSoon(), nil
 	}
 	a.app = fresh

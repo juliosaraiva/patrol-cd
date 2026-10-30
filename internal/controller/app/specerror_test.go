@@ -259,3 +259,48 @@ func TestTreeRefreshRunsAfterStaleRead(t *testing.T) {
 	assert.Equal(t, 1, e.cmp.trees, "the tree-only refresh ran")
 	assert.InDelta(t, 3, e.value(), 0)
 }
+
+// A reconcile that stops at the read from the API server keeps the pending tree-only refresh
+// for its retry, by then the cache has caught up and nothing asks for a comparison.
+func TestTreeRefreshSurvivesStoppedReconcile(t *testing.T) {
+	t.Parallel()
+	for _, tc := range []struct {
+		name    string
+		reader  func(client.Reader) client.Reader
+		wantErr bool
+	}{
+		{name: "failed read", reader: func(client.Reader) client.Reader { return failingReader{} }, wantErr: true},
+		{name: "skip-reconcile set since the cached read", reader: func(c client.Reader) client.Reader { return skipReconcileReader{Reader: c} }},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+			e := newOrphanEnv(t, true)
+			e.reconcile()
+			require.Equal(t, 1, e.cmp.compares)
+			e.r.c = staleGet{Client: e.c, stale: e.app}
+			e.r.cfg.APIReader = tc.reader(e.c)
+			e.r.refresh.RequestTreeRefresh(e.key)
+			_, err := e.r.Reconcile(context.Background(), reconcile.Request{NamespacedName: e.key})
+			require.Equal(t, tc.wantErr, err != nil, "%v", err)
+			assert.Zero(t, e.cmp.trees)
+
+			e.r.c = e.c
+			e.r.cfg.APIReader = e.c
+			e.reconcile()
+			assert.Equal(t, 1, e.cmp.compares, "nothing to compare")
+			assert.Equal(t, 1, e.cmp.trees, "the tree-only refresh ran")
+			assert.InDelta(t, 3, e.value(), 0)
+		})
+	}
+}
+
+// skipReconcileReader reads every object with the skip-reconcile annotation.
+type skipReconcileReader struct{ client.Reader }
+
+func (r skipReconcileReader) Get(ctx context.Context, key client.ObjectKey, obj client.Object, opts ...client.GetOption) error {
+	if err := r.Reader.Get(ctx, key, obj, opts...); err != nil {
+		return err
+	}
+	obj.SetAnnotations(map[string]string{v1alpha1.AnnotationKeySkipReconcile: "true"})
+	return nil
+}
