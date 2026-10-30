@@ -370,6 +370,7 @@ func (c *clusterConfigs) RESTConfig(_ context.Context, cl *v1alpha1.Cluster) (*k
 type resEnvOptions struct {
 	cm        map[string]string
 	resources func(*applications.ResourceDeps)
+	now       func() time.Time // the service's clock (Deps.Now); nil: time.Now
 }
 
 // resEnv is an API server with the resource routes: envtest is both the control plane and
@@ -413,6 +414,7 @@ func newResEnv(t *testing.T, o resEnvOptions) *resEnv {
 	deps := applications.Deps{
 		Config: applications.Config{Namespace: e.ns, RefreshTimeout: 10 * time.Second, RefreshPollInterval: 100 * time.Millisecond},
 		Client: e.kube, Settings: e.holder, Events: e.broadcaster, RepoServer: e.repo, Resources: rd,
+		Now: o.now,
 	}
 	svc := applications.New(deps)
 	tbl := rest.NewTable()

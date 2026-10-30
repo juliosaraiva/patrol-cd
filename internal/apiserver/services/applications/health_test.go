@@ -52,15 +52,19 @@ func nextFor(t *testing.T, ch <-chan watchResult, name string) apiclient.Applica
 // Rollback responses fill it from the controller's resource tree (upstream
 // inferResourcesStatusHealth), List and DELETED watch events do not, inline health is
 // returned as stored, and a tree that cannot be read leaves the health empty without failing
-// the request, triggering a refresh or, on a watch stream, being asked again for
-// resourceHealthPause.
+// the request, triggering a refresh or, on a watch stream whose controller did not answer,
+// being asked again for resourceHealthPause.
 func TestApplicationResourceHealthFromTree(t *testing.T) {
 	gate := &gatedTree{}
-	re := newResEnv(t, resEnvOptions{resources: func(rd *applications.ResourceDeps) {
-		gate.TreeClient = rd.Tree
-		rd.Tree = gate
-		rd.ResourceHealthTimeout = time.Second
-	}})
+	var skew atomic.Int64 // the service's clock runs this far ahead
+	re := newResEnv(t, resEnvOptions{
+		resources: func(rd *applications.ResourceDeps) {
+			gate.TreeClient = rd.Tree
+			rd.Tree = gate
+			rd.ResourceHealthTimeout = time.Second
+		},
+		now: func() time.Time { return time.Now().Add(time.Duration(skew.Load())) },
+	})
 	ns := re.appNS
 	alice := re.rclient("alice")
 
@@ -202,6 +206,7 @@ func TestApplicationResourceHealthFromTree(t *testing.T) {
 	})
 
 	t.Run("sync", func(t *testing.T) {
+		setTree(healthy)
 		resp, err := alice.SyncApplication(re.ctx, &apiclient.ApplicationSyncRequest{Name: "health"})
 		require.NoError(t, err)
 		require.NotNil(t, resp.Operation)
@@ -210,6 +215,7 @@ func TestApplicationResourceHealthFromTree(t *testing.T) {
 	})
 
 	t.Run("rollback", func(t *testing.T) {
+		setTree(healthy)
 		resp, err := alice.RollbackApplication(re.ctx, &apiclient.ApplicationRollbackRequest{Name: "health", ID: 0})
 		require.NoError(t, err)
 		require.NotNil(t, resp.Operation)
@@ -246,39 +252,65 @@ func TestApplicationResourceHealthFromTree(t *testing.T) {
 	})
 
 	t.Run("slow controller", func(t *testing.T) {
-		// A controller that does not answer: the first read of a watch stream waits for
-		// ResourceHealthTimeout, then the stream stops asking (resourceHealthPause).
-		gate.block.Store(true)
+		// One watch stream: reads with an answer from the controller do not pause it, a
+		// controller that does not answer pauses it for resourceHealthPause, and it reads
+		// again once the pause has passed.
 		defer gate.block.Store(false)
+		defer re.state.setMissing(key, false)
+		// The controller answers that it has no state: every event asks it again.
+		re.state.setMissing(key, true)
 		before := gate.calls.Load()
 		ctx, cancel := context.WithCancel(re.ctx)
 		defer cancel()
-		s, err := alice.WatchApplications(ctx, &apiclient.ApplicationQuery{}, nil)
+		s, err := alice.WatchApplications(ctx, &apiclient.ApplicationQuery{Name: "health"}, nil)
 		require.NoError(t, err)
 		ch := watchEvents(t, s)
-		ev := nextFor(t, ch, "health")
-		assert.Equal(t, apiclient.EventAdded, ev.Type)
-		requireEmpty(t, &ev.Object)
+		// until reads events up to the one annotated slow=v; it returns that event and the
+		// number of events read.
+		until := func(v string, check func(*v1alpha1.Application)) (apiclient.ApplicationWatchEvent, int64) {
+			t.Helper()
+			for n := int64(1); ; n++ {
+				ev := next(t, ch)
+				require.NotEqual(t, apiclient.EventDeleted, ev.Type)
+				check(&ev.Object)
+				if ev.Object.Annotations["slow"] == v {
+					return ev, n
+				}
+			}
+		}
+		empty := func(a *v1alpha1.Application) { requireEmpty(t, a) }
 
+		re.updateApp("health", func(a *v1alpha1.Application) { a.Annotations = map[string]string{"slow": "answer"} })
+		_, events := until("answer", empty)
+		assert.GreaterOrEqual(t, events, int64(2), "the ADDED event and the update")
+		assert.Equal(t, events, gate.calls.Load()-before, "one tree read per event")
+		re.state.setMissing(key, false)
+
+		// The controller does not answer: the first read waits for ResourceHealthTimeout, then
+		// the stream stops asking.
+		gate.block.Store(true)
+		before = gate.calls.Load()
 		const updates = 5
 		for i := 1; i <= updates; i++ {
 			re.updateApp("health", func(a *v1alpha1.Application) { a.Annotations = map[string]string{"slow": strconv.Itoa(i)} })
 		}
-		for {
-			ev = nextFor(t, ch, "health")
-			assert.Equal(t, apiclient.EventModified, ev.Type)
-			requireEmpty(t, &ev.Object)
-			if ev.Object.Annotations["slow"] == strconv.Itoa(updates) {
-				break
-			}
-		}
-		assert.Equal(t, int64(1), gate.calls.Load()-before, "tree reads of the stream")
+		until(strconv.Itoa(updates), empty)
+		assert.Equal(t, int64(1), gate.calls.Load()-before, "tree reads during the pause")
+
+		// Past resourceHealthPause (30 s) the stream reads again.
+		gate.block.Store(false)
+		setTree(healthy)
+		skew.Add(int64(31 * time.Second))
+		before = gate.calls.Load()
+		re.updateApp("health", func(a *v1alpha1.Application) { a.Annotations = map[string]string{"slow": "after"} })
+		ev, _ := until("after", func(*v1alpha1.Application) {})
+		requireFilled(t, &ev.Object, healthy)
+		assert.Equal(t, int64(1), gate.calls.Load()-before, "tree reads after the pause")
 	})
 
 	t.Run("watch deleted", func(t *testing.T) {
 		// The controller drops the state of a deleted Application: its DELETED event is sent
 		// as stored, without a tree read, although the tree here still has the Application.
-		// (Runs after "slow controller", whose stream, if still open, reads no tree.)
 		gone := re.createApp(re.newApp("gone", "proj-a"))
 		gone.Status.ResourceHealthSource = v1alpha1.ResourceHealthLocationAppTree
 		gone.Status.Resources = []v1alpha1.ResourceStatus{{Version: "v1", Kind: "ConfigMap", Namespace: ns, Name: "cfg", Status: v1alpha1.SyncStatusCodeSynced}}
