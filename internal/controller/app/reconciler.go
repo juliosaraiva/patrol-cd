@@ -33,11 +33,17 @@ import (
 // ControllerName names the Application controller (metrics, logs, events).
 const ControllerName = "patrol-application"
 
-// Field indexes of Applications.
+// Field indexes of Applications and AppProjects.
 const (
 	indexProject     = "spec.project"
 	indexDestination = "spec.destination"
 	indexRepoURL     = "spec.sources.repoURL"
+	// indexDestinationNamespace indexes Applications by destination namespace.
+	indexDestinationNamespace = "spec.destination.namespace"
+	// indexOrphanedResources indexes the AppProjects that monitor orphaned resources under
+	// orphanMonitoringKey.
+	indexOrphanedResources = "spec.orphanedResources"
+	orphanMonitoringKey    = "true"
 )
 
 // repoErrorRetry is the requeue delay after a manifest error deferred by the grace period.
@@ -126,7 +132,33 @@ func IndexFields(ctx context.Context, indexer client.FieldIndexer) error {
 	}); err != nil {
 		return fmt.Errorf("index applications by repository: %w", err)
 	}
+	if err := indexer.IndexField(ctx, &v1alpha1.Application{}, indexDestinationNamespace, destinationNamespaceKeys); err != nil {
+		return fmt.Errorf("index applications by destination namespace: %w", err)
+	}
+	if err := indexer.IndexField(ctx, &v1alpha1.AppProject{}, indexOrphanedResources, orphanMonitoringKeys); err != nil {
+		return fmt.Errorf("index projects monitoring orphaned resources: %w", err)
+	}
 	return nil
+}
+
+// destinationNamespaceKeys indexes an Application under its destination namespace (none when
+// empty).
+func destinationNamespaceKeys(o client.Object) []string {
+	a, ok := o.(*v1alpha1.Application)
+	if !ok || a.Spec.Destination.Namespace == "" {
+		return nil
+	}
+	return []string{a.Spec.Destination.Namespace}
+}
+
+// orphanMonitoringKeys indexes an AppProject that monitors orphaned resources
+// (spec.orphanedResources set, even empty) under orphanMonitoringKey.
+func orphanMonitoringKeys(o client.Object) []string {
+	p, ok := o.(*v1alpha1.AppProject)
+	if !ok || !project.OrphanedResourcesEnabled(p) {
+		return nil
+	}
+	return []string{orphanMonitoringKey}
 }
 
 func destinationKeys(server, name string) []string {
@@ -239,10 +271,12 @@ func (r *Reconciler) Reconcile(ctx context.Context, req reconcile.Request) (res 
 		if client.IgnoreNotFound(err) == nil {
 			r.refresh.forget(req.NamespacedName)
 			r.state.forget(req.NamespacedName)
+			r.cfg.Metrics.ForgetApplication(req.Namespace, req.Name)
 		}
 		return reconcile.Result{}, client.IgnoreNotFound(err)
 	}
 	if !r.cfg.Namespaces().Allowed(app.Namespace) {
+		r.cfg.Metrics.ForgetApplication(app.Namespace, app.Name)
 		return reconcile.Result{}, nil
 	}
 	if core.SkipReconcile(app.Annotations) {
@@ -263,6 +297,7 @@ func (r *Reconciler) Reconcile(ctx context.Context, req reconcile.Request) (res 
 	// Sharding (ADR-0008): only the shard owning the destination processes the Application;
 	// an unresolvable destination (nil cluster) belongs to shard 0.
 	if r.cfg.OwnsCluster != nil && !r.cfg.OwnsCluster(cluster) {
+		r.cfg.Metrics.ForgetApplication(app.Namespace, app.Name)
 		return reconcile.Result{}, nil
 	}
 	log := r.log.With("application", app.QualifiedName())

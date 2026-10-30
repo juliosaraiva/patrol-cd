@@ -49,8 +49,8 @@ func (a *appRun) refreshApp(ctx context.Context) (reconcile.Result, error) {
 	key := client.ObjectKeyFromObject(a.app)
 	requested, tree, wait := a.r.refresh.takeAll(key)
 	rec := a.st.Reconciliation()
-	d := needRefresh(a.app, rec, requested, a.now())
-	if d.level == core.CompareNone {
+	// noComparison ends a refresh that needs no comparison: a pending tree-only refresh runs.
+	noComparison := func() (reconcile.Result, error) {
 		out := a.requeue(a.app.Status.ReconciledAt, rec, wait)
 		if tree {
 			res, err := a.refreshTree(ctx)
@@ -60,21 +60,25 @@ func (a *appRun) refreshApp(ctx context.Context) (reconcile.Result, error) {
 		}
 		return out, nil
 	}
+	d := needRefresh(a.app, rec, requested, a.now())
+	if d.level == core.CompareNone {
+		return noComparison()
+	}
 	// The cache may not show this controller's latest status write yet; decide again on the
 	// object read from the API server, so a stale status neither repeats a comparison nor
 	// feeds the automated sync decision.
 	fresh := &v1alpha1.Application{}
 	if err := a.r.cfg.APIReader.Get(ctx, key, fresh); err != nil {
-		a.r.refresh.restore(key, requested)
+		a.r.refresh.restoreAll(key, requested, tree)
 		return reconcile.Result{}, client.IgnoreNotFound(err)
 	}
 	if fresh.DeletionTimestamp != nil || core.SkipReconcile(fresh.Annotations) {
-		a.r.refresh.restore(key, requested)
+		a.r.refresh.restoreAll(key, requested, tree)
 		return requeueSoon(), nil
 	}
 	a.app = fresh
 	if d = needRefresh(a.app, rec, requested, a.now()); d.level == core.CompareNone {
-		return a.requeue(a.app.Status.ReconciledAt, rec, wait), nil
+		return noComparison()
 	}
 	start := a.now()
 	a.log.Info("refreshing application status", "reason", d.reason, "level", d.level.String(), "hard", d.hard)
@@ -122,8 +126,11 @@ func (a *appRun) compareAndPersist(ctx context.Context, d refreshDecision, rec s
 		msgs = append(msgs, i.Type+": "+i.Message)
 	}
 	if len(issues) > 0 {
-		// Spec errors: no comparison or sync; sync and health are Unknown (APP-033/036).
+		// Spec errors: no comparison or sync; sync and health are Unknown (APP-033/036), the
+		// tree is empty and no orphaned resources are counted.
 		a.log.Info("application spec is invalid", "issues", strings.Join(msgs, "; "))
+		a.r.state.set(client.ObjectKeyFromObject(app), AppState{Tree: &compare.ApplicationTree{}, ComparedAt: a.now(), SpecInvalid: true})
+		a.r.cfg.Metrics.ForgetApplication(app.Namespace, app.Name)
 		err := a.persist(ctx, d, func(s *v1alpha1.ApplicationStatus, gen int64, now metav1.Time) {
 			s.Sync.Status = v1alpha1.SyncStatusCodeUnknown
 			setHealth(s, v1alpha1.HealthStatusUnknown, now)
@@ -176,6 +183,9 @@ func (a *appRun) compareAndPersist(ctx context.Context, d refreshDecision, rec s
 	}
 
 	a.storeComparison(ctx, res)
+	if res.Tree != nil {
+		a.r.cfg.Metrics.SetOrphanedResources(app.Namespace, app.Name, app.Spec.GetProject(), project.OrphanedResourcesEnabled(proj), res.OrphanedResources)
+	}
 	if err := a.updateDeleteHookFinalizers(ctx, res); err != nil {
 		return reconcile.Result{}, err
 	}

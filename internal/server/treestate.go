@@ -31,13 +31,18 @@ import (
 // liveGetTimeout bounds one live object read from a destination cluster.
 const liveGetTimeout = time.Minute
 
+// stateSource is the comparison state served by treeState (*app.Reconciler).
+type stateSource interface {
+	State(key types.NamespacedName) (app.AppState, bool)
+}
+
 // treeState implements treeapi.StateProvider over the Application reconciler's in-memory
 // comparison state (the tree and the masked managed resources of the last comparison), the
 // live-state caches and the destination clusters. Applications whose shard this replica
 // does not own are answered with a *treeapi.NotOwnedError so the client re-routes.
 type treeState struct {
 	reader        client.Reader
-	app           *app.Reconciler
+	app           stateSource
 	own           *sharding.Ownership
 	matcher       *core.NamespaceMatcher
 	settings      *settings.Manager
@@ -100,11 +105,17 @@ func (t *treeState) Tree(ctx context.Context, key treeapi.AppKey) (*compare.Appl
 	return st.Tree, nil
 }
 
-// ManagedResources implements treeapi.StateProvider.
+// ManagedResources implements treeapi.StateProvider. An Application with spec errors has no
+// managed resources to report, which is not the same as none: as for one never compared, the
+// answer is unavailable, so the API reports its error conditions (upstream deletes the cache
+// entry; the tree stays readable, empty).
 func (t *treeState) ManagedResources(ctx context.Context, key treeapi.AppKey) ([]compare.ManagedResource, error) {
 	_, st, err := t.state(ctx, key)
 	if err != nil {
 		return nil, err
+	}
+	if st.SpecInvalid {
+		return nil, fmt.Errorf("%w: application %s has an invalid spec", treeapi.ErrUnavailable, key)
 	}
 	return st.Managed, nil
 }

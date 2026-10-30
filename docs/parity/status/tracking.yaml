@@ -171,8 +171,8 @@ DIFF-076:
     of untracked target matches) is internal/cache + controller.
 
 DIFF-087:
-  status: in-progress
+  status: implemented
   impl: [internal/tracking/tracker.go]
   tests:
     - internal/tracking/tracker_test.go:TestSetAppInstanceRoundTrip
-  notes: GetAppName supplies the tracking-derived app of root objects; owner-chain inheritance and refresh triggering are internal/cache + controller.
+  notes: GetAppName supplies the tracking-derived app of root objects; owner-chain inheritance is internal/compare (AppOf) and refresh triggering is in internal/controller/app/liveevents.go.
