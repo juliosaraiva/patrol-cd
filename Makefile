@@ -129,3 +129,4 @@ include hack/deploy.mk
 include hack/kind/kind.mk
 include hack/ci.mk
 include hack/release.mk
+include hack/sdlc.mk

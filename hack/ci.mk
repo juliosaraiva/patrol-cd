@@ -4,7 +4,8 @@
 # way. Guide: docs/guides/ci.md.
 #
 #   make ci-static       gofmt, go mod tidy, build, vet, golangci-lint, generated files, OpenAPI,
-#                        parity matrix, test report rules, shell scripts, workflow lint, secret scan (job "static")
+#                        parity matrix, test report rules, tier and SDLC gate tests, shell scripts, workflow lint,
+#                        secret scan (job "static")
 #   make ci-unit         go test -json (-race unless CI_RACE=0) over every package except test/integration and
 #                        test/deploy, then the skip/must-run report (job "unit")
 #   make ci-scripts      the kind scripts' offline tests (envtest, no Docker) (job "unit")
@@ -55,7 +56,7 @@ ACTIONLINT ?= actionlint
 ##@ CI
 
 .PHONY: ci-static
-ci-static: ci-gofmt ci-gomod ci-lint-go ci-generated ci-openapi ci-parity ci-rules ci-classify ci-shell ci-actionlint ci-gitleaks ## Everything the "static" job checks.
+ci-static: ci-gofmt ci-gomod ci-lint-go ci-generated ci-openapi ci-parity ci-rules ci-classify ci-sdlc ci-shell ci-actionlint ci-gitleaks ## Everything the "static" job checks.
 
 .PHONY: ci-gofmt
 ci-gofmt: ## Fail when a tracked Go file is not gofmt-formatted.
@@ -70,13 +71,15 @@ ci-gomod: ## go mod tidy -diff and go mod verify for both modules.
 	$(GO) mod verify
 	cd tools && $(GO) mod tidy -diff
 
+# The repository has no golangci-lint configuration: --no-config keeps one in HOME or a parent
+# directory from applying, so a local run judges as CI does.
 .PHONY: ci-lint-go
 ci-lint-go: ## go build, go vet and golangci-lint (fails when golangci-lint is missing, unlike `make lint`).
 	@echo "==> ci-lint-go"
 	@command -v $(GOLANGCI_LINT) >/dev/null 2>&1 || { echo "ci-lint-go: $(GOLANGCI_LINT) not found (hack/ci/install-tools.sh golangci-lint)" >&2; exit 1; }
 	$(GO) build ./...
 	$(GO) vet ./...
-	$(GOLANGCI_LINT) run ./...
+	$(GOLANGCI_LINT) run --no-config ./...
 
 # verify-generated and generate rewrite deploy/crds and deploy/manifests in place: nothing else may
 # touch the tree while this runs. The final `git status` catches any generated file that is
@@ -117,11 +120,12 @@ ci-shell: ## shellcheck -x, bash -n and dash -n over every tracked shell script.
 	@echo "==> ci-shell"
 	hack/ci/lint-shell.sh
 
+# The shellcheck actionlint runs reads no rc file from outside the tree (SHELLCHECK_OPTS=--norc).
 .PHONY: ci-actionlint
 ci-actionlint: ## Lint the GitHub workflows (actionlint runs shellcheck on their run: blocks).
 	@echo "==> ci-actionlint"
 	@command -v $(ACTIONLINT) >/dev/null 2>&1 || { echo "ci-actionlint: $(ACTIONLINT) not found (hack/ci/install-tools.sh actionlint)" >&2; exit 1; }
-	$(ACTIONLINT)
+	SHELLCHECK_OPTS=--norc $(ACTIONLINT)
 
 # Two scans. History: every commit reachable from the checked-out commit (the job fetches all of it;
 # on a pull request that is the merge commit, so a secret that the pull request adds and later removes
@@ -169,6 +173,7 @@ ci-unit: $(SETUP_ENVTEST) $(KUSTOMIZE) ## go test (-race unless CI_RACE=0) over 
 .PHONY: ci-scripts
 ci-scripts: $(SETUP_ENVTEST) ## Offline tests of the kind scripts (envtest API servers, no Docker).
 	@echo "==> ci-scripts"
+	test/e2e/fixtures/test-envtest.sh
 	KUBEBUILDER_ASSETS="$(ENVTEST_ASSETS)" test/e2e/fixtures/test-scripts.sh
 	KUBEBUILDER_ASSETS="$(ENVTEST_ASSETS)" test/e2e/fixtures/validate.sh
 
@@ -191,7 +196,8 @@ ci-ui: ## pnpm install --frozen-lockfile, gen:api:check, typecheck, lint, vitest
 	pnpm -C $(UI_DIR) gen:api:check
 	pnpm -C $(UI_DIR) typecheck
 	pnpm -C $(UI_DIR) lint
-	pnpm -C $(UI_DIR) test
+	# CI=true here as on GitHub: vitest then fails a focused test (.only) instead of running it alone.
+	CI=true pnpm -C $(UI_DIR) test
 	pnpm -C $(UI_DIR) build
 
 # Offline pin checks first (cheap), then the image itself. umask 022: rootfs-check asserts file

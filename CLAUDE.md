@@ -69,6 +69,8 @@ make build           # binaries into ./bin
 make image           # local OCI image
 make kind-up kind-fixtures kind-install kind-verify   # disposable kind clusters and the checks on them
 make ci-static ci-unit ci-ui ci-image                  # the CI jobs (docs/guides/ci.md); `make help` lists them
+make sdlc-check       # before every push: CI static checks, tests of what changed, CodeQL
+make codeql           # CodeQL alone (security-extended; CODEQL_LANGUAGES=go to narrow it)
 ```
 
 OpenAPI (`go run ./internal/apiserver/cmd/genopenapi -check`), the parity matrix
@@ -76,6 +78,15 @@ OpenAPI (`go run ./internal/apiserver/cmd/genopenapi -check`), the parity matrix
 `make generate`; `make ci-static` and `make ci-ui` run them.
 
 Go: run `go vet ./...` after changes. UI: `pnpm -C ui typecheck` before marking done.
+
+## Lifecycle of a change
+
+Follow `docs/guides/claude-code-sdlc.md` (the `sdlc` skill): issue, branch, change with tests,
+conventional commit, `make sdlc-check`, the `review-change` skill (agent review), push, pull request,
+CI. git's pre-push hook (enabled once with `make sdlc-git-hooks`) refuses a push whose tree has no
+passing `make sdlc-check` and, unless the change is documentation only, no passing agent review; the
+Claude Code hook in `.claude/settings.json` refuses it early and keeps git's hook from being skipped.
+Never weaken a check, a skip list or the CodeQL baseline to get a push through.
 
 ## Interruption policy
 

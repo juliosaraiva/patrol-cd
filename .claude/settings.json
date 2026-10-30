@@ -1,0 +1,43 @@
+{
+  "$schema": "https://json.schemastore.org/claude-code-settings.json",
+  "permissions": {
+    "allow": [
+      "Bash(make sdlc-check)",
+      "Bash(make sdlc-check SDLC_CHECK_FLAGS=--no-codeql)",
+      "Bash(make sdlc-gate)",
+      "Bash(make codeql)",
+      "Bash(make codeql CODEQL_LANGUAGES=go)",
+      "Bash(make ci-sdlc)",
+      "Bash(hack/sdlc/review-input.sh)",
+      "Bash(hack/sdlc/record-review.sh:*)",
+      "Bash(hack/sdlc/gate.sh)",
+      "Bash(hack/sdlc/gate.sh:*)"
+    ]
+  },
+  "hooks": {
+    "PreToolUse": [
+      {
+        "matcher": "Bash|Monitor|mcp__terminal__run_in_terminal|mcp__.*Claude_Browser__preview_start",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "f=\"$CLAUDE_PROJECT_DIR\"/hack/sdlc/claude-pre-push.sh; [ ! -e \"$f\" ] || bash \"$f\" || exit 2",
+            "timeout": 120
+          }
+        ]
+      }
+    ],
+    "PostToolUse": [
+      {
+        "matcher": "Edit|MultiEdit|Write",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "f=\"$CLAUDE_PROJECT_DIR\"/hack/sdlc/claude-format.sh; [ ! -e \"$f\" ] || bash \"$f\"",
+            "timeout": 60
+          }
+        ]
+      }
+    ]
+  }
+}

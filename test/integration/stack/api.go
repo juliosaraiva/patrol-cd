@@ -116,15 +116,23 @@ func (s *Stack) GetApp(t testing.TB, name string) *v1alpha1.Application {
 // AppGone reports whether the Application no longer exists.
 func (s *Stack) AppGone(t testing.TB, name string) bool {
 	t.Helper()
+	_, ok := s.LookupApp(t, name)
+	return !ok
+}
+
+// LookupApp returns the Application, or false when it no longer exists. A check that it is gone
+// followed by a GetApp would fail when the deletion completes in between.
+func (s *Stack) LookupApp(t testing.TB, name string) (*v1alpha1.Application, bool) {
+	t.Helper()
 	var app v1alpha1.Application
 	err := s.control.Client.Get(t.Context(), client.ObjectKey{Namespace: s.Namespace, Name: name}, &app)
 	if apierrors.IsNotFound(err) {
-		return true
+		return nil, false
 	}
 	if err != nil {
 		t.Fatalf("get application %s: %v", name, err)
 	}
-	return false
+	return &app, true
 }
 
 // UpdateApp re-reads an Application, applies mutate and writes it (conflicts retried).

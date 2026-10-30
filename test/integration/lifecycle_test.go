@@ -729,8 +729,7 @@ func TestDeletion(t *testing.T) {
 
 	require.NoError(t, s.API(t).DeleteApplication(t.Context(), &apiclient.ApplicationDeleteRequest{Name: "cascade", Cascade: stack.Ptr(true)}))
 	stack.Eventually(t, 2*time.Minute, "cascading deletion completes", func() (bool, string) {
-		if !s.AppGone(t, "cascade") {
-			a := s.GetApp(t, "cascade")
+		if a, ok := s.LookupApp(t, "cascade"); ok { // one read: it may go between two
 			return false, "finalizers=" + strings.Join(a.Finalizers, ",") + " " + stack.DescribeApp(a)
 		}
 		return true, ""

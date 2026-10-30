@@ -414,6 +414,17 @@ func (c *Client) baseConfig() []gitConfig {
 	if c.opts.gpgProgram != "" {
 		cfg = append(cfg, gitConfig{"gpg.program", c.opts.gpgProgram})
 	}
+	if c.opts.enableLFS {
+		// What `git lfs install` writes. git-lfs populates large files (lfs pull) only when the
+		// filter is configured, and the client reads no global configuration and must not depend
+		// on the host's system one. Checkout still skips the smudge (GIT_LFS_SKIP_SMUDGE=1).
+		cfg = append(cfg,
+			gitConfig{"filter.lfs.clean", "git-lfs clean -- %f"},
+			gitConfig{"filter.lfs.smudge", "git-lfs smudge -- %f"},
+			gitConfig{"filter.lfs.process", "git-lfs filter-process"},
+			gitConfig{"filter.lfs.required", "true"},
+		)
+	}
 	return append(cfg, c.opts.extraConfig...)
 }
 
