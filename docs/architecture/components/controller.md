@@ -233,23 +233,25 @@ therefore has one writer; the synthetic in-cluster cluster has no object and get
 
 - **Interval:** `PATROL_UPDATE_CLUSTER_INFO_TIMEOUT`, a Go duration from 10 s to 1 min, default
   10 s, read by `RunController` unless `ControllerConfig.ClusterInfoInterval` is set; the updater
-  logs it when it starts. The interval also bounds a round: what it did not reach waits for the
-  next one.
+  logs it when it starts. The interval also bounds a round: the next one starts where it stopped,
+  so that the first clusters of a long list do not use every round.
 - **Reads:** the manager's cached client and `cache.Manager.Lookup`. A round never creates a
   live-state cache and contacts no destination, so it cannot hang on one.
 - **Writes:** the status lives in etcd (ADR-0004), where every write reaches every Cluster
   informer. An unchanged status is not written. A change of the cache statistics alone waits for
-  `CacheInfoWriteInterval` (1 min). Anything else is written at once. `attemptedAt` moves with a
-  write only, so it is not the time of the last round.
+  `CacheInfoWriteInterval` (1 min). Anything else is written at once. `attemptedAt` moves when the
+  connection status or message changes: it says since when that state holds, not when it was last
+  checked.
 - **Reactions:** status writes reach no comparison. The Application reconciler's Cluster watch
-  passes changes of generation, labels and annotations only, as the ApplicationSet handler does,
-  and the cluster registry sends no event for them.
-- **Application count:** Applications whose project exists and permits their namespace. A failed
-  list ends the round without writing, because a count of zero would be a guess.
+  passes a new UID and changes of generation, labels and annotations only, as the ApplicationSet
+  handler does, and the cluster registry sends no event for them.
+- **Application count:** Applications of the namespaces this controller serves whose project
+  exists and permits their namespace. A failed list ends the round without writing, because a count
+  of zero would be a guess.
 - **Skip-reconcile:** no shard processes such a cluster, so it reports `Unknown` whatever an old
   cache says.
-- **Invalidated cache:** `Unknown` until the next sync, as upstream, because the time of the old
-  sync says nothing about what the cache holds now (`compare.ClusterCacheState`).
+- **Invalidated cache:** `Unknown` until the next sync, as upstream, because the time and the
+  outcome of the old sync say nothing about what the cache holds now (`compare.ClusterCacheState`).
 - **Resource version:** a status write moves it, so a client that sends the version it read can
   get a 409 with no change to what it edits. The UI's cluster form sends none: `updatedFields`
   confines its write.

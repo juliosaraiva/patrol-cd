@@ -152,6 +152,7 @@ REPO-094:
     - internal/clusters/status_test.go:TestComputeClusterInfo
     - internal/clusters/status_test.go:TestComputeClusterInfoSyncTimeHasStoredPrecision
     - internal/clusters/status_test.go:TestComputeClusterInfoBounds
+    - internal/clusters/status_test.go:TestStatusWriterStoresTheLargestStatus
     - internal/clusters/status_test.go:TestApplyClusterInfo
     - internal/clusters/status_test.go:TestStatusWriterEnvtest
     - internal/clusters/registry_test.go:TestRegistryLookups

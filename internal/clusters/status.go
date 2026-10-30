@@ -37,7 +37,8 @@ const maxConnectionMessage = 32768
 // Bounds of what a destination reports about itself. The API refuses a status it cannot store
 // whole, and the connection state would go with it.
 const (
-	maxServerVersion   = 256
+	maxServerVersion = 256
+	// maxAPIVersionBytes is the size of the list as stored, where JSON can take six bytes for one.
 	maxAPIVersionBytes = 512 << 10
 )
 
@@ -128,11 +129,8 @@ func ComputeClusterInfo(state *CacheState, applications int64, now time.Time) St
 // boundedAPIVersions copies versions, or drops a list too large to store: part of it would pass
 // for everything the destination serves.
 func boundedAPIVersions(versions []string) []string {
-	size := 0
-	for _, v := range versions {
-		size += len(v)
-	}
-	if size > maxAPIVersionBytes {
+	encoded, err := json.Marshal(versions)
+	if err != nil || len(encoded) > maxAPIVersionBytes {
 		return nil
 	}
 	return append([]string(nil), versions...)

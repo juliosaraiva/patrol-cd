@@ -122,7 +122,7 @@ func (h *clusterEventHandler) Create(ctx context.Context, e event.TypedCreateEve
 }
 
 func (h *clusterEventHandler) Update(ctx context.Context, e event.TypedUpdateEvent[client.Object], q workqueue.TypedRateLimitingInterface[reconcile.Request]) {
-	if e.ObjectOld != nil && e.ObjectNew != nil && e.ObjectOld.GetGeneration() == e.ObjectNew.GetGeneration() &&
+	if e.ObjectOld != nil && e.ObjectNew != nil && e.ObjectOld.GetUID() == e.ObjectNew.GetUID() && e.ObjectOld.GetGeneration() == e.ObjectNew.GetGeneration() &&
 		maps.Equal(e.ObjectOld.GetLabels(), e.ObjectNew.GetLabels()) && maps.Equal(e.ObjectOld.GetAnnotations(), e.ObjectNew.GetAnnotations()) {
 		return
 	}

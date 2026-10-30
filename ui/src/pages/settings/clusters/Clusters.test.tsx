@@ -1,3 +1,4 @@
+import { focusManager } from '@tanstack/react-query';
 import { screen, waitFor, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { http, HttpResponse } from 'msw';
@@ -120,6 +121,34 @@ describe('Settings → Cluster details', () => {
     expect(calls[0]?.body.config).toBeUndefined();
     // A status write since the last poll must not refuse this save.
     expect(calls[0]?.body.resourceVersion).toBeUndefined();
+  });
+
+  it('leaves out of the save what another writer changed while the form was open', async () => {
+    const user = userEvent.setup();
+    const calls: string[][] = [];
+    server.use(
+      http.put('*/api/v1/clusters/:server', ({ request }) => {
+        calls.push(new URL(request.url).searchParams.getAll('updatedFields'));
+      }),
+    );
+    await renderSettings(clusterPath(PROD), 'prod-eu');
+    await user.click(screen.getByRole('button', { name: 'Edit' }));
+    const dialog = await findDialog('Edit cluster');
+    const name = within(dialog).getByRole('textbox', { name: 'Name' });
+    await user.clear(name);
+    await user.type(name, 'prod-europe');
+    const stored = settingsStore.clusters.find((c) => c.spec.server === PROD);
+    if (!stored) throw new Error('no cluster');
+    stored.metadata.labels = { ...stored.metadata.labels, oncall: 'sre' };
+    // Stands in for the poll: the page behind the form shows the new label.
+    focusManager.setFocused(false);
+    focusManager.setFocused(true);
+    await screen.findByText(/oncall/);
+    focusManager.setFocused(undefined);
+    await user.click(within(dialog).getByRole('button', { name: 'Save' }));
+    await expectToast('Cluster updated');
+    expect(calls).toEqual([['name']]);
+    expect(stored.metadata.labels).toMatchObject({ oncall: 'sre' });
   });
 
   it('invalidates the cache and rotates credentials with a confirmation', async () => {

@@ -34,6 +34,7 @@ func TestClusterChanged(t *testing.T) {
 		{"spec", func(c *v1alpha1.Cluster) { c.Generation = 2 }, true},
 		{"labels", func(c *v1alpha1.Cluster) { c.Labels["a"] = "2" }, true},
 		{"annotations", func(c *v1alpha1.Cluster) { c.Annotations["b"] = "3" }, true},
+		{"recreated across a watch gap", func(c *v1alpha1.Cluster) { c.UID = "new" }, true},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {

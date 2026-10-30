@@ -169,6 +169,7 @@ func TestClusterEventHandler(t *testing.T) {
 		"spec":        func(c *v1alpha1.Cluster) { c.Generation = 3 },
 		"labels":      func(c *v1alpha1.Cluster) { c.Labels = map[string]string{"env": "prod"} },
 		"annotations": func(c *v1alpha1.Cluster) { c.Annotations = map[string]string{"team": "a"} },
+		"recreated":   func(c *v1alpha1.Cluster) { c.UID = "new" },
 	}
 	for name, change := range changes {
 		next := cur.DeepCopy()

@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"log/slog"
 	"maps"
+	"slices"
 	"time"
 
 	"k8s.io/apimachinery/pkg/api/equality"
@@ -50,6 +51,9 @@ type Options struct {
 	Reader client.Reader
 	// Namespace is the control-plane namespace, which holds the AppProjects. Required.
 	Namespace string
+	// NamespaceAllowed tells whether this controller serves the Applications of a namespace: the
+	// Reader can hold more than that. Required.
+	NamespaceAllowed func(namespace string) bool
 	// Counter counts the Applications of each cluster. Required.
 	Counter ApplicationCounter
 	// CacheState returns the live-state cache information of a normalized server, nil when this
@@ -74,12 +78,15 @@ type Updater struct {
 	opts Options
 	// lastWrite is when this replica last wrote a server's status. Only Sync touches it.
 	lastWrite map[string]time.Time
+	// resume is the server a cut round stopped at, where the next one starts, so that the head of
+	// a long list does not use every round. Only Sync touches it.
+	resume string
 }
 
 // New returns an Updater.
 func New(opts Options) (*Updater, error) {
-	if opts.Assigner == nil || opts.Owner == nil || opts.Reader == nil || opts.Namespace == "" || opts.Counter == nil || opts.CacheState == nil || opts.Recorder == nil {
-		return nil, errors.New("clusterinfo: assigner, shard owner, reader, namespace, application counter, cache state and recorder are required")
+	if opts.Assigner == nil || opts.Owner == nil || opts.Reader == nil || opts.Namespace == "" || opts.NamespaceAllowed == nil || opts.Counter == nil || opts.CacheState == nil || opts.Recorder == nil {
+		return nil, errors.New("clusterinfo: assigner, shard owner, reader, namespace, namespace filter, application counter, cache state and recorder are required")
 	}
 	if opts.Interval <= 0 {
 		opts.Interval = clusters.DefaultClusterInfoInterval
@@ -127,8 +134,13 @@ func (u *Updater) Sync(ctx context.Context) error {
 	now := u.opts.Now()
 	var errs []error
 	owned := map[string]bool{}
-	for _, info := range u.opts.Assigner.Clusters() {
+	infos := u.opts.Assigner.Clusters()
+	if i := slices.IndexFunc(infos, func(info sharding.ClusterInfo) bool { return info.Server >= u.resume }); i > 0 {
+		infos = slices.Concat(infos[i:], infos[:i])
+	}
+	for _, info := range infos {
 		if err := ctx.Err(); err != nil {
+			u.resume = info.Server
 			return errors.Join(append(errs, err)...)
 		}
 		if info.ObjectName == "" {
@@ -143,12 +155,13 @@ func (u *Updater) Sync(ctx context.Context) error {
 			errs = append(errs, fmt.Errorf("cluster %s/%s: %w", info.Namespace, info.ObjectName, err))
 		}
 	}
+	u.resume = ""
 	maps.DeleteFunc(u.lastWrite, func(server string, _ time.Time) bool { return !owned[server] })
 	return errors.Join(errs...)
 }
 
-// applicationCounts counts, per server, the Applications whose project exists and permits their
-// namespace, as upstream.
+// applicationCounts counts, per server, the Applications of the namespaces this controller serves
+// whose project exists and permits their namespace, as upstream.
 func (u *Updater) applicationCounts(ctx context.Context) (map[string]int64, error) {
 	// Shared with the informer cache: read only.
 	var apps v1alpha1.ApplicationList
@@ -165,7 +178,7 @@ func (u *Updater) applicationCounts(ctx context.Context) (map[string]int64, erro
 	}
 	return u.opts.Counter.ApplicationCounts(apps.Items, func(app *v1alpha1.Application) bool {
 		proj, ok := byName[app.Spec.GetProject()]
-		return ok && project.IsAppNamespacePermitted(proj, app.Namespace, u.opts.Namespace)
+		return ok && u.opts.NamespaceAllowed(app.Namespace) && project.IsAppNamespacePermitted(proj, app.Namespace, u.opts.Namespace)
 	}), nil
 }
 

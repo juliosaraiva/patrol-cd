@@ -454,12 +454,8 @@ func RunController(ctx context.Context, cfg ControllerConfig) error {
 		return err
 	}
 	shardWriterTrigger = writer.Trigger
-	clusterInfoInterval := cfg.ClusterInfoInterval
-	if clusterInfoInterval == 0 {
-		clusterInfoInterval = clusters.ClusterInfoIntervalFromLookup(os.LookupEnv, log)
-	}
 	clusterInfo, err := clusterinfo.New(clusterinfo.Options{
-		Assigner: assigner, Owner: lm, Reader: mgr.GetClient(), Namespace: cfg.Namespace, Counter: registry, Recorder: statusWriter,
+		Assigner: assigner, Owner: lm, Reader: mgr.GetClient(), Namespace: cfg.Namespace, NamespaceAllowed: matcher.Allowed, Counter: registry, Recorder: statusWriter,
 		CacheState: func(server string) *clusters.CacheState {
 			cc, ok := cacheMgr.Lookup(server)
 			if !ok {
@@ -467,7 +463,7 @@ func RunController(ctx context.Context, cfg ControllerConfig) error {
 			}
 			return compare.ClusterCacheState(cc)
 		},
-		Interval: clusterInfoInterval, Logger: log,
+		Interval: clusterInfoInterval(cfg.ClusterInfoInterval, os.LookupEnv, log), Logger: log,
 	})
 	if err != nil {
 		return err
@@ -806,4 +802,12 @@ func serveInternalHTTP(ctx context.Context, o internalHTTP, started func(net.Add
 		return fmt.Errorf("shutdown %s: %w", o.name, err)
 	}
 	return nil
+}
+
+// clusterInfoInterval is the interval set in the configuration, else the one of the environment.
+func clusterInfoInterval(configured time.Duration, lookup func(string) (string, bool), log *slog.Logger) time.Duration {
+	if configured != 0 {
+		return configured
+	}
+	return clusters.ClusterInfoIntervalFromLookup(lookup, log)
 }

@@ -47,6 +47,8 @@ function EditClusterDrawer({ cluster, onClose }: { cluster: RegisteredCluster; o
     labels: mapToRows(cluster.metadata.labels),
     annotations: mapToRows(cluster.metadata.annotations),
   }));
+  // What the form opened with, not the polled cluster: a change by another writer is not this edit.
+  const [opened] = useState(cluster);
 
   const nsErrors = edit.namespaces.map((n) => (n.trim() === '' ? null : validateNamespace(n)));
   const labelErrors = edit.labels.map((r) => validateLabelKey(r.key ?? '') ?? validateLabelValue(r.value ?? ''));
@@ -61,7 +63,7 @@ function EditClusterDrawer({ cluster, onClose }: { cluster: RegisteredCluster; o
   const onSubmit = (event: FormEvent) => {
     event.preventDefault();
     if (!form.check()) return;
-    const updatedFields = changedClusterFields(cluster, edit);
+    const updatedFields = changedClusterFields(opened, edit);
     if (updatedFields.length === 0) {
       toast({ tone: 'info', title: 'No changes to save' });
       onClose();
@@ -256,7 +258,7 @@ export function Component() {
             items={[
               { key: 'status', label: 'Status', value: <ConnectionStatus status={state?.status} /> },
               { key: 'message', label: 'Message', value: state?.message },
-              { key: 'attempted', label: 'Last attempt', value: state?.attemptedAt ? <Timestamp value={state.attemptedAt} /> : undefined },
+              { key: 'attempted', label: 'State since', value: state?.attemptedAt ? <Timestamp value={state.attemptedAt} /> : undefined },
               { key: 'version', label: 'Kubernetes version', value: data.status?.serverVersion },
               { key: 'credentials', label: 'Credentials', value: credentialsType(data) },
             ]}

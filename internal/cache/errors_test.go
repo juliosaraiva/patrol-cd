@@ -88,6 +88,14 @@ func TestEnsureSyncedUnreachableCluster(t *testing.T) {
 	require.ErrorIs(t, c.EnsureSynced(context.Background()), ErrClusterUnreachable)
 	assert.True(t, c.GetClusterInfo().LastCacheSyncTime.After(first))
 
+	// An invalidation drops the failure along with the state that failed.
+	c.Invalidate()
+	info = c.GetClusterInfo()
+	assert.False(t, info.Synced)
+	require.NoError(t, info.SyncError)
+	require.ErrorIs(t, c.EnsureSynced(context.Background()), ErrClusterUnreachable)
+	assert.ErrorIs(t, c.GetClusterInfo().SyncError, ErrClusterUnreachable)
+
 	_, err = c.GetManagedLiveObjs(context.Background(), nil, nil)
 	assert.ErrorIs(t, err, ErrNotSynced)
 	_, err = c.IsNamespaced(schema.GroupKind{Kind: "ConfigMap"})

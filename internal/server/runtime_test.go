@@ -290,3 +290,10 @@ func TestConfigValidation(t *testing.T) {
 }
 
 func testCfgOrEmpty() *krest.Config { return &krest.Config{Host: "https://127.0.0.1:1"} }
+
+func TestClusterInfoInterval(t *testing.T) {
+	t.Parallel()
+	env := func(string) (string, bool) { return "42s", true }
+	assert.Equal(t, 20*time.Second, clusterInfoInterval(20*time.Second, env, nil), "the configuration comes first")
+	assert.Equal(t, 42*time.Second, clusterInfoInterval(0, env, nil))
+}

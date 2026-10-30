@@ -2,6 +2,7 @@ package clusters
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"strings"
 	"testing"
@@ -82,17 +83,21 @@ func TestComputeClusterInfoBounds(t *testing.T) {
 	t.Parallel()
 	now := time.Date(2026, 10, 13, 10, 0, 0, 0, time.UTC)
 	synced := now.Add(-time.Minute)
-	fits := []string{strings.Repeat("a", maxAPIVersionBytes)}
+	// With its brackets and quotes, this list is exactly the limit.
+	fits := []string{strings.Repeat("a", maxAPIVersionBytes-4)}
 	u := ComputeClusterInfo(&CacheState{ServerVersion: strings.Repeat("v", maxServerVersion), APIVersions: fits, LastCacheSyncTime: &synced}, 0, now)
 	assert.Len(t, u.ServerVersion, maxServerVersion)
-	assert.Equal(t, fits, u.Info.APIVersions)
+	assert.Len(t, u.Info.APIVersions, 1)
 
 	u = ComputeClusterInfo(&CacheState{
-		ServerVersion: strings.Repeat("v", maxServerVersion+1), APIVersions: append(fits, "v1"), LastCacheSyncTime: &synced, SyncError: errors.New("unreachable"),
+		ServerVersion: strings.Repeat("v", maxServerVersion+1), APIVersions: []string{fits[0] + "a"}, LastCacheSyncTime: &synced, SyncError: errors.New("unreachable"),
 	}, 0, now)
 	assert.Empty(t, u.ServerVersion)
 	assert.Empty(t, u.Info.APIVersions, "part of the list would pass for all of it")
 	assert.Equal(t, v1alpha1.ConnectionStatusFailed, u.ConnectionState.Status)
+
+	u = ComputeClusterInfo(&CacheState{APIVersions: []string{strings.Repeat("<", maxAPIVersionBytes/2)}, LastCacheSyncTime: &synced}, 0, now)
+	assert.Empty(t, u.Info.APIVersions, "half the limit in raw bytes, three times the limit as stored")
 }
 
 func TestApplyClusterInfo(t *testing.T) {
@@ -258,6 +263,36 @@ func TestStatusWriterRetriesConflicts(t *testing.T) {
 
 // TestStatusWriterEnvtest writes probe results, cluster info and the version label to a real
 // Cluster object (status subresource of the generated CRD).
+// The largest status ComputeClusterInfo lets through is stored: everything a destination decides,
+// in characters JSON takes six bytes for.
+func TestStatusWriterStoresTheLargestStatus(t *testing.T) {
+	cfg := envConfig(t)
+	ctx := context.Background()
+	dyn, err := dynamic.NewForConfig(cfg)
+	require.NoError(t, err)
+	ns := createNamespace(t, cfg, "largest-status")
+	c := cluster("target", "https://target.example", func(c *v1alpha1.Cluster) { c.Namespace = ns })
+	u, err := dyn.Resource(ClusterGVR).Namespace(ns).Create(ctx, toUnstructured(t, c), metav1.CreateOptions{})
+	require.NoError(t, err)
+	require.NoError(t, runtime.DefaultUnstructuredConverter.FromUnstructured(u.Object, c))
+
+	now := time.Now()
+	versions := []string{strings.Repeat("<", (maxAPIVersionBytes-4)/6)}
+	update := ComputeClusterInfo(&CacheState{
+		ServerVersion: strings.Repeat("<", maxServerVersion), APIVersions: versions, LastCacheSyncTime: &now,
+		SyncError: errors.New(strings.Repeat("<", 2*maxConnectionMessage)),
+	}, 0, now)
+	require.Len(t, update.Info.APIVersions, 1)
+	out, err := NewStatusWriter(dyn).RecordClusterInfo(ctx, c, update)
+	require.NoError(t, err)
+	assert.Equal(t, v1alpha1.ConnectionStatusFailed, out.Status.ConnectionState.Status)
+	assert.Len(t, out.Status.Info.APIVersions, 1)
+	// A default etcd refuses more than 1.5 MiB; the one of envtest takes more than that.
+	encoded, err := json.Marshal(out)
+	require.NoError(t, err)
+	assert.Less(t, len(encoded), 3<<19)
+}
+
 func TestStatusWriterEnvtest(t *testing.T) {
 	cfg := envConfig(t)
 	ctx := context.Background()

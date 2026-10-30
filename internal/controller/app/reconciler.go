@@ -18,6 +18,7 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/builder"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/controller"
+	"sigs.k8s.io/controller-runtime/pkg/event"
 	"sigs.k8s.io/controller-runtime/pkg/handler"
 	"sigs.k8s.io/controller-runtime/pkg/manager"
 	"sigs.k8s.io/controller-runtime/pkg/predicate"
@@ -174,8 +175,12 @@ func destinationKeys(server, name string) []string {
 
 // clusterChanged drops status-only updates of a Cluster. The controller writes that status itself
 // on its cluster-info interval, and a comparison does not read it, so a latest-level refresh of
-// every Application of the cluster would follow each write for nothing.
-var clusterChanged = predicate.Or[client.Object](predicate.GenerationChangedPredicate{}, predicate.LabelChangedPredicate{}, predicate.AnnotationChangedPredicate{})
+// every Application of the cluster would follow each write for nothing. A new UID passes: after a
+// watch gap the informer reports a delete and a create as one update, with nothing else to tell.
+var clusterChanged = predicate.Or[client.Object](predicate.GenerationChangedPredicate{}, predicate.LabelChangedPredicate{}, predicate.AnnotationChangedPredicate{},
+	predicate.Funcs{UpdateFunc: func(e event.UpdateEvent) bool {
+		return e.ObjectOld != nil && e.ObjectNew != nil && e.ObjectOld.GetUID() != e.ObjectNew.GetUID()
+	}})
 
 // SetupWithManager registers the controller: Applications of allowed namespaces, their
 // Operations, AppProjects, Clusters and Repositories (dependent Applications are refreshed

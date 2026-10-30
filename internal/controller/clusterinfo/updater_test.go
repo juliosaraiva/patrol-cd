@@ -26,7 +26,11 @@ import (
 	"github.com/juliosaraiva/patrol-cd/internal/controller/sharding"
 )
 
-const controlNS = "patrol"
+const (
+	controlNS = "patrol"
+	// unservedNS is a namespace projects can permit and this controller does not serve.
+	unservedNS = "team-unserved"
+)
 
 // recorder stores what the Updater decided on a fake client, so a later round reads it back as it
 // would through the API: whole-second times, and only what the schema keeps.
@@ -37,6 +41,7 @@ type recorder struct {
 	block     bool // RecordClusterInfo waits for the end of its context
 	errs      map[string]error
 	labelErrs map[string]error
+	onWrite   func(name string)
 }
 
 func (r *recorder) RecordClusterInfo(ctx context.Context, c *v1alpha1.Cluster, u clusters.StatusUpdate) (*v1alpha1.Cluster, error) {
@@ -45,6 +50,9 @@ func (r *recorder) RecordClusterInfo(ctx context.Context, c *v1alpha1.Cluster, u
 		return nil, ctx.Err()
 	}
 	r.writes = append(r.writes, c.Name)
+	if r.onWrite != nil {
+		r.onWrite(c.Name)
+	}
 	if err := r.errs[c.Name]; err != nil {
 		return nil, err
 	}
@@ -126,8 +134,9 @@ func newFixture(t *testing.T, funcs interceptor.Funcs, objs ...client.Object) *f
 	assigner.Init(append(list, synthetic()), nil)
 	f.Updater, err = New(Options{
 		Assigner: assigner, Owner: f.owned, Reader: c, Namespace: controlNS, Counter: f.counter, Recorder: f.rec,
-		CacheState: func(server string) *clusters.CacheState { return f.states[server] },
-		Now:        func() time.Time { return f.now },
+		NamespaceAllowed: func(namespace string) bool { return namespace != unservedNS },
+		CacheState:       func(server string) *clusters.CacheState { return f.states[server] },
+		Now:              func() time.Time { return f.now },
 	})
 	require.NoError(t, err)
 	return f
@@ -180,13 +189,14 @@ func TestNewRequiresDependencies(t *testing.T) {
 	_, err := New(f.opts)
 	require.NoError(t, err)
 	tests := map[string]func(*Options){
-		"assigner":    func(o *Options) { o.Assigner = nil },
-		"owner":       func(o *Options) { o.Owner = nil },
-		"reader":      func(o *Options) { o.Reader = nil },
-		"namespace":   func(o *Options) { o.Namespace = "" },
-		"counter":     func(o *Options) { o.Counter = nil },
-		"cache state": func(o *Options) { o.CacheState = nil },
-		"recorder":    func(o *Options) { o.Recorder = nil },
+		"assigner":         func(o *Options) { o.Assigner = nil },
+		"owner":            func(o *Options) { o.Owner = nil },
+		"reader":           func(o *Options) { o.Reader = nil },
+		"namespace":        func(o *Options) { o.Namespace = "" },
+		"namespace filter": func(o *Options) { o.NamespaceAllowed = nil },
+		"counter":          func(o *Options) { o.Counter = nil },
+		"cache state":      func(o *Options) { o.CacheState = nil },
+		"recorder":         func(o *Options) { o.Recorder = nil },
 	}
 	for name, clear := range tests {
 		t.Run(name, func(t *testing.T) {
@@ -244,12 +254,67 @@ func TestSyncApplicationsCount(t *testing.T) {
 		application(controlNS, "no-project-field", "", "https://a"),
 		application("team-a", "source-namespace", "open", "https://a"),
 		application("team-a", "namespace-not-permitted", "default", "https://a"),
+		application(unservedNS, "namespace-not-served", "open", "https://a"),
 		application(controlNS, "project-missing", "gone", "https://a"),
 		application(controlNS, "other-cluster", "default", "https://b"),
 	)
 	require.NoError(t, f.Sync(context.Background()))
 	assert.Equal(t, int64(4), f.status(t, "a").Info.ApplicationsCount)
 	assert.Equal(t, int64(1), f.status(t, "b").Info.ApplicationsCount)
+}
+
+// A round the interval cut short does not start over: with enough clusters that are always due,
+// the last ones would never be reached.
+func TestSyncResumesACutRound(t *testing.T) {
+	t.Parallel()
+	f := newFixture(t, interceptor.Funcs{}, clusterObj("a", "https://a"), clusterObj("b", "https://b"), clusterObj("c", "https://c"), clusterObj("d", "https://d"))
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	f.rec.onWrite = func(name string) {
+		if name == "b" {
+			cancel()
+		}
+	}
+	require.ErrorIs(t, f.Sync(ctx), context.Canceled)
+	assert.Equal(t, []string{"a", "b"}, f.rec.taken())
+
+	f.rec.onWrite = nil
+	round := func() []string {
+		t.Helper()
+		f.now = f.now.Add(DefaultCacheInfoWriteInterval)
+		for _, server := range []string{"https://a", "https://b", "https://c", "https://d"} {
+			f.states[server] = synced(f.now)
+		}
+		require.NoError(t, f.Sync(context.Background()))
+		return f.rec.taken()
+	}
+	assert.Equal(t, []string{"c", "d", "a", "b"}, round(), "from where the last round stopped, then the rest")
+	assert.Equal(t, []string{"a", "b", "c", "d"}, round(), "a round that finished leaves nothing to resume")
+}
+
+// The Reader's objects are shared with the informer cache.
+func TestSyncDoesNotChangeTheClusterItReads(t *testing.T) {
+	t.Parallel()
+	shared := clusterObj("a", "https://a")
+	seen := clusters.ComputeClusterInfo(synced(time.Date(2026, 10, 13, 9, 0, 0, 0, time.UTC)), 0, time.Date(2026, 10, 13, 9, 0, 0, 0, time.UTC))
+	clusters.ApplyClusterInfo(shared, seen)
+	want := shared.DeepCopy()
+	f := newFixture(t, interceptor.Funcs{
+		Get: func(ctx context.Context, c client.WithWatch, key client.ObjectKey, obj client.Object, opts ...client.GetOption) error {
+			if cl, ok := obj.(*v1alpha1.Cluster); ok && key.Name == shared.Name {
+				*cl = *shared // what the cache hands out with UnsafeDisableDeepCopy
+				return nil
+			}
+			return c.Get(ctx, key, obj, opts...)
+		},
+	}, shared.DeepCopy())
+	failed := synced(f.now)
+	failed.SyncError = errors.New("unreachable")
+	f.states["https://a"] = failed
+	f.rec.errs["a"] = errors.New("refused") // the recorder would write to the shared object here
+	require.ErrorContains(t, f.Sync(context.Background()), "refused")
+	assert.Equal(t, []string{"a"}, f.rec.taken())
+	assert.Equal(t, want, shared)
 }
 
 func TestSyncSkipsUnchangedAndThrottlesCacheInfo(t *testing.T) {
