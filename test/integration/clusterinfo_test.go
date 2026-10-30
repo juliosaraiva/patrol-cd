@@ -78,6 +78,15 @@ func TestClusterInfoWrittenByController(t *testing.T) {
 		return l.Metadata.Labels[v1alpha1.LabelKeyClusterKubernetesVersion] == c.Status.ServerVersion
 	})
 
+	_, err = s.API(t).UpdateCluster(t.Context(), apiclient.ClusterByServer(used.Server), &apiclient.ClusterInput{
+		Server: used.Server,
+		Labels: map[string]string{v1alpha1.LabelKeyAutoLabelClusterInfo: "true", v1alpha1.LabelKeyClusterKubernetesVersion: "v0.0.0"},
+	}, "labels")
+	require.NoError(t, err)
+	waitCluster(t, s, used, "a stale version label replaced", func(l *apiclient.RegisteredCluster) bool {
+		return l.Metadata.Labels[v1alpha1.LabelKeyClusterKubernetesVersion] == c.Status.ServerVersion
+	})
+
 	row := func(d *stack.Cluster) string {
 		for line := range strings.Lines(s.CLI(t, "cluster", "list").Stdout) {
 			if strings.HasPrefix(line, d.Server+" ") {

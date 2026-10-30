@@ -625,7 +625,7 @@ SYNC-094:
     to find a matching service account to impersonate: ...") without cleaning up hooks.
 
 REPO-094:
-  status: implemented
+  status: in-progress
   impl: [internal/controller/clusterinfo/updater.go, internal/compare/clusterstate.go, internal/cache/manager.go, internal/server/controller.go]
   tests:
     - internal/controller/clusterinfo/updater_test.go:TestSyncWritesOwnedClusters
@@ -637,15 +637,21 @@ REPO-094:
     - test/integration/clusterinfo_test.go:TestClusterInfoWrittenByController
     - test/integration/clusterinfo_test.go:TestManifestsMatchControllerCapabilities
     - test/integration/recovery_test.go:TestDestinationUnreachable
-  evidence: docs/verification/log.md#V-0046
+  evidence: docs/verification/log.md#V-0046; docs/verification/log.md#V-0047
   notes: >-
-    Exercised through the API and the CLI, not the UI. Written to Cluster.status instead of
-    Redis (ADR-0004): an unchanged status is not written, a change of the cache statistics alone
-    is written at most once a minute, and connectionState.attemptedAt moves with a write only.
-    A status write reaches no comparison: the Cluster watches ignore it. The synthetic in-cluster
-    cluster has no object, so no status. A skip-reconcile cluster reports Unknown. As upstream, a
-    destination that fails under a synced cache shows as Failed only after the next full sync
-    (restart, invalidate-cache, credential change, 12 h resync).
+    Not complete: the implicit in-cluster cluster, the destination of a default install, has no
+    object and so no Application count, API versions or cache information; GET /clusters shows the
+    probe only, and GET manifests renders without its API versions (#246). Registering a Cluster
+    object for that server is the workaround. For the clusters that have an object it is exercised
+    through the API and the CLI, not the UI. Written to Cluster.status instead of Redis (ADR-0004):
+    an unchanged status is not written, a change of the cache statistics alone is written at most
+    once a minute, and connectionState.attemptedAt moves with a write only. A status write reaches
+    no comparison: the Cluster watches ignore it. It moves the resourceVersion, so a client that
+    sends one gets 409 after a status write; the UI sends none. Nothing expires the status, where
+    upstream's Redis entry lapses after 10 minutes: with every controller stopped the last state
+    stays. A skip-reconcile cluster reports Unknown, and so does a cache from its invalidation to
+    the next sync. As upstream, a destination that fails under a synced cache shows as Failed only
+    after the next full sync (restart, invalidate-cache, credential change, 12 h resync).
 
 REPO-095:
   status: verified
@@ -653,17 +659,20 @@ REPO-095:
   tests:
     - internal/controller/clusterinfo/updater_test.go:TestSyncVersionLabel
     - test/integration/clusterinfo_test.go:TestClusterInfoWrittenByController
-  evidence: docs/verification/log.md#V-0046
+  evidence: docs/verification/log.md#V-0046; docs/verification/log.md#V-0047
 
 OPS-050:
   status: implemented
-  impl: [internal/clusters/tuning.go, internal/controller/clusterinfo/updater.go, internal/server/commands.go]
+  impl: [internal/clusters/tuning.go, internal/controller/clusterinfo/updater.go, internal/server/controller.go]
   tests:
     - internal/clusters/tuning_test.go:TestClusterInfoIntervalFromLookup
     - internal/controller/clusterinfo/updater_test.go:TestRunInterval
     - internal/controller/clusterinfo/updater_test.go:TestRunBoundsARound
-  evidence: docs/verification/log.md#V-0046
+    - internal/server/smoke_test.go:TestControllerRunSmoke
+  evidence: docs/verification/log.md#V-0046; docs/verification/log.md#V-0047
   notes: >-
     PATROL_UPDATE_CLUSTER_INFO_TIMEOUT (upstream ARGO_CD_UPDATE_CLUSTER_INFO_TIMEOUT): a Go
     duration from 10s to 1m; anything else logs a warning and keeps 10s. A round is bounded by
-    the interval. The integrated tests set the interval in ControllerConfig, not the variable.
+    the interval. TestControllerRunSmoke sets the variable on a real RunController and sees the
+    value reach the updater; the cadence itself is shown on fake time (TestRunInterval), and
+    setting it through the chart's controller.env was not run.

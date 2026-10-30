@@ -84,7 +84,6 @@ func TestTuningFromLookupBounds(t *testing.T) {
 	})
 }
 
-// innerTransport walks client-go wrappers down to the *http.Transport.
 func TestClusterInfoIntervalFromLookup(t *testing.T) {
 	t.Parallel()
 	tests := []struct {
@@ -113,6 +112,7 @@ func TestClusterInfoIntervalFromLookup(t *testing.T) {
 	}
 }
 
+// innerTransport walks client-go wrappers down to the *http.Transport.
 func innerTransport(t *testing.T, rt http.RoundTripper) *http.Transport {
 	t.Helper()
 	for i := 0; i < 20 && rt != nil; i++ {

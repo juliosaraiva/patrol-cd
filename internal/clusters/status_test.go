@@ -76,6 +76,25 @@ func TestComputeClusterInfoSyncTimeHasStoredPrecision(t *testing.T) {
 	assert.True(t, u.Info.CacheInfo.LastCacheSyncTime.Time.Equal(synced.Truncate(time.Second)))
 }
 
+// TestComputeClusterInfoBounds: what a destination reports cannot make the API refuse the status,
+// and the connection state with it.
+func TestComputeClusterInfoBounds(t *testing.T) {
+	t.Parallel()
+	now := time.Date(2026, 10, 13, 10, 0, 0, 0, time.UTC)
+	synced := now.Add(-time.Minute)
+	fits := []string{strings.Repeat("a", maxAPIVersionBytes)}
+	u := ComputeClusterInfo(&CacheState{ServerVersion: strings.Repeat("v", maxServerVersion), APIVersions: fits, LastCacheSyncTime: &synced}, 0, now)
+	assert.Len(t, u.ServerVersion, maxServerVersion)
+	assert.Equal(t, fits, u.Info.APIVersions)
+
+	u = ComputeClusterInfo(&CacheState{
+		ServerVersion: strings.Repeat("v", maxServerVersion+1), APIVersions: append(fits, "v1"), LastCacheSyncTime: &synced, SyncError: errors.New("unreachable"),
+	}, 0, now)
+	assert.Empty(t, u.ServerVersion)
+	assert.Empty(t, u.Info.APIVersions, "part of the list would pass for all of it")
+	assert.Equal(t, v1alpha1.ConnectionStatusFailed, u.ConnectionState.Status)
+}
+
 func TestApplyClusterInfo(t *testing.T) {
 	t.Parallel()
 	now := time.Date(2026, 10, 13, 10, 0, 0, 0, time.UTC)
@@ -141,6 +160,18 @@ func TestApplyClusterInfo(t *testing.T) {
 		before := c.Status.DeepCopy()
 		ApplyClusterInfo(c, failed)
 		assert.True(t, equality.Semantic.DeepEqual(before, &c.Status), "the same long error is no change")
+	})
+	t.Run("a message that is not valid UTF-8 is stored as the API will", func(t *testing.T) {
+		t.Parallel()
+		failed := func(at time.Time) StatusUpdate {
+			return ComputeClusterInfo(&CacheState{LastCacheSyncTime: &synced, SyncError: errors.New("verweigert f\xfcr Benutzer")}, 2, at)
+		}
+		c := healthy()
+		ApplyClusterInfo(c, failed(now))
+		assert.Equal(t, "verweigert f\uFFFDr Benutzer", c.Status.ConnectionState.Message)
+		before := c.Status.DeepCopy()
+		ApplyClusterInfo(c, failed(now.Add(time.Minute)))
+		assert.True(t, equality.Semantic.DeepEqual(before, &c.Status), "the same error is no change")
 	})
 }
 
@@ -277,15 +308,13 @@ func TestStatusWriterEnvtest(t *testing.T) {
 	require.NoError(t, err)
 	assert.Equal(t, out.ResourceVersion, again.ResourceVersion)
 
-	// The cache's sync time is finer than what is stored, and that is no change either.
-	fine := time.Now().Add(-time.Second).Truncate(time.Second).Add(123456789)
-	out, err = w.RecordClusterInfo(ctx, again, ComputeClusterInfo(&CacheState{
-		ServerVersion: ver, LastCacheSyncTime: &fine, APIsCount: 12, ResourcesCount: 34, APIVersions: []string{"v1"},
-	}, 5, time.Now()))
+	// An error that is not valid UTF-8 settles too: JSON would replace those bytes.
+	failed := func(at time.Time) StatusUpdate {
+		return ComputeClusterInfo(&CacheState{ServerVersion: ver, LastCacheSyncTime: &synced, SyncError: errors.New("verweigert f\xfcr Benutzer")}, 5, at)
+	}
+	out, err = w.RecordClusterInfo(ctx, again, failed(time.Now()))
 	require.NoError(t, err)
-	again, err = w.RecordClusterInfo(ctx, out, ComputeClusterInfo(&CacheState{
-		ServerVersion: ver, LastCacheSyncTime: &fine, APIsCount: 12, ResourcesCount: 34, APIVersions: []string{"v1"},
-	}, 5, time.Now()))
+	again, err = w.RecordClusterInfo(ctx, out, failed(time.Now().Add(time.Minute)))
 	require.NoError(t, err)
 	assert.Equal(t, out.ResourceVersion, again.ResourceVersion)
 

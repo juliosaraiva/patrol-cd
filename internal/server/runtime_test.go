@@ -280,10 +280,11 @@ func TestConfigValidation(t *testing.T) {
 	assert.Contains(t, err.Error(), "TLS ciphers")
 	assert.Contains(t, err.Error(), "--tls-cert and --tls-key")
 
-	cerr := (&ControllerConfig{HydratorEnabled: true, TreeAPIAddress: "bad"}).Validate()
+	cerr := (&ControllerConfig{HydratorEnabled: true, TreeAPIAddress: "bad", ClusterInfoInterval: -time.Second}).Validate()
 	require.Error(t, cerr)
 	assert.Contains(t, cerr.Error(), "commit-server address")
 	assert.Contains(t, cerr.Error(), "tree API address")
+	assert.Contains(t, cerr.Error(), "cluster info interval")
 	assert.True(t, strings.Contains((&AppSetConfig{}).Validate().Error(), "namespace is required"))
 	assert.True(t, strings.Contains((&NotificationsConfig{}).Validate().Error(), "namespace is required"))
 }

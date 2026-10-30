@@ -232,7 +232,9 @@ assigner, keeps those of owned shards and writes what `ComputeClusterInfo` gives
 therefore has one writer; the synthetic in-cluster cluster has no object and gets no status.
 
 - **Interval:** `PATROL_UPDATE_CLUSTER_INFO_TIMEOUT`, a Go duration from 10 s to 1 min, default
-  10 s. The interval also bounds a round: what it did not reach waits for the next one.
+  10 s, read by `RunController` unless `ControllerConfig.ClusterInfoInterval` is set; the updater
+  logs it when it starts. The interval also bounds a round: what it did not reach waits for the
+  next one.
 - **Reads:** the manager's cached client and `cache.Manager.Lookup`. A round never creates a
   live-state cache and contacts no destination, so it cannot hang on one.
 - **Writes:** the status lives in etcd (ADR-0004), where every write reaches every Cluster
@@ -246,6 +248,11 @@ therefore has one writer; the synthetic in-cluster cluster has no object and get
   list ends the round without writing, because a count of zero would be a guess.
 - **Skip-reconcile:** no shard processes such a cluster, so it reports `Unknown` whatever an old
   cache says.
+- **Invalidated cache:** `Unknown` until the next sync, as upstream, because the time of the old
+  sync says nothing about what the cache holds now (`compare.ClusterCacheState`).
+- **Resource version:** a status write moves it, so a client that sends the version it read can
+  get a 409 with no change to what it edits. The UI's cluster form sends none: `updatedFields`
+  confines its write.
 
 A destination that fails under a synced cache keeps `Successful` until the next full sync of that
 cache (restart, invalidate-cache, credential change, 12 h resync). Upstream behaves the same way:
@@ -344,6 +351,14 @@ different-by-design.
   does not exist yet) is left to the tree API wiring.
 - **Delete hooks of an excluded kind** are created and awaited (health read from the object),
   but the `/cleanup` stage only sees hooks in the live-state cache, so they are left behind.
+- **Implicit in-cluster cluster:** no object, so the updater skips it. A default install shows no
+  Application count, API versions or cache information for its main destination, the CLI and UI
+  read 0 and "Not synced" there, and `GET manifests` renders without its API versions. Upstream
+  walks the local cluster too. Registering a Cluster object for that server is the workaround
+  (#246).
+- **Cluster information does not expire.** Upstream's Redis entry lapses after 10 minutes. Here
+  the status stays at its last value when every controller stops, and `attemptedAt` cannot tell a
+  live updater from a dead one, because a steady status is not written.
 - **Hydrator**, **sharding wiring** in `Run`, and the `patrolcd controller` command are not
   part of this package yet; `Deps.OwnsCluster` is the sharding hook.
 

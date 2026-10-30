@@ -33,6 +33,7 @@ import (
 
 	"github.com/juliosaraiva/patrol-cd/api/v1alpha1"
 	"github.com/juliosaraiva/patrol-cd/internal/auth"
+	"github.com/juliosaraiva/patrol-cd/internal/clusters"
 	"github.com/juliosaraiva/patrol-cd/internal/cmp"
 	"github.com/juliosaraiva/patrol-cd/internal/controller/sharding"
 	"github.com/juliosaraiva/patrol-cd/internal/envtestx"
@@ -114,7 +115,12 @@ func (b *syncBuffer) String() string {
 
 func testLogger(t *testing.T) *slog.Logger {
 	t.Helper()
-	b := &syncBuffer{}
+	return loggerTo(t, &syncBuffer{})
+}
+
+// loggerTo logs to b, which also goes to the test output of a failed test.
+func loggerTo(t *testing.T, b *syncBuffer) *slog.Logger {
+	t.Helper()
 	t.Cleanup(func() {
 		if t.Failed() {
 			t.Logf("component logs:\n%s", b.String())
@@ -465,8 +471,10 @@ func mustScheme(t *testing.T) *runtime.Scheme {
 
 func TestControllerRunSmoke(t *testing.T) {
 	requireEnvtest(t)
+	t.Setenv(clusters.EnvUpdateClusterInfoTimeout, "42s")
 	kube := kubernetes.NewForConfigOrDie(testCfg)
 	ns := newNamespace(t, kube)
+	logs := &syncBuffer{}
 	type addrs struct{ metrics, tree net.Addr }
 	ch := make(chan addrs, 1)
 	const identity = "patrol-controller-0"
@@ -477,7 +485,7 @@ func TestControllerRunSmoke(t *testing.T) {
 		Sharding:        sharding.ConfigFromEnv(func(string) (string, bool) { return "", false }, identity, nil),
 		Identity:        identity,
 		ShutdownTimeout: 5 * time.Second,
-		Logger:          testLogger(t),
+		Logger:          loggerTo(t, logs),
 		OnListening:     func(m, tr net.Addr) { ch <- addrs{m, tr} },
 	}
 	stop := running(t, func(ctx context.Context) error { return RunController(ctx, cfg) })
@@ -496,6 +504,8 @@ func TestControllerRunSmoke(t *testing.T) {
 		l, err := kube.CoordinationV1().Leases(ns).Get(context.Background(), sharding.LeaseName(0), metav1.GetOptions{})
 		return err == nil && l.Spec.HolderIdentity != nil && *l.Spec.HolderIdentity == identity
 	}, 30*time.Second, 200*time.Millisecond)
+	require.Eventually(t, func() bool { return strings.Contains(logs.String(), "interval=42s") },
+		30*time.Second, 100*time.Millisecond, "the cluster-info updater runs on the interval of the environment")
 	stop()
 	l, err := kube.CoordinationV1().Leases(ns).Get(context.Background(), sharding.LeaseName(0), metav1.GetOptions{})
 	require.NoError(t, err)

@@ -448,9 +448,8 @@ func newControllerCommand() *cobra.Command {
 			TreeAPIAddress: treeAddr,
 			TreeAPITLS:     TLSServerOptions{CertFile: rt.Common.TLSCert, KeyFile: rt.Common.TLSKey, ClientCAFile: rt.Common.TLSClientCA},
 			Sharding:       shardCfg, Identity: host,
-			ClusterTuning:       clusterTuning(rt),
-			ClusterInfoInterval: clusters.ClusterInfoIntervalFromLookup(os.LookupEnv, rt.Log),
-			ShutdownTimeout:     rt.Common.ShutdownTimeout, Registry: rt.Registry, Logger: rt.Log,
+			ClusterTuning:   clusterTuning(rt),
+			ShutdownTimeout: rt.Common.ShutdownTimeout, Registry: rt.Registry, Logger: rt.Log,
 		})
 	}
 	return c.command()

@@ -177,6 +177,21 @@ func TestEnsureSyncedOutlivesCallerContext(t *testing.T) {
 	assert.Equal(t, 1, fc.versionRequests(), "the sync that callers gave up on was not restarted")
 }
 
+// An invalidated cache keeps the time of its last sync and reports no error: only Synced tells
+// that it holds nothing yet.
+func TestClusterInfoOfInvalidatedCache(t *testing.T) {
+	t.Parallel()
+	fc := newFakeCluster(t, cmResource)
+	c := fc.start(t, Settings{})
+	require.True(t, c.GetClusterInfo().Synced)
+	c.Invalidate()
+	info := c.GetClusterInfo()
+	assert.False(t, info.Synced)
+	assert.NotNil(t, info.LastCacheSyncTime)
+	assert.NoError(t, info.SyncError)
+	assert.Zero(t, info.APIsCount)
+}
+
 // A caller that joined a sync must not get its result when that sync completed for an epoch
 // older than the call (Invalidate ran between the sync's swap and its completion).
 func TestEnsureSyncedIgnoresResultOfOlderEpoch(t *testing.T) {

@@ -130,6 +130,7 @@ func TestAutoLabelKubernetesVersion(t *testing.T) {
 	assert.False(t, AutoLabelKubernetesVersion(off, "v1.36.0"))
 	assert.False(t, AutoLabelKubernetesVersion(nil, "v1.36.0"))
 	assert.False(t, AutoLabelKubernetesVersion(c, ""), "no version to record")
+	assert.False(t, AutoLabelKubernetesVersion(c, "not a label value"), "the API would refuse it")
 	assert.Equal(t, "v1.37.1", c.Labels[v1alpha1.LabelKeyClusterKubernetesVersion])
 }
 

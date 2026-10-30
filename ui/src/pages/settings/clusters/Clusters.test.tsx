@@ -115,9 +115,11 @@ describe('Settings → Cluster details', () => {
     expect(calls).toHaveLength(1);
     expect(calls[0]?.fields).toEqual(['name', 'namespaces', 'labels']);
     // The flat ClusterInput; no `config`, so the stored credentials are untouched.
-    expect(calls[0]?.body).toMatchObject({ server: PROD, name: 'prod-europe', namespaces: ['payments', 'search', 'ledger'], resourceVersion: '10' });
+    expect(calls[0]?.body).toMatchObject({ server: PROD, name: 'prod-europe', namespaces: ['payments', 'search', 'ledger'] });
     expect(calls[0]?.body.labels).toEqual({ env: 'prod' });
     expect(calls[0]?.body.config).toBeUndefined();
+    // A status write since the last poll must not refuse this save.
+    expect(calls[0]?.body.resourceVersion).toBeUndefined();
   });
 
   it('invalidates the cache and rotates credentials with a confirmation', async () => {

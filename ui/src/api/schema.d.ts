@@ -2665,7 +2665,7 @@ export interface components {
             namespaces?: string[];
             /** @description Project scopes the cluster to an AppProject. */
             project?: string;
-            /** @description ResourceVersion, when set on an update, must match the stored Cluster (409 otherwise). */
+            /** @description ResourceVersion, when set on an update, must match the stored Cluster (409 otherwise). The controller's status writes move it too: updatedFields confines a write without it. */
             resourceVersion?: string;
             /** @description Server is the API server URL (http or https). It identifies the cluster and cannot be changed by an update. */
             server: string;

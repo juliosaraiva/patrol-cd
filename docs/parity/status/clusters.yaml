@@ -151,6 +151,7 @@ REPO-094:
   tests:
     - internal/clusters/status_test.go:TestComputeClusterInfo
     - internal/clusters/status_test.go:TestComputeClusterInfoSyncTimeHasStoredPrecision
+    - internal/clusters/status_test.go:TestComputeClusterInfoBounds
     - internal/clusters/status_test.go:TestApplyClusterInfo
     - internal/clusters/status_test.go:TestStatusWriterEnvtest
     - internal/clusters/registry_test.go:TestRegistryLookups
@@ -165,7 +166,6 @@ REPO-095:
   tests:
     - internal/clusters/helpers_test.go:TestAutoLabelKubernetesVersion
     - internal/clusters/status_test.go:TestStatusWriterEnvtest
-  evidence: docs/verification/log.md#V-0046
   notes: The controller's cluster-info updater calls RecordVersionLabel (controller.yaml).
 
 REPO-096:

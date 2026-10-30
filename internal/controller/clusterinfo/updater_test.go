@@ -5,7 +5,6 @@ import (
 	"context"
 	"errors"
 	"log/slog"
-	"slices"
 	"strings"
 	"sync/atomic"
 	"testing"
@@ -177,8 +176,27 @@ func synced(at time.Time) *clusters.CacheState {
 
 func TestNewRequiresDependencies(t *testing.T) {
 	t.Parallel()
-	_, err := New(Options{})
-	require.Error(t, err)
+	f := newFixture(t, interceptor.Funcs{})
+	_, err := New(f.opts)
+	require.NoError(t, err)
+	tests := map[string]func(*Options){
+		"assigner":    func(o *Options) { o.Assigner = nil },
+		"owner":       func(o *Options) { o.Owner = nil },
+		"reader":      func(o *Options) { o.Reader = nil },
+		"namespace":   func(o *Options) { o.Namespace = "" },
+		"counter":     func(o *Options) { o.Counter = nil },
+		"cache state": func(o *Options) { o.CacheState = nil },
+		"recorder":    func(o *Options) { o.Recorder = nil },
+	}
+	for name, clear := range tests {
+		t.Run(name, func(t *testing.T) {
+			t.Parallel()
+			opts := f.opts
+			clear(&opts)
+			_, err := New(opts)
+			require.Error(t, err)
+		})
+	}
 }
 
 func TestSyncWritesOwnedClusters(t *testing.T) {
@@ -215,9 +233,12 @@ func TestSyncClusterWithoutCache(t *testing.T) {
 
 func TestSyncApplicationsCount(t *testing.T) {
 	t.Parallel()
+	// Sorts after the control namespace: a list across namespaces would let it win.
+	elsewhere := appProject("default", "team-*")
+	elsewhere.Namespace = "zzz-tenant"
 	f := newFixture(t, interceptor.Funcs{},
 		clusterObj("a", "https://a/"), clusterObj("b", "https://b"),
-		appProject("default"), appProject("open", "team-*"),
+		appProject("default"), appProject("open", "team-*"), elsewhere,
 		application(controlNS, "counted", "default", "https://a"),
 		application(controlNS, "trailing-slash", "default", "https://a/"),
 		application(controlNS, "no-project-field", "", "https://a"),
@@ -452,6 +473,6 @@ func TestRunBoundsARound(t *testing.T) {
 		assert.Contains(t, logs.String(), "cannot record cluster info")
 		cancel()
 		<-done
-		assert.False(t, slices.Contains(strings.Fields(logs.String()), "level=ERROR"))
+		assert.Equal(t, 1, strings.Count(logs.String(), "cannot record cluster info"), "the round stopped by the shutdown is no failure")
 	})
 }

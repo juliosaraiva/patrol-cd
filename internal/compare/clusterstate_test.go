@@ -39,4 +39,9 @@ func TestClusterCacheState(t *testing.T) {
 		ServerVersion: "v1.36.0", APIVersions: []string{"apps/v1", "apps/v1/Deployment"},
 		APIsCount: 40, ResourcesCount: 900, LastCacheSyncTime: &synced, SyncError: syncErr,
 	}, got)
+
+	info := cache.ClusterInfo{K8SVersion: "v1.36.0", LastCacheSyncTime: &synced, Synced: true}
+	assert.Equal(t, &synced, ClusterCacheState(stateCache{info: info}).LastCacheSyncTime)
+	info.Synced = false
+	assert.Nil(t, ClusterCacheState(stateCache{info: info}).LastCacheSyncTime, "an invalidated cache has no completed sync")
 }

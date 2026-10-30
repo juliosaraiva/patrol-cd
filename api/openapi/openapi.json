@@ -5645,7 +5645,7 @@
             "type": "string"
           },
           "resourceVersion": {
-            "description": "ResourceVersion, when set on an update, must match the stored Cluster (409 otherwise).",
+            "description": "ResourceVersion, when set on an update, must match the stored Cluster (409 otherwise). The controller's status writes move it too: updatedFields confines a write without it.",
             "type": "string"
           },
           "server": {

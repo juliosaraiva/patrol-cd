@@ -92,8 +92,8 @@ type ControllerConfig struct {
 	Identity string
 	// ClusterTuning configures destination cluster clients (nil: defaults).
 	ClusterTuning *clusters.Tuning
-	// ClusterInfoInterval is how often Cluster status is written (0: the default; the command
-	// reads PATROL_UPDATE_CLUSTER_INFO_TIMEOUT).
+	// ClusterInfoInterval is how often Cluster status is written (0: from
+	// PATROL_UPDATE_CLUSTER_INFO_TIMEOUT, else the default).
 	ClusterInfoInterval time.Duration
 
 	ShutdownTimeout time.Duration
@@ -454,6 +454,10 @@ func RunController(ctx context.Context, cfg ControllerConfig) error {
 		return err
 	}
 	shardWriterTrigger = writer.Trigger
+	clusterInfoInterval := cfg.ClusterInfoInterval
+	if clusterInfoInterval == 0 {
+		clusterInfoInterval = clusters.ClusterInfoIntervalFromLookup(os.LookupEnv, log)
+	}
 	clusterInfo, err := clusterinfo.New(clusterinfo.Options{
 		Assigner: assigner, Owner: lm, Reader: mgr.GetClient(), Namespace: cfg.Namespace, Counter: registry, Recorder: statusWriter,
 		CacheState: func(server string) *clusters.CacheState {
@@ -463,7 +467,7 @@ func RunController(ctx context.Context, cfg ControllerConfig) error {
 			}
 			return compare.ClusterCacheState(cc)
 		},
-		Interval: cfg.ClusterInfoInterval, Logger: log,
+		Interval: clusterInfoInterval, Logger: log,
 	})
 	if err != nil {
 		return err

@@ -163,6 +163,16 @@ func TestClusterLifecycle(t *testing.T) {
 	_, err = admin.UpdateCluster(ctx, apiclient.ClusterByServer(f.srv.URL), &apiclient.ClusterInput{Name: "x", ResourceVersion: "1"}, "name")
 	assert.Equal(t, http.StatusConflict, apiErr(t, err).StatusCode)
 
+	// A status write moves the resourceVersion, not what a partial update changes: without one
+	// (the UI) the update goes through and the status stays.
+	read := e.clusterObject(f.srv.URL)
+	read.Status.Info.ApplicationsCount = 7
+	require.NoError(t, e.kube.Status().Update(ctx, read))
+	upd, err = admin.UpdateCluster(ctx, apiclient.ClusterByServer(f.srv.URL), &apiclient.ClusterInput{Namespaces: []string{"apps", "web", "ledger"}}, "namespaces")
+	require.NoError(t, err)
+	assert.Equal(t, []string{"apps", "web", "ledger"}, upd.Spec.Namespaces)
+	assert.Equal(t, int64(7), upd.Status.Info.ApplicationsCount)
+
 	// A config update replaces the credentials (unknown Secret keys dropped, REPO-104), and
 	// the connection is checked with the new ones.
 	_, err = admin.UpdateCluster(ctx, apiclient.ClusterByServer(f.srv.URL), input(f, "", "", "wrong-token"), "config")

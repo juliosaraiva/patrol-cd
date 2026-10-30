@@ -158,8 +158,6 @@ REPO-094:
   impl: [internal/apiserver/services/clusters/handlers.go]
   tests:
     - internal/apiserver/services/clusters/clusters_test.go:TestClusterLifecycle
-    - test/integration/clusterinfo_test.go:TestClusterInfoWrittenByController
-  evidence: docs/verification/log.md#V-0046
   notes: Responses carry Cluster status (connection state, server version, cache info, applications count, assigned shard); create/update/rotate-auth record a Successful check. The cluster-info updater is the controller's (controller.yaml).
 
 REPO-096:

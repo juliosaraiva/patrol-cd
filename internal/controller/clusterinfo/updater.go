@@ -64,7 +64,7 @@ type Options struct {
 	CacheInfoWriteInterval time.Duration
 	// Now replaces time.Now.
 	Now func() time.Time
-	// Logger receives failed rounds (nil discards).
+	// Logger receives the start and failed rounds (nil discards).
 	Logger *slog.Logger
 }
 
@@ -99,6 +99,7 @@ func New(opts Options) (*Updater, error) {
 // Run does a round at once and one per interval until ctx ends. A failed round is logged and the
 // next one tries again.
 func (u *Updater) Run(ctx context.Context) {
+	u.opts.Logger.Info("cluster info updater started", slog.Duration("interval", u.opts.Interval))
 	ticker := time.NewTicker(u.opts.Interval)
 	defer ticker.Stop()
 	for {

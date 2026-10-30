@@ -34,6 +34,13 @@ const NoApplicationsMessage = "Cluster has no applications and is not being moni
 // the Ready and ConnectionFailed conditions too, and a destination decides what its errors say.
 const maxConnectionMessage = 32768
 
+// Bounds of what a destination reports about itself. The API refuses a status it cannot store
+// whole, and the connection state would go with it.
+const (
+	maxServerVersion   = 256
+	maxAPIVersionBytes = 512 << 10
+)
+
 // Probe checks connectivity to the cluster behind cfg with GET /version and returns the server
 // version normalized to "v<major>.<minor>.<patch>" (vendor suffixes such as "-eks-1" or "+k3s1"
 // removed). The request is bounded by ctx.
@@ -95,8 +102,10 @@ func ComputeClusterInfo(state *CacheState, applications int64, now time.Time) St
 		}
 		return u
 	}
-	u.ServerVersion = state.ServerVersion
-	u.Info.APIVersions = append([]string(nil), state.APIVersions...)
+	if len(state.ServerVersion) <= maxServerVersion {
+		u.ServerVersion = state.ServerVersion
+	}
+	u.Info.APIVersions = boundedAPIVersions(state.APIVersions)
 	switch {
 	case state.LastCacheSyncTime == nil:
 		u.ConnectionState.Status = v1alpha1.ConnectionStatusUnknown
@@ -114,6 +123,19 @@ func ComputeClusterInfo(state *CacheState, applications int64, now time.Time) St
 		u.ConnectionState.Message = state.SyncError.Error()
 	}
 	return u
+}
+
+// boundedAPIVersions copies versions, or drops a list too large to store: part of it would pass
+// for everything the destination serves.
+func boundedAPIVersions(versions []string) []string {
+	size := 0
+	for _, v := range versions {
+		size += len(v)
+	}
+	if size > maxAPIVersionBytes {
+		return nil
+	}
+	return append([]string(nil), versions...)
 }
 
 // ProbeUpdate returns the status of a connection check: Successful with the version, or Failed
@@ -308,9 +330,12 @@ func applyConnection(c *v1alpha1.Cluster, state v1alpha1.ConnectionState, versio
 	meta.SetStatusCondition(&c.Status.Conditions, failed)
 }
 
-// truncateConnectionMessage cuts m to maxConnectionMessage bytes, on a character boundary. The
-// schema counts characters, so a cut message always fits.
+// truncateConnectionMessage returns m as the API stores it: valid UTF-8 (JSON encoding would
+// replace the rest, and the stored message would never equal the next one), cut to
+// maxConnectionMessage bytes on a character boundary. The schema counts characters, so a cut
+// message always fits.
 func truncateConnectionMessage(m string) string {
+	m = strings.ToValidUTF8(m, "\uFFFD")
 	if len(m) <= maxConnectionMessage {
 		return m
 	}
