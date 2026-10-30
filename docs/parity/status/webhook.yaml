@@ -23,7 +23,8 @@ REPO-114:
     draining on shutdown. Additions: 404 for unknown provider paths, 429 per-source rate
     limit, 503 "Webhook server is busy" when the global in-flight body budget is exhausted,
     byte-bounded queue, untrusted values clipped in logs. Served by patrol-server at
-    /api/webhook and /api/webhook/{provider} (internal/server/server_routes.go).
+    /api/webhook and /api/webhook/{provider} (internal/server/server_routes.go), where the
+    server's global body cap (64 MiB) answers 413 before the handler runs.
 
 REPO-115:
   status: different-by-design
@@ -266,8 +267,9 @@ ASET-104:
     - internal/webhook/handler_test.go:TestHTTPSemantics
     - internal/webhook/envtest_test.go:TestEnvtestWebhookRefresh
   notes: >-
-    Served by patrol-server /api/webhook together with Application refreshes instead of a
-    separate ApplicationSet controller port (:7000); every provider is accepted; secrets apply
+    Served by patrol-server /api/webhook together with Application refreshes; the
+    ApplicationSet controller listener (:7000 upstream) is off by default and runs only with
+    --webhook-addr (chart appsetController.webhook.enabled); every provider is accepted; secrets apply
     without a restart; ApplicationSets are filtered by ApplicationSetNamespaces (upstream
     lists all visible ones). Refresh is a merge patch of
     cd.patrol.example/application-set-refresh=true. See

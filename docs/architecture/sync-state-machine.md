@@ -118,14 +118,20 @@ Each reconcile performs at most one step and persists the result before returnin
   recorded); otherwise the persisted revisions are reused.
 - Transient Kubernetes API errors inside a step (server and client timeouts, 429, 503,
   connection refused or reset, unexpected EOF; `IsTransient` in `internal/sync/kube.go`)
-  end the step without recording a failure and requeue it after a fixed poll interval (5s,
+  end the step without recording a failure, and the attempt is not counted. The step
+  persists its partial result and message, then requeues after the poll interval (5s,
   `DefaultPollInterval` in `internal/sync/keys.go`; `syncStep` in
-  `internal/controller/operation/execute.go`). There is no rate-limited backoff, and the
-  attempt is not counted.
+  `internal/controller/operation/execute.go`). That is the longest wait, not a fixed one: a
+  status write that changes the Operation raises a watch event, so the first retry normally
+  runs at once, and the wait applies only once the message stops changing. An error whose
+  text changes on every attempt (a connection reset names a new source port) can retry with
+  no wait at all, on paths where the failing call is a write (#241). There is no
+  rate-limited backoff, unless that status write fails too: the reconcile then returns the
+  error to the workqueue's rate limiter.
 - Other API errors are not transient: a 500 (a failing admission webhook, say) fails the
   task, as upstream does. A 409 conflict on a resource is retried inside the step; a 409 on
   the Operation's own status write abandons the step, which is recomputed from the newer
-  object after the same poll interval.
+  object, normally at its watch event and at the latest after the same poll interval.
 
 ## Automated sync guard
 

@@ -1,5 +1,5 @@
 # GitHub notifications for preview environments: a commit status on the pull request head
-# commit and a pull request comment that is updated in place (commentTag) on every sync.
+# commit and a pull request comment that is updated in place (commentTag), once per commit.
 # These keys extend patrol-notifications-cm (examples/platform/settings): merge them into
 # that ConfigMap, e.g. `kubectl patch configmap patrol-notifications-cm -n patrol
 # --type merge --patch-file 04-notifications.yaml`. A merge patch replaces whole values, so

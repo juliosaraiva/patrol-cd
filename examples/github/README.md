@@ -39,8 +39,11 @@ GitHub: *Organization settings → Developer settings → GitHub Apps → New Gi
 
 - Subscribe to events: `Push`, `Pull request`.
 - Install the App on *Only select repositories* → `guestbook`. Note the App ID
-  (`appID` in the manifests) and generate a private key (`example-org-github-app`, key
-  `privateKey`; `github-privateKey` in `patrol-notifications-secret`).
+  (`appID` in the manifests) and the installation ID, and generate a private key
+  (`example-org-github-app`, key `privateKey`; `github-privateKey` in
+  `patrol-notifications-secret`).
+- Set `appID` and `installationID` of `service.github` in `patrol-notifications-cm` to this
+  App's values; the notifications are what report sync results to the pull request.
 
 ## 2. Webhook registration checklist
 
@@ -87,9 +90,10 @@ k -n patrol patch configmap patrol-notifications-cm --type merge \
    namespace `guestbook-pr-<number>`, head commit).
 2. Every push to the branch (`synchronize`) changes `head_sha` → the Application's
    `targetRevision` is updated and auto-sync deploys it.
-3. After each sync, `on-preview-deployed`/`on-preview-failed` post a commit status
-   (`patrol-cd/preview`) and update the single PR comment tagged `patrol-preview`. No check
-   run is reported: the SCMProvider's `statusReporting` is not wired yet (#235).
+3. After the first finished sync of each commit, `on-preview-deployed`/`on-preview-failed`
+   post a commit status (`patrol-cd/preview`) and update the single PR comment tagged
+   `patrol-preview`. No check run is reported: the SCMProvider's `statusReporting` is not
+   wired yet (#235).
 4. Closing/merging the pull request (or removing the label) removes it from the generator
    output → the Application is deleted → the resources finalizer deletes the workload and
    the `Namespace` rendered by the chart.

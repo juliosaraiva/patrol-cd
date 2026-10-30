@@ -11,10 +11,11 @@ Sync and rollback requests are `Operation` objects. See `docs/architecture/sync-
   hook object names are deterministic; re-executing a step converges.
 - Retry: `spec.retry` (limit, backoff) applies to `Failed` and `Error` attempts. A transient
   Kubernetes API error inside a step (timeouts, 429, 503, connection errors) consumes no
-  retry budget: the step is requeued after a fixed poll interval (5s), without rate-limited
-  backoff. A 500 fails the task; a 409 on a resource is retried inside the step, and one on
-  the Operation abandons the step until the next reconcile
-  (`docs/architecture/sync-state-machine.md`, "Retry semantics").
+  retry budget: the step is requeued after at most a poll interval (5s), without rate-limited
+  backoff; a status write that changes the Operation retries at once (#241). A 500 fails the
+  task; a 409 on a resource is retried inside the step, and one on the Operation abandons
+  the step until the next reconcile (`docs/architecture/sync-state-machine.md`, "Retry
+  semantics").
 - Cancellation: `spec.cancel=true` → `Terminating` (running hooks are deleted per policy,
   no new tasks start) → `Cancelled`.
 - Retention: keep the newest `revisionHistoryLimit` (default 10) terminal Operations per
