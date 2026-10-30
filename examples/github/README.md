@@ -34,7 +34,8 @@ GitHub: *Organization settings → Developer settings → GitHub Apps → New Gi
   | Commit statuses | Read and write | `github.status` notifications |
 
   Checks is not needed: this example sends no `github.checkRun` notification, and the
-  SCMProvider's `statusReporting` reports nothing yet (#235).
+  SCMProvider's `statusReporting` reports nothing yet (#235). Once #235 wires it, its
+  `mode: checks` will need Checks: Read and write.
 
 - Subscribe to events: `Push`, `Pull request`.
 - Install the App on *Only select repositories* → `guestbook`. Note the App ID

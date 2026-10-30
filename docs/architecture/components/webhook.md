@@ -2,11 +2,13 @@
 
 Status: implemented. `patrol-server` mounts the handler at `/api/webhook` and
 `/api/webhook/{provider...}` (`internal/server/server_api.go` builds it,
-`internal/server/server_routes.go` adds the routes, unauthenticated and hidden from
-OpenAPI); the ApplicationSet controller can serve the same handler on its optional
-`--webhook-addr` listener. Parity areas: `docs/parity/areas/03-repositories-clusters-webhooks.md`
-(REPO-114..REPO-131) and `06-applicationset.md` (ASET-104..ASET-107). Threat model: T9
-(webhook spoofing), T10 (replay and flood).
+`internal/server/server_routes.go` adds them as raw, unauthenticated routes;
+`internal/apiserver/services/webhooks` describes them in `api/openapi/openapi.json`); the
+ApplicationSet controller can serve the same handler on its optional `--webhook-addr`
+listener. The Bitbucket Cloud callback is not given repository credentials yet (#239).
+Parity areas: `docs/parity/areas/03-repositories-clusters-webhooks.md` (REPO-114..REPO-131)
+and `06-applicationset.md` (ASET-104..ASET-107). Threat model: T9 (webhook spoofing), T10
+(replay and flood).
 
 Webhook ingestion turns SCM and registry deliveries into Kubernetes-native refresh
 requests. It re-implements the behavior of Argo CD v3.5.5 `util/webhook` (API server
@@ -86,6 +88,11 @@ algorithms and payload parsing (`pkg/scm/<provider>`), generator evaluation
 
 ### Wiring (API server)
 
+The shipped wiring is `internal/server/server_api.go` (patrol-server) and
+`internal/server/appset.go` (the ApplicationSet controller listener). Neither sets
+`BitbucketCloud` yet (#239), so the Bitbucket Cloud callback runs anonymously; the snippet
+shows the intended configuration.
+
 ```go
 h, err := webhook.NewHandler(webhook.Config{
     Namespace:             ns,
@@ -97,7 +104,7 @@ h, err := webhook.NewHandler(webhook.Config{
     Workers:               params.WebhookParallelismLimit,
     RefreshWorkers:        params.WebhookRefreshWorkers,
     GeneratorEvaluator:    appsetEvaluator,          // internal/appset adapter, optional
-    BitbucketCloud:        webhook.BitbucketCloudOptions{Credentials: repoCredsByURL},
+    BitbucketCloud:        webhook.BitbucketCloudOptions{Credentials: repoCredsByURL}, // not wired yet (#239)
     Registerer:            metricsRegistry,
     Logger:                logger,
 })
@@ -293,7 +300,9 @@ covered by the UUID check, it must be one of `BitbucketCloudOptions.AllowedAPIUR
 → basic auth; otherwise the bearer token (empty: anonymous). The diffstat
 (`<before>..<after>`, renames, every page, old and new paths) replaces the changed-file
 list, and the main branch lookup sets `TouchedDefaultBranch`. Any failure keeps the
-conservative defaults (every path changed, default branch touched). 10s timeout.
+conservative defaults (every path changed, default branch touched). 10s timeout. No
+shipped handler sets `Credentials` yet (#239), so the callback is anonymous and works for
+public repositories only.
 
 ### Metrics
 
@@ -430,6 +439,10 @@ ASET-104..ASET-107. Status: `docs/parity/status/webhook.yaml`.
     deliveries for each provider without a secret; Patrol rejects them once any webhook
     secret is configured (see SEC-WH-3). `AllowUnsignedPerProvider` restores upstream.
 15. **In-flight body budget** (`503 Webhook server is busy`) is an addition (T10).
+16. **Bitbucket Cloud callback without credentials.** Upstream looks up the repository's
+    credentials for the diffstat and main-branch calls; no shipped Patrol handler passes
+    `BitbucketCloudOptions.Credentials` yet (#239). For a private repository the anonymous
+    call fails and every matching Application is refreshed (REPO-119, `in-progress`).
 
 ## Verification
 

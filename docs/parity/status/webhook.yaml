@@ -22,7 +22,8 @@ REPO-114:
     effective limit, 401 GHCR, 503 queue full); asynchronous workers with panic recovery and
     draining on shutdown. Additions: 404 for unknown provider paths, 429 per-source rate
     limit, 503 "Webhook server is busy" when the global in-flight body budget is exhausted,
-    byte-bounded queue, untrusted values clipped in logs. Not yet mounted by patrol-server.
+    byte-bounded queue, untrusted values clipped in logs. Served by patrol-server at
+    /api/webhook and /api/webhook/{provider} (internal/server/server_routes.go).
 
 REPO-115:
   status: different-by-design
@@ -88,7 +89,7 @@ REPO-118:
     400. Parsing is pkg/scm/gitlab.
 
 REPO-119:
-  status: implemented
+  status: in-progress
   impl: [internal/webhook/bitbucket.go, internal/webhook/providers.go]
   tests:
     - internal/webhook/bitbucket_test.go:TestBitbucketCloudCallback
@@ -99,8 +100,11 @@ REPO-119:
     with repository credentials (x-token-auth bearer, basic, bearer token, anonymous),
     tested against a fake Bitbucket API. Differences: the callback API base must be
     allow-listed (default https://api.bitbucket.org/2.0) because links.self is not
-    authenticated; renamed files report old and new paths. Credentials lookup is supplied by
-    the API server wiring.
+    authenticated; renamed files report old and new paths. Not wired (#239): neither
+    patrol-server nor the ApplicationSet controller listener passes
+    BitbucketCloudOptions.Credentials, so the callback runs anonymously; for a private
+    repository it fails and the handler keeps its conservative defaults (every path changed,
+    main branch moved), refreshing every matching Application.
 
 REPO-120:
   status: implemented
@@ -302,6 +306,7 @@ ASET-107:
     - internal/webhook/appsets_test.go:TestEventsRefreshApplicationSets
   notes: >-
     Plugin (top level, Matrix child 1), Matrix and Merge including nested generators,
-    tested with a stub GeneratorEvaluator. internal/appset must provide the evaluator to the
-    API server wiring; without it templated Matrix children are wildcards
-    (over-approximation).
+    tested with a stub GeneratorEvaluator. patrol-server and the ApplicationSet controller
+    listener pass the internal/appset evaluator (internal/server/server_api.go,
+    internal/server/appset.go); no test goes through the wired evaluator yet. A handler built
+    without one treats templated Matrix children as wildcards (over-approximation).
