@@ -1,8 +1,10 @@
-# GitHub App of the example-org organization: API access for the pull request generator,
-# webhook signature verification and commit check runs for sync results.
+# GitHub App of the example-org organization: API access for the pull request generator
+# and webhook signature verification. Sync results reach the pull request through the
+# notifications of 04-notifications.yaml; statusReporting below is validated but no
+# component reads it yet (#235), so it reports no check run.
 # Required App permissions (least privilege, see docs/integrations/github-permissions.md):
 #   Metadata: Read, Contents: Read, Pull requests: Read and write (PR comments),
-#   Commit statuses: Read and write, Checks: Read and write.
+#   Commit statuses: Read and write.
 apiVersion: cd.patrol.example/v1alpha1
 kind: SCMProvider
 metadata:

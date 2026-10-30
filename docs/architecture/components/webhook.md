@@ -1,7 +1,10 @@
 # Component: `internal/webhook`
 
-Status: implemented as a library with an HTTP handler; not yet mounted by `patrol-server`
-(`internal/apiserver` wires it). Parity areas: `docs/parity/areas/03-repositories-clusters-webhooks.md`
+Status: implemented. `patrol-server` mounts the handler at `/api/webhook` and
+`/api/webhook/{provider...}` (`internal/server/server_api.go` builds it,
+`internal/server/server_routes.go` adds the routes, unauthenticated and hidden from
+OpenAPI); the ApplicationSet controller can serve the same handler on its optional
+`--webhook-addr` listener. Parity areas: `docs/parity/areas/03-repositories-clusters-webhooks.md`
 (REPO-114..REPO-131) and `06-applicationset.md` (ASET-104..ASET-107). Threat model: T9
 (webhook spoofing), T10 (replay and flood).
 
@@ -33,7 +36,7 @@ delays a refresh.
 Out of scope: parsing `patrol-cm`/`patrol-secret` (`internal/settings`), signature
 algorithms and payload parsing (`pkg/scm/<provider>`), generator evaluation
 (`internal/appset`, consumed through `GeneratorEvaluator`), consuming the annotations
-(controller, ApplicationSet controller), mounting and TLS (`internal/apiserver`).
+(controller, ApplicationSet controller), mounting and TLS (`internal/server`).
 
 ## Public API
 
@@ -382,6 +385,8 @@ ASET-104..ASET-107. Status: `docs/parity/status/webhook.yaml`.
 1. **One endpoint for Applications and ApplicationSets.** Upstream serves the ApplicationSet
    webhook from the ApplicationSet controller (`:7000/api/webhook`). Patrol's
    `patrol-server /api/webhook` refreshes both, so one SCM webhook suffices (ASET-104).
+   The ApplicationSet controller serves the same handler only when `--webhook-addr` is set
+   (chart `appsetController.webhook.enabled`, off by default).
 2. **ApplicationSet events from every provider.** Upstream's ApplicationSet webhook handles
    GitHub, GitLab and Azure DevOps only; Patrol also refreshes Git generators on Gogs,
    Gitea, Bitbucket Cloud and Bitbucket Server pushes, GitLab tag pushes, and Pull Request
@@ -413,8 +418,9 @@ ASET-104..ASET-107. Status: `docs/parity/status/webhook.yaml`.
     merge patch (and can downgrade a hard refresh requested concurrently); Patrol includes
     the `resourceVersion` read and retries real conflicts. Retries also cover 429 and
     server timeouts.
-12. Matrix evaluation needs `internal/appset` to provide the `GeneratorEvaluator`; until it
-    is wired, templated second children match any value (over-approximation).
+12. Matrix evaluation uses the `GeneratorEvaluator` of `internal/appset`, which both
+    `patrol-server` and the ApplicationSet controller's listener pass in; a handler built
+    without one matches templated second children with any value (over-approximation).
 13. **Payload limit clamped to 25 MiB.** Upstream applies `webhook.maxPayloadSizeMB`
     (default 50 MB) as is. Every `pkg/scm` verifier rejects bodies over 25 MiB (GitHub's
     own delivery cap), so Patrol clamps the setting: the default and any value above 25

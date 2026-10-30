@@ -1,8 +1,8 @@
 # internal/webhook (SCM and registry webhook ingestion). See
-# docs/architecture/components/webhook.md. The handler is tested through ServeHTTP with fake
-# and envtest API servers but is not yet mounted by patrol-server (internal/apiserver), so
-# endpoint features are `implemented`, not `verified`. Settings parsing of the same keys is
-# tracked in settings.yaml.
+# docs/architecture/components/webhook.md. patrol-server mounts the handler at /api/webhook
+# (internal/server/server_routes.go). It is tested through ServeHTTP with fake and envtest
+# API servers; endpoint features are recorded as `implemented`, not `verified`. Settings
+# parsing of the same keys is tracked in settings.yaml.
 
 REPO-114:
   status: implemented
