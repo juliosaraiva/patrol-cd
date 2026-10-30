@@ -155,10 +155,12 @@ DIFF-078:
   tests:
     - internal/compare/envtest_test.go:TestEnvOrphanedResources
     - internal/controller/app/liveevents_test.go:TestRefreshOrphanMonitors
+    - internal/controller/app/reconciler_test.go:TestApplicationExists
     - internal/controller/integration/orphans_test.go:TestOrphanedResourcesRefresh
   notes: >-
     Orphans from the destination namespace's top-level resources (not managed, permitted, not
-    excepted, not attributed to an existing Application) with descendants;
+    excepted, not attributed to an existing Application: an object tracked by an Application
+    that does not exist is an orphan, as upstream) with descendants;
     OrphanedResourceWarning when warn is true. A change of an unattributed namespaced object
     gives the orphan-monitoring Applications of its namespace and cluster a tree-only refresh;
     patrol_app_orphaned_resources_count is set after each tree build (OPS-073).

@@ -405,7 +405,8 @@ func (e *env) startController(opts ...controllerOption) *controller {
 	cmp, err := compare.New(compare.Deps{
 		RepoServer: e.repo, Repositories: fakeRepositories{}, Settings: ss,
 		Clusters: core.LookupClusterResolver{Lookup: lookup}, LiveState: live,
-		ControlPlaneNamespace: e.ns, PersistResourceHealth: true, Registerer: reg, Logger: e.log,
+		ControlPlaneNamespace: e.ns, ApplicationExists: app.ApplicationExists(mgr.GetClient(), e.ns),
+		PersistResourceHealth: true, Registerer: reg, Logger: e.log,
 	})
 	require.NoError(e.t, err)
 	events := &recorder{}

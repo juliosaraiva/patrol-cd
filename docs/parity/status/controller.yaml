@@ -272,6 +272,8 @@ OPS-073:
     - internal/controller/core/metrics_test.go:TestOrphanedResourcesMetricConcurrent
     - internal/controller/app/reconciler_test.go:TestReconcileForgetsOrphanedSeries
     - internal/controller/app/specerror_test.go:TestSpecErrorClearsTreeState
+    - internal/controller/app/specerror_test.go:TestTreeRefreshOrphanedSeries
+    - internal/controller/app/specerror_test.go:TestComparisonWithoutTreeKeepsOrphanedSeries
     - internal/controller/integration/orphans_test.go:TestOrphanedResourcesRefresh
   notes: >-
     patrol_app_orphaned_resources_count{namespace,name,project}, set after every tree build

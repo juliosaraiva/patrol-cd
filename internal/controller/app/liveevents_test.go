@@ -373,6 +373,7 @@ func TestRefreshOrphanMonitors(t *testing.T) {
 		app("patrol", "othercluster", "watch", server("https://other", "web")),
 		app("patrol", "otherns", "watch", server(testServer, "db")),
 		app("patrol", "unknown", "missing", server(testServer, "web")),
+		app("patrol", "lost", "watch", server("https://unknown", "web")), // no such cluster
 		app("team", "outside", "watch", server(testServer, "web")),
 		app("patrol", "self", "watch", server(testServer, "patrol")),
 		app("patrol", "peer", "watch", server(testServer, "patrol")),

@@ -88,6 +88,21 @@ func TestOrphanedResourcesRefresh(t *testing.T) {
 		assertGaugeProjects(t, ctl.registry, e.ns, mon.Name, step.want)
 	}
 
+	// An object tracked by an Application that does not exist is an orphan, unlike the objects
+	// of plain. Its event is attributed to the missing Application, so nothing refreshes the
+	// monitors (as upstream), and the live-state cache sees it asynchronously: refresh until a
+	// comparison has it.
+	ghost := configMap("ghost", nil, map[string]string{v1alpha1.AnnotationKeyTrackingID: "gone-app:/ConfigMap:" + e.dest + "/ghost"})
+	_, err = e.dyn.Resource(gvrConfigMap).Namespace(e.dest).Create(e.ctx, ghost, metav1.CreateOptions{})
+	require.NoError(t, err)
+	for deadline := time.Now().Add(waitTimeout); ; time.Sleep(5 * pollEvery) {
+		e.refresh(mon, v1alpha1.RefreshTypeNormal)
+		if v, ok := gaugeValue(t, ctl.registry, e.ns, mon.Name); ok && v == 1 {
+			break
+		}
+		require.True(t, time.Now().Before(deadline), "the object of the missing Application never counted as an orphan")
+	}
+
 	// Deleting the Application removes its series.
 	require.NoError(t, e.c.Delete(e.ctx, e.getApp(mon)))
 	require.Eventually(t, func() bool {

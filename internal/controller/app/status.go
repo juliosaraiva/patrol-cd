@@ -49,8 +49,8 @@ func (a *appRun) refreshApp(ctx context.Context) (reconcile.Result, error) {
 	key := client.ObjectKeyFromObject(a.app)
 	requested, tree, wait := a.r.refresh.takeAll(key)
 	rec := a.st.Reconciliation()
-	d := needRefresh(a.app, rec, requested, a.now())
-	if d.level == core.CompareNone {
+	// noComparison ends a refresh that needs no comparison: a pending tree-only refresh runs.
+	noComparison := func() (reconcile.Result, error) {
 		out := a.requeue(a.app.Status.ReconciledAt, rec, wait)
 		if tree {
 			res, err := a.refreshTree(ctx)
@@ -59,6 +59,10 @@ func (a *appRun) refreshApp(ctx context.Context) (reconcile.Result, error) {
 			}
 		}
 		return out, nil
+	}
+	d := needRefresh(a.app, rec, requested, a.now())
+	if d.level == core.CompareNone {
+		return noComparison()
 	}
 	// The cache may not show this controller's latest status write yet; decide again on the
 	// object read from the API server, so a stale status neither repeats a comparison nor
@@ -74,7 +78,7 @@ func (a *appRun) refreshApp(ctx context.Context) (reconcile.Result, error) {
 	}
 	a.app = fresh
 	if d = needRefresh(a.app, rec, requested, a.now()); d.level == core.CompareNone {
-		return a.requeue(a.app.Status.ReconciledAt, rec, wait), nil
+		return noComparison()
 	}
 	start := a.now()
 	a.log.Info("refreshing application status", "reason", d.reason, "level", d.level.String(), "hard", d.hard)

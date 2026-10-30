@@ -356,6 +356,7 @@ func RunController(ctx context.Context, cfg ControllerConfig) error {
 	cmpMgr, err := compare.New(compare.Deps{
 		RepoServer: repoClient, Repositories: resolver, Settings: settingsMgr, Clusters: registry,
 		LiveState: live, ServerSideDiff: ssd, ControlPlaneNamespace: cfg.Namespace,
+		ApplicationExists:     app.ApplicationExists(mgr.GetClient(), cfg.Namespace),
 		ServerSideDiffEnabled: cp.serverSideDiff, PersistResourceHealth: cp.persistResourceHealth,
 		RepoErrorGracePeriod: cp.repoErrorGrace, GPGEnabled: !gpgDisabled(), JQTimeout: cp.jqTimeout,
 		Registerer: reg, Logger: log,

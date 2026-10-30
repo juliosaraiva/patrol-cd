@@ -2,6 +2,7 @@ package app
 
 import (
 	"context"
+	"errors"
 	"testing"
 
 	"github.com/prometheus/client_golang/prometheus"
@@ -28,6 +29,26 @@ func TestIndexKeys(t *testing.T) {
 	proj.Spec.OrphanedResources = &v1alpha1.OrphanedResourcesMonitorSettings{}
 	assert.Equal(t, []string{orphanMonitoringKey}, orphanMonitoringKeys(proj), "an empty orphanedResources enables monitoring")
 	assert.Nil(t, orphanMonitoringKeys(app), "not an AppProject")
+}
+
+// An instance name counts as an existing Application unless the read says it does not exist.
+func TestApplicationExists(t *testing.T) {
+	t.Parallel()
+	inControlPlane := &v1alpha1.Application{ObjectMeta: metav1.ObjectMeta{Namespace: "patrol", Name: "a"}}
+	inTeam := &v1alpha1.Application{ObjectMeta: metav1.ObjectMeta{Namespace: "team", Name: "b"}}
+	exists := ApplicationExists(liveEventsReconciler(t, nil, inControlPlane, inTeam).c, "patrol")
+	assert.True(t, exists("a"), "control-plane namespace")
+	assert.True(t, exists("team_b"), "another namespace")
+	assert.False(t, exists("gone"))
+	assert.False(t, exists("team_a"), "the name in another namespace")
+	assert.True(t, ApplicationExists(failingReader{}, "patrol")("a"), "a failed read is not a missing Application")
+}
+
+// failingReader fails every read.
+type failingReader struct{ client.Reader }
+
+func (failingReader) Get(context.Context, client.ObjectKey, client.Object, ...client.GetOption) error {
+	return errors.New("cache not ready")
 }
 
 // An Application this replica stops processing loses its orphaned-resources series: its

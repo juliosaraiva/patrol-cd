@@ -97,7 +97,9 @@ persisted; falls back to a recent comparison after a restart). The changed Appli
 itself (same UID: an Application of that name on a destination cluster is another object) and
 Applications outside the allowed namespaces are skipped. A namespaced object
 attributed to no Application gives a tree-only refresh to the Applications that monitor
-orphaned resources in its namespace on the same cluster (APP-085, DIFF-078): two in-memory
+orphaned resources in its namespace on the same cluster (APP-085, DIFF-078; an object tracked
+by an Application that does not exist counts as an orphan in a tree build, as upstream, but its
+event is attributed and refreshes no monitor): two in-memory
 field indexes (AppProjects with `spec.orphanedResources`, Applications by destination
 namespace) find them without API calls, and Applications of other shards are skipped. The
 handler runs on the cache's event goroutine, so it reads only the informer cache and the
