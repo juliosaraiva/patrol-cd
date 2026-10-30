@@ -102,6 +102,32 @@ single-source entry → 412; then the in-progress check and an Operation with
 `spec.rollback.id`, `spec.sync{prune, dryRun, syncStrategy.apply, syncOptions (spec)}`, no
 retry; event `initiated rollback to <id>`.
 
+### Resource health from the tree (DIFF-064, APP-031)
+
+With `controller.resource.health.persist=false` (the default) the controller stores no
+`status.resources[].health` and sets `status.resourceHealthSource: appTree`; the health lives in
+the controller's resource tree. `withTreeHealth` (`health.go`, upstream
+`inferResourcesStatusHealth`) fills it into a copy of the Application for
+`GET /applications/{name}` (with and without `refresh`), the `ADDED`/`MODIFIED` events of
+`GET /stream/applications`, and the Application of the sync, rollback and terminate responses. `GET
+/applications` does not fill it (upstream List).
+
+- Only Applications with `resourceHealthSource: appTree` and at least one resource are read;
+  inline health is returned as stored.
+- One `TreeClient.Tree` call per response or event, bounded by
+  `ResourceDeps.ResourceHealthTimeout` (5 s). Each resource gets the health of the managed tree
+  node with its group, kind, namespace and name; a node without health, UID, resourceVersion
+  and createdAt gives `Missing` / `Resource has not been created`; no node gives nil. Orphaned
+  nodes do not count.
+- A failed read leaves the health nil and the response is served anyway. The tree is read
+  directly, never through `withAppState`, so a controller without state for the Application
+  never triggers a refresh.
+- A watch stream whose read failed without an answer from the controller (transport error,
+  timeout, routing error) stops reading for 30 s; an answer such as "not compared yet" concerns
+  one Application and does not pause.
+- The fill never writes the Application and never modifies its argument (watch events share
+  one object between subscribers).
+
 ## Wiring (`Deps`)
 
 | Field | Production value |
@@ -168,12 +194,15 @@ retry; event `initiated rollback to <id>`.
 | `UpdateSpec` copies labels/annotations/finalizers of its first read on every retry (`updateApp`) | `/spec` writes only the spec | concurrent cascade delete must keep its finalizer (APP-051) |
 | Upsert after a lost create race checks `update` only on the new object | project change rules applied to the winning Application | TEN-043 / APP-055 |
 | JSON patch `copy` accumulation unlimited, no operation cap | 1000 operations, 1 MiB copied, 4 MiB result (413) | memory exhaustion from a sub-KiB body |
+| Resource health read from the Redis tree cache | read from the controller tree API, bounded (5 s) | no shared cache; the controller owns the tree |
+| Sync/Rollback fill a copy that `SetAppOperation`'s result replaces, so success responses carry no resource health; Terminate returns no Application | the Application of the sync, rollback and terminate responses carries it | responses are `{application, operation}` (ADR-0011), and the UI writes their Application into its detail cache |
+| Every watch event is filled | `DELETED` events are not | the controller drops the state of deleted Applications |
+| Watch reads the cache for every event | a stream stops reading for 30 s after the controller did not answer | a remote call per event must not stall a stream |
 
 ## Gaps
 
 - Not wired into `cmd/patrolcd` (server assembly, RBAC manifests with the impersonate verb).
-- Resource health inference from the cached tree (`resourceHealthSource: appTree`) and the
-  project read lock around create/update (upstream `projectLock`) are not implemented.
+- The project read lock around create/update (upstream `projectLock`) is not implemented.
 - Resource links of managed resources need the `LiveResources` implementation of the resource
   routes task; resource-level routes (tree, managed resources, server-side diff, events, live
   resources, actions, logs, terminal) are that task's.
@@ -183,7 +212,7 @@ retry; event `initiated rollback to <id>`.
 
 Recorded in [`docs/parity/status/api-applications.yaml`](../../parity/status/api-applications.yaml):
 implemented APP-049..054, APP-056, TEN-036, TEN-043, TEN-069, TEN-081, SYNC-002, SYNC-005,
-SYNC-047, API-017..020, API-025; in-progress (API part done) APP-067, APP-069, APP-080, APP-102,
+SYNC-047, API-017..020, API-025, DIFF-064 (alias APP-031; API part); in-progress (API part done) APP-067, APP-069, APP-080, APP-102,
 APP-141, TEN-010, TEN-040, TEN-068, SYNC-001, SYNC-003, SYNC-004, SYNC-011..014, SYNC-016,
 SYNC-078, SYNC-087, SYNC-088, SYNC-091, API-026, API-027.
 
@@ -238,3 +267,33 @@ stream.
 Known: `internal/apiserver` `TestOpenAPIUpToDate` fails with `api/openapi/openapi.json is
 stale` until the orchestrator regenerates the document with the new services (expected; the
 document generates without errors).
+
+Resource health from the tree (issue #11), run on 2026-10-29 (macOS arm64, Go 1.27.3, envtest
+kube-apiserver 1.36.0); the exact commands and results, with the later runs and the review's
+mutation checks, are V-0044 in [`docs/verification/log.md`](../../verification/log.md):
+
+```bash
+go vet ./internal/apiserver/services/applications/ ./internal/cli/app/ ./internal/compare/   # ok
+golangci-lint run ./internal/apiserver/services/applications/... ./internal/cli/app/... ./internal/compare/...   # 0 issues
+go test -race -count=1 -run 'TestTreeHealthByKey|TestWithTreeHealth|TestPausesTreeHealth' \
+  ./internal/apiserver/services/applications/                                 # ok
+KUBEBUILDER_ASSETS=<envtest 1.36.0 assets> PATROL_REQUIRE_ENVTEST=1 \
+  go test -race -count=1 ./internal/apiserver/services/applications/          # ok (53.9 s)
+KUBEBUILDER_ASSETS=<envtest 1.36.0 assets> PATROL_REQUIRE_ENVTEST=1 \
+  go test -race -count=1 ./internal/cli/app/                                  # ok (41.1 s)
+KUBEBUILDER_ASSETS=<envtest 1.36.0 assets> PATROL_REQUIRE_ENVTEST=1 \
+  go test -race -count=1 ./internal/compare/                                  # ok (6.7 s)
+go run ./internal/apiserver/cmd/genopenapi -check                             # exit 0 (no route change)
+go run ./hack/parity && go run ./hack/parity -check                           # exit 0
+```
+
+Without the change (`go test -overlay` with the previous `crud.go`, `watch.go` and
+`operations.go`), `TestApplicationResourceHealthFromTree` fails in get, refresh, watch, sync,
+rollback, unavailable, slow controller and watch deleted (list and inline pass: they guard
+upstream List and inline health), and `TestE2EAppResourceHealthFromTree` fails (empty HEALTH
+column, then `app wait --health --resource :ConfigMap:cfg` times out after 15 s). With the
+watch pause disabled the slow-controller subtest counted 6 tree reads instead of 1 (its first
+version; the later mutants of the pause are in V-0044); with a fill
+that writes into its argument `TestWithTreeHealth` fails and `-race` reports a data race in the
+watch subtest; with `DELETED` events filled too, the watch deleted subtest fails (the event
+carries the tree's health and the tree is read once more).

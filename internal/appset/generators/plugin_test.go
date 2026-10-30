@@ -6,6 +6,7 @@ import (
 	"io"
 	"net/http"
 	"net/http/httptest"
+	"net/url"
 	"strings"
 	"sync"
 	"testing"
@@ -25,7 +26,8 @@ type pluginServer struct {
 	bodies   []string
 	status   int
 	body     string
-	delay    time.Duration
+	// block, when set, keeps every request unanswered until it is closed or the client gives up.
+	block chan struct{}
 }
 
 func (s *pluginServer) ServeHTTP(w http.ResponseWriter, r *http.Request) {
@@ -33,10 +35,14 @@ func (s *pluginServer) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	s.mu.Lock()
 	s.requests = append(s.requests, r)
 	s.bodies = append(s.bodies, string(b))
-	status, body, delay := s.status, s.body, s.delay
+	status, body, block := s.status, s.body, s.block
 	s.mu.Unlock()
-	if delay > 0 {
-		time.Sleep(delay)
+	if block != nil {
+		select {
+		case <-block:
+		case <-r.Context().Done():
+		}
+		return
 	}
 	if status == 0 {
 		status = http.StatusOK
@@ -160,13 +166,32 @@ func TestPluginGeneratorFailures(t *testing.T) {
 	})
 	t.Run("timeout", func(t *testing.T) {
 		t.Parallel()
-		ps := &pluginServer{body: `{}`, delay: 2 * time.Second}
+		// The plugin never answers: only the client's timeout (requestTimeout, 1 s) ends the
+		// request. Nothing is timed but the guard, half the default timeout, which a scheduling
+		// delay does not reach and which fires if requestTimeout is ignored (issue #224).
+		ps := &pluginServer{block: make(chan struct{})}
 		srv := httptest.NewServer(ps)
 		t.Cleanup(srv.Close)
-		start := time.Now()
-		_, err := pluginGenerator(t, srv, map[string]string{"requestTimeout": "1"}, PluginConfig{}).GenerateParams(context.Background(), pluginGen(nil), appSet(false))
-		require.Error(t, err)
-		assert.Less(t, time.Since(start), 1900*time.Millisecond)
+		t.Cleanup(func() { close(ps.block) }) // runs before srv.Close, which waits for the handler
+		g := pluginGenerator(t, srv, map[string]string{"requestTimeout": "1"}, PluginConfig{})
+		errc := make(chan error, 1)
+		go func() {
+			_, err := g.GenerateParams(context.Background(), pluginGen(nil), appSet(false))
+			errc <- err
+		}()
+		var err error
+		select {
+		case err = <-errc:
+		case <-time.After(DefaultPluginRequestTimeout / 2):
+			t.Fatal("requestTimeout 1 was not enforced: the request outlived half the default timeout")
+		}
+		var urlErr *url.Error
+		require.ErrorAs(t, err, &urlErr)
+		assert.True(t, urlErr.Timeout(), "the client timeout ended the request: %v", err)
+		assert.Contains(t, err.Error(), "Client.Timeout exceeded")
+		ps.mu.Lock()
+		assert.LessOrEqual(t, len(ps.requests), 1, "no retry")
+		ps.mu.Unlock()
 	})
 	t.Run("invalid timeout", func(t *testing.T) {
 		t.Parallel()
@@ -183,4 +208,47 @@ func TestPluginGeneratorFailures(t *testing.T) {
 		require.NoError(t, err)
 		assert.Empty(t, got)
 	})
+}
+
+// TestPluginRequestTimeout pins the client a plugin call uses: the ConfigMap's requestTimeout in
+// whole seconds (absent, zero or negative: the default) on a copy of the configured base client.
+func TestPluginRequestTimeout(t *testing.T) {
+	t.Parallel()
+	srv := httptest.NewServer(&pluginServer{})
+	t.Cleanup(srv.Close)
+	for name, tc := range map[string]struct {
+		requestTimeout *string
+		base           *http.Client
+		want           time.Duration
+		wantErr        string
+	}{
+		"absent":              {want: DefaultPluginRequestTimeout},
+		"one second":          {requestTimeout: ptr.To("1"), want: time.Second},
+		"45 seconds":          {requestTimeout: ptr.To("45"), want: 45 * time.Second},
+		"zero":                {requestTimeout: ptr.To("0"), want: DefaultPluginRequestTimeout},
+		"negative":            {requestTimeout: ptr.To("-3"), want: DefaultPluginRequestTimeout},
+		"not a number":        {requestTimeout: ptr.To("soon"), wantErr: "error set requestTimeout"},
+		"base client":         {requestTimeout: ptr.To("1"), base: &http.Client{Timeout: 5 * time.Second}, want: time.Second},
+		"base client, absent": {base: &http.Client{Timeout: 5 * time.Second}, want: DefaultPluginRequestTimeout},
+	} {
+		t.Run(name, func(t *testing.T) {
+			t.Parallel()
+			cm := map[string]string{}
+			if tc.requestTimeout != nil {
+				cm["requestTimeout"] = *tc.requestTimeout
+			}
+			g := pluginGenerator(t, srv, cm, PluginConfig{HTTPClient: tc.base})
+			call, err := g.client(context.Background(), "plugin")
+			if tc.wantErr != "" {
+				require.ErrorContains(t, err, tc.wantErr)
+				return
+			}
+			require.NoError(t, err)
+			assert.Equal(t, tc.want, call.client.Timeout)
+			if tc.base != nil {
+				assert.NotSame(t, tc.base, call.client, "the base client is copied")
+				assert.Equal(t, 5*time.Second, tc.base.Timeout, "the base client keeps its own timeout")
+			}
+		})
+	}
 }

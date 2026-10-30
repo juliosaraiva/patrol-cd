@@ -5,7 +5,7 @@
 # internal/diff, internal/lua, internal/cache) together with this package are implemented.
 
 APP-031:
-  status: in-progress
+  status: implemented
   impl: [internal/settings/params.go, internal/settings/params_table.go]
   tests:
     - internal/settings/params_test.go:TestParamKeysMatchUpstream
@@ -14,9 +14,10 @@ APP-031:
     - internal/settings/params_test.go:TestResolveParamsPrecedence
     - internal/settings/params_test.go:TestResolveParamsInvalidValues
   notes: >-
-    Settings part only: patrol-cmd-params-cm key(s) controller.resource.health.persist with
-    upstream env var (ARGOCD_ renamed PATROL_), flag name, default, bounds and fallback warnings;
-    the consuming component applies the semantics.
+    Settings part: patrol-cmd-params-cm key(s) controller.resource.health.persist with
+    upstream env var (ARGOCD_ renamed PATROL_), flag name, default, bounds and fallback warnings.
+    Consumed by the controller (internal/server/controller.go, compare.Deps.PersistResourceHealth;
+    compare.yaml) and the API server's tree fill-in (api-applications.yaml).
 
 APP-040:
   status: in-progress
@@ -562,7 +563,7 @@ DIFF-025:
     ignoreResourceStatusField (all/crd/none/off/false; unknown warned with the upstream message).
 
 DIFF-064:
-  status: in-progress
+  status: implemented
   impl: [internal/settings/params.go, internal/settings/params_table.go]
   tests:
     - internal/settings/params_test.go:TestParamKeysMatchUpstream
@@ -571,9 +572,10 @@ DIFF-064:
     - internal/settings/params_test.go:TestResolveParamsPrecedence
     - internal/settings/params_test.go:TestResolveParamsInvalidValues
   notes: >-
-    Settings part only: patrol-cmd-params-cm key(s) controller.resource.health.persist with
-    upstream env var (ARGOCD_ renamed PATROL_), flag name, default, bounds and fallback warnings;
-    the consuming component applies the semantics.
+    Settings part: patrol-cmd-params-cm key(s) controller.resource.health.persist with
+    upstream env var (ARGOCD_ renamed PATROL_), flag name, default, bounds and fallback warnings.
+    Consumed by the controller (internal/server/controller.go, compare.Deps.PersistResourceHealth;
+    compare.yaml) and the API server's tree fill-in (api-applications.yaml).
 
 DIFF-067:
   status: in-progress

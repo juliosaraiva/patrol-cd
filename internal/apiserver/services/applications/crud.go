@@ -189,7 +189,9 @@ func (s *Service) listApplications(ctx context.Context, q *pubapi.ApplicationQue
 	return out, nil
 }
 
-// getApplication serves GET /applications/{name}, with an optional refresh.
+// getApplication serves GET /applications/{name}, with an optional refresh. Resource health
+// kept in the controller's resource tree is filled in (upstream Get, withTreeHealth); the
+// list route does not fill it (upstream List).
 func (s *Service) getApplication(ctx context.Context, req *pubapi.ApplicationGetRequest) (*v1alpha1.Application, error) {
 	projects := req.Project
 	if len(projects) == 0 {
@@ -207,13 +209,19 @@ func (s *Service) getApplication(ctx context.Context, req *pubapi.ApplicationGet
 		return nil, err
 	}
 	if req.Refresh == "" {
-		return app, nil
+		out, _ := s.withTreeHealth(ctx, app)
+		return out, nil
 	}
 	refreshType := v1alpha1.RefreshTypeNormal
 	if req.Refresh == string(v1alpha1.RefreshTypeHard) {
 		refreshType = v1alpha1.RefreshTypeHard
 	}
-	return s.refresh(ctx, app, p, refreshType)
+	refreshed, err := s.refresh(ctx, app, p, refreshType)
+	if err != nil {
+		return nil, err
+	}
+	out, _ := s.withTreeHealth(ctx, refreshed)
+	return out, nil
 }
 
 // refresh sets the refresh annotation (and, for hydrator Applications, the hydrate

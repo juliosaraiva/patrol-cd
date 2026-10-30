@@ -105,14 +105,16 @@ DIFF-063:
     - internal/compare/envtest_test.go:TestEnvHooksExcludedFromHealth
 
 DIFF-064:
-  status: in-progress
+  status: implemented
   impl: [internal/compare/status.go, internal/compare/compare.go]
   tests:
     - internal/compare/unit_test.go:TestApplicationHealth
+    - internal/compare/health_source_test.go:TestEnvResourceHealthSource
   notes: >-
     Health written to status.resources only with PersistResourceHealth;
     ResourceHealthSource inline vs appTree; tree nodes carry health. The API server's fill-in
-    from the tree is not implemented here.
+    from the tree is in api-applications.yaml. Switching modes (converging on the next
+    reconcile) has no dedicated test.
 
 DIFF-066:
   status: implemented
@@ -340,10 +342,11 @@ APP-030:
     condition (Patrol addition).
 
 APP-031:
-  status: in-progress
+  status: implemented
   impl: [internal/compare/status.go]
   tests:
     - internal/compare/unit_test.go:TestApplicationHealth
+    - internal/compare/health_source_test.go:TestEnvResourceHealthSource
 
 APP-034:
   status: in-progress
