@@ -271,6 +271,7 @@ OPS-073:
     - internal/controller/core/metrics_test.go:TestOrphanedResourcesMetric
     - internal/controller/core/metrics_test.go:TestOrphanedResourcesMetricConcurrent
     - internal/controller/app/reconciler_test.go:TestReconcileForgetsOrphanedSeries
+    - internal/controller/app/specerror_test.go:TestSpecErrorClearsTreeState
     - internal/controller/integration/orphans_test.go:TestOrphanedResourcesRefresh
   notes: >-
     patrol_app_orphaned_resources_count{namespace,name,project}, set after every tree build
@@ -278,7 +279,8 @@ OPS-073:
     Not emitted for Applications whose project does not monitor orphaned resources (upstream
     sets 0). Beyond upstream, a project change moves the series (upstream keeps the old
     project's series until the optional metrics cache expiration), and the series is removed
-    when the Application is deleted, when its spec is invalid (no comparison), and when this
+    when the Application is deleted, when its spec is invalid (no comparison; the stored tree
+    is then empty, as upstream, so a tree-only refresh compares again), and when this
     replica stops processing it (namespace no longer allowed, cluster of another shard); an
     Application with skip-reconcile keeps it, as it keeps the rest of its state.
 

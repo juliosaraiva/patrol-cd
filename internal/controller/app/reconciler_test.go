@@ -38,22 +38,26 @@ func TestReconcileForgetsOrphanedSeries(t *testing.T) {
 	for _, tc := range []struct {
 		name        string
 		namespace   string
+		server      string
 		annotations map[string]string
 		ownsCluster func(*v1alpha1.Cluster) bool
 		want        int
 	}{
-		{name: "namespace not allowed", namespace: "team"},
-		{name: "cluster of another shard", namespace: "patrol", ownsCluster: func(*v1alpha1.Cluster) bool { return false }},
-		{name: "skip-reconcile", namespace: "patrol", annotations: map[string]string{v1alpha1.AnnotationKeySkipReconcile: "true"},
+		{name: "namespace not allowed", namespace: "team", server: testServer},
+		{name: "registered cluster of another shard", namespace: "patrol", server: testServer, ownsCluster: func(c *v1alpha1.Cluster) bool { return c == nil }},
+		// An unresolvable destination belongs to shard 0, here another shard's.
+		{name: "unresolvable destination of another shard", namespace: "patrol", server: "https://unknown", ownsCluster: func(c *v1alpha1.Cluster) bool { return c != nil }},
+		{name: "skip-reconcile", namespace: "patrol", server: testServer, annotations: map[string]string{v1alpha1.AnnotationKeySkipReconcile: "true"},
 			ownsCluster: func(*v1alpha1.Cluster) bool { return false }, want: 1},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			t.Parallel()
 			app := &v1alpha1.Application{
 				ObjectMeta: metav1.ObjectMeta{Namespace: tc.namespace, Name: "a", Annotations: tc.annotations},
-				Spec:       v1alpha1.ApplicationSpec{Project: "watch", Destination: v1alpha1.ApplicationDestination{Server: testServer, Namespace: "web"}},
+				Spec:       v1alpha1.ApplicationSpec{Project: "watch", Destination: v1alpha1.ApplicationDestination{Server: tc.server, Namespace: "web"}},
 			}
-			r := liveEventsReconciler(t, nil, app)
+			cluster := &v1alpha1.Cluster{ObjectMeta: metav1.ObjectMeta{Name: "k8s", Namespace: "patrol"}, Spec: v1alpha1.ClusterSpec{Server: testServer, Name: "k8s"}}
+			r := liveEventsReconciler(t, nil, app, cluster)
 			reg := prometheus.NewRegistry()
 			m, err := core.NewMetrics(reg)
 			require.NoError(t, err)

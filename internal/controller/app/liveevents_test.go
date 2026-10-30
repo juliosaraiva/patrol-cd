@@ -179,6 +179,13 @@ func TestOnResourceUpdated(t *testing.T) {
 			want: map[types.NamespacedName]requested{}},
 		{name: "tracked object with an inferred owner", newRes: pvc("2"), oldRes: pvc("1"),
 			want: map[types.NamespacedName]requested{appKey("a"): treeReq}},
+		// Old and new object of one Application: a root on either side compares it.
+		{name: "descendant becomes a root", newRes: cm("a", "2"),
+			oldRes: liveRes("", "ConfigMap", "web", "cm", &compare.ResourceInfo{AppName: "a", ManifestHash: "1"}, ownedBy("apps/v1", "Deployment", "da")),
+			want:   map[types.NamespacedName]requested{appKey("a"): recentReq}},
+		{name: "root becomes a descendant", newRes: liveRes("", "ConfigMap", "web", "cm", &compare.ResourceInfo{AppName: "a", ManifestHash: "2"}, ownedBy("apps/v1", "Deployment", "da")),
+			oldRes: cm("a", "1"),
+			want:   map[types.NamespacedName]requested{appKey("a"): recentReq}},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			t.Parallel()
@@ -415,6 +422,11 @@ func TestRefreshOrphanMonitors(t *testing.T) {
 			want: map[types.NamespacedName]requested{appKey("peer"): treeReq, appKey("self"): treeReq}},
 		{name: "no project monitors orphaned resources", noMonitors: true, newRes: unmanaged(""),
 			want: map[types.NamespacedName]requested{}},
+		// Attributed to an Application, if a skipped one: not an orphan.
+		{name: "object of an application outside the allowed namespaces",
+			newRes: liveRes("", "ConfigMap", "web", "theirs", &compare.ResourceInfo{AppName: "team_x", ManifestHash: "2"}),
+			oldRes: liveRes("", "ConfigMap", "web", "theirs", &compare.ResourceInfo{AppName: "team_x", ManifestHash: "1"}),
+			want:   map[types.NamespacedName]requested{}},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			t.Parallel()

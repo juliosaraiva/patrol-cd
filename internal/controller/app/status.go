@@ -122,9 +122,10 @@ func (a *appRun) compareAndPersist(ctx context.Context, d refreshDecision, rec s
 		msgs = append(msgs, i.Type+": "+i.Message)
 	}
 	if len(issues) > 0 {
-		// Spec errors: no comparison or sync; sync and health are Unknown (APP-033/036), and
-		// no orphaned resources are counted.
+		// Spec errors: no comparison or sync; sync and health are Unknown (APP-033/036), the
+		// tree is empty and no orphaned resources are counted.
 		a.log.Info("application spec is invalid", "issues", strings.Join(msgs, "; "))
+		a.r.state.set(client.ObjectKeyFromObject(app), AppState{Tree: &compare.ApplicationTree{}, ComparedAt: a.now(), SpecInvalid: true})
 		a.r.cfg.Metrics.ForgetApplication(app.Namespace, app.Name)
 		err := a.persist(ctx, d, func(s *v1alpha1.ApplicationStatus, gen int64, now metav1.Time) {
 			s.Sync.Status = v1alpha1.SyncStatusCodeUnknown

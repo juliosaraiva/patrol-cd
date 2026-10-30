@@ -27,6 +27,10 @@ type AppState struct {
 	Managed []compare.ManagedResource
 	// ComparedAt is when the comparison or tree refresh completed.
 	ComparedAt time.Time
+	// SpecInvalid: the latest refresh found spec errors and compared nothing; Tree is empty
+	// and Managed nil (upstream stores an empty tree and no managed resources), and a
+	// tree-only refresh compares again instead.
+	SpecInvalid bool
 }
 
 // TreeBuilder rebuilds an Application's tree from the managed resources of its last
@@ -84,12 +88,13 @@ func (a *appRun) storeComparison(ctx context.Context, res *compare.Result) {
 // refreshTree rebuilds the resource tree from the managed resources of the last comparison
 // (upstream comparison level "nothing": a descendant of a managed resource changed) and
 // persists the summary and the orphaned-resource condition. Without a stored comparison
-// (after a restart) it falls back to a comparison at level recent.
+// (after a restart, or when the latest refresh found spec errors) it falls back to a
+// comparison at level recent.
 func (a *appRun) refreshTree(ctx context.Context) (reconcile.Result, error) {
 	key := client.ObjectKeyFromObject(a.app)
 	prev, ok := a.r.state.get(key)
 	tb, isBuilder := a.r.cfg.Comparer.(TreeBuilder)
-	if !ok || !isBuilder || a.destErr != nil {
+	if !ok || prev.SpecInvalid || !isBuilder || a.destErr != nil {
 		a.r.refresh.RequestRefresh(key, core.CompareRecent, 0)
 		return reconcile.Result{}, nil
 	}
