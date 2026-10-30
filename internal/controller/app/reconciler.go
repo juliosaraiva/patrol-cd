@@ -276,6 +276,7 @@ func (r *Reconciler) Reconcile(ctx context.Context, req reconcile.Request) (res 
 		return reconcile.Result{}, client.IgnoreNotFound(err)
 	}
 	if !r.cfg.Namespaces().Allowed(app.Namespace) {
+		r.cfg.Metrics.ForgetApplication(app.Namespace, app.Name)
 		return reconcile.Result{}, nil
 	}
 	if core.SkipReconcile(app.Annotations) {
@@ -296,6 +297,7 @@ func (r *Reconciler) Reconcile(ctx context.Context, req reconcile.Request) (res 
 	// Sharding (ADR-0008): only the shard owning the destination processes the Application;
 	// an unresolvable destination (nil cluster) belongs to shard 0.
 	if r.cfg.OwnsCluster != nil && !r.cfg.OwnsCluster(cluster) {
+		r.cfg.Metrics.ForgetApplication(app.Namespace, app.Name)
 		return reconcile.Result{}, nil
 	}
 	log := r.log.With("application", app.QualifiedName())

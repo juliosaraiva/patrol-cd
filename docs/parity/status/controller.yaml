@@ -200,8 +200,10 @@ APP-084:
     Levels recent/latest/force-resolve plus tree-only refreshes; a spec generation not yet
     observed requests latest (upstream reacts to the specific spec differences listed). A live
     object change is logged as the refresh cause at info for a root (managed) object and at
-    debug otherwise; the attributes are named differently (comparisonLevel, group/kind/name,
-    server as the cluster key).
+    debug otherwise, including orphan-monitor refreshes (upstream logs those at info: it
+    compares orphan-monitoring Applications at level recent, Patrol refreshes their tree only);
+    the attributes are named differently (comparisonLevel, group/kind/name, server as the
+    cluster key).
 
 APP-085:
   status: implemented
@@ -216,7 +218,8 @@ APP-085:
   notes: >-
     Managed (root) resources → recent comparison; descendants → tree-only refresh. Suppression
     by ignoreResourceUpdates runs before attribution; the Applications of the old and the new
-    object are both refreshed; the changed Application object itself is skipped. A namespaced
+    object are both refreshed; the changed Application object itself (same UID, as upstream) is
+    skipped. A namespaced
     object attributed to no Application gives the orphan-monitoring Applications of its
     namespace and cluster a tree-only refresh (upstream: CompareWithRecent; the tree, summary,
     condition and gauge are the same), found through in-memory field indexes (Applications by
@@ -256,20 +259,28 @@ DIFF-037:
     resourceVersion, generation and managedFields are always ignored by the update hash. Core
     Endpoints never refresh the Application they belong to; as upstream (handleObjectUpdated),
     an Endpoints change that leaves no Application to refresh is treated like any unattributed
-    object and refreshes the orphan-monitoring Applications of its namespace. As upstream, the
-    refresh request is logged at info for a root (managed) object and at debug otherwise.
+    object and refreshes the orphan-monitoring Applications of its namespace. The refresh
+    request is logged at info for a root (managed) object and at debug otherwise; upstream also
+    logs orphan-monitor refreshes at info (it compares those Applications at level recent,
+    Patrol refreshes their tree only).
 
 OPS-073:
   status: implemented
   impl: [internal/controller/core/metrics.go, internal/controller/app/status.go, internal/controller/app/state.go, internal/controller/app/reconciler.go]
   tests:
     - internal/controller/core/metrics_test.go:TestOrphanedResourcesMetric
+    - internal/controller/core/metrics_test.go:TestOrphanedResourcesMetricConcurrent
+    - internal/controller/app/reconciler_test.go:TestReconcileForgetsOrphanedSeries
     - internal/controller/integration/orphans_test.go:TestOrphanedResourcesRefresh
   notes: >-
     patrol_app_orphaned_resources_count{namespace,name,project}, set after every tree build
-    (comparison or tree-only refresh). Not emitted for Applications whose project does not
-    monitor orphaned resources (upstream sets 0). Beyond upstream, the series is removed when
-    the Application is deleted.
+    (comparison or tree-only refresh): one series per Application, under its current project.
+    Not emitted for Applications whose project does not monitor orphaned resources (upstream
+    sets 0). Beyond upstream, a project change moves the series (upstream keeps the old
+    project's series until the optional metrics cache expiration), and the series is removed
+    when the Application is deleted, when its spec is invalid (no comparison), and when this
+    replica stops processing it (namespace no longer allowed, cluster of another shard); an
+    Application with skip-reconcile keeps it, as it keeps the rest of its state.
 
 APP-086:
   status: in-progress

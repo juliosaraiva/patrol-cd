@@ -91,7 +91,8 @@ count for none (DIFF-037). The Application whose root object (tracked, no owners
 a recent comparison; one whose descendant changed gets a tree-only refresh (tree rebuilt from
 the managed resources of the last comparison, `summary` and `OrphanedResourceWarning`
 persisted; falls back to a recent comparison after a restart). The changed Application object
-itself and Applications outside the allowed namespaces are skipped. A namespaced object
+itself (same UID: an Application of that name on a destination cluster is another object) and
+Applications outside the allowed namespaces are skipped. A namespaced object
 attributed to no Application gives a tree-only refresh to the Applications that monitor
 orphaned resources in its namespace on the same cluster (APP-085, DIFF-078): two in-memory
 field indexes (AppProjects with `spec.orphanedResources`, Applications by destination
@@ -99,7 +100,8 @@ namespace) find them without API calls, and Applications of other shards are ski
 handler runs on the cache's event goroutine, so it reads only the informer cache and the
 cluster registry. Each refresh request is logged (`requesting app refresh caused by object
 update`, object identity only): at info for a root object's change, which requests a
-comparison, and at debug for descendant and orphan changes, as upstream (OPS-061).
+comparison, and at debug for descendant and orphan changes (OPS-061; upstream logs orphan-monitor
+refreshes at info, since it compares those Applications).
 
 Watches: Applications; Operations (mapped by `spec.application`); AppProjects, Clusters and
 Repositories (Applications found through field indexes on project, destination server/name
@@ -292,8 +294,11 @@ SYNC-001, 003, 006, 013..028, 031 (deletion confirmation), 051, 052, 070, 076..0
   `OrphanedResourceWarning` and gauge are the same, only a sync status affected by such an
   object waits for the next comparison. Monitors are matched by namespace and by the event's
   cluster (upstream: namespace only).
-- **`patrol_app_orphaned_resources_count`** is not emitted for Applications whose project does
-  not monitor orphaned resources (upstream sets 0) and is removed on Application deletion.
+- **`patrol_app_orphaned_resources_count`** has one series per Application, under its current
+  project (upstream keeps an old project's series). It is not emitted for Applications whose
+  project does not monitor orphaned resources (upstream sets 0), and is removed when the
+  Application is deleted, has an invalid spec, or is no longer processed by this replica
+  (namespace no longer allowed, cluster of another shard).
 - **Repo error grace** handling is implemented but not exercised by controller tests (the
   harness runs with no grace period).
 - **Status size fallback** (APP-087) is implemented but not tested (envtest does not reach

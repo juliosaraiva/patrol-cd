@@ -6,6 +6,7 @@ import (
 	"net/http"
 	"strconv"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/prometheus/client_golang/prometheus"
@@ -33,6 +34,11 @@ type Metrics struct {
 	// OrphanedResources is the number of orphaned resources per Application whose project
 	// monitors them (argocd_app_orphaned_resources_count).
 	OrphanedResources *prometheus.GaugeVec
+
+	orphanedMu sync.Mutex
+	// orphanedProject is the project label of each Application's OrphanedResources series,
+	// keyed by namespace and name: one series per Application, whatever its project was.
+	orphanedProject map[[2]string]string
 }
 
 // NewMetrics creates the collectors and registers them with reg (nil: not registered).
@@ -72,6 +78,7 @@ func NewMetrics(reg prometheus.Registerer) (*Metrics, error) {
 			Name: "patrol_app_orphaned_resources_count",
 			Help: "Number of orphaned resources per Application.",
 		}, []string{"namespace", "name", "project"}),
+		orphanedProject: map[[2]string]string{},
 	}
 	if reg == nil {
 		return m, nil
@@ -104,24 +111,39 @@ func (m *Metrics) ObserveSync(namespace, name, project, server, phase string, dr
 }
 
 // SetOrphanedResources records the orphaned resources found by an Application's latest tree
-// build. The series exists only while the project monitors orphaned resources (monitored).
+// build. The series exists only while the project monitors orphaned resources (monitored),
+// under the Application's current project: a series under an earlier project is removed.
 func (m *Metrics) SetOrphanedResources(namespace, name, project string, monitored bool, n int) {
 	if m == nil {
 		return
 	}
+	key := [2]string{namespace, name}
+	m.orphanedMu.Lock()
+	defer m.orphanedMu.Unlock()
+	if prev, ok := m.orphanedProject[key]; ok && (!monitored || prev != project) {
+		m.OrphanedResources.DeleteLabelValues(namespace, name, prev)
+		delete(m.orphanedProject, key)
+	}
 	if !monitored {
-		m.OrphanedResources.DeleteLabelValues(namespace, name, project)
 		return
 	}
 	m.OrphanedResources.WithLabelValues(namespace, name, project).Set(float64(n))
+	m.orphanedProject[key] = project
 }
 
-// ForgetApplication removes the per-Application series of a deleted Application.
+// ForgetApplication removes the per-Application series of an Application this controller no
+// longer compares: deleted, invalid, or no longer processed by this replica.
 func (m *Metrics) ForgetApplication(namespace, name string) {
 	if m == nil {
 		return
 	}
-	m.OrphanedResources.DeletePartialMatch(prometheus.Labels{"namespace": namespace, "name": name})
+	key := [2]string{namespace, name}
+	m.orphanedMu.Lock()
+	defer m.orphanedMu.Unlock()
+	if prev, ok := m.orphanedProject[key]; ok {
+		m.OrphanedResources.DeleteLabelValues(namespace, name, prev)
+		delete(m.orphanedProject, key)
+	}
 }
 
 // WrapConfig returns a copy of cfg whose requests are counted in K8sRequests under server.

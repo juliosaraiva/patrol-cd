@@ -15,9 +15,10 @@ import (
 	"github.com/juliosaraiva/patrol-cd/internal/tracking"
 )
 
-// orphanLookupTimeout bounds the lookup of the Applications monitoring orphaned resources,
-// which runs on the event goroutine of a cluster cache.
-const orphanLookupTimeout = 5 * time.Second
+// lookupTimeout bounds the informer cache reads of the live-event handler (the Applications
+// monitoring orphaned resources, a changed Application object), which runs on the event
+// goroutine of a cluster cache.
+const lookupTimeout = 5 * time.Second
 
 // OnClusterCacheCreated registers the live-state change handler on a new cluster cache. Pass
 // it as cache.ManagerOptions.OnCacheCreated; clusterKey is the cache key (compare.ClusterKey,
@@ -79,20 +80,32 @@ func (r *Reconciler) onResourceUpdated(clusterKey string, newRes, oldRes *cache.
 	}
 	if len(apps) == 0 {
 		if ref.Namespace != "" {
-			ctx, cancel := context.WithTimeout(ctx, orphanLookupTimeout)
+			ctx, cancel := context.WithTimeout(ctx, lookupTimeout)
 			defer cancel()
-			r.refreshOrphanMonitors(ctx, clusterKey, ref)
+			r.refreshOrphanMonitors(ctx, clusterKey, changed)
 		}
 		return
 	}
 	for inst, root := range apps {
 		name, namespace := tracking.ParseInstanceName(inst, r.cfg.Namespace)
 		key := types.NamespacedName{Namespace: namespace, Name: name}
-		if isSelfReferencedApp(ref, key) || !r.cfg.Namespaces().Allowed(namespace) {
+		if !r.cfg.Namespaces().Allowed(namespace) || r.isSelf(ctx, changed, key) {
 			continue
 		}
 		r.requestLiveRefresh(ctx, key, root, clusterKey, ref)
 	}
+}
+
+// isSelf reports whether changed is the Application key itself (isSelfReferencedApp); the
+// Application is read from the informer cache only when changed has its name.
+func (r *Reconciler) isSelf(ctx context.Context, changed *cache.Resource, key types.NamespacedName) bool {
+	if !namesApp(changed.ResourceKey(), key) {
+		return false
+	}
+	ctx, cancel := context.WithTimeout(ctx, lookupTimeout)
+	defer cancel()
+	app := &v1alpha1.Application{}
+	return r.c.Get(ctx, key, app) == nil && isSelfReferencedApp(changed, app)
 }
 
 // refreshOrphanMonitors requests a tree-only refresh of the Applications that monitor orphaned
@@ -102,7 +115,8 @@ func (r *Reconciler) onResourceUpdated(clusterKey string, newRes, oldRes *cache.
 // of another shard, or that are the changed object are skipped. It reads the manager's
 // informer cache and the cluster registry only: it runs on the cluster cache's event
 // goroutine.
-func (r *Reconciler) refreshOrphanMonitors(ctx context.Context, clusterKey string, changed cache.ResourceKey) {
+func (r *Reconciler) refreshOrphanMonitors(ctx context.Context, clusterKey string, changed *cache.Resource) {
+	ref := changed.ResourceKey()
 	var projects v1alpha1.AppProjectList
 	if err := r.c.List(ctx, &projects, client.InNamespace(r.cfg.Namespace),
 		client.MatchingFields{indexOrphanedResources: orphanMonitoringKey}, client.UnsafeDisableDeepCopy); err != nil {
@@ -118,15 +132,15 @@ func (r *Reconciler) refreshOrphanMonitors(ctx context.Context, clusterKey strin
 	}
 	// The listed objects are shared with the informer cache: read only.
 	var apps v1alpha1.ApplicationList
-	if err := r.c.List(ctx, &apps, client.MatchingFields{indexDestinationNamespace: changed.Namespace}, client.UnsafeDisableDeepCopy); err != nil {
-		r.log.Warn("cannot list applications monitoring orphaned resources", "namespace", changed.Namespace, "error", err)
+	if err := r.c.List(ctx, &apps, client.MatchingFields{indexDestinationNamespace: ref.Namespace}, client.UnsafeDisableDeepCopy); err != nil {
+		r.log.Warn("cannot list applications monitoring orphaned resources", "namespace", ref.Namespace, "error", err)
 		return
 	}
 	st := r.cfg.Settings.Current()
 	for i := range apps.Items {
 		app := &apps.Items[i]
 		key := client.ObjectKeyFromObject(app)
-		if !monitoring[app.Spec.GetProject()] || isSelfReferencedApp(changed, key) || !r.cfg.Namespaces().Allowed(key.Namespace) {
+		if !monitoring[app.Spec.GetProject()] || isSelfReferencedApp(changed, app) || !r.cfg.Namespaces().Allowed(key.Namespace) {
 			continue
 		}
 		cluster, err := r.cfg.DestinationCluster(ctx, app.Spec.Destination, st)
@@ -136,7 +150,7 @@ func (r *Reconciler) refreshOrphanMonitors(ctx context.Context, clusterKey strin
 		if r.cfg.OwnsCluster != nil && !r.cfg.OwnsCluster(cluster) {
 			continue
 		}
-		r.requestLiveRefresh(ctx, key, false, clusterKey, changed)
+		r.requestLiveRefresh(ctx, key, false, clusterKey, ref)
 	}
 }
 
@@ -179,9 +193,15 @@ func skipAppRequeuing(k cache.ResourceKey) bool {
 	return k.Group == "" && k.Kind == "Endpoints"
 }
 
-// isSelfReferencedApp reports whether the changed object is the Application app itself;
-// refreshing it would loop on its own status writes.
-func isSelfReferencedApp(changed cache.ResourceKey, app types.NamespacedName) bool {
-	return changed.Group == v1alpha1.GroupName && changed.Kind == "Application" &&
-		changed.Name == app.Name && changed.Namespace == app.Namespace
+// isSelfReferencedApp reports whether the changed object is the Application app itself, as
+// upstream: its group, kind, namespace, name and UID (an Application of that name on another
+// cluster, or an earlier Application of that name, is another object). Refreshing it would
+// loop on its own status writes.
+func isSelfReferencedApp(changed *cache.Resource, app *v1alpha1.Application) bool {
+	return namesApp(changed.ResourceKey(), client.ObjectKeyFromObject(app)) && changed.Ref.UID == app.UID
+}
+
+// namesApp reports whether ref has the group, kind, namespace and name of Application app.
+func namesApp(ref cache.ResourceKey, app types.NamespacedName) bool {
+	return ref.Group == v1alpha1.GroupName && ref.Kind == "Application" && ref.Name == app.Name && ref.Namespace == app.Namespace
 }

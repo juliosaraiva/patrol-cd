@@ -185,7 +185,8 @@ DIFF-087:
     - internal/controller/app/liveevents_test.go:TestOnResourceUpdated
   notes: >-
     Attribution helpers here; refresh triggering in internal/controller/app/liveevents.go
-    (the Applications of the old and the new object are both refreshed).
+    (the Applications of the old and the new object are both refreshed). An owner cycle stops
+    the walk without the warning upstream logs ("Circular dependency detected").
 
 DIFF-089:
   status: implemented

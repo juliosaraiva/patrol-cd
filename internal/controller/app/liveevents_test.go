@@ -122,9 +122,13 @@ func TestOnResourceUpdated(t *testing.T) {
 	cm := func(appName, hash string) *cache.Resource {
 		return liveRes("", "ConfigMap", "web", "cm", &compare.ResourceInfo{AppName: appName, ManifestHash: hash})
 	}
-	application := func(appName string) *cache.Resource {
-		return liveRes(v1alpha1.GroupName, "Application", "patrol", "a", &compare.ResourceInfo{AppName: appName, ManifestHash: appName})
+	// The Application patrol/a (UID u-a) as a live object of UID uid, tracked by appName.
+	application := func(appName, uid, hash string) *cache.Resource {
+		r := liveRes(v1alpha1.GroupName, "Application", "patrol", "a", &compare.ResourceInfo{AppName: appName, ManifestHash: hash})
+		r.Ref.UID = types.UID(uid)
+		return r
 	}
+	appA := &v1alpha1.Application{ObjectMeta: metav1.ObjectMeta{Namespace: "patrol", Name: "a", UID: "u-a"}}
 	endpoints := func(hash string) *cache.Resource {
 		return liveRes("", "Endpoints", "web", "svc", &compare.ResourceInfo{ManifestHash: hash}, ownedBy("v1", "Service", "svc"))
 	}
@@ -162,9 +166,12 @@ func TestOnResourceUpdated(t *testing.T) {
 			want: map[types.NamespacedName]requested{appKey("a"): recentReq}},
 		{name: "managed root created", newRes: cm("a", "1"),
 			want: map[types.NamespacedName]requested{appKey("a"): recentReq}},
-		{name: "self-managed application object", newRes: application("a"), oldRes: liveRes(v1alpha1.GroupName, "Application", "patrol", "a", &compare.ResourceInfo{AppName: "a", ManifestHash: "old"}),
+		{name: "self-managed application object", newRes: application("a", "u-a", "new"), oldRes: application("a", "u-a", "old"),
 			want: map[types.NamespacedName]requested{}},
-		{name: "application managed by a parent", newRes: application("parent"), oldRes: liveRes(v1alpha1.GroupName, "Application", "patrol", "a", &compare.ResourceInfo{AppName: "parent", ManifestHash: "old"}),
+		// For example the Application patrol/a of another Patrol on a destination cluster.
+		{name: "same-named application object with another UID", newRes: application("a", "u-remote", "new"), oldRes: application("a", "u-remote", "old"),
+			want: map[types.NamespacedName]requested{appKey("a"): recentReq}},
+		{name: "application managed by a parent", newRes: application("parent", "u-a", "new"), oldRes: application("parent", "u-a", "old"),
 			want: map[types.NamespacedName]requested{appKey("parent"): recentReq}},
 		{name: "application namespace not allowed", newRes: cm("other_x", "2"), oldRes: cm("other_x", "1"),
 			want: map[types.NamespacedName]requested{}},
@@ -175,7 +182,7 @@ func TestOnResourceUpdated(t *testing.T) {
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			t.Parallel()
-			r := liveEventsReconciler(t, tc.cm)
+			r := liveEventsReconciler(t, tc.cm, appA)
 			r.onResourceUpdated(testServer, tc.newRes, tc.oldRes, ns)
 			assert.Equal(t, tc.want, pendingRequests(r.refresh))
 		})
@@ -337,9 +344,17 @@ func TestRefreshOrphanMonitors(t *testing.T) {
 		return &v1alpha1.Cluster{ObjectMeta: metav1.ObjectMeta{Name: name, Namespace: "patrol"}, Spec: v1alpha1.ClusterSpec{Server: server, Name: name}}
 	}
 	app := func(namespace, name, proj string, dest v1alpha1.ApplicationDestination) *v1alpha1.Application {
-		return &v1alpha1.Application{ObjectMeta: metav1.ObjectMeta{Name: name, Namespace: namespace},
+		return &v1alpha1.Application{ObjectMeta: metav1.ObjectMeta{Name: name, Namespace: namespace, UID: types.UID("u-" + name)},
 			Spec: v1alpha1.ApplicationSpec{Project: proj, Destination: dest}}
 	}
+	// The Application patrol/self as a live object of UID uid.
+	selfObject := func(uid, hash string) *cache.Resource {
+		r := liveRes(v1alpha1.GroupName, "Application", "patrol", "self", &compare.ResourceInfo{ManifestHash: hash})
+		r.Ref.UID = types.UID(uid)
+		return r
+	}
+	// A shard filter that owns the cluster of testServer only.
+	ownsTestServer := func(c *v1alpha1.Cluster) bool { return c != nil && c.Spec.Server == testServer }
 	server := func(s, ns string) v1alpha1.ApplicationDestination {
 		return v1alpha1.ApplicationDestination{Server: s, Namespace: ns}
 	}
@@ -391,9 +406,13 @@ func TestRefreshOrphanMonitors(t *testing.T) {
 			want: map[types.NamespacedName]requested{appKey("othercluster"): treeReq}},
 		{name: "cluster of another shard", ownsCluster: func(*v1alpha1.Cluster) bool { return false }, newRes: unmanaged(""),
 			want: map[types.NamespacedName]requested{}},
-		{name: "monitoring application object itself", newRes: liveRes(v1alpha1.GroupName, "Application", "patrol", "self", &compare.ResourceInfo{ManifestHash: "2"}),
-			oldRes: liveRes(v1alpha1.GroupName, "Application", "patrol", "self", &compare.ResourceInfo{ManifestHash: "1"}),
-			want:   map[types.NamespacedName]requested{appKey("peer"): treeReq}},
+		{name: "cluster of this shard", ownsCluster: ownsTestServer, newRes: unmanaged(""), want: web},
+		{name: "event of another shard's cluster", clusterKey: "https://other", ownsCluster: ownsTestServer, newRes: unmanaged(""),
+			want: map[types.NamespacedName]requested{}},
+		{name: "monitoring application object itself", newRes: selfObject("u-self", "2"), oldRes: selfObject("u-self", "1"),
+			want: map[types.NamespacedName]requested{appKey("peer"): treeReq}},
+		{name: "earlier application object of the same name", oldRes: selfObject("u-gone", "1"),
+			want: map[types.NamespacedName]requested{appKey("peer"): treeReq, appKey("self"): treeReq}},
 		{name: "no project monitors orphaned resources", noMonitors: true, newRes: unmanaged(""),
 			want: map[types.NamespacedName]requested{}},
 	} {

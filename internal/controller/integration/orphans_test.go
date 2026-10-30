@@ -1,6 +1,7 @@
 package integration
 
 import (
+	"slices"
 	"testing"
 	"time"
 
@@ -19,7 +20,9 @@ const orphanGauge = "patrol_app_orphaned_resources_count"
 // unmanaged ConfigMap in the destination namespace sets OrphanedResourceWarning and the
 // orphaned-resources gauge through a refresh driven by the live-state event (the harness's
 // periodic refresh is 1h away), and deleting it clears both (APP-085, DIFF-078, OPS-073). An
-// Application of a project without monitoring targeting the same namespace gets neither.
+// Application of a project without monitoring targeting the same namespace gets neither. The
+// gauge has one series per Application, under its current project, and none while its spec is
+// invalid.
 func TestOrphanedResourcesRefresh(t *testing.T) {
 	t.Parallel()
 	e := newEnv(t)
@@ -27,6 +30,9 @@ func TestOrphanedResourcesRefresh(t *testing.T) {
 	proj := permissiveProject(e.ns, "orphans")
 	proj.Spec.OrphanedResources = &v1alpha1.OrphanedResourcesMonitorSettings{Warn: ptr.To(true)}
 	e.create(proj)
+	other := permissiveProject(e.ns, "orphans2")
+	other.Spec.OrphanedResources = &v1alpha1.OrphanedResourcesMonitorSettings{}
+	e.create(other)
 
 	monRev := e.repo.commit(e.repoURL, "orph", "main", configMap("orph-cm", nil, nil))
 	plainRev := e.repo.commit(e.repoURL, "plain", "main", configMap("plain-cm", nil, nil))
@@ -68,6 +74,20 @@ func TestOrphanedResourcesRefresh(t *testing.T) {
 	_, ok := gaugeValue(t, ctl.registry, e.ns, plain.Name)
 	assert.False(t, ok, "no orphaned-resources series without monitoring")
 
+	// A project change moves the series, a project that does not exist (a spec error: no
+	// comparison) removes it, and a monitoring project brings it back.
+	for _, step := range []struct {
+		project string
+		want    []string
+	}{
+		{"orphans2", []string{"orphans2"}},
+		{"absent", nil},
+		{"orphans", []string{"orphans"}},
+	} {
+		e.updateApp(mon, func(a *v1alpha1.Application) { a.Spec.Project = step.project })
+		assertGaugeProjects(t, ctl.registry, e.ns, mon.Name, step.want)
+	}
+
 	// Deleting the Application removes its series.
 	require.NoError(t, e.c.Delete(e.ctx, e.getApp(mon)))
 	require.Eventually(t, func() bool {
@@ -90,6 +110,47 @@ func assertGauge(t *testing.T, reg *prometheus.Registry, namespace, name, projec
 		time.Sleep(pollEvery)
 	}
 	t.Fatalf("%s{namespace=%q,name=%q,project=%q}: want %v, got %v (found %v)", orphanGauge, namespace, name, project, want, last, found)
+}
+
+// assertGaugeProjects waits until the projects of an Application's orphaned-resources series
+// are want (sorted; nil: no series).
+func assertGaugeProjects(t *testing.T, reg *prometheus.Registry, namespace, name string, want []string) {
+	t.Helper()
+	var last []string
+	deadline := time.Now().Add(waitTimeout)
+	for time.Now().Before(deadline) {
+		last = gaugeProjects(t, reg, namespace, name)
+		if slices.Equal(last, want) {
+			return
+		}
+		time.Sleep(pollEvery)
+	}
+	t.Fatalf("%s{namespace=%q,name=%q}: want projects %v, got %v", orphanGauge, namespace, name, want, last)
+}
+
+// gaugeProjects returns the sorted project labels of an Application's orphaned-resources
+// series.
+func gaugeProjects(t *testing.T, reg *prometheus.Registry, namespace, name string) []string {
+	t.Helper()
+	mfs, err := reg.Gather()
+	require.NoError(t, err)
+	var out []string
+	for _, mf := range mfs {
+		if mf.GetName() != orphanGauge {
+			continue
+		}
+		for _, m := range mf.GetMetric() {
+			got := map[string]string{}
+			for _, l := range m.GetLabel() {
+				got[l.GetName()] = l.GetValue()
+			}
+			if got["namespace"] == namespace && got["name"] == name {
+				out = append(out, got["project"])
+			}
+		}
+	}
+	slices.Sort(out)
+	return out
 }
 
 // gaugeValue returns the orphaned-resources gauge of an Application (extra: more label
