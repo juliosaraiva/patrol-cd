@@ -90,8 +90,9 @@ type DeleteOptions struct {
 
 // ErrTransient marks errors that Step returns when a Kubernetes API call failed
 // transiently (timeouts, throttling, unavailable server, connection errors). Nothing was
-// recorded as failed: the caller should requeue with rate-limited backoff without counting
-// a retry attempt (docs/architecture/sync-state-machine.md, "Retry semantics").
+// recorded as failed: the caller should requeue without counting a retry attempt (the
+// Operation reconciler waits a fixed poll interval; docs/architecture/sync-state-machine.md,
+// "Retry semantics").
 var ErrTransient = errors.New("sync: transient Kubernetes API error")
 
 // ErrInvalidInput is returned for inputs the engine cannot work with.
