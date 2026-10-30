@@ -3,11 +3,14 @@ package clusters
 import (
 	"context"
 	"errors"
+	"strings"
 	"testing"
 	"time"
+	"unicode/utf8"
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+	"k8s.io/apimachinery/pkg/api/equality"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	"k8s.io/apimachinery/pkg/api/meta"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
@@ -63,6 +66,82 @@ func TestComputeClusterInfo(t *testing.T) {
 			}
 		})
 	}
+}
+
+func TestComputeClusterInfoSyncTimeHasStoredPrecision(t *testing.T) {
+	t.Parallel()
+	synced := time.Date(2026, 10, 13, 10, 0, 0, 123456789, time.UTC)
+	u := ComputeClusterInfo(&CacheState{LastCacheSyncTime: &synced}, 1, synced)
+	require.NotNil(t, u.Info.CacheInfo.LastCacheSyncTime)
+	assert.True(t, u.Info.CacheInfo.LastCacheSyncTime.Time.Equal(synced.Truncate(time.Second)))
+}
+
+func TestApplyClusterInfo(t *testing.T) {
+	t.Parallel()
+	now := time.Date(2026, 10, 13, 10, 0, 0, 0, time.UTC)
+	synced := now.Add(-time.Minute)
+	state := &CacheState{ServerVersion: "v1.36.0", LastCacheSyncTime: &synced, APIsCount: 40, ResourcesCount: 900, APIVersions: []string{"v1"}}
+	healthy := func() *v1alpha1.Cluster {
+		c := cluster("c", "https://c", func(c *v1alpha1.Cluster) { c.Generation = 3 })
+		ApplyClusterInfo(c, ComputeClusterInfo(state, 2, now))
+		return c
+	}
+
+	t.Run("unchanged", func(t *testing.T) {
+		t.Parallel()
+		c := healthy()
+		before := c.Status.DeepCopy()
+		ApplyClusterInfo(c, ComputeClusterInfo(state, 2, now.Add(time.Hour)))
+		assert.True(t, equality.Semantic.DeepEqual(before, &c.Status), "a later round of the same state changes nothing, attemptedAt included")
+	})
+	t.Run("connected", func(t *testing.T) {
+		t.Parallel()
+		c := healthy()
+		assert.Equal(t, int64(3), c.Status.ObservedGeneration)
+		assert.Equal(t, "v1.36.0", c.Status.ServerVersion)
+		assert.Equal(t, []string{"v1"}, c.Status.Info.APIVersions)
+		assert.Equal(t, int64(2), c.Status.Info.ApplicationsCount)
+		assert.Equal(t, int64(900), c.Status.Info.CacheInfo.ResourcesCount)
+		assert.True(t, meta.IsStatusConditionTrue(c.Status.Conditions, v1alpha1.ConditionReady))
+		assert.True(t, meta.IsStatusConditionFalse(c.Status.Conditions, v1alpha1.ConditionConnectionFailed))
+	})
+	t.Run("failed clears the cache information", func(t *testing.T) {
+		t.Parallel()
+		c := healthy()
+		ApplyClusterInfo(c, ComputeClusterInfo(&CacheState{ServerVersion: "v1.36.0", LastCacheSyncTime: &synced, SyncError: errors.New("refused")}, 2, now))
+		assert.Equal(t, v1alpha1.ConnectionStatusFailed, c.Status.ConnectionState.Status)
+		assert.Equal(t, "refused", c.Status.ConnectionState.Message)
+		assert.Equal(t, v1alpha1.ClusterCacheInfo{}, c.Status.Info.CacheInfo)
+		assert.True(t, meta.IsStatusConditionTrue(c.Status.Conditions, v1alpha1.ConditionConnectionFailed))
+	})
+	t.Run("no cache clears what the cache reported", func(t *testing.T) {
+		t.Parallel()
+		c := healthy()
+		ApplyClusterInfo(c, ComputeClusterInfo(nil, 0, now))
+		assert.Equal(t, v1alpha1.ConnectionStatusUnknown, c.Status.ConnectionState.Status)
+		assert.Equal(t, NoApplicationsMessage, c.Status.ConnectionState.Message)
+		assert.Empty(t, c.Status.ServerVersion)
+		assert.Empty(t, c.Status.Info.APIVersions)
+		assert.Equal(t, NoApplicationsMessage, meta.FindStatusCondition(c.Status.Conditions, v1alpha1.ConditionReady).Message)
+		assert.Nil(t, meta.FindStatusCondition(c.Status.Conditions, v1alpha1.ConditionConnectionFailed))
+	})
+	t.Run("a long message fits the schema", func(t *testing.T) {
+		t.Parallel()
+		// Multi-byte characters across the cut: bytes are cut, and what is stored stays valid.
+		long := strings.Repeat("é", maxConnectionMessage)
+		c := healthy()
+		failed := ComputeClusterInfo(&CacheState{LastCacheSyncTime: &synced, SyncError: errors.New(long)}, 2, now)
+		ApplyClusterInfo(c, failed)
+		msg := c.Status.ConnectionState.Message
+		assert.LessOrEqual(t, len(msg), maxConnectionMessage)
+		assert.True(t, utf8.ValidString(msg))
+		assert.True(t, strings.HasSuffix(msg, "... (truncated)"))
+		assert.Equal(t, msg, meta.FindStatusCondition(c.Status.Conditions, v1alpha1.ConditionReady).Message)
+
+		before := c.Status.DeepCopy()
+		ApplyClusterInfo(c, failed)
+		assert.True(t, equality.Semantic.DeepEqual(before, &c.Status), "the same long error is no change")
+	})
 }
 
 func TestProbeErrors(t *testing.T) {
@@ -195,6 +274,18 @@ func TestStatusWriterEnvtest(t *testing.T) {
 	again, err := w.RecordClusterInfo(ctx, out, ComputeClusterInfo(&CacheState{
 		ServerVersion: ver, LastCacheSyncTime: &synced, APIsCount: 12, ResourcesCount: 34, APIVersions: []string{"v1"},
 	}, 5, time.Now().Add(time.Minute)))
+	require.NoError(t, err)
+	assert.Equal(t, out.ResourceVersion, again.ResourceVersion)
+
+	// The cache's sync time is finer than what is stored, and that is no change either.
+	fine := time.Now().Add(-time.Second).Truncate(time.Second).Add(123456789)
+	out, err = w.RecordClusterInfo(ctx, again, ComputeClusterInfo(&CacheState{
+		ServerVersion: ver, LastCacheSyncTime: &fine, APIsCount: 12, ResourcesCount: 34, APIVersions: []string{"v1"},
+	}, 5, time.Now()))
+	require.NoError(t, err)
+	again, err = w.RecordClusterInfo(ctx, out, ComputeClusterInfo(&CacheState{
+		ServerVersion: ver, LastCacheSyncTime: &fine, APIsCount: 12, ResourcesCount: 34, APIVersions: []string{"v1"},
+	}, 5, time.Now()))
 	require.NoError(t, err)
 	assert.Equal(t, out.ResourceVersion, again.ResourceVersion)
 

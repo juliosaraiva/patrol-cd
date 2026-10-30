@@ -172,6 +172,11 @@ func destinationKeys(server, name string) []string {
 	return out
 }
 
+// clusterChanged drops status-only updates of a Cluster. The controller writes that status itself
+// on its cluster-info interval, and a comparison does not read it, so a latest-level refresh of
+// every Application of the cluster would follow each write for nothing.
+var clusterChanged = predicate.Or[client.Object](predicate.GenerationChangedPredicate{}, predicate.LabelChangedPredicate{}, predicate.AnnotationChangedPredicate{})
+
 // SetupWithManager registers the controller: Applications of allowed namespaces, their
 // Operations, AppProjects, Clusters and Repositories (dependent Applications are refreshed
 // at level latest), and the channel of controller-requested refreshes. IndexFields and
@@ -200,7 +205,7 @@ func (r *Reconciler) SetupWithManager(mgr manager.Manager) error {
 				return nil
 			}
 			return destinationKeys(c.Spec.Server, c.Spec.Name)
-		}))).
+		})), builder.WithPredicates(clusterChanged)).
 		Watches(&v1alpha1.Repository{}, handler.EnqueueRequestsFromMapFunc(r.mapIndexed(indexRepoURL, func(o client.Object) []string {
 			repo, ok := o.(*v1alpha1.Repository)
 			if !ok || repo.Namespace != r.cfg.Namespace {

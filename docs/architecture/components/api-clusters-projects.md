@@ -214,7 +214,7 @@ there).
   `--enable-k8s-event` is not implemented.
 - Delete/impact checks only consider Applications/ApplicationSets of the control-plane
   namespace (upstream); ApplicationSet references inside generator templates are not counted.
-- The cluster-info loop (REPO-094), cache invalidation (REPO-096) and sharding (REPO-082) are
+- The cluster-info updater (REPO-094), cache invalidation (REPO-096) and sharding (REPO-082) are
   controller work; this API only writes what they read.
 - No server-side `GetClusterInfo` cache: status comes from the Cluster object.
 - Residual risks of the escalation checks: a destination server glob is checked as the pattern

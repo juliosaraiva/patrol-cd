@@ -623,3 +623,47 @@ SYNC-094:
   notes: >-
     Enforced and unmatched also fails termination ("Operation termination had errors: failed
     to find a matching service account to impersonate: ...") without cleaning up hooks.
+
+REPO-094:
+  status: implemented
+  impl: [internal/controller/clusterinfo/updater.go, internal/compare/clusterstate.go, internal/cache/manager.go, internal/server/controller.go]
+  tests:
+    - internal/controller/clusterinfo/updater_test.go:TestSyncWritesOwnedClusters
+    - internal/controller/clusterinfo/updater_test.go:TestSyncClusterWithoutCache
+    - internal/controller/clusterinfo/updater_test.go:TestSyncApplicationsCount
+    - internal/controller/clusterinfo/updater_test.go:TestSyncSkipsUnchangedAndThrottlesCacheInfo
+    - internal/compare/clusterstate_test.go:TestClusterCacheState
+    - internal/controller/integration/cluster_events_test.go:TestClusterEventsRefreshApplications
+    - test/integration/clusterinfo_test.go:TestClusterInfoWrittenByController
+    - test/integration/clusterinfo_test.go:TestManifestsMatchControllerCapabilities
+    - test/integration/recovery_test.go:TestDestinationUnreachable
+  evidence: docs/verification/log.md#V-0046
+  notes: >-
+    Exercised through the API and the CLI, not the UI. Written to Cluster.status instead of
+    Redis (ADR-0004): an unchanged status is not written, a change of the cache statistics alone
+    is written at most once a minute, and connectionState.attemptedAt moves with a write only.
+    A status write reaches no comparison: the Cluster watches ignore it. The synthetic in-cluster
+    cluster has no object, so no status. A skip-reconcile cluster reports Unknown. As upstream, a
+    destination that fails under a synced cache shows as Failed only after the next full sync
+    (restart, invalidate-cache, credential change, 12 h resync).
+
+REPO-095:
+  status: verified
+  impl: [internal/controller/clusterinfo/updater.go]
+  tests:
+    - internal/controller/clusterinfo/updater_test.go:TestSyncVersionLabel
+    - test/integration/clusterinfo_test.go:TestClusterInfoWrittenByController
+  evidence: docs/verification/log.md#V-0046
+
+OPS-050:
+  status: implemented
+  impl: [internal/clusters/tuning.go, internal/controller/clusterinfo/updater.go, internal/server/commands.go]
+  tests:
+    - internal/clusters/tuning_test.go:TestClusterInfoIntervalFromLookup
+    - internal/controller/clusterinfo/updater_test.go:TestRunInterval
+    - internal/controller/clusterinfo/updater_test.go:TestRunBoundsARound
+  evidence: docs/verification/log.md#V-0046
+  notes: >-
+    PATROL_UPDATE_CLUSTER_INFO_TIMEOUT (upstream ARGO_CD_UPDATE_CLUSTER_INFO_TIMEOUT): a Go
+    duration from 10s to 1m; anything else logs a warning and keeps 10s. A round is bounded by
+    the interval. The integrated tests set the interval in ControllerConfig, not the variable.

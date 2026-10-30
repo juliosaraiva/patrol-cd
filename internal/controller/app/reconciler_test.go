@@ -11,11 +11,39 @@ import (
 	"github.com/stretchr/testify/require"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"sigs.k8s.io/controller-runtime/pkg/client"
+	"sigs.k8s.io/controller-runtime/pkg/event"
 	"sigs.k8s.io/controller-runtime/pkg/reconcile"
 
 	"github.com/juliosaraiva/patrol-cd/api/v1alpha1"
 	"github.com/juliosaraiva/patrol-cd/internal/controller/core"
 )
+
+func TestClusterChanged(t *testing.T) {
+	t.Parallel()
+	base := func() *v1alpha1.Cluster {
+		return &v1alpha1.Cluster{ObjectMeta: metav1.ObjectMeta{
+			Generation: 1, Labels: map[string]string{"a": "1"}, Annotations: map[string]string{"b": "2"},
+		}}
+	}
+	cases := []struct {
+		name   string
+		mutate func(*v1alpha1.Cluster)
+		want   bool
+	}{
+		{"status", func(c *v1alpha1.Cluster) { c.Status.ServerVersion = "v1.36.0" }, false},
+		{"spec", func(c *v1alpha1.Cluster) { c.Generation = 2 }, true},
+		{"labels", func(c *v1alpha1.Cluster) { c.Labels["a"] = "2" }, true},
+		{"annotations", func(c *v1alpha1.Cluster) { c.Annotations["b"] = "3" }, true},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+			updated := base()
+			tc.mutate(updated)
+			assert.Equal(t, tc.want, clusterChanged.Update(event.UpdateEvent{ObjectOld: base(), ObjectNew: updated}))
+		})
+	}
+}
 
 func TestIndexKeys(t *testing.T) {
 	t.Parallel()

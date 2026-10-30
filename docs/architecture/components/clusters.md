@@ -30,7 +30,7 @@ and status writing, impersonation, and the `patrol-manager` bootstrap used by
    (`EnsureManagerServiceAccount`, `RotateManagerToken`, `UninstallManager`).
 
 Out of scope: the ClusterService API, `patrol cluster` / `patrol admin cluster` commands and
-the UI (REPO-098..102, 106, 108..110 surfaces); the periodic cluster-info loop, sharding and the
+the UI (REPO-098..102, 106, 108..110 surfaces); the periodic cluster-info updater, sharding and the
 live-state cache (`internal/controller`, `internal/cache`); project permission evaluation and
 service-account selection (`internal/project`); settings parsing (`internal/settings`).
 
@@ -57,7 +57,8 @@ service-account selection (`internal/project`); settings parsing (`internal/sett
 | `Subscribe(func(Event)) (cancel)`, `Event{Type, Server, Old, New, Changes}` | Effective-change notifications (Added/Modified/Deleted; `Changes{Identity, Spec, Metadata, Credentials}`). |
 | `IsSynthetic`, `IsSkipReconcile`, `RefreshRequestedAt`, `NeedsCacheInvalidation`, `DiffCacheSettings`, `NormalizeNamespaces`, `NormalizeServer`, `AutoLabelKubernetesVersion`, `ObjectNameForServer` | Helpers for REPO-092/096/097/079/095/104. |
 | `Probe(ctx, cfg) (version, error)` | `GET /version`, normalized to `v<major>.<minor>.<patch>`. |
-| `ComputeClusterInfo(*CacheState, apps, now) StatusUpdate`, `ProbeUpdate` | REPO-094 mapping. |
+| `ComputeClusterInfo(*CacheState, apps, now) StatusUpdate`, `ApplyClusterInfo`, `ProbeUpdate` | REPO-094 mapping; `ApplyClusterInfo` is what `RecordClusterInfo` writes, so the updater can compare before writing. Sync times have whole seconds and condition messages at most 32,768 bytes, as the API stores them. |
+| `ApplicationCounts(apps, permitted) map[string]int64`, `CountApplications`, `WantsVersionLabel`, `ClusterInfoIntervalFromLookup` | Inputs of the updater in `internal/controller/clusterinfo`. |
 | `NewStatusWriter(dyn, ...)`, `Update`, `RecordProbe`, `RecordClusterInfo`, `RecordVersionLabel` | Status subresource writes (re-read + retry on conflicts and transient errors with `DefaultStatusBackoff`); `Ready`/`ConnectionFailed` conditions with `observedGeneration`; label patch for REPO-095. |
 | `ImpersonatingConfig(base, user)`, `ServiceAccountUsername` | Impersonation of a project-selected service account. |
 | `EnsureManagerServiceAccount(ctx, kube, namespace, clusterWide, namespaces, *BootstrapOptions) (token, error)`, `ServiceAccountBearerToken`, `RotateManagerToken(ctx, kube, oldToken, persist, opts)`, `UninstallManager`, `ParseServiceAccountToken` | `patrol-manager` SA, `patrol-manager-role(-binding)` (ClusterRole with `*/*/*` + nonResourceURLs `*`, or a Role with `*/*/*` per namespace), `patrol-manager-long-lived-token` Secret polled every 500 ms for 30 s (10 s per request). |
@@ -194,8 +195,8 @@ SYNC-093.
   serialized into a kubeconfig; use `AWSAuthExec` / `DisableNativeK8sAuth` for
   `admin cluster kubeconfig`-style export (REPO-109).
 - Not implemented here: the ClusterService API (REPO-098..103 handlers), CLI (REPO-106,
-  108, 109), UI (REPO-110), the cluster-info loop and `UPDATE_CLUSTER_INFO_TIMEOUT`
-  (REPO-094), cache invalidation wiring (REPO-096), shard filtering with skip-reconcile
+  108, 109), UI (REPO-110), the cluster-info updater (REPO-094, `internal/controller/clusterinfo`),
+  cache invalidation wiring (REPO-096), shard filtering with skip-reconcile
   (REPO-097), project destination rules (REPO-081, `internal/project`).
 - Requested API addition (not made; `api/v1alpha1` is owned elsewhere): a
   `KubernetesInClusterName = "in-cluster"` constant next to
@@ -211,9 +212,8 @@ SYNC-093.
   Applications whose cluster `IsSkipReconcile`. Build configs with
   `reg.RestConfig(ctx, c, clusters.Options{Tuning: ptr(clusters.TuningFromEnv(log)),
   FakeInCluster: clusters.FakeInClusterFromEnv()})`, then `ImpersonatingConfig` with the user
-  from `project.SelectServiceAccount`. Every cluster-info interval:
-  `ComputeClusterInfo(cacheState, reg.CountApplications(apps, server, permitted), now)` →
-  `StatusWriter.RecordClusterInfo` and `RecordVersionLabel`.
+  from `project.SelectServiceAccount`. `internal/controller/clusterinfo` writes the status every
+  cluster-info interval.
 - API server: pass the registry as `project.ClusterLookup`; on create/update run
   `ValidateRegistration`, `RestConfig` + `Probe` (`error getting server version: …`), then
   `RecordProbe`.

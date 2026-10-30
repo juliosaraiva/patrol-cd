@@ -53,7 +53,7 @@ reading settings (`internal/settings`), shard assignment (`internal/controller`)
 | `ClusterInfo` | `Server`, `K8SVersion`, `APIsCount`, `ResourcesCount`, `LastCacheSyncTime`, `SyncError`, `Synced`, `ActiveWatches`, `UnavailableAPIs []UnavailableAPI{GroupKind, Version, Namespace, Reason, Message}` (reasons: `ListForbidden`, `WatchForbidden`, `DiscoveryFailed`). |
 | `APIResourceInfo` | `GroupKind`, `GroupVersionResource`, `Meta metav1.APIResource`. |
 | `GVKParser` | `Type(gvk) *typed.ParseableType` (nil when unknown or ambiguous) and `Ambiguous()`. |
-| `Manager` | `NewManager(ManagerOptions{Logger, OnCacheCreated, CacheOptions})`, `Get(ctx, clusterKey, cfg, settings) (ClusterCache, error)` (creates if absent, then `EnsureSynced`), `Invalidate(clusterKey)` (closes and forgets), `ClustersInfo()`, `Close()`. |
+| `Manager` | `NewManager(ManagerOptions{Logger, OnCacheCreated, CacheOptions})`, `Get(ctx, clusterKey, cfg, settings) (ClusterCache, error)` (creates if absent, then `EnsureSynced`), `Lookup(clusterKey) (ClusterCache, bool)` (the existing cache, without creating or syncing one), `Invalidate(clusterKey)` (closes and forgets), `ClustersInfo()`, `Close()`. |
 | Predicates | `TopLevelResource`, `ResourceOfGroupKind(group, kind)`. |
 | Errors | `ErrClusterUnreachable` (`*UnreachableError{Server, Err}`), `ErrClosed`, `ErrNotSynced`, `ErrUnknownGroupKind`, `ErrOutOfScope` (`*OutOfScopeError`, upstream message text), `ErrInvalidResourceKey`, `ErrManagerClosed`. |
 

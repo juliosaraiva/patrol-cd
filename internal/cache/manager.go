@@ -118,6 +118,23 @@ func (m *Manager) Invalidate(clusterKey string) {
 	}
 }
 
+// Lookup returns the cache of clusterKey as it is: it never creates or syncs one. ok is false
+// when no Get created it, Invalidate or Close dropped it, or OnCacheCreated is still running.
+func (m *Manager) Lookup(clusterKey string) (c ClusterCache, ok bool) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	e, ok := m.entries[clusterKey]
+	if !ok {
+		return nil, false
+	}
+	select {
+	case <-e.ready:
+		return e.c, true
+	default:
+		return nil, false
+	}
+}
+
 // ClustersInfo returns the statistics of every cache, ordered by cluster key.
 func (m *Manager) ClustersInfo() []ClusterInfo {
 	m.mu.Lock()

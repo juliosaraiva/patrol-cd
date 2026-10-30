@@ -32,6 +32,16 @@ const (
 	EnvK8sClientRetryBaseBackoff   = "PATROL_K8SCLIENT_RETRY_BASE_BACKOFF"
 )
 
+// EnvUpdateClusterInfoTimeout is how often the controller writes Cluster status (upstream
+// ARGO_CD_UPDATE_CLUSTER_INFO_TIMEOUT).
+const EnvUpdateClusterInfoTimeout = "PATROL_UPDATE_CLUSTER_INFO_TIMEOUT"
+
+// DefaultClusterInfoInterval is the default of EnvUpdateClusterInfoTimeout and its minimum.
+const DefaultClusterInfoInterval = 10 * time.Second
+
+// maxClusterInfoInterval is the maximum of EnvUpdateClusterInfoTimeout.
+const maxClusterInfoInterval = time.Minute
+
 // Upstream defaults (pkg/apis/application/v1alpha1/cluster_constants.go, util/http).
 const (
 	DefaultQPS                 float32 = 50
@@ -110,6 +120,16 @@ func TuningFromLookup(lookup func(string) (string, bool), logger *slog.Logger) T
 	t.RetryMax = p.int64(EnvK8sClientRetryMax, 0, 1, math.MaxInt64)
 	t.RetryBaseBackoff = time.Duration(p.int64(EnvK8sClientRetryBaseBackoff, int64(DefaultRetryBaseBackoff/time.Millisecond), 1, math.MaxInt64/int64(time.Millisecond))) * time.Millisecond
 	return t
+}
+
+// ClusterInfoIntervalFromLookup reads EnvUpdateClusterInfoTimeout through lookup. As upstream, an
+// unparsable value or one outside 10s to 1m keeps the default and logs a warning.
+func ClusterInfoIntervalFromLookup(lookup func(string) (string, bool), logger *slog.Logger) time.Duration {
+	if logger == nil {
+		logger = slog.New(slog.DiscardHandler)
+	}
+	p := envParser{lookup: lookup, logger: logger}
+	return p.duration(EnvUpdateClusterInfoTimeout, DefaultClusterInfoInterval, DefaultClusterInfoInterval, maxClusterInfoInterval)
 }
 
 type envParser struct {

@@ -252,6 +252,8 @@ server.RunController(ControllerConfig) ── Validate
  ├─ sharding: Assigner (registry events, Application informer), LeaseManager
  │    (Leases patrol-controller-shard-<n>, StaticReplicas or WorkloadReplicas), Ownership
  │    (core.Deps.OwnsCluster), AssignedShardWriter (Cluster.status.assignedShard)
+ ├─ clusterinfo.Updater (Cluster.status of the owned shards, every ClusterInfoInterval,
+ │    PATROL_UPDATE_CLUSTER_INFO_TIMEOUT)
  ├─ app.Reconciler; operation.Reconciler (+ requeue channel); operation.KubeEngines
  │    (sync engine: wave delay, parallelism from parameters)
  ├─ hydrator.Setup when hydrator.enabled (commit-server client: --commit-server-timeout,

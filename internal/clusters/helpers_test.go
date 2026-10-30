@@ -129,6 +129,8 @@ func TestAutoLabelKubernetesVersion(t *testing.T) {
 	off := cluster("c", "https://c", func(c *v1alpha1.Cluster) { c.Labels = map[string]string{} })
 	assert.False(t, AutoLabelKubernetesVersion(off, "v1.36.0"))
 	assert.False(t, AutoLabelKubernetesVersion(nil, "v1.36.0"))
+	assert.False(t, AutoLabelKubernetesVersion(c, ""), "no version to record")
+	assert.Equal(t, "v1.37.1", c.Labels[v1alpha1.LabelKeyClusterKubernetesVersion])
 }
 
 func TestInClusterEnabledSetting(t *testing.T) {

@@ -88,6 +88,22 @@ func TestBuildDiscovery(t *testing.T) {
 	assert.Equal(t, "autoscaling", d.byGVK[schema.GroupVersionKind{Group: "autoscaling", Version: "v1", Kind: "HorizontalPodAutoscaler"}].Meta.Group)
 }
 
+func TestAPIVersionStrings(t *testing.T) {
+	t.Parallel()
+	info := func(group, version, resource, kind string) APIResourceInfo {
+		return APIResourceInfo{
+			GroupKind:            schema.GroupKind{Group: group, Kind: kind},
+			GroupVersionResource: schema.GroupVersionResource{Group: group, Version: version, Resource: resource},
+		}
+	}
+	got := APIVersionStrings([]APIResourceInfo{
+		info("", "v1", "pods", "Pod"), info("apps", "v1", "deployments", "Deployment"),
+		info("apps", "v1", "statefulsets", "StatefulSet"), info("", "v1", "pods", "Pod"),
+	})
+	assert.Equal(t, []string{"apps/v1", "apps/v1/Deployment", "apps/v1/StatefulSet", "v1", "v1/Pod"}, got)
+	assert.Empty(t, APIVersionStrings(nil))
+}
+
 func TestNormalizeServerVersion(t *testing.T) {
 	t.Parallel()
 	for in, want := range map[string]string{

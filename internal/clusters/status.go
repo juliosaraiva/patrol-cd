@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"strings"
 	"time"
 
 	"k8s.io/apimachinery/pkg/api/equality"
@@ -28,6 +29,10 @@ import (
 // NoApplicationsMessage is upstream's connection message for an unmonitored cluster with no
 // applications.
 const NoApplicationsMessage = "Cluster has no applications and is not being monitored."
+
+// maxConnectionMessage is the metav1.Condition message limit: connection messages are stored in
+// the Ready and ConnectionFailed conditions too, and a destination decides what its errors say.
+const maxConnectionMessage = 32768
 
 // Probe checks connectivity to the cluster behind cfg with GET /version and returns the server
 // version normalized to "v<major>.<minor>.<patch>" (vendor suffixes such as "-eks-1" or "+k3s1"
@@ -97,7 +102,8 @@ func ComputeClusterInfo(state *CacheState, applications int64, now time.Time) St
 		u.ConnectionState.Status = v1alpha1.ConnectionStatusUnknown
 	case state.SyncError == nil:
 		u.ConnectionState.Status = v1alpha1.ConnectionStatusSuccessful
-		synced := metav1.NewTime(*state.LastCacheSyncTime)
+		// Whole seconds, as the API stores it: a finer value never compares equal to the stored one.
+		synced := metav1.NewTime(state.LastCacheSyncTime.Truncate(time.Second))
 		u.Info.CacheInfo = v1alpha1.ClusterCacheInfo{
 			LastCacheSyncTime: &synced,
 			APIsCount:         state.APIsCount,
@@ -252,18 +258,25 @@ func (w *StatusWriter) RecordClusterInfo(ctx context.Context, c *v1alpha1.Cluste
 		return nil, errSynthetic
 	}
 	return w.Update(ctx, c.Namespace, c.Name, func(cur *v1alpha1.Cluster) error {
-		applyConnection(cur, u.ConnectionState, u.ServerVersion, true)
-		cur.Status.ServerVersion = u.ServerVersion
-		cur.Status.Info.ApplicationsCount = u.Info.ApplicationsCount
-		cur.Status.Info.APIVersions = u.Info.APIVersions
-		cur.Status.Info.CacheInfo = u.Info.CacheInfo
+		ApplyClusterInfo(cur, u)
 		return nil
 	})
+}
+
+// ApplyClusterInfo sets the status fields of a ComputeClusterInfo result on c. Callers can apply
+// it to a copy to find out whether RecordClusterInfo would write.
+func ApplyClusterInfo(c *v1alpha1.Cluster, u StatusUpdate) {
+	applyConnection(c, u.ConnectionState, u.ServerVersion, true)
+	c.Status.ServerVersion = u.ServerVersion
+	c.Status.Info.ApplicationsCount = u.Info.ApplicationsCount
+	c.Status.Info.APIVersions = u.Info.APIVersions
+	c.Status.Info.CacheInfo = u.Info.CacheInfo
 }
 
 // applyConnection sets the connection state, version and conditions. AttemptedAt is kept when
 // nothing else changed, so periodic writes of an unchanged state are no-ops.
 func applyConnection(c *v1alpha1.Cluster, state v1alpha1.ConnectionState, version string, setVersion bool) {
+	state.Message = truncateConnectionMessage(state.Message)
 	if prev := c.Status.ConnectionState; prev != nil && prev.Status == state.Status && prev.Message == state.Message {
 		state.AttemptedAt = prev.AttemptedAt
 	}
@@ -295,6 +308,16 @@ func applyConnection(c *v1alpha1.Cluster, state v1alpha1.ConnectionState, versio
 	meta.SetStatusCondition(&c.Status.Conditions, failed)
 }
 
+// truncateConnectionMessage cuts m to maxConnectionMessage bytes, on a character boundary. The
+// schema counts characters, so a cut message always fits.
+func truncateConnectionMessage(m string) string {
+	if len(m) <= maxConnectionMessage {
+		return m
+	}
+	const suffix = "... (truncated)"
+	return strings.ToValidUTF8(m[:maxConnectionMessage-len(suffix)], "") + suffix
+}
+
 // RecordVersionLabel maintains cd.patrol.example/kubernetes-version on clusters labeled
 // cd.patrol.example/auto-label-cluster-info=true (REPO-095) with a merge patch of the label. It
 // reports whether a patch was sent.
@@ -302,11 +325,7 @@ func (w *StatusWriter) RecordVersionLabel(ctx context.Context, c *v1alpha1.Clust
 	if IsSynthetic(c) {
 		return false, nil
 	}
-	probe := c.DeepCopy()
-	if probe.Labels == nil {
-		return false, nil
-	}
-	if !AutoLabelKubernetesVersion(probe, version) {
+	if !WantsVersionLabel(c, version) {
 		return false, nil
 	}
 	patch, err := json.Marshal(map[string]any{"metadata": map[string]any{"labels": map[string]string{v1alpha1.LabelKeyClusterKubernetesVersion: version}}})

@@ -706,18 +706,21 @@ func (r *Registry) DestinationCluster(dest v1alpha1.ApplicationDestination) (*v1
 // returns false (upstream: apps whose project does not permit their namespace) and apps whose
 // destination does not resolve.
 func (r *Registry) CountApplications(apps []v1alpha1.Application, server string, permitted func(*v1alpha1.Application) bool) int64 {
-	server = NormalizeServer(server)
-	var n int64
+	return r.ApplicationCounts(apps, permitted)[NormalizeServer(server)]
+}
+
+// ApplicationCounts is CountApplications for every server at once, by normalized server.
+func (r *Registry) ApplicationCounts(apps []v1alpha1.Application, permitted func(*v1alpha1.Application) bool) map[string]int64 {
+	out := map[string]int64{}
 	for i := range apps {
 		if permitted != nil && !permitted(&apps[i]) {
 			continue
 		}
-		s, err := r.ResolveDestination(apps[i].Spec.Destination)
-		if err == nil && s == server {
-			n++
+		if s, err := r.ResolveDestination(apps[i].Spec.Destination); err == nil {
+			out[s]++
 		}
 	}
-	return n
+	return out
 }
 
 // secretRequiredReason explains why a referenced Secret may be invisible to the registry.

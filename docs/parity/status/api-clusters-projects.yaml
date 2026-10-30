@@ -154,11 +154,13 @@ REPO-093:
     missing cluster, creation returns "cannot register cluster: in-cluster has been disabled".
 
 REPO-094:
-  status: in-progress
+  status: implemented
   impl: [internal/apiserver/services/clusters/handlers.go]
   tests:
     - internal/apiserver/services/clusters/clusters_test.go:TestClusterLifecycle
-  notes: Responses carry Cluster status (connection state, server version, cache info, applications count, assigned shard); create/update/rotate-auth record a Successful check. The cluster-info loop is the controller's.
+    - test/integration/clusterinfo_test.go:TestClusterInfoWrittenByController
+  evidence: docs/verification/log.md#V-0046
+  notes: Responses carry Cluster status (connection state, server version, cache info, applications count, assigned shard); create/update/rotate-auth record a Successful check. The cluster-info updater is the controller's (controller.yaml).
 
 REPO-096:
   status: in-progress

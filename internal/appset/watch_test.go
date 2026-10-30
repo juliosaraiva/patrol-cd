@@ -156,4 +156,27 @@ func TestClusterEventHandler(t *testing.T) {
 	other.Namespace = tenantNS
 	h.Delete(context.Background(), event.TypedDeleteEvent[client.Object]{Object: other}, q)
 	assert.Equal(t, 0, q.Len())
+
+	// The controller's status writes do not requeue; changes a generator can see do.
+	cur := clusterObj("c1", "https://c1")
+	cur.Generation = 2
+	statusOnly := cur.DeepCopy()
+	statusOnly.Status.ServerVersion = "v1.36.0"
+	h.Update(context.Background(), event.TypedUpdateEvent[client.Object]{ObjectOld: cur, ObjectNew: statusOnly}, q)
+	assert.Equal(t, 0, q.Len(), "status-only update")
+
+	changes := map[string]func(*v1alpha1.Cluster){
+		"spec":        func(c *v1alpha1.Cluster) { c.Generation = 3 },
+		"labels":      func(c *v1alpha1.Cluster) { c.Labels = map[string]string{"env": "prod"} },
+		"annotations": func(c *v1alpha1.Cluster) { c.Annotations = map[string]string{"team": "a"} },
+	}
+	for name, change := range changes {
+		next := cur.DeepCopy()
+		change(next)
+		h.Update(context.Background(), event.TypedUpdateEvent[client.Object]{ObjectOld: cur, ObjectNew: next}, q)
+		require.Equal(t, 1, q.Len(), name)
+		item, _ := q.Get()
+		q.Done(item)
+		q.Forget(item)
+	}
 }

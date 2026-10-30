@@ -20,6 +20,7 @@ and `controller/hook.go` and re-implemented on controller-runtime; no upstream c
 | `internal/controller/app` | Application reconciler: refresh decisions and levels, comparison, status, conditions and Events, automated sync and self-heal, deletion (finalizers, cascade, delete hooks), live-state event mapping, in-memory comparison state (`State`). |
 | `internal/controller/operation` | Operation reconciler: admission, revision resolution and plan persistence, one sync step per reconcile, retries, termination, sync timeout, completion side effects; `KubeEngines` (sync engines per destination, impersonation), `NextRetryAt`, `MergeSyncOptions`, `Summary`. |
 | `internal/controller/retention` | `Select`/`Collect`/`CollectIfNeeded`/`Needed`: keep the newest `revisionHistoryLimit` terminal Operations per Application; the API server is listed only when the cache shows more than the limit. |
+| `internal/controller/clusterinfo` | Cluster-info updater: `New(Options)`, `(*Updater).Run`, `Sync`. Writes `Cluster.status` of the clusters of owned shards from the live-state caches (below). |
 | `internal/controller/integration` | envtest integration tests only. |
 
 ## Public API
@@ -224,6 +225,32 @@ revisions, per-task results, progress, retry state). A new controller re-plans f
 persisted revisions and the engine adopts its hooks (deterministic names) and treats persisted
 completed tasks as done; no in-memory state is required.
 
+## Cluster-info updater
+
+`clusterinfo.Updater` runs in every replica, from `RunController`. A round takes the clusters of the
+assigner, keeps those of owned shards and writes what `ComputeClusterInfo` gives for each. A cluster
+therefore has one writer; the synthetic in-cluster cluster has no object and gets no status.
+
+- **Interval:** `PATROL_UPDATE_CLUSTER_INFO_TIMEOUT`, a Go duration from 10 s to 1 min, default
+  10 s. The interval also bounds a round: what it did not reach waits for the next one.
+- **Reads:** the manager's cached client and `cache.Manager.Lookup`. A round never creates a
+  live-state cache and contacts no destination, so it cannot hang on one.
+- **Writes:** the status lives in etcd (ADR-0004), where every write reaches every Cluster
+  informer. An unchanged status is not written. A change of the cache statistics alone waits for
+  `CacheInfoWriteInterval` (1 min). Anything else is written at once. `attemptedAt` moves with a
+  write only, so it is not the time of the last round.
+- **Reactions:** status writes reach no comparison. The Application reconciler's Cluster watch
+  passes changes of generation, labels and annotations only, as the ApplicationSet handler does,
+  and the cluster registry sends no event for them.
+- **Application count:** Applications whose project exists and permits their namespace. A failed
+  list ends the round without writing, because a count of zero would be a guess.
+- **Skip-reconcile:** no shard processes such a cluster, so it reports `Unknown` whatever an old
+  cache says.
+
+A destination that fails under a synced cache keeps `Successful` until the next full sync of that
+cache (restart, invalidate-cache, credential change, 12 h resync). Upstream behaves the same way:
+the sync error is set by full syncs only. The Applications report the failure earlier.
+
 ## Metrics
 
 `patrol_app_sync_total{namespace,name,project,dest_server,phase,dry_run}`,
@@ -275,7 +302,8 @@ deleted).
 `docs/parity/status/controller.yaml`: APP-002, 032..037, 042, 044, 046, 057..060, 063, 066,
 067, 078..088 (086, 087 in-progress), 110, 141 (in-progress); DIFF-036, 037; OPS-073;
 SYNC-001, 003, 006, 013..028, 031 (deletion confirmation), 051, 052, 070, 076..079, 087,
-089..091, 093, 094; TEN-010; REPO-097 (in-progress); APP-045 different-by-design.
+089..091, 093, 094; TEN-010; REPO-094, 095; OPS-050; REPO-097 (in-progress); APP-045
+different-by-design.
 
 ## Known gaps and deliberate differences
 

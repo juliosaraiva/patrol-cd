@@ -4,6 +4,7 @@ import (
 	"cmp"
 	"errors"
 	"fmt"
+	"maps"
 	"slices"
 	"strings"
 
@@ -260,6 +261,18 @@ func compareAPIInfo(a, b APIResourceInfo) int {
 		cmp.Compare(a.GroupVersionResource.Version, b.GroupVersionResource.Version),
 		cmp.Compare(a.GroupVersionResource.Resource, b.GroupVersionResource.Resource),
 	)
+}
+
+// APIVersionStrings lists "group/version" and "group/version/Kind" of every served resource,
+// sorted (upstream APIResourcesToStrings with kinds).
+func APIVersionStrings(resources []APIResourceInfo) []string {
+	set := map[string]bool{}
+	for _, r := range resources {
+		gv := r.GroupVersionResource.GroupVersion().String()
+		set[gv] = true
+		set[gv+"/"+r.GroupKind.Kind] = true
+	}
+	return slices.Sorted(maps.Keys(set))
 }
 
 // normalizeServerVersion turns a git version such as "v1.30.2-eks-1234" into "v1.30.2",

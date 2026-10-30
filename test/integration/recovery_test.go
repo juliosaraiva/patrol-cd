@@ -163,13 +163,14 @@ func TestCacheLossMidOperation(t *testing.T) {
 
 // TestDestinationUnreachable: the destination's kube-apiserver stops (a) while an Operation
 // waits on a held wave and (b) under a restarted controller. Operations stay Running without
-// consuming retries, the Application reports ComparisonError, nothing is lost, and both
-// recover when the API server is back.
+// consuming retries, the Application and the Cluster report the failure, nothing is lost, and
+// everything recovers when the API server is back.
 func TestDestinationUnreachable(t *testing.T) {
 	s := stack.Start(t, stack.Options{
 		DedicatedDestinations: 1,
 		// The controller and server log failed requests to the stopped destination.
 		AllowedErrors: []string{`connection refused`, `dest-2`, `Failed to load live state`, `cluster unreachable`},
+		Controller:    fastClusterInfo,
 	})
 	d := s.Destination(2)
 	require.Equal(t, stack.AuthBearerToken, d.Auth)
@@ -207,11 +208,12 @@ func TestDestinationUnreachable(t *testing.T) {
 		return stack.HasCondition(a, v1alpha1.ApplicationConditionComparisonError, "")
 	})
 	t.Logf("condition while unreachable: %s", stack.Condition(a, v1alpha1.ApplicationConditionComparisonError).Message)
-	// Observation for integration finding O-1: the controller does not maintain Cluster.status.
-	if c, err := s.API(t).GetCluster(t.Context(), apiclient.ClusterByServer(d.Server)); err == nil {
-		t.Logf("Cluster %s status while unreachable: connectionState=%+v serverVersion=%q lastCacheSyncTime=%v",
-			d.Name, c.Status.ConnectionState, c.Status.ServerVersion, c.Status.Info.CacheInfo.LastCacheSyncTime)
-	}
+	// The Cluster reports the outage (O-1).
+	down := waitCluster(t, s, d, "the Cluster reports the outage", func(c *apiclient.RegisteredCluster) bool {
+		return connectionIs(c, v1alpha1.ConnectionStatusFailed)
+	})
+	assert.NotEmpty(t, down.Status.ConnectionState.Message)
+	assert.Nil(t, down.Status.Info.CacheInfo.LastCacheSyncTime, "no statistics from a cache that cannot sync")
 	// Backoff: the controller does not hammer the unreachable cluster.
 	errorsBefore := stack.MetricSum(s.Metrics(t, stack.Controller), "patrol_app_k8s_request_total", map[string]string{"server": d.Server, "response_code": "error"})
 	window := 10 * time.Second
@@ -240,6 +242,12 @@ func TestDestinationUnreachable(t *testing.T) {
 	})
 	assert.Nil(t, stack.Condition(a, v1alpha1.ApplicationConditionComparisonError), "ComparisonError cleared")
 	assert.Equal(t, "two", liveData(t, d, ns, "wave-0", "value"))
+	up := waitCluster(t, s, d, "the Cluster reports the recovery", func(c *apiclient.RegisteredCluster) bool {
+		return connectionIs(c, v1alpha1.ConnectionStatusSuccessful)
+	})
+	assert.Empty(t, up.Status.ConnectionState.Message)
+	assert.NotEmpty(t, up.Status.ServerVersion)
+	assert.NotNil(t, up.Status.Info.CacheInfo.LastCacheSyncTime)
 }
 
 // TestRepoServerDown: with the repo-server stopped, a periodic-style (latest) comparison
