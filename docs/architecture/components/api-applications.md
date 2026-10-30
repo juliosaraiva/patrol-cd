@@ -292,7 +292,8 @@ Without the change (`go test -overlay` with the previous `crud.go`, `watch.go` a
 rollback, unavailable, slow controller and watch deleted (list and inline pass: they guard
 upstream List and inline health), and `TestE2EAppResourceHealthFromTree` fails (empty HEALTH
 column, then `app wait --health --resource :ConfigMap:cfg` times out after 15 s). With the
-watch pause disabled the slow-controller subtest counts 6 tree reads instead of 1; with a fill
+watch pause disabled the slow-controller subtest counted 6 tree reads instead of 1 (its first
+version; the later mutants of the pause are in V-0044); with a fill
 that writes into its argument `TestWithTreeHealth` fails and `-race` reports a data race in the
 watch subtest; with `DELETED` events filled too, the watch deleted subtest fails (the event
 carries the tree's health and the tree is read once more).

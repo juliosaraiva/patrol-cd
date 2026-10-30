@@ -175,7 +175,7 @@ type ResourceDeps struct {
 	ClusterCallTimeout time.Duration
 	// ResourceHealthTimeout bounds the tree read that fills status.resources[].health of
 	// Applications whose resource health lives in the tree (resourceHealthSource appTree)
-	// in get, watch, sync and rollback responses (DefaultResourceHealthTimeout).
+	// in get, watch, sync, rollback and terminate responses (DefaultResourceHealthTimeout).
 	ResourceHealthTimeout time.Duration
 	// MaxEvents caps listed Events (DefaultMaxEvents).
 	MaxEvents int64
