@@ -35,6 +35,7 @@ API-063:
     - internal/cli/app/e2e_test.go:TestE2EAppSyncFlags
     - internal/cli/app/e2e_test.go:TestE2EAppAuthorization
     - internal/cli/app/e2e_test.go:TestE2EAppCreateFromFiles
+    - internal/cli/app/e2e_test.go:TestE2EAppResourceHealthFromTree
     - internal/cli/app/units_test.go:TestLogsCommand
   notes: >-
     Every subcommand with the upstream flags, messages and exit codes. Patrol additions:
@@ -158,6 +159,7 @@ SYNC-098:
   tests:
     - internal/cli/app/e2e_test.go:TestE2EAppSyncFlags
     - internal/cli/app/e2e_test.go:TestE2EAppResourceCommands
+    - internal/cli/app/e2e_test.go:TestE2EAppResourceHealthFromTree
     - internal/cli/app/units_test.go:TestCheckResourceStatus
     - internal/cli/app/units_test.go:TestNeedsReconcile
   notes: >-

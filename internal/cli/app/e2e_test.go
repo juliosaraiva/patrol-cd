@@ -3,6 +3,7 @@ package app_test
 import (
 	"os"
 	"path/filepath"
+	"slices"
 	"strings"
 	"testing"
 
@@ -592,6 +593,60 @@ func TestE2EAppSyncFlags(t *testing.T) {
 	x.RunAs(admin, "app", "wait", "s1", "--suspended", "--timeout", "2").
 		Failed(t, 1, `timed out (2s) waiting for app "s1" to match the expected conditions`).
 		Contains(t, "This is the state of the app after wait timed out:", "The command timed out waiting for the conditions to be met.")
+}
+
+// resourceRow returns the first five whitespace-separated fields of the resource table row
+// of kind/name in out (KIND, NAMESPACE, NAME, STATUS and HEALTH when the group is empty), or
+// nil when there is none.
+func resourceRow(out, kind, name string) []string {
+	for line := range strings.SplitSeq(out, "\n") {
+		f := strings.Fields(line)
+		if slices.Contains(f, kind) && slices.Contains(f, name) {
+			return f[:min(len(f), 5)]
+		}
+	}
+	return nil
+}
+
+// TestE2EAppResourceHealthFromTree runs the controller's default
+// controller.resource.health.persist=false: the stored Application has no resource health
+// (status.resourceHealthSource appTree), and app get and app wait --health --resource see
+// the health the API server fills in from the controller's resource tree (DIFF-064).
+func TestE2EAppResourceHealthFromTree(t *testing.T) {
+	x := newE2E(t)
+	x.repo.set(t, "health", "", cmV1, cmExtra)
+	admin := x.token("admin")
+	x.RunAs(admin, x.createArgs("health", "default", "health", "--annotations", treeHealthAnnotation+"=true")...).Succeeded(t)
+	x.waitReconciled("health")
+	storedHealthEmpty := func() {
+		t.Helper()
+		a := x.app("health")
+		assert.Equal(t, v1alpha1.ResourceHealthLocationAppTree, a.Status.ResourceHealthSource)
+		require.Len(t, a.Status.Resources, 2)
+		for _, r := range a.Status.Resources {
+			assert.Nil(t, r.Health, r.Name)
+		}
+	}
+	storedHealthEmpty()
+
+	// Not synced yet: the tree has Missing nodes for both ConfigMaps.
+	out := x.RunAs(admin, "app", "get", "health").Succeeded(t).Stdout
+	assert.Equal(t, []string{"ConfigMap", x.dest, "cfg", "OutOfSync", "Missing"}, resourceRow(out, "ConfigMap", "cfg"), out)
+	got := decodeJSON[v1alpha1.Application](t, x.RunAs(admin, "app", "get", "health", "-o", "json").Succeeded(t).Stdout)
+	health := map[string]v1alpha1.HealthStatusCode{}
+	for _, r := range got.Status.Resources {
+		if r.Health != nil {
+			health[r.Name] = r.Health.Status
+		}
+	}
+	assert.Equal(t, map[string]v1alpha1.HealthStatusCode{"cfg": v1alpha1.HealthStatusMissing, "extra": v1alpha1.HealthStatusMissing}, health)
+
+	// Synced: the live ConfigMaps are Healthy in the tree.
+	x.RunAs(admin, "app", "sync", "health", "--timeout", "60").Succeeded(t)
+	x.RunAs(admin, "app", "wait", "health", "--health", "--resource", ":ConfigMap:cfg", "--timeout", "15").Succeeded(t)
+	out = x.RunAs(admin, "app", "get", "health").Succeeded(t).Stdout
+	assert.Equal(t, []string{"ConfigMap", x.dest, "cfg", "Synced", "Healthy"}, resourceRow(out, "ConfigMap", "cfg"), out)
+	storedHealthEmpty()
 }
 
 // TestE2EAppHydratorFlags creates a source hydrator Application from flags and clears its

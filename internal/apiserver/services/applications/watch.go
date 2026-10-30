@@ -3,6 +3,7 @@ package applications
 import (
 	"context"
 	"slices"
+	"time"
 
 	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/apimachinery/pkg/types"
@@ -97,10 +98,25 @@ type appWatch struct {
 	f       *appFilter
 	sink    *rest.Sink[pubapi.ApplicationWatchEvent]
 	visible map[types.NamespacedName]*v1alpha1.Application
+	// healthPausedUntil: resource health is not read from the controller before this instant
+	// (set for resourceHealthPause when the controller did not answer).
+	healthPausedUntil time.Time
 }
 
+// send sends an event. ADDED and MODIFIED events carry the resource health kept in the
+// controller's resource tree (upstream Watch, withTreeHealth); DELETED events are sent as
+// they are (the controller drops the state of deleted Applications). a is never modified:
+// it is shared with the other subscribers.
 func (w *appWatch) send(typ string, a *v1alpha1.Application) error {
-	return w.sink.SendWithID(a.ResourceVersion, pubapi.ApplicationWatchEvent{Type: typ, Object: *a})
+	out := a
+	if typ != pubapi.EventDeleted && !w.s.now().Before(w.healthPausedUntil) {
+		filled, err := w.s.withTreeHealth(w.ctx, a)
+		if pausesTreeHealth(err) {
+			w.healthPausedUntil = w.s.now().Add(resourceHealthPause)
+		}
+		out = filled
+	}
+	return w.sink.SendWithID(out.ResourceVersion, pubapi.ApplicationWatchEvent{Type: typ, Object: *out})
 }
 
 func (w *appWatch) handle(ev Event) error {
