@@ -4,7 +4,7 @@
 # component reads it yet (#235), so it reports no check run.
 # Required App permissions (least privilege, see docs/integrations/github-permissions.md):
 #   Metadata: Read, Contents: Read, Pull requests: Read and write (PR comments),
-#   Commit statuses: Read and write.
+#   Commit statuses: Read and write (no status is posted yet: #248).
 apiVersion: cd.patrol.example/v1alpha1
 kind: SCMProvider
 metadata:

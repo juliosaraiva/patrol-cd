@@ -134,8 +134,8 @@ a fake GitHub organization and a stub plugin service.
 
 Pull request preview environments with a GitHub App: SCMProvider and repository credentials,
 a `previews` project, a pull request ApplicationSet with `providerRef` (namespace per pull
-request, cleanup when the pull request closes), commit status and pull request comment
-notifications, the App permission list (from
+request, cleanup when the pull request closes), pull request comment notifications (no
+commit status yet: #248), the App permission list (from
 [github-permissions.md](../integrations/github-permissions.md)) and a webhook registration
 checklist. Start with `examples/github/README.md`. Nothing there registers an App or webhook.
 

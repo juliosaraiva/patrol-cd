@@ -434,8 +434,9 @@ ASET-104..ASET-107. Status: `docs/parity/status/webhook.yaml`.
     (default 50 MB) as is. Every `pkg/scm` verifier rejects bodies over 25 MiB (GitHub's
     own delivery cap), so Patrol clamps the setting: the default and any value above 25
     behave as 25 MiB, and the 400 body states the effective limit (`under 25 MB`, upstream
-    `under 50 MB`). Values up to 25 behave as upstream. GHCR uses the same limit. Above
-    64 MiB, `patrol-server`'s global body cap answers 413 before the handler runs.
+    `under 50 MB`). Values up to 25 behave as upstream. GHCR uses the same limit. A body
+    whose `Content-Length` exceeds 64 MiB gets 413 from `patrol-server`'s global body cap
+    before the handler runs; a chunked one reaches the handler and gets its 400.
 14. **Unsigned deliveries when some secret is configured.** Upstream accepts unsigned
     deliveries for each provider without a secret; Patrol rejects them once any webhook
     secret is configured (see SEC-WH-3). `AllowUnsignedPerProvider` restores upstream.

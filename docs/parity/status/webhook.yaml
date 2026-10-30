@@ -23,8 +23,9 @@ REPO-114:
     draining on shutdown. Additions: 404 for unknown provider paths, 429 per-source rate
     limit, 503 "Webhook server is busy" when the global in-flight body budget is exhausted,
     byte-bounded queue, untrusted values clipped in logs. Served by patrol-server at
-    /api/webhook and /api/webhook/{provider} (internal/server/server_routes.go), where the
-    server's global body cap (64 MiB) answers 413 before the handler runs.
+    /api/webhook and /api/webhook/{provider} (internal/server/server_routes.go). A body whose
+    Content-Length exceeds the server's global cap (64 MiB) is answered 413 before the handler
+    runs; a chunked body reaches the handler and gets its 400.
 
 REPO-115:
   status: different-by-design
@@ -39,7 +40,8 @@ REPO-115:
     request, so changes apply without a restart. Difference: the setting is clamped to
     25 MiB, the cap every pkg/scm verifier enforces (GitHub's own delivery limit), so the
     default (50) and larger values behave as 25 MiB and the 400 body says "under 25 MB"
-    (upstream "under 50 MB"); values up to 25 behave as upstream; GHCR uses the same limit.
+    (upstream "under 50 MB"); values up to 25 behave as upstream, except for the 413 above
+    the server's 64 MiB cap (REPO-114); GHCR uses the same limit.
     See docs/architecture/components/webhook.md#gaps-and-intentional-differences (item 13).
 
 REPO-116:

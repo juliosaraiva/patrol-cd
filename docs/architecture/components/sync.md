@@ -72,8 +72,9 @@ execution during Application deletion, API/CLI/UI surfaces.
    server-side diff) avoids that extra GET.
 2. If `spec.cancel` (or the sync timeout) → `Terminate`; else `Step`.
 3. Persist `Phase/Message/Results/Progress/ManagedNamespaceMetadata` with optimistic
-   concurrency; on `ErrTransient` requeue with rate-limited backoff (optionally persisting
-   the partial result) without counting a retry; requeue after `RequeueAfter` while Running.
+   concurrency; on `ErrTransient` persist the partial result and requeue after at most
+   `PollInterval` without counting a retry (`sync-state-machine.md`, "Retry semantics");
+   requeue after `RequeueAfter` while Running.
    A transient error during the first step (namespace creation, dry run) returns no rows, so
    persisting it never marks the dry run as done.
 4. On a retry attempt, reset `syncResult.resources` and `progress` (like upstream clears
