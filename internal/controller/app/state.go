@@ -28,8 +28,9 @@ type AppState struct {
 	// ComparedAt is when the comparison or tree refresh completed.
 	ComparedAt time.Time
 	// SpecInvalid: the latest refresh found spec errors and compared nothing; Tree is empty
-	// and Managed nil (upstream stores an empty tree and no managed resources), and a
-	// tree-only refresh compares again instead.
+	// and Managed nil, a tree-only refresh compares again instead, and managed resources are
+	// reported as unavailable (upstream stores an empty tree and deletes the managed
+	// resources from its cache).
 	SpecInvalid bool
 }
 

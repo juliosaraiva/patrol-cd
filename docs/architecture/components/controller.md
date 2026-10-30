@@ -55,9 +55,10 @@ Per reconcile (one Application, cache read):
    comparison nor feeds a stale automated-sync decision.
 5. Project resolution and `project.ValidateApplication`: issues become `InvalidSpecError` /
    `UnknownError` (status True) with sync and health `Unknown` and no comparison (APP-033/036).
-   The stored state becomes an empty tree with no managed resources (upstream does the same), so
-   the tree API serves an empty tree and a tree-only refresh compares again instead of
-   rebuilding the tree from the last valid comparison.
+   The stored state becomes an empty tree with no managed resources, so the tree API serves an
+   empty tree and answers managed resources as unavailable, which the API reports as the
+   Application's conditions (412), as upstream's empty tree and cache miss do. A tree-only
+   refresh then compares again instead of rebuilding the tree from the last valid comparison.
 6. `compare.Compare` at the level: recent compares at `status.sync.revision(s)`, latest and
    force-resolve at the spec target revisions (force bypasses the revision cache).
    `ErrRepoErrorDeferred` keeps the previous status (retry in 30s). The last Operation's

@@ -157,6 +157,7 @@ DIFF-078:
     - internal/controller/app/liveevents_test.go:TestRefreshOrphanMonitors
     - internal/controller/app/reconciler_test.go:TestApplicationExists
     - internal/controller/integration/orphans_test.go:TestOrphanedResourcesRefresh
+    - test/integration/lifecycle_test.go:TestObjectOfMissingApplicationIsOrphan
   notes: >-
     Orphans from the destination namespace's top-level resources (not managed, permitted, not
     excepted, not attributed to an existing Application: an object tracked by an Application

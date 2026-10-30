@@ -746,6 +746,49 @@ func TestDeletion(t *testing.T) {
 	})
 }
 
+// TestObjectOfMissingApplicationIsOrphan: the real controller counts an object tracked by an
+// Application that does not exist as an orphan (DIFF-078), and not the object of one that
+// exists. Its event is attributed to the missing Application, so it takes a refresh to count.
+func TestObjectOfMissingApplicationIsOrphan(t *testing.T) {
+	s := stack.Start(t, stack.Options{})
+	d := s.Destination(1)
+	repo := s.Git().NewRepo(t, "orphans")
+	repo.CommitFiles(t, "apps", map[string]string{
+		"monitor/a.yaml": configMap("monitor-a", map[string]string{"k": "v"}, nil),
+		"peer/a.yaml":    configMap("peer-a", map[string]string{"k": "v"}, nil),
+	})
+	ns := s.NewNamespace(t, d, "orphans")
+	warn := true
+	_, err := s.API(t).CreateProject(t.Context(), &v1alpha1.AppProject{
+		ObjectMeta: metav1.ObjectMeta{Name: "orphans"},
+		Spec: v1alpha1.AppProjectSpec{
+			SourceRepos:       []string{"*"},
+			Destinations:      []v1alpha1.ApplicationDestination{{Server: "*", Namespace: "*"}},
+			OrphanedResources: &v1alpha1.OrphanedResourcesMonitorSettings{Warn: &warn},
+		},
+	}, false)
+	require.NoError(t, err)
+	monitor := s.NewApp("monitor", repo, "monitor", d, ns)
+	monitor.Spec.Project = "orphans"
+	for _, a := range []*v1alpha1.Application{monitor, s.NewApp("peer", repo, "peer", d, ns)} {
+		s.CreateApp(t, a)
+		requireSucceeded(t, syncAndWait(t, s, &apiclient.ApplicationSyncRequest{Name: a.Name}))
+		s.WaitSyncedHealthy(t, a.Name, "")
+	}
+	got := s.RefreshUntil(t, "monitor", "the object of peer is no orphan", func(a *v1alpha1.Application) bool {
+		return a.Status.Sync.Status == v1alpha1.SyncStatusCodeSynced
+	})
+	require.Nil(t, stack.Condition(got, v1alpha1.ApplicationConditionOrphanedResourceWarning), stack.DescribeApp(got))
+
+	d.Apply(t, ns, configMap("ghost", nil, map[string]string{
+		v1alpha1.AnnotationKeyInstallationID: s.InstallationID,
+		v1alpha1.AnnotationKeyTrackingID:     "gone-app:/ConfigMap:" + ns + "/ghost",
+	}))
+	s.RefreshUntil(t, "monitor", "the object of the missing Application counted", func(a *v1alpha1.Application) bool {
+		return stack.HasCondition(a, v1alpha1.ApplicationConditionOrphanedResourceWarning, "Application has 1 orphaned resources")
+	})
+}
+
 // TestOnboardingThroughAPI registers a destination cluster (bearer token) and a private git
 // repository (basic auth) through the API and creates a validated Application for them right
 // away, as a script running `patrol cluster add`, `patrol repo add` and `patrol app create`
