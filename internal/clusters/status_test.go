@@ -138,24 +138,43 @@ func TestApplyClusterInfo(t *testing.T) {
 		assert.Equal(t, v1alpha1.ClusterCacheInfo{}, c.Status.Info.CacheInfo)
 		assert.True(t, meta.IsStatusConditionTrue(c.Status.Conditions, v1alpha1.ConditionConnectionFailed))
 	})
-	t.Run("no cache clears what the cache reported", func(t *testing.T) {
+	t.Run("no cache clears the statistics and keeps what renders read", func(t *testing.T) {
 		t.Parallel()
 		c := healthy()
 		ApplyClusterInfo(c, ComputeClusterInfo(nil, 0, now))
 		assert.Equal(t, v1alpha1.ConnectionStatusUnknown, c.Status.ConnectionState.Status)
 		assert.Equal(t, NoApplicationsMessage, c.Status.ConnectionState.Message)
-		assert.Empty(t, c.Status.ServerVersion)
-		assert.Empty(t, c.Status.Info.APIVersions)
+		assert.Equal(t, "v1.36.0", c.Status.ServerVersion)
+		assert.Equal(t, []string{"v1"}, c.Status.Info.APIVersions)
+		assert.Equal(t, v1alpha1.ClusterCacheInfo{}, c.Status.Info.CacheInfo)
 		assert.Equal(t, NoApplicationsMessage, meta.FindStatusCondition(c.Status.Conditions, v1alpha1.ConditionReady).Message)
 		assert.Nil(t, meta.FindStatusCondition(c.Status.Conditions, v1alpha1.ConditionConnectionFailed))
+	})
+	t.Run("a cache that has reported nothing keeps what renders read", func(t *testing.T) {
+		t.Parallel()
+		c := healthy()
+		ApplyClusterInfo(c, ComputeClusterInfo(&CacheState{}, 2, now))
+		assert.Equal(t, v1alpha1.ConnectionStatusUnknown, c.Status.ConnectionState.Status)
+		assert.Equal(t, "v1.36.0", c.Status.ServerVersion)
+		assert.Equal(t, []string{"v1"}, c.Status.Info.APIVersions)
+	})
+	t.Run("what a destination reports replaces what was kept", func(t *testing.T) {
+		t.Parallel()
+		c := healthy()
+		ApplyClusterInfo(c, ComputeClusterInfo(nil, 2, now))
+		ApplyClusterInfo(c, ComputeClusterInfo(&CacheState{ServerVersion: "v1.37.0", APIVersions: []string{"v1", "apps/v1"}, LastCacheSyncTime: &synced}, 2, now))
+		assert.Equal(t, "v1.37.0", c.Status.ServerVersion)
+		assert.Equal(t, []string{"v1", "apps/v1"}, c.Status.Info.APIVersions)
 	})
 	t.Run("a long message fits the schema", func(t *testing.T) {
 		t.Parallel()
 		// Multi-byte characters across the cut: bytes are cut, and what is stored stays valid.
 		long := strings.Repeat("é", maxConnectionMessage)
+		failed := func(at time.Time) StatusUpdate {
+			return ComputeClusterInfo(&CacheState{LastCacheSyncTime: &synced, SyncError: errors.New(long)}, 2, at)
+		}
 		c := healthy()
-		failed := ComputeClusterInfo(&CacheState{LastCacheSyncTime: &synced, SyncError: errors.New(long)}, 2, now)
-		ApplyClusterInfo(c, failed)
+		ApplyClusterInfo(c, failed(now))
 		msg := c.Status.ConnectionState.Message
 		assert.LessOrEqual(t, len(msg), maxConnectionMessage)
 		assert.True(t, utf8.ValidString(msg))
@@ -163,7 +182,7 @@ func TestApplyClusterInfo(t *testing.T) {
 		assert.Equal(t, msg, meta.FindStatusCondition(c.Status.Conditions, v1alpha1.ConditionReady).Message)
 
 		before := c.Status.DeepCopy()
-		ApplyClusterInfo(c, failed)
+		ApplyClusterInfo(c, failed(now.Add(time.Minute)))
 		assert.True(t, equality.Semantic.DeepEqual(before, &c.Status), "the same long error is no change")
 	})
 	t.Run("a message that is not valid UTF-8 is stored as the API will", func(t *testing.T) {
@@ -261,8 +280,6 @@ func TestStatusWriterRetriesConflicts(t *testing.T) {
 	require.ErrorIs(t, err, errSynthetic)
 }
 
-// TestStatusWriterEnvtest writes probe results, cluster info and the version label to a real
-// Cluster object (status subresource of the generated CRD).
 // The largest status ComputeClusterInfo lets through is stored: everything a destination decides,
 // in characters JSON takes six bytes for.
 func TestStatusWriterStoresTheLargestStatus(t *testing.T) {
@@ -293,6 +310,8 @@ func TestStatusWriterStoresTheLargestStatus(t *testing.T) {
 	assert.Less(t, len(encoded), 3<<19)
 }
 
+// TestStatusWriterEnvtest writes probe results, cluster info and the version label to a real
+// Cluster object (status subresource of the generated CRD).
 func TestStatusWriterEnvtest(t *testing.T) {
 	cfg := envConfig(t)
 	ctx := context.Background()

@@ -191,8 +191,9 @@ SYNC-093.
 - Exec environment variables are passed sorted by name (upstream: map order).
 - `ComputeClusterInfo` bounds what a destination reports, so that the API cannot refuse a status
   and lose the connection state with it: a server version over 256 bytes and API versions over
-  512 KiB as stored are left out, and a connection message is stored as valid UTF-8 and cut to
-  32768 bytes. `WantsVersionLabel` skips a version the API would refuse as a label value.
+  512 KiB as stored are left out, which leaves the stored ones in place (renders read them, and
+  `ApplyClusterInfo` keeps what an update does not have), and a connection message is stored as
+  valid UTF-8 and cut to 32768 bytes. `WantsVersionLabel` skips a version the API would refuse as a label value.
 - The implicit in-cluster cluster has no object, so no cluster information (#246).
 - The synthetic in-cluster version uses the `v<major>.<minor>.<patch>` form like every other
   cluster (upstream omits the `v` for the synthetic one only).

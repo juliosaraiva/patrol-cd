@@ -192,7 +192,7 @@ func (u *Updater) syncCluster(ctx context.Context, info sharding.ClusterInfo, as
 		return err
 	}
 	// No shard processes a skip-reconcile cluster, so it has no fresh state: Unknown rather than
-	// whatever was true before the annotation.
+	// the connection state from before the annotation.
 	var state *clusters.CacheState
 	if !as.Skip {
 		state = u.opts.CacheState(info.Server)

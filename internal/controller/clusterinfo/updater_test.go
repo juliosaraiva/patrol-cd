@@ -151,7 +151,7 @@ func (f *fixture) status(t *testing.T, name string) v1alpha1.ClusterStatus {
 
 func clusterObj(name, server string, mutate ...func(*v1alpha1.Cluster)) *v1alpha1.Cluster {
 	c := &v1alpha1.Cluster{
-		ObjectMeta: metav1.ObjectMeta{Name: name, Namespace: controlNS},
+		ObjectMeta: metav1.ObjectMeta{Name: name, Namespace: controlNS, Generation: 1},
 		Spec:       v1alpha1.ClusterSpec{Name: name, Server: server, Shard: ptr.To[int64](0)},
 	}
 	for _, m := range mutate {
@@ -213,6 +213,7 @@ func TestSyncWritesOwnedClusters(t *testing.T) {
 	t.Parallel()
 	skipped := func(c *v1alpha1.Cluster) {
 		c.Annotations = map[string]string{v1alpha1.AnnotationKeySkipReconcile: "true"}
+		c.Status.ServerVersion, c.Status.Info.APIVersions = "v1.35.0", []string{"v1"}
 	}
 	f := newFixture(t, interceptor.Funcs{},
 		clusterObj("a-owned", "https://a"),
@@ -228,7 +229,8 @@ func TestSyncWritesOwnedClusters(t *testing.T) {
 	assert.Equal(t, v1alpha1.ConnectionStatusSuccessful, f.status(t, "a-owned").ConnectionState.Status)
 	assert.Nil(t, f.status(t, "b-other").ConnectionState)
 	assert.Equal(t, v1alpha1.ConnectionStatusUnknown, f.status(t, "c-skipped").ConnectionState.Status, "no shard processes it, whatever the cache says")
-	assert.Empty(t, f.status(t, "c-skipped").ServerVersion)
+	assert.Equal(t, "v1.35.0", f.status(t, "c-skipped").ServerVersion, "renders still read it")
+	assert.Equal(t, []string{"v1"}, f.status(t, "c-skipped").Info.APIVersions)
 }
 
 func TestSyncClusterWithoutCache(t *testing.T) {
@@ -345,6 +347,14 @@ func TestSyncSkipsUnchangedAndThrottlesCacheInfo(t *testing.T) {
 
 	f.states[server].ServerVersion = "v1.37.0"
 	assert.Equal(t, []string{"a"}, round(time.Second), "a new version is written at once")
+
+	c := &v1alpha1.Cluster{}
+	require.NoError(t, f.reader.Get(context.Background(), client.ObjectKey{Namespace: controlNS, Name: "a"}, c))
+	c.Generation++
+	require.NoError(t, f.reader.Update(context.Background(), c))
+	f.states[server].ResourcesCount = 12
+	assert.Equal(t, []string{"a"}, round(time.Second), "a new generation is written at once, statistics or not")
+	assert.Equal(t, c.Generation, f.status(t, "a").ObservedGeneration)
 
 	require.NoError(t, f.reader.Create(context.Background(), application(controlNS, "two", "default", server)))
 	assert.Equal(t, []string{"a"}, round(time.Second), "a new Application is written at once")

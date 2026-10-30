@@ -250,6 +250,12 @@ therefore has one writer; the synthetic in-cluster cluster has no object and get
   of zero would be a guess.
 - **Skip-reconcile:** no shard processes such a cluster, so it reports `Unknown` whatever an old
   cache says.
+- **Version and API versions:** validation, `GET .../manifests` and the CLI's local render read them
+  from the status, where upstream asks the destination. So a status with nothing newer keeps them:
+  a cluster with no Applications, a skip-reconcile cluster, the rounds after a controller restart
+  and a cache that has not reported report `Unknown` or `Failed` with the last version and list
+  known. Only a destination's answer replaces them. Connection state and cache statistics are not
+  kept.
 - **Invalidated cache:** `Unknown` until the next sync, as upstream, because the time and the
   outcome of the old sync say nothing about what the cache holds now (`compare.ClusterCacheState`).
 - **Resource version:** a status write moves it, so a client that sends the version it read can

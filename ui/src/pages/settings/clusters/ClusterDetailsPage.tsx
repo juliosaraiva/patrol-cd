@@ -300,7 +300,13 @@ export function Component() {
               {
                 key: 'sync',
                 label: 'Last cache sync',
-                value: info?.cacheInfo?.lastCacheSyncTime ? <Timestamp value={info.cacheInfo.lastCacheSyncTime} /> : 'Not synced yet',
+                value: info?.cacheInfo?.lastCacheSyncTime ? (
+                  <Timestamp value={info.cacheInfo.lastCacheSyncTime} />
+                ) : state?.status === 'Failed' ? (
+                  'Last sync failed'
+                ) : (
+                  'Not synced yet'
+                ),
               },
             ]}
           />

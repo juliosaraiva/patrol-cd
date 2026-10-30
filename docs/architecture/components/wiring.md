@@ -113,6 +113,7 @@ besides those:
 | `PATROL_K8S_CLIENT_QPS`, `_BURST`, `_MAX_IDLE_CONNECTIONS`, `PATROL_K8S_TCP_TIMEOUT`, `_TCP_KEEPALIVE`, `_TLS_HANDSHAKE_TIMEOUT`, `_TCP_IDLE_TIMEOUT`, `PATROL_K8S_SERVER_SIDE_TIMEOUT`, `PATROL_K8SCLIENT_RETRY_MAX`, `_RETRY_BASE_BACKOFF` | server, controller | Destination cluster clients (`clusters.TuningFromLookup`; the parameter values win) |
 | `PATROL_FAKE_IN_CLUSTER` | server, controller | Development: serve the in-cluster destination from the local kubeconfig |
 | `PATROL_CONTROLLER_REPLICAS`, `PATROL_CONTROLLER_SHARD`, `PATROL_ENABLE_DYNAMIC_CLUSTER_DISTRIBUTION`, `PATROL_CONTROLLER_HEARTBEAT_TIME`, `PATROL_APPLICATION_CONTROLLER_NAME` | controller | Sharding (`sharding.ConfigFromEnv`) |
+| `PATROL_UPDATE_CLUSTER_INFO_TIMEOUT` | controller | Interval of the cluster-info updater (`clusters.ClusterInfoIntervalFromLookup`; out-of-range values ignored with a warning) |
 | `PATROL_GPG_ENABLED` | server, controller, repo-server | `false` disables GnuPG source verification criteria |
 | `PATROL_SESSION_FAILURE_MAX_FAIL_COUNT`, `PATROL_SESSION_FAILURE_WINDOW_SECONDS`, `PATROL_SESSION_MAX_CACHE_SIZE`, `PATROL_MAX_CONCURRENT_LOGIN_REQUESTS_COUNT` | server | Login throttling (`auth.LoginConfigFromEnv`) |
 | `PATROL_APPLICATIONSET_CONTROLLER_NAMESPACES` | server | ApplicationSet namespaces served by the API (the appset controller reads `applicationsetcontroller.namespaces`) |

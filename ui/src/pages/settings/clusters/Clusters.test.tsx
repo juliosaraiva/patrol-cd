@@ -74,6 +74,7 @@ describe('Settings → Cluster details', () => {
     await renderSettings(clusterPath(PROD), 'prod-eu');
     expect(screen.getByRole('heading', { name: 'Connection' })).toBeInTheDocument();
     expect(screen.getByText('Patrol cannot reach this cluster')).toBeInTheDocument();
+    expect(screen.getByText('Last sync failed')).toBeInTheDocument();
     // From RegisteredCluster.credentials flags; values are never returned.
     expect(screen.getByText('Bearer token (custom CA)')).toBeInTheDocument();
     expect(screen.getByRole('list', { name: 'Labels' })).toHaveTextContent('env=prod');

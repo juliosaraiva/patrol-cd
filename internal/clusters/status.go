@@ -272,7 +272,8 @@ func (w *StatusWriter) RecordProbe(ctx context.Context, c *v1alpha1.Cluster, ver
 }
 
 // RecordClusterInfo stores a ComputeClusterInfo result. The cache-derived status replaces the
-// connection state, server version and info, as upstream's cluster-info updater does.
+// connection state and info, as upstream's cluster-info updater does, but for what
+// ApplyClusterInfo keeps.
 func (w *StatusWriter) RecordClusterInfo(ctx context.Context, c *v1alpha1.Cluster, u StatusUpdate) (*v1alpha1.Cluster, error) {
 	if IsSynthetic(c) {
 		return nil, errSynthetic
@@ -284,12 +285,15 @@ func (w *StatusWriter) RecordClusterInfo(ctx context.Context, c *v1alpha1.Cluste
 }
 
 // ApplyClusterInfo sets the status fields of a ComputeClusterInfo result on c. Callers can apply
-// it to a copy to find out whether RecordClusterInfo would write.
+// it to a copy to find out whether RecordClusterInfo would write. A version or API list the update
+// does not have stays: renders read them from here, where upstream asks the destination, and an
+// older answer is closer to it than Helm's default.
 func ApplyClusterInfo(c *v1alpha1.Cluster, u StatusUpdate) {
 	applyConnection(c, u.ConnectionState, u.ServerVersion, true)
-	c.Status.ServerVersion = u.ServerVersion
 	c.Status.Info.ApplicationsCount = u.Info.ApplicationsCount
-	c.Status.Info.APIVersions = u.Info.APIVersions
+	if len(u.Info.APIVersions) > 0 {
+		c.Status.Info.APIVersions = u.Info.APIVersions
+	}
 	c.Status.Info.CacheInfo = u.Info.CacheInfo
 }
 

@@ -9,6 +9,7 @@ import (
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 
 	"github.com/juliosaraiva/patrol-cd/api/v1alpha1"
 	"github.com/juliosaraiva/patrol-cd/internal/clusters"
@@ -147,4 +148,91 @@ metadata:
 	got, err := s.API(t).GetApplicationManifests(t.Context(), &apiclient.ApplicationManifestQuery{Name: "capabilities"})
 	require.NoError(t, err)
 	assert.Contains(t, strings.Join(got.Manifests, "\n"), `"gated"`)
+}
+
+// TestRenderInputsOutliveTheCache: validation and GET .../manifests read the version and API versions
+// of the Cluster status, so these stay when the controller has nothing newer to say. A cluster with
+// no Applications keeps what the API's probe found, and a skip-reconcile cluster what its cache
+// reported. A controller that restarted has no cache either, and goes the same way.
+func TestRenderInputsOutliveTheCache(t *testing.T) {
+	s := stack.Start(t, stack.Options{DedicatedDestinations: 1, UnregisteredDedicated: true, Controller: fastClusterInfo})
+	d := s.Destination(2)
+	creds := d.Credentials()
+	_, err := s.API(t).CreateCluster(t.Context(), &apiclient.ClusterInput{
+		Server: d.Server, Name: "render-inputs",
+		Config: apiclient.ClusterConfigInput{
+			BearerToken:     string(creds[v1alpha1.ClusterSecretKeyBearerToken]),
+			TLSClientConfig: apiclient.ClusterTLSClientConfigInput{CAData: creds[v1alpha1.ClusterSecretKeyCAData]},
+		},
+	}, false)
+	require.NoError(t, err)
+	unused := waitCluster(t, s, d, "the probed version of a cluster with no Applications", func(c *apiclient.RegisteredCluster) bool {
+		return connectionIs(c, v1alpha1.ConnectionStatusUnknown) && c.Status.ConnectionState.Message == clusters.NoApplicationsMessage && c.Status.ServerVersion != ""
+	})
+	version := unused.Status.ServerVersion
+
+	ns := s.NewNamespace(t, d, "render-inputs")
+	repo := s.Git().NewRepo(t, "render-inputs")
+	rev := repo.CommitFiles(t, "v1", map[string]string{
+		// Only that version: the create below is refused if validation renders with any other.
+		"chart/Chart.yaml":        "apiVersion: v2\nname: render-inputs\nversion: 0.1.0\nkubeVersion: \"=" + strings.TrimPrefix(version, "v") + "\"\n",
+		"chart/templates/cm.yaml": "apiVersion: v1\nkind: ConfigMap\nmetadata:\n  name: kube\ndata:\n  version: {{ .Capabilities.KubeVersion.Version | quote }}\n",
+	})
+	s.CreateApp(t, s.NewApp("render-inputs", repo, "chart", d, ns))
+	requireSucceeded(t, syncAndWait(t, s, &apiclient.ApplicationSyncRequest{Name: "render-inputs"}))
+	s.WaitSyncedHealthy(t, "render-inputs", rev)
+	used := waitCluster(t, s, d, "the status of the cluster in use", func(c *apiclient.RegisteredCluster) bool {
+		return connectionIs(c, v1alpha1.ConnectionStatusSuccessful) && len(c.Status.Info.APIVersions) > 0
+	})
+
+	manifests := func() string {
+		t.Helper()
+		got, err := s.API(t).GetApplicationManifests(t.Context(), &apiclient.ApplicationManifestQuery{Name: "render-inputs"})
+		require.NoError(t, err)
+		return strings.Join(got.Manifests, "\n")
+	}
+	rendered := `"version":"` + version + `"`
+	assert.Contains(t, manifests(), rendered)
+
+	_, err = s.API(t).UpdateCluster(t.Context(), apiclient.ClusterByServer(d.Server), &apiclient.ClusterInput{
+		Server:      d.Server,
+		Annotations: map[string]string{v1alpha1.AnnotationKeySkipReconcile: "true"},
+	}, "annotations")
+	require.NoError(t, err)
+	skipped := waitCluster(t, s, d, "a skip-reconcile cluster reports no state", func(c *apiclient.RegisteredCluster) bool {
+		return connectionIs(c, v1alpha1.ConnectionStatusUnknown)
+	})
+	assert.Equal(t, version, skipped.Status.ServerVersion)
+	assert.Equal(t, used.Status.Info.APIVersions, skipped.Status.Info.APIVersions)
+	assert.Contains(t, manifests(), rendered)
+}
+
+// TestClusterInfoCountsServedNamespaces: a pattern in application.namespaces makes the informers
+// cluster-wide, and an Application of a namespace the controller does not serve is not counted, though
+// its project permits that namespace.
+func TestClusterInfoCountsServedNamespaces(t *testing.T) {
+	s := stack.Start(t, stack.Options{DedicatedDestinations: 1, ApplicationNamespaces: []string{"served-*"}, Controller: fastClusterInfo})
+	d := s.Destination(2)
+	ns := s.NewNamespace(t, d, "counted")
+	repo := s.Git().NewRepo(t, "counted")
+	repo.CommitFiles(t, "v1", map[string]string{"app/cm.yaml": configMap("cm", map[string]string{"v": "1"}, nil)})
+	project := &v1alpha1.AppProject{
+		ObjectMeta: metav1.ObjectMeta{Name: "anywhere", Namespace: s.Namespace},
+		Spec: v1alpha1.AppProjectSpec{
+			SourceRepos: []string{"*"}, SourceNamespaces: []string{"*"},
+			Destinations: []v1alpha1.ApplicationDestination{{Server: "*", Namespace: "*"}},
+		},
+	}
+	require.NoError(t, s.Control().Client.Create(t.Context(), project))
+	// The served one last: the cluster reports a state only after that one reached its cache, so a
+	// round that writes the state sees both.
+	for _, namespace := range []string{"unserved", "served"} {
+		app := s.NewApp(namespace, repo, "app", d, ns)
+		app.Namespace, app.Spec.Project = s.NewNamespace(t, s.Control(), namespace), project.Name
+		require.NoError(t, s.Control().Client.Create(t.Context(), app))
+	}
+	c := waitCluster(t, s, d, "the status of the cluster", func(c *apiclient.RegisteredCluster) bool {
+		return connectionIs(c, v1alpha1.ConnectionStatusSuccessful)
+	})
+	assert.Equal(t, int64(1), c.Status.Info.ApplicationsCount)
 }
