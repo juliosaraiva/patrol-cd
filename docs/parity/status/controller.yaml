@@ -639,12 +639,13 @@ REPO-094:
     - internal/controller/integration/cluster_events_test.go:TestClusterEventsRefreshApplications
     - internal/controller/integration/cluster_events_test.go:TestStatusWriteKeepsTheSyncEngine
     - internal/controller/operation/engines_test.go:TestKubeEnginesReuse
+    - api/v1alpha1/admission_test.go:TestAdmissionCluster
     - test/integration/clusterinfo_test.go:TestClusterInfoWrittenByController
     - test/integration/clusterinfo_test.go:TestManifestsMatchControllerCapabilities
     - test/integration/clusterinfo_test.go:TestRenderInputsOutliveTheCache
     - test/integration/clusterinfo_test.go:TestClusterInfoCountsServedNamespaces
     - test/integration/recovery_test.go:TestDestinationUnreachable
-  evidence: docs/verification/log.md#V-0046; docs/verification/log.md#V-0047; docs/verification/log.md#V-0049; docs/verification/log.md#V-0050; docs/verification/log.md#V-0051; docs/verification/log.md#V-0052
+  evidence: docs/verification/log.md#V-0046; docs/verification/log.md#V-0047; docs/verification/log.md#V-0049; docs/verification/log.md#V-0050; docs/verification/log.md#V-0051; docs/verification/log.md#V-0052; docs/verification/log.md#V-0053
   notes: >-
     Not complete: the implicit in-cluster cluster, the destination of a default install, has no
     object and so no Application count, API versions or cache information; GET /clusters shows the
@@ -662,7 +663,8 @@ REPO-094:
     the next sync. Validation and GET manifests read serverVersion and apiVersions from the status
     where upstream asks the destination, so unlike upstream's entry they stay until a destination
     answers again: a stale value after a destination upgrade, with no cache to report it, instead
-    of Helm's default version. As upstream, a destination that fails under a synced cache shows as Failed only
+    of Helm's default version. spec.server is immutable on the CRD, so a value that stays is always
+    this destination's. As upstream, a destination that fails under a synced cache shows as Failed only
     after the next full sync (restart, invalidate-cache, credential change, 12 h resync).
 
 REPO-095:

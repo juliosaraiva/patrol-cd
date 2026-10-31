@@ -430,6 +430,29 @@ func TestClusterDeleteByName(t *testing.T) {
 	assert.NotNil(t, e.secret("user-creds"), "unmanaged Secret kept")
 }
 
+// TestUpdateKeepsTheStoredServer: the API normalizes the server it reads (REPO-077), and the CRD
+// refuses a changed one, so an update has to write back what is stored.
+func TestUpdateKeepsTheStoredServer(t *testing.T) {
+	e := newEnv(t, envOptions{})
+	f := newFakeCluster(t, e.cfg, e.clientset, "")
+	f.addToken(goodToken)
+	ctx := context.Background()
+	require.NoError(t, e.kube.Create(ctx, &corev1.Secret{
+		ObjectMeta: metav1.ObjectMeta{Name: "creds", Namespace: e.ns, Labels: map[string]string{v1alpha1.LabelKeySecretType: v1alpha1.LabelValueSecretTypeCluster}},
+		Data:       map[string][]byte{v1alpha1.ClusterSecretKeyBearerToken: []byte(goodToken), v1alpha1.ClusterSecretKeyCAData: f.caPEM},
+	}))
+	stored := f.srv.URL + "/"
+	require.NoError(t, e.kube.Create(ctx, &v1alpha1.Cluster{ObjectMeta: metav1.ObjectMeta{Name: "declarative", Namespace: e.ns}, Spec: v1alpha1.ClusterSpec{
+		Server: stored, Name: "declarative", Config: v1alpha1.ClusterConfig{CredentialsRef: &v1alpha1.LocalSecretReference{Name: "creds"}},
+	}}))
+
+	_, err := e.client("admin").UpdateCluster(ctx, apiclient.ClusterByServer(f.srv.URL), &apiclient.ClusterInput{Labels: map[string]string{"team": "a"}}, "labels")
+	require.NoError(t, err)
+	obj := e.clusterObject(stored)
+	require.NotNil(t, obj, "the stored server keeps its slash")
+	assert.Equal(t, "a", obj.Labels["team"])
+}
+
 // TestClusterRotateAuth covers REPO-103 end to end: the destination accepts only tokens of
 // existing service-account token Secrets; rotation creates a new Secret, verifies and
 // stores the new token, and deletes the old Secret, after which the old token is refused.

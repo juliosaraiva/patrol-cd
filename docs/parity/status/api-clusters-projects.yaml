@@ -205,6 +205,7 @@ REPO-101:
     - internal/apiserver/services/clusters/clusters_test.go:TestClusterLifecycle
     - internal/apiserver/services/clusters/clusters_test.go:TestClusterAuthorization
     - internal/apiserver/services/clusters/security_test.go:TestClusterPartialUpdateConcurrency
+    - internal/apiserver/services/clusters/clusters_test.go:TestUpdateKeepsTheStoredServer
   notes: >-
     updatedFields (repeated or comma-separated; unknown paths ignored) applied to the latest
     stored object on every attempt, so concurrent changes of other fields are kept; project

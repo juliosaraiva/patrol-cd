@@ -256,8 +256,8 @@ therefore has one writer; the synthetic in-cluster cluster has no object and get
   from the status, where upstream asks the destination. So a status with nothing newer keeps them:
   a cluster with no Applications, a skip-reconcile cluster, the rounds after a controller restart
   and a cache that has not reported report `Unknown` or `Failed` with the last version and list
-  known. Only a destination's answer replaces them. Connection state and cache statistics are not
-  kept.
+  known. Only a destination's answer replaces them, and `spec.server` cannot change, so what stays
+  is this destination's. Connection state and cache statistics are not kept.
 - **Invalidated cache:** `Unknown` until the next sync, as upstream, because the time and the
   outcome of the old sync say nothing about what the cache holds now (`compare.ClusterCacheState`).
 - **Resource version:** a status write moves it, so a client that sends the version it read can
@@ -319,7 +319,7 @@ deleted).
 `docs/parity/status/controller.yaml`: APP-002, 032..037, 042, 044, 046, 057..060, 063, 066,
 067, 078..088 (086, 087 in-progress), 110, 141 (in-progress); DIFF-036, 037; OPS-073;
 SYNC-001, 003, 006, 013..028, 031 (deletion confirmation), 051, 052, 070, 076..079, 087,
-089..091, 093, 094; TEN-010; REPO-094, 095; OPS-050; REPO-097 (in-progress); APP-045
+089..091, 093, 094; TEN-010; REPO-094 (in-progress), 095; OPS-050; REPO-097 (in-progress); APP-045
 different-by-design.
 
 ## Known gaps and deliberate differences

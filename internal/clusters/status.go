@@ -287,7 +287,8 @@ func (w *StatusWriter) RecordClusterInfo(ctx context.Context, c *v1alpha1.Cluste
 // ApplyClusterInfo sets the status fields of a ComputeClusterInfo result on c. Callers can apply
 // it to a copy to find out whether RecordClusterInfo would write. A version or API list the update
 // does not have stays: renders read them from here, where upstream asks the destination, and an
-// older answer is closer to it than Helm's default.
+// older answer is closer to it than Helm's default. spec.server cannot change, so that answer is
+// this destination's.
 func ApplyClusterInfo(c *v1alpha1.Cluster, u StatusUpdate) {
 	applyConnection(c, u.ConnectionState, u.ServerVersion, true)
 	c.Status.Info.ApplicationsCount = u.Info.ApplicationsCount

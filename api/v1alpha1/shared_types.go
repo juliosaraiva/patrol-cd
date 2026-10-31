@@ -52,7 +52,8 @@ type ConnectionState struct {
 	// Message is a human-readable description of the connection status.
 	// +optional
 	Message string `json:"message,omitempty"`
-	// AttemptedAt is when the connection status was determined.
+	// AttemptedAt is when the connection status was determined. On a Cluster object it moves only
+	// when the status or message changes, so it says since when that state holds.
 	// +optional
 	AttemptedAt *metav1.Time `json:"attemptedAt,omitempty"`
 }

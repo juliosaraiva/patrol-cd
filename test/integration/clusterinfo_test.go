@@ -145,9 +145,15 @@ metadata:
 	waitCluster(t, s, d, "the status lists the destination's API", func(c *apiclient.RegisteredCluster) bool {
 		return slices.Contains(c.Status.Info.APIVersions, widgets)
 	})
-	got, err := s.API(t).GetApplicationManifests(t.Context(), &apiclient.ApplicationManifestQuery{Name: "capabilities"})
-	require.NoError(t, err)
-	assert.Contains(t, strings.Join(got.Manifests, "\n"), `"gated"`)
+	// GET manifests reads the Cluster through the API server's informer, which can trail that read.
+	stack.Eventually(t, time.Minute, "manifests rendered with the destination's API", func() (bool, string) {
+		got, err := s.API(t).GetApplicationManifests(t.Context(), &apiclient.ApplicationManifestQuery{Name: "capabilities"})
+		if err != nil {
+			return false, err.Error()
+		}
+		joined := strings.Join(got.Manifests, "\n")
+		return strings.Contains(joined, `"gated"`), joined
+	})
 }
 
 // TestRenderInputsOutliveTheCache: validation and GET .../manifests read the version and API versions

@@ -1028,6 +1028,18 @@ func TestAdmissionCluster(t *testing.T) {
 			requireInvalid(t, k8sClient.Create(ctx, c), tt.message)
 		})
 	}
+
+	t.Run("server is immutable", func(t *testing.T) {
+		cur := &v1alpha1.Cluster{}
+		require.NoError(t, k8sClient.Get(ctx, client.ObjectKeyFromObject(cluster), cur))
+		cur.Spec.Server = "https://other.k8s.example.com:6443"
+		requireInvalid(t, k8sClient.Update(ctx, cur), "server is immutable")
+
+		cur = &v1alpha1.Cluster{}
+		require.NoError(t, k8sClient.Get(ctx, client.ObjectKeyFromObject(cluster), cur))
+		cur.Spec.Name = "renamed"
+		require.NoError(t, k8sClient.Update(ctx, cur), "the rest of the spec may change")
+	})
 }
 
 func TestAdmissionSCMProvider(t *testing.T) {

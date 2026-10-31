@@ -4984,7 +4984,8 @@ export interface components {
         RepositoryStatusConnectionState: {
             /**
              * Format: date-time
-             * @description AttemptedAt is when the connection status was determined.
+             * @description AttemptedAt is when the connection status was determined. On a Cluster object it moves only
+             *     when the status or message changes, so it says since when that state holds.
              */
             attemptedAt?: string;
             /** @description Message is a human-readable description of the connection status. */
@@ -5077,7 +5078,10 @@ export interface components {
             namespaces?: string[];
             /** @description Project scopes the cluster to an AppProject. */
             project?: string;
-            /** @description Server is the URL of the cluster's API server. */
+            /**
+             * @description Server is the URL of the cluster's API server. It cannot change: the status describes this
+             *     destination, so another one needs a new Cluster.
+             */
             server: string;
             /**
              * Format: int64

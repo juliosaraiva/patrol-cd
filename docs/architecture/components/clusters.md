@@ -194,6 +194,11 @@ SYNC-093.
   512 KiB as stored are left out, which leaves the stored ones in place (renders read them, and
   `ApplyClusterInfo` keeps what an update does not have), and a connection message is stored as
   valid UTF-8 and cut to 32768 bytes. `WantsVersionLabel` skips a version the API would refuse as a label value.
+- `spec.server` is immutable on the CRD as well as through the API, because the status describes
+  that destination and `ApplyClusterInfo` keeps its version and API versions: `kubectl` and
+  `patrol admin import` cannot move a Cluster, and a new destination needs a new object. Upstream's
+  Secret has no such rule. The rule compares the stored text, and the API normalizes only what it
+  reads, so a server stored with a trailing `/` keeps it.
 - The implicit in-cluster cluster has no object, so no cluster information (#246).
 - The synthetic in-cluster version uses the `v<major>.<minor>.<patch>` form like every other
   cluster (upstream omits the `v` for the synthetic one only).

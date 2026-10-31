@@ -29841,7 +29841,9 @@ spec:
                 description: Project scopes the cluster to an AppProject.
                 type: string
               server:
-                description: Server is the URL of the cluster's API server.
+                description: |-
+                  Server is the URL of the cluster's API server. It cannot change: the status describes this
+                  destination, so another one needs a new Cluster.
                 maxLength: 2048
                 minLength: 1
                 type: string
@@ -29849,6 +29851,8 @@ spec:
                 - message: server must be an http(s) URL
                   rule: isURL(self) && url(self).getScheme() in ['https', 'http']
                     && url(self).getHostname() != ''
+                - message: server is immutable
+                  rule: self == oldSelf
               shard:
                 description: Shard pins the cluster to a controller shard. Computed
                   by the sharding algorithm when unset.
@@ -29931,7 +29935,9 @@ spec:
                   check.
                 properties:
                   attemptedAt:
-                    description: AttemptedAt is when the connection status was determined.
+                    description: |-
+                      AttemptedAt is when the connection status was determined. On a Cluster object it moves only
+                      when the status or message changes, so it says since when that state holds.
                     format: date-time
                     type: string
                   message:
@@ -32429,7 +32435,9 @@ spec:
                   check.
                 properties:
                   attemptedAt:
-                    description: AttemptedAt is when the connection status was determined.
+                    description: |-
+                      AttemptedAt is when the connection status was determined. On a Cluster object it moves only
+                      when the status or message changes, so it says since when that state holds.
                     format: date-time
                     type: string
                   message:
@@ -32714,7 +32722,9 @@ spec:
                   check.
                 properties:
                   attemptedAt:
-                    description: AttemptedAt is when the connection status was determined.
+                    description: |-
+                      AttemptedAt is when the connection status was determined. On a Cluster object it moves only
+                      when the status or message changes, so it says since when that state holds.
                     format: date-time
                     type: string
                   message:

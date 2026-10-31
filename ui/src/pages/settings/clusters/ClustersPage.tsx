@@ -122,7 +122,7 @@ export function Component() {
       width: '110px',
       align: 'end',
       cell: (c) => (isImplicit(c) ? '—' : (c.status?.info?.applicationsCount ?? 0)),
-      sortValue: (c) => c.status?.info?.applicationsCount ?? 0,
+      sortValue: (c) => (isImplicit(c) ? undefined : (c.status?.info?.applicationsCount ?? 0)),
     },
     {
       id: 'cache',

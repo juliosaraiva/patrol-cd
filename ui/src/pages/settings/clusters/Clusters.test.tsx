@@ -43,6 +43,24 @@ describe('Settings → Clusters list', () => {
     expect(row).toHaveTextContent('Not reported');
   });
 
+  it('sorts the implicit cluster as having no count, not a count of zero', async () => {
+    const user = userEvent.setup();
+    const implicit = { ...clusterFixture('in-cluster', { server: IN_CLUSTER_SERVER }), inCluster: true };
+    const counted = (name: string, applicationsCount: number) =>
+      clusterFixture(name, { server: `https://${name}.example.test` }, { info: { applicationsCount } });
+    await renderSettings('/settings/clusters', 'Clusters', () => {
+      settingsStore.clusters = [implicit, counted('five', 5), counted('one', 1)];
+    });
+    await screen.findByRole('table', { name: 'Clusters' });
+    const header = screen.getByRole('columnheader', { name: /Applications/ });
+    await user.click(within(header).getByRole('button'));
+    expect(header).toHaveAttribute('aria-sort', 'ascending');
+    const [first, second, third] = tableRows('Clusters');
+    expect(first).toHaveTextContent('https://one.example.test');
+    expect(second).toHaveTextContent('https://five.example.test');
+    expect(third).toHaveTextContent(IN_CLUSTER_SERVER);
+  });
+
   it('opens details with the keyboard (Enter on a row) using the encoded server URL', async () => {
     const user = userEvent.setup();
     const { router } = await renderSettings('/settings/clusters', 'Clusters');
