@@ -642,7 +642,7 @@ REPO-094:
     - test/integration/clusterinfo_test.go:TestRenderInputsOutliveTheCache
     - test/integration/clusterinfo_test.go:TestClusterInfoCountsServedNamespaces
     - test/integration/recovery_test.go:TestDestinationUnreachable
-  evidence: docs/verification/log.md#V-0046; docs/verification/log.md#V-0047; docs/verification/log.md#V-0049; docs/verification/log.md#V-0050
+  evidence: docs/verification/log.md#V-0046; docs/verification/log.md#V-0047; docs/verification/log.md#V-0049; docs/verification/log.md#V-0050; docs/verification/log.md#V-0051
   notes: >-
     Not complete: the implicit in-cluster cluster, the destination of a default install, has no
     object and so no Application count, API versions or cache information; GET /clusters shows the

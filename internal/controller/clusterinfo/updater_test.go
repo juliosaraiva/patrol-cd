@@ -215,7 +215,15 @@ func TestSyncWritesOwnedClusters(t *testing.T) {
 		c.Annotations = map[string]string{v1alpha1.AnnotationKeySkipReconcile: "true"}
 		c.Status.ServerVersion, c.Status.Info.APIVersions = "v1.35.0", []string{"v1"}
 	}
-	f := newFixture(t, interceptor.Funcs{},
+	unnamed := 0
+	f := newFixture(t, interceptor.Funcs{
+		Get: func(ctx context.Context, c client.WithWatch, key client.ObjectKey, obj client.Object, opts ...client.GetOption) error {
+			if key.Name == "" {
+				unnamed++
+			}
+			return c.Get(ctx, key, obj, opts...)
+		},
+	},
 		clusterObj("a-owned", "https://a"),
 		clusterObj("b-other", "https://b", func(c *v1alpha1.Cluster) { c.Spec.Shard = ptr.To[int64](1) }),
 		clusterObj("c-skipped", "https://c", skipped),
@@ -224,7 +232,8 @@ func TestSyncWritesOwnedClusters(t *testing.T) {
 		f.states[server] = synced(f.now)
 	}
 	require.NoError(t, f.Sync(context.Background()))
-	assert.Equal(t, []string{"a-owned", "c-skipped"}, f.rec.taken(), "owned shards only, and never the synthetic cluster")
+	assert.Equal(t, []string{"a-owned", "c-skipped"}, f.rec.taken(), "owned shards only")
+	assert.Zero(t, unnamed, "the synthetic cluster has no object to read")
 
 	assert.Equal(t, v1alpha1.ConnectionStatusSuccessful, f.status(t, "a-owned").ConnectionState.Status)
 	assert.Nil(t, f.status(t, "b-other").ConnectionState)

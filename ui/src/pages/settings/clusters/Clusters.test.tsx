@@ -4,7 +4,7 @@ import userEvent from '@testing-library/user-event';
 import { http, HttpResponse } from 'msw';
 import { describe, expect, it } from 'vitest';
 import type { ClusterInput } from '../../../api/types';
-import { clustersFixture } from '../../../mocks/fixtures/settings';
+import { clusterFixture, clustersFixture } from '../../../mocks/fixtures/settings';
 import { settingsStore } from '../../../mocks/handlers/settings';
 import { server } from '../../../mocks/server';
 import { emptyGet, expectToast, findDialog, renderSettings, tableRows } from '../testUtils';
@@ -81,6 +81,21 @@ describe('Settings → Cluster details', () => {
     expect(screen.getByText('payments, search')).toBeInTheDocument();
   });
 
+  it.each([
+    { name: 'the implicit cluster, stamped on every read', inCluster: true, status: 'Failed', since: false, sync: 'Not reported' },
+    { name: 'an object at the same server', inCluster: undefined, status: 'Failed', since: true, sync: 'Last sync failed' },
+    { name: 'an object that has not failed', inCluster: undefined, status: 'Unknown', since: true, sync: 'Not synced yet' },
+  ] as const)('claims only what it knows about $name', async ({ inCluster, status, since, sync }) => {
+    const local = 'https://kubernetes.default.svc';
+    await renderSettings(clusterPath(local), 'in-cluster', () => {
+      const connectionState = { status, attemptedAt: '2026-10-15T08:00:00Z' };
+      settingsStore.clusters = [{ ...clusterFixture('in-cluster', { server: local }, { connectionState }), inCluster }];
+    });
+    const value = (label: string) => screen.getByText(label).nextElementSibling;
+    expect(value('State since')?.textContent !== '—').toBe(since);
+    expect(value('Last cache sync')).toHaveTextContent(sync);
+  });
+
   it('shows guidance for an unknown cluster (the server answers 403 for missing clusters)', async () => {
     await renderSettings(clusterPath('https://nope.example.test'), 'Cluster');
     expect(await screen.findByRole('heading', { name: 'Cluster not found' })).toBeInTheDocument();
@@ -144,8 +159,11 @@ describe('Settings → Cluster details', () => {
     // Stands in for the poll: the page behind the form shows the new label.
     focusManager.setFocused(false);
     focusManager.setFocused(true);
-    await screen.findByText(/oncall/);
-    focusManager.setFocused(undefined);
+    try {
+      await screen.findByText(/oncall/);
+    } finally {
+      focusManager.setFocused(undefined);
+    }
     await user.click(within(dialog).getByRole('button', { name: 'Save' }));
     await expectToast('Cluster updated');
     expect(calls).toEqual([['name']]);

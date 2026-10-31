@@ -241,7 +241,8 @@ therefore has one writer; the synthetic in-cluster cluster has no object and get
   informer. An unchanged status is not written. A change of the cache statistics alone waits for
   `CacheInfoWriteInterval` (1 min). Anything else is written at once. `attemptedAt` moves when the
   connection status or message changes: it says since when that state holds, not when it was last
-  checked.
+  checked. The implicit in-cluster cluster has no object and the registry stamps its state on every
+  read, so the details page shows no such time for it, and "Not reported" for its last cache sync.
 - **Reactions:** status writes reach no comparison. The Application reconciler's Cluster watch
   passes a new UID and changes of generation, labels and annotations only, as the ApplicationSet
   handler does, and the cluster registry sends no event for them.

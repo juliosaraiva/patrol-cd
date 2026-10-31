@@ -223,6 +223,9 @@ export function Component() {
   const apps = info?.applicationsCount ?? 0;
   const ref = { server: data.spec.server };
   const inCluster = isInCluster(data);
+  // No object registers it: the server stamps its state on every read and the controller reports
+  // nothing for it. An object at the same server has neither limit.
+  const implicit = data.inCluster === true;
 
   return (
     <>
@@ -258,7 +261,7 @@ export function Component() {
             items={[
               { key: 'status', label: 'Status', value: <ConnectionStatus status={state?.status} /> },
               { key: 'message', label: 'Message', value: state?.message },
-              { key: 'attempted', label: 'State since', value: state?.attemptedAt ? <Timestamp value={state.attemptedAt} /> : undefined },
+              { key: 'attempted', label: 'State since', value: state?.attemptedAt && !implicit ? <Timestamp value={state.attemptedAt} /> : undefined },
               { key: 'version', label: 'Kubernetes version', value: data.status?.serverVersion },
               { key: 'credentials', label: 'Credentials', value: credentialsType(data) },
             ]}
@@ -302,6 +305,8 @@ export function Component() {
                 label: 'Last cache sync',
                 value: info?.cacheInfo?.lastCacheSyncTime ? (
                   <Timestamp value={info.cacheInfo.lastCacheSyncTime} />
+                ) : implicit ? (
+                  'Not reported'
                 ) : state?.status === 'Failed' ? (
                   'Last sync failed'
                 ) : (
