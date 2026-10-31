@@ -20,6 +20,7 @@ and `controller/hook.go` and re-implemented on controller-runtime; no upstream c
 | `internal/controller/app` | Application reconciler: refresh decisions and levels, comparison, status, conditions and Events, automated sync and self-heal, deletion (finalizers, cascade, delete hooks), live-state event mapping, in-memory comparison state (`State`). |
 | `internal/controller/operation` | Operation reconciler: admission, revision resolution and plan persistence, one sync step per reconcile, retries, termination, sync timeout, completion side effects; `KubeEngines` (sync engines per destination, impersonation), `NextRetryAt`, `MergeSyncOptions`, `Summary`. |
 | `internal/controller/retention` | `Select`/`Collect`/`CollectIfNeeded`/`Needed`: keep the newest `revisionHistoryLimit` terminal Operations per Application; the API server is listed only when the cache shows more than the limit. |
+| `internal/controller/clusterinfo` | Cluster-info updater: `New(Options)`, `(*Updater).Run`, `Sync`. Writes `Cluster.status` of the clusters of owned shards from the live-state caches (below). |
 | `internal/controller/integration` | envtest integration tests only. |
 
 ## Public API
@@ -216,13 +217,56 @@ Impersonation: with `application.sync.impersonation.enabled`, `project.SelectSer
 picks the destination service account; the engine's REST config impersonates it
 (`clusters.ImpersonatingConfig`). Enforced and unmatched → Error "failed to find a matching
 service account to impersonate: …". Engines are cached per (server, user, settings
-fingerprint, Cluster resourceVersion) for 10 minutes (bounded to 1024), dropped by `Forget` on
-cluster credential or spec changes.
+fingerprint, Cluster UID and generation) for 10 minutes (bounded to 1024), dropped by `Forget` on
+cluster credential or spec changes. The key has no resourceVersion: the cluster-info updater
+writes the status on its own schedule, and a REST config is not built from it.
 
 Restart recovery: everything needed to continue is in `Operation.status` (plan with resolved
 revisions, per-task results, progress, retry state). A new controller re-plans from the
 persisted revisions and the engine adopts its hooks (deterministic names) and treats persisted
 completed tasks as done; no in-memory state is required.
+
+## Cluster-info updater
+
+`clusterinfo.Updater` runs in every replica, from `RunController`. A round takes the clusters of the
+assigner, keeps those of owned shards and writes what `ComputeClusterInfo` gives for each. A cluster
+therefore has one writer; the synthetic in-cluster cluster has no object and gets no status.
+
+- **Interval:** `PATROL_UPDATE_CLUSTER_INFO_TIMEOUT`, a Go duration from 10 s to 1 min, default
+  10 s, read by `RunController` unless `ControllerConfig.ClusterInfoInterval` is set; the updater
+  logs it when it starts. The interval also bounds a round: the next one starts where it stopped,
+  so that the first clusters of a long list do not use every round.
+- **Reads:** the manager's cached client and `cache.Manager.Lookup`. A round never creates a
+  live-state cache and contacts no destination, so it cannot hang on one.
+- **Writes:** the status lives in etcd (ADR-0004), where every write reaches every Cluster
+  informer. An unchanged status is not written. A change of the cache statistics alone waits for
+  `CacheInfoWriteInterval` (1 min). Anything else is written at once. `attemptedAt` moves when the
+  connection status or message changes: it says since when that state holds, not when it was last
+  checked. The implicit in-cluster cluster has no object and the registry stamps its state on every
+  read, so the UI shows no such time for it.
+- **Reactions:** status writes reach no comparison and no sync engine. The Application reconciler's
+  Cluster watch passes a new UID and changes of generation, labels and annotations only, as the
+  ApplicationSet handler does, and the cluster registry sends no event for them.
+- **Application count:** Applications of the namespaces this controller serves whose project
+  exists and permits their namespace. A failed list ends the round without writing, because a count
+  of zero would be a guess.
+- **Skip-reconcile:** no shard processes such a cluster, so it reports `Unknown` whatever an old
+  cache says.
+- **Version and API versions:** validation, `GET .../manifests` and the CLI's local render read them
+  from the status, where upstream asks the destination. So a status with nothing newer keeps them:
+  a cluster with no Applications, a skip-reconcile cluster, the rounds after a controller restart
+  and a cache that has not reported report `Unknown` or `Failed` with the last version and list
+  known. Only a destination's answer replaces them, and `spec.server` cannot change, so what stays
+  is this destination's. Connection state and cache statistics are not kept.
+- **Invalidated cache:** `Unknown` until the next sync, as upstream, because the time and the
+  outcome of the old sync say nothing about what the cache holds now (`compare.ClusterCacheState`).
+- **Resource version:** a status write moves it, so a client that sends the version it read can
+  get a 409 with no change to what it edits. The UI's cluster form sends none: `updatedFields`
+  confines its write.
+
+A destination that fails under a synced cache keeps `Successful` until the next full sync of that
+cache (restart, invalidate-cache, credential change, 12 h resync). Upstream behaves the same way:
+the sync error is set by full syncs only. The Applications report the failure earlier.
 
 ## Metrics
 
@@ -275,7 +319,8 @@ deleted).
 `docs/parity/status/controller.yaml`: APP-002, 032..037, 042, 044, 046, 057..060, 063, 066,
 067, 078..088 (086, 087 in-progress), 110, 141 (in-progress); DIFF-036, 037; OPS-073;
 SYNC-001, 003, 006, 013..028, 031 (deletion confirmation), 051, 052, 070, 076..079, 087,
-089..091, 093, 094; TEN-010; REPO-097 (in-progress); APP-045 different-by-design.
+089..091, 093, 094; TEN-010; REPO-094 (in-progress), 095; OPS-050; REPO-097 (in-progress); APP-045
+different-by-design.
 
 ## Known gaps and deliberate differences
 
@@ -316,6 +361,14 @@ SYNC-001, 003, 006, 013..028, 031 (deletion confirmation), 051, 052, 070, 076..0
   does not exist yet) is left to the tree API wiring.
 - **Delete hooks of an excluded kind** are created and awaited (health read from the object),
   but the `/cleanup` stage only sees hooks in the live-state cache, so they are left behind.
+- **Implicit in-cluster cluster:** no object, so the updater skips it. A default install shows no
+  Application count, API versions or cache information for its main destination, the CLI reads 0
+  there, the UI "Not reported", and `GET manifests` renders without its API versions. Upstream
+  walks the local cluster too. Registering a Cluster object for that server is the workaround
+  (#246).
+- **Cluster information does not expire.** Upstream's Redis entry lapses after 10 minutes. Here
+  the status stays at its last value when every controller stops, and `attemptedAt` cannot tell a
+  live updater from a dead one, because a steady status is not written.
 - **Hydrator**, **sharding wiring** in `Run`, and the `patrolcd controller` command are not
   part of this package yet; `Deps.OwnsCluster` is the sharding hook.
 

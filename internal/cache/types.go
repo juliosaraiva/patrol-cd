@@ -164,7 +164,8 @@ type ClusterInfo struct {
 	ResourcesCount int
 	// LastCacheSyncTime is the time of the most recent full sync attempt.
 	LastCacheSyncTime *time.Time
-	// SyncError is the error of the most recent full sync attempt.
+	// SyncError is the error of the most recent full sync attempt, nil from an invalidation to
+	// the next attempt: the state that attempt failed on is gone.
 	SyncError error
 	// Synced reports whether the cache currently holds a valid, watched state.
 	Synced bool

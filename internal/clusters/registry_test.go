@@ -231,7 +231,10 @@ func TestRegistryLookups(t *testing.T) {
 		{Spec: v1alpha1.ApplicationSpec{Destination: v1alpha1.ApplicationDestination{Name: "dup"}}},
 		{ObjectMeta: metav1.ObjectMeta{Name: "denied"}, Spec: v1alpha1.ApplicationSpec{Destination: v1alpha1.ApplicationDestination{Name: "b"}}},
 	}
-	assert.Equal(t, int64(2), r.CountApplications(apps, "https://b.example", func(a *v1alpha1.Application) bool { return a.Name != "denied" }))
+	permitted := func(a *v1alpha1.Application) bool { return a.Name != "denied" }
+	assert.Equal(t, int64(2), r.CountApplications(apps, "https://b.example/", permitted))
+	assert.Equal(t, map[string]int64{"https://b.example": 2}, r.ApplicationCounts(apps, permitted))
+	assert.Equal(t, map[string]int64{"https://b.example": 3}, r.ApplicationCounts(apps, nil))
 }
 
 func TestRegistryNotSynced(t *testing.T) {

@@ -1,13 +1,14 @@
+import { focusManager } from '@tanstack/react-query';
 import { screen, waitFor, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { http, HttpResponse } from 'msw';
 import { describe, expect, it } from 'vitest';
 import type { ClusterInput } from '../../../api/types';
-import { clustersFixture } from '../../../mocks/fixtures/settings';
+import { clusterFixture, clustersFixture } from '../../../mocks/fixtures/settings';
 import { settingsStore } from '../../../mocks/handlers/settings';
 import { server } from '../../../mocks/server';
 import { emptyGet, expectToast, findDialog, renderSettings, tableRows } from '../testUtils';
-import { changedClusterFields, clusterPath } from './clusterUtil';
+import { changedClusterFields, clusterPath, IN_CLUSTER_SERVER } from './clusterUtil';
 
 const PROD = 'https://prod-eu.k8s.example.test';
 
@@ -23,10 +24,41 @@ describe('Settings → Clusters list', () => {
     expect(prod).toHaveTextContent('dial tcp 10.0.0.12:443: i/o timeout');
     expect(prod).toHaveTextContent('finance');
     expect(prod).toHaveTextContent('payments, search');
+    expect(prod).toHaveTextContent('Last sync failed');
     expect(prod?.querySelector('[data-status-family="connection"][data-status="Failed"]')).not.toBeNull();
     const local = rows.find((r) => r.textContent?.includes('in-cluster'));
     expect(local).toHaveTextContent('412 resources');
     expect(local).toHaveTextContent('All namespaces');
+  });
+
+  it('claims no counts or cache sync for the implicit cluster', async () => {
+    const implicit = { ...clusterFixture('in-cluster', { server: IN_CLUSTER_SERVER }, { connectionState: { status: 'Failed' } }), inCluster: true };
+    await renderSettings('/settings/clusters', 'Clusters', () => {
+      settingsStore.clusters = [implicit];
+    });
+    await screen.findByRole('table', { name: 'Clusters' });
+    const [row] = tableRows('Clusters');
+    const applications = screen.getAllByRole('columnheader').findIndex((h) => h.textContent === 'Applications');
+    expect(row?.children[applications]).toHaveTextContent('—');
+    expect(row).toHaveTextContent('Not reported');
+  });
+
+  it('sorts the implicit cluster as having no count, not a count of zero', async () => {
+    const user = userEvent.setup();
+    const implicit = { ...clusterFixture('in-cluster', { server: IN_CLUSTER_SERVER }), inCluster: true };
+    const counted = (name: string, applicationsCount: number) =>
+      clusterFixture(name, { server: `https://${name}.example.test` }, { info: { applicationsCount } });
+    await renderSettings('/settings/clusters', 'Clusters', () => {
+      settingsStore.clusters = [implicit, counted('five', 5), counted('one', 1)];
+    });
+    await screen.findByRole('table', { name: 'Clusters' });
+    const header = screen.getByRole('columnheader', { name: /Applications/ });
+    await user.click(within(header).getByRole('button'));
+    expect(header).toHaveAttribute('aria-sort', 'ascending');
+    const [first, second, third] = tableRows('Clusters');
+    expect(first).toHaveTextContent('https://one.example.test');
+    expect(second).toHaveTextContent('https://five.example.test');
+    expect(third).toHaveTextContent(IN_CLUSTER_SERVER);
   });
 
   it('opens details with the keyboard (Enter on a row) using the encoded server URL', async () => {
@@ -73,10 +105,27 @@ describe('Settings → Cluster details', () => {
     await renderSettings(clusterPath(PROD), 'prod-eu');
     expect(screen.getByRole('heading', { name: 'Connection' })).toBeInTheDocument();
     expect(screen.getByText('Patrol cannot reach this cluster')).toBeInTheDocument();
+    expect(screen.getByText('Last sync failed')).toBeInTheDocument();
     // From RegisteredCluster.credentials flags; values are never returned.
     expect(screen.getByText('Bearer token (custom CA)')).toBeInTheDocument();
     expect(screen.getByRole('list', { name: 'Labels' })).toHaveTextContent('env=prod');
     expect(screen.getByText('payments, search')).toBeInTheDocument();
+  });
+
+  it.each([
+    { name: 'the implicit cluster, stamped on every read', inCluster: true, status: 'Failed', reported: false, sync: 'Not reported' },
+    { name: 'an object at the same server', inCluster: undefined, status: 'Failed', reported: true, sync: 'Last sync failed' },
+    { name: 'an object that has not failed', inCluster: undefined, status: 'Unknown', reported: true, sync: 'Not synced yet' },
+  ] as const)('claims only what it knows about $name', async ({ inCluster, status, reported, sync }) => {
+    await renderSettings(clusterPath(IN_CLUSTER_SERVER), 'in-cluster', () => {
+      const connectionState = { status, attemptedAt: '2026-10-15T08:00:00Z' };
+      settingsStore.clusters = [{ ...clusterFixture('in-cluster', { server: IN_CLUSTER_SERVER }, { connectionState }), inCluster }];
+    });
+    const value = (label: string) => screen.getAllByText(label).find((e) => e.tagName === 'DT')?.nextElementSibling;
+    for (const label of ['State since', 'Applications', 'API groups and kinds cached', 'Resources cached']) {
+      expect(value(label)?.textContent !== '—', label).toBe(reported);
+    }
+    expect(value('Last cache sync')).toHaveTextContent(sync);
   });
 
   it('shows guidance for an unknown cluster (the server answers 403 for missing clusters)', async () => {
@@ -115,9 +164,42 @@ describe('Settings → Cluster details', () => {
     expect(calls).toHaveLength(1);
     expect(calls[0]?.fields).toEqual(['name', 'namespaces', 'labels']);
     // The flat ClusterInput; no `config`, so the stored credentials are untouched.
-    expect(calls[0]?.body).toMatchObject({ server: PROD, name: 'prod-europe', namespaces: ['payments', 'search', 'ledger'], resourceVersion: '10' });
+    expect(calls[0]?.body).toMatchObject({ server: PROD, name: 'prod-europe', namespaces: ['payments', 'search', 'ledger'] });
     expect(calls[0]?.body.labels).toEqual({ env: 'prod' });
     expect(calls[0]?.body.config).toBeUndefined();
+    // A status write since the last poll must not refuse this save.
+    expect(calls[0]?.body.resourceVersion).toBeUndefined();
+  });
+
+  it('leaves out of the save what another writer changed while the form was open', async () => {
+    const user = userEvent.setup();
+    const calls: string[][] = [];
+    server.use(
+      http.put('*/api/v1/clusters/:server', ({ request }) => {
+        calls.push(new URL(request.url).searchParams.getAll('updatedFields'));
+      }),
+    );
+    await renderSettings(clusterPath(PROD), 'prod-eu');
+    await user.click(screen.getByRole('button', { name: 'Edit' }));
+    const dialog = await findDialog('Edit cluster');
+    const name = within(dialog).getByRole('textbox', { name: 'Name' });
+    await user.clear(name);
+    await user.type(name, 'prod-europe');
+    const stored = settingsStore.clusters.find((c) => c.spec.server === PROD);
+    if (!stored) throw new Error('no cluster');
+    stored.metadata.labels = { ...stored.metadata.labels, oncall: 'sre' };
+    // Stands in for the poll: the page behind the form shows the new label.
+    focusManager.setFocused(false);
+    focusManager.setFocused(true);
+    try {
+      await screen.findByText(/oncall/);
+    } finally {
+      focusManager.setFocused(undefined);
+    }
+    await user.click(within(dialog).getByRole('button', { name: 'Save' }));
+    await expectToast('Cluster updated');
+    expect(calls).toEqual([['name']]);
+    expect(stored.metadata.labels).toMatchObject({ oncall: 'sre' });
   });
 
   it('invalidates the cache and rotates credentials with a confirmation', async () => {

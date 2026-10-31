@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"log/slog"
+	"strconv"
 	gosync "sync"
 	"time"
 
@@ -44,8 +45,8 @@ type KubeEnginesOptions struct {
 }
 
 // KubeEngines builds sync engines over sync.KubeClient and reuses them per destination
-// server, impersonated user and settings fingerprint (the health overrides) for TTL, so the
-// per-engine discovery cache survives across steps. It is safe for concurrent use.
+// server, impersonated user, settings fingerprint (the health overrides) and Cluster spec for
+// TTL, so the per-engine discovery cache survives across steps. It is safe for concurrent use.
 type KubeEngines struct {
 	o KubeEnginesOptions
 
@@ -84,7 +85,9 @@ func (k *KubeEngines) Engine(ctx context.Context, cluster *v1alpha1.Cluster, imp
 	if st != nil {
 		fp = st.Fingerprint()
 	}
-	key := clusters.NormalizeServer(cluster.Spec.Server) + "\x00" + impersonate + "\x00" + fp + "\x00" + cluster.ResourceVersion
+	// UID and generation, not resourceVersion: the cluster-info updater writes the status on its own
+	// schedule, and a REST config is built from the spec and the credentials, which reach Forget.
+	key := clusters.NormalizeServer(cluster.Spec.Server) + "\x00" + impersonate + "\x00" + fp + "\x00" + string(cluster.UID) + "\x00" + strconv.FormatInt(cluster.Generation, 10)
 	now := k.o.Clock.Now()
 	k.mu.Lock()
 	if e, ok := k.engines[key]; ok && now.Sub(e.created) < k.o.TTL {
@@ -109,11 +112,9 @@ func (k *KubeEngines) Engine(ctx context.Context, cluster *v1alpha1.Cluster, imp
 	}
 	k.mu.Lock()
 	defer k.mu.Unlock()
-	if len(k.engines) >= maxCachedEngines {
-		for key, e := range k.engines {
-			if now.Sub(e.created) >= k.o.TTL || len(k.engines) >= maxCachedEngines {
-				delete(k.engines, key)
-			}
+	for key, e := range k.engines {
+		if now.Sub(e.created) >= k.o.TTL || len(k.engines) >= maxCachedEngines {
+			delete(k.engines, key)
 		}
 	}
 	k.engines[key] = engineEntry{engine: engine, created: now}

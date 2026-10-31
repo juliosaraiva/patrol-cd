@@ -94,7 +94,8 @@ type ClusterInput struct {
 	// Config is the connection configuration (write-only credentials).
 	Config ClusterConfigInput `json:"config,omitempty,omitzero"`
 	// ResourceVersion, when set on an update, must match the stored Cluster (409
-	// otherwise).
+	// otherwise). The controller's status writes move it too: updatedFields confines a write
+	// without it.
 	ResourceVersion string `json:"resourceVersion,omitempty"`
 }
 

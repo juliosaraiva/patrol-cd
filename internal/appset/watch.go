@@ -3,6 +3,7 @@ package appset
 import (
 	"context"
 	"log/slog"
+	"maps"
 
 	"github.com/google/go-cmp/cmp"
 	"github.com/google/go-cmp/cmp/cmpopts"
@@ -105,7 +106,8 @@ func namespacePredicate(m *NamespaceMatcher) predicate.Predicate {
 
 // clusterEventHandler enqueues every ApplicationSet (in an allowed namespace) that uses a
 // Clusters generator, at the top level or nested in Matrix/Merge, on any change of a Cluster
-// of the control-plane namespace.
+// of the control-plane namespace, except a status-only update: the controller writes that status
+// on its cluster-info interval, and the generators do not read it.
 type clusterEventHandler struct {
 	client     client.Reader
 	namespace  string
@@ -120,6 +122,10 @@ func (h *clusterEventHandler) Create(ctx context.Context, e event.TypedCreateEve
 }
 
 func (h *clusterEventHandler) Update(ctx context.Context, e event.TypedUpdateEvent[client.Object], q workqueue.TypedRateLimitingInterface[reconcile.Request]) {
+	if e.ObjectOld != nil && e.ObjectNew != nil && e.ObjectOld.GetUID() == e.ObjectNew.GetUID() && e.ObjectOld.GetGeneration() == e.ObjectNew.GetGeneration() &&
+		maps.Equal(e.ObjectOld.GetLabels(), e.ObjectNew.GetLabels()) && maps.Equal(e.ObjectOld.GetAnnotations(), e.ObjectNew.GetAnnotations()) {
+		return
+	}
 	h.enqueue(ctx, e.ObjectNew, q)
 }
 

@@ -5383,7 +5383,7 @@
                 "type": "string"
               },
               "server": {
-                "description": "Server is the URL of the cluster's API server.",
+                "description": "Server is the URL of the cluster's API server. It cannot change: the status describes this\ndestination, so another one needs a new Cluster.",
                 "maxLength": 2048,
                 "minLength": 1,
                 "type": "string",
@@ -5391,6 +5391,10 @@
                   {
                     "message": "server must be an http(s) URL",
                     "rule": "isURL(self) && url(self).getScheme() in ['https', 'http'] && url(self).getHostname() != ''"
+                  },
+                  {
+                    "message": "server is immutable",
+                    "rule": "self == oldSelf"
                   }
                 ]
               },
@@ -5645,7 +5649,7 @@
             "type": "string"
           },
           "resourceVersion": {
-            "description": "ResourceVersion, when set on an update, must match the stored Cluster (409 otherwise).",
+            "description": "ResourceVersion, when set on an update, must match the stored Cluster (409 otherwise). The controller's status writes move it too: updatedFields confines a write without it.",
             "type": "string"
           },
           "server": {
@@ -7622,7 +7626,7 @@
                 "description": "ConnectionState is the result of the last connection check.",
                 "properties": {
                   "attemptedAt": {
-                    "description": "AttemptedAt is when the connection status was determined.",
+                    "description": "AttemptedAt is when the connection status was determined. On a Cluster object it moves only\nwhen the status or message changes, so it says since when that state holds.",
                     "format": "date-time",
                     "type": "string"
                   },

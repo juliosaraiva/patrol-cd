@@ -58,6 +58,7 @@ cache invalidation on credential changes.
 | `ManagedResource` | `Key, Version, Target, Live, Diff, Hook, SelfReferenced, RequiresPruning, RequiresDeletionConfirmation, SyncWave, Status, Health, ResourceVersion`. |
 | `MergeConditions(existing, found, evaluated, generation, now)` | Folds the (possibly repeated) conditions into the one-per-type `metav1.Condition` list. |
 | `ApplicationTree`, `ResourceNode`, `ResourceRef`, `InfoItem`, `NetworkingInfo`, `LoadBalancerIngress`, `HostInfo`, `HostResourceInfo` | Tree API types (upstream JSON field names). |
+| `ClusterCacheState(cache.ClusterCache) *clusters.CacheState` | What the cluster-info updater reads from a live-state cache; nil without a cache. |
 | `LiveStateProvider`, `LiveStateCache`, `NewLiveStateCache(LiveStateCacheOptions{Manager, Config, Settings, ControlPlaneNamespace, Base, Logger})`, `CacheManager` (`*cache.Manager` implements it), `ClusterKey`, `CacheSettings(...)`, `(*LiveStateCache).Forget(cluster)` | Per-cluster caches with this package's info populator; reconfigured in place when cache-relevant settings or the cluster's namespaces change (invariant 15). |
 | `PopulateResourceInfo(InfoConfig)`, `ResourceInfo`, `InfoOf`, `AppOf`, `SkipResourceUpdate`, `PodInfo`, `NodeInfo` | Cache integration for the controller's update handler (attribution, refresh suppression). |
 | `ServerSideDiffProvider`, `KubeServerSideDiff`, `NewKubeServerSideDiff(config, live, ttl)` | SSA dry runs (`dryRun=All`, force, raw config, no impersonation) and OpenAPI v2 type parsers per cluster (cached, TTL). |

@@ -29,7 +29,7 @@ import { mapToRows, nonEmpty, RowListEditor, StringListEditor } from '../common/
 import { ActionError, ConfirmDialog, ErrorSummary, LoadingBlock, useFormErrors, type FieldError } from '../common/feedback';
 import styles from '../common/common.module.css';
 import { validateLabelKey, validateLabelValue, validateNamespace } from '../common/validation';
-import { changedClusterFields, clusterUpdateInput, credentialsType, isInCluster, namespacesSummary, type ClusterEditState } from './clusterUtil';
+import { changedClusterFields, clusterUpdateInput, credentialsType, isImplicit, isInCluster, namespacesSummary, noCacheSyncText, type ClusterEditState } from './clusterUtil';
 
 /** Upstream polls cluster details every second; every 5 s keeps status fresh at lower cost. */
 const POLL_MS = 5000;
@@ -47,6 +47,8 @@ function EditClusterDrawer({ cluster, onClose }: { cluster: RegisteredCluster; o
     labels: mapToRows(cluster.metadata.labels),
     annotations: mapToRows(cluster.metadata.annotations),
   }));
+  // What the form opened with, not the polled cluster: a change by another writer is not this edit.
+  const [opened] = useState(cluster);
 
   const nsErrors = edit.namespaces.map((n) => (n.trim() === '' ? null : validateNamespace(n)));
   const labelErrors = edit.labels.map((r) => validateLabelKey(r.key ?? '') ?? validateLabelValue(r.value ?? ''));
@@ -61,7 +63,7 @@ function EditClusterDrawer({ cluster, onClose }: { cluster: RegisteredCluster; o
   const onSubmit = (event: FormEvent) => {
     event.preventDefault();
     if (!form.check()) return;
-    const updatedFields = changedClusterFields(cluster, edit);
+    const updatedFields = changedClusterFields(opened, edit);
     if (updatedFields.length === 0) {
       toast({ tone: 'info', title: 'No changes to save' });
       onClose();
@@ -221,6 +223,7 @@ export function Component() {
   const apps = info?.applicationsCount ?? 0;
   const ref = { server: data.spec.server };
   const inCluster = isInCluster(data);
+  const implicit = isImplicit(data);
 
   return (
     <>
@@ -256,7 +259,7 @@ export function Component() {
             items={[
               { key: 'status', label: 'Status', value: <ConnectionStatus status={state?.status} /> },
               { key: 'message', label: 'Message', value: state?.message },
-              { key: 'attempted', label: 'Last attempt', value: state?.attemptedAt ? <Timestamp value={state.attemptedAt} /> : undefined },
+              { key: 'attempted', label: 'State since', value: state?.attemptedAt && !implicit ? <Timestamp value={state.attemptedAt} /> : undefined },
               { key: 'version', label: 'Kubernetes version', value: data.status?.serverVersion },
               { key: 'credentials', label: 'Credentials', value: credentialsType(data) },
             ]}
@@ -292,13 +295,13 @@ export function Component() {
           <h2 id="cluster-cache">Applications and cache</h2>
           <KeyValueList
             items={[
-              { key: 'apps', label: 'Applications', value: String(apps) },
-              { key: 'apis', label: 'API groups and kinds cached', value: String(info?.cacheInfo?.apisCount ?? 0) },
-              { key: 'resources', label: 'Resources cached', value: String(info?.cacheInfo?.resourcesCount ?? 0) },
+              { key: 'apps', label: 'Applications', value: implicit ? undefined : String(apps) },
+              { key: 'apis', label: 'API groups and kinds cached', value: implicit ? undefined : String(info?.cacheInfo?.apisCount ?? 0) },
+              { key: 'resources', label: 'Resources cached', value: implicit ? undefined : String(info?.cacheInfo?.resourcesCount ?? 0) },
               {
                 key: 'sync',
                 label: 'Last cache sync',
-                value: info?.cacheInfo?.lastCacheSyncTime ? <Timestamp value={info.cacheInfo.lastCacheSyncTime} /> : 'Not synced yet',
+                value: info?.cacheInfo?.lastCacheSyncTime ? <Timestamp value={info.cacheInfo.lastCacheSyncTime} /> : noCacheSyncText(data),
               },
             ]}
           />

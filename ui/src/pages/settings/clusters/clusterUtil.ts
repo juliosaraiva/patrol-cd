@@ -34,6 +34,17 @@ export function isInCluster(cluster: RegisteredCluster): boolean {
   return cluster.inCluster === true || cluster.spec.server === IN_CLUSTER_SERVER;
 }
 
+/** No Cluster object registers it: the server stamps its state on every read and the controller reports nothing for it. */
+export function isImplicit(cluster: RegisteredCluster): boolean {
+  return cluster.inCluster === true;
+}
+
+/** What stands for the last cache sync of a cluster that has none recorded (a failed sync clears it). */
+export function noCacheSyncText(cluster: RegisteredCluster): string {
+  if (isImplicit(cluster)) return 'Not reported';
+  return cluster.status?.connectionState?.status === 'Failed' ? 'Last sync failed' : 'Not synced yet';
+}
+
 export function namespacesSummary(cluster: RegisteredCluster): string {
   const ns = cluster.spec.namespaces ?? [];
   if (ns.length === 0) return 'All namespaces';
@@ -75,7 +86,9 @@ export function changedClusterFields(cluster: RegisteredCluster, edit: ClusterEd
 
 /**
  * PUT body for an edit: the flat ClusterInput. With `updatedFields` the server changes only
- * those fields, so `config` (write-only credentials) is never sent and stays as stored.
+ * those fields, so `config` (write-only credentials) is never sent and stays as stored, and no
+ * `resourceVersion` either: the controller's status writes move it, and a version from the last
+ * poll would refuse a save that conflicts with nothing.
  */
 export function clusterUpdateInput(cluster: RegisteredCluster, edit: ClusterEditState): ClusterInput {
   return {
@@ -86,6 +99,5 @@ export function clusterUpdateInput(cluster: RegisteredCluster, edit: ClusterEdit
     ...(edit.project ? { project: edit.project } : {}),
     labels: rowsToMap(edit.labels),
     annotations: rowsToMap(edit.annotations),
-    ...(cluster.metadata.resourceVersion ? { resourceVersion: cluster.metadata.resourceVersion } : {}),
   };
 }

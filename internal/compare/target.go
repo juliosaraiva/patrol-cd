@@ -4,7 +4,6 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"maps"
 	"path/filepath"
 	"regexp"
 	"slices"
@@ -65,7 +64,7 @@ func (m *Manager) getRepoObjs(ctx context.Context, env *renderEnv, sources []v1a
 		return nil, fmt.Errorf("failed to get cluster version for cluster %q: %w", env.server, env.ccErr)
 	}
 	env.kubeVersion = env.cc.GetServerVersion()
-	env.apiVersions = apiResourcesToStrings(env.cc.GetAPIResources())
+	env.apiVersions = cache.APIVersionStrings(env.cc.GetAPIResources())
 
 	refs, err := m.refSources(ctx, sources, proj.Name, revisions)
 	if err != nil {
@@ -336,18 +335,6 @@ func kustomizeOptions(k settings.Kustomize) apiclient.KustomizeOptions {
 		}
 	}
 	return out
-}
-
-// apiResourcesToStrings lists "group/version" and "group/version/Kind" of every served
-// resource, sorted (upstream APIResourcesToStrings with kinds).
-func apiResourcesToStrings(resources []cache.APIResourceInfo) []string {
-	set := map[string]bool{}
-	for _, r := range resources {
-		gv := r.GroupVersionResource.GroupVersion().String()
-		set[gv] = true
-		set[gv+"/"+r.GroupKind.Kind] = true
-	}
-	return slices.Sorted(maps.Keys(set))
 }
 
 // unmarshalManifests decodes JSON (or YAML) documents; "" and "null" yield nil entries.

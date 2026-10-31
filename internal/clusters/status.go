@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"strings"
 	"time"
 
 	"k8s.io/apimachinery/pkg/api/equality"
@@ -28,6 +29,18 @@ import (
 // NoApplicationsMessage is upstream's connection message for an unmonitored cluster with no
 // applications.
 const NoApplicationsMessage = "Cluster has no applications and is not being monitored."
+
+// maxConnectionMessage is the metav1.Condition message limit: connection messages are stored in
+// the Ready and ConnectionFailed conditions too, and a destination decides what its errors say.
+const maxConnectionMessage = 32768
+
+// Bounds of what a destination reports about itself. The API refuses a status it cannot store
+// whole, and the connection state would go with it.
+const (
+	maxServerVersion = 256
+	// maxAPIVersionBytes is the size of the list as stored, where JSON can take six bytes for one.
+	maxAPIVersionBytes = 512 << 10
+)
 
 // Probe checks connectivity to the cluster behind cfg with GET /version and returns the server
 // version normalized to "v<major>.<minor>.<patch>" (vendor suffixes such as "-eks-1" or "+k3s1"
@@ -90,14 +103,17 @@ func ComputeClusterInfo(state *CacheState, applications int64, now time.Time) St
 		}
 		return u
 	}
-	u.ServerVersion = state.ServerVersion
-	u.Info.APIVersions = append([]string(nil), state.APIVersions...)
+	if len(state.ServerVersion) <= maxServerVersion {
+		u.ServerVersion = state.ServerVersion
+	}
+	u.Info.APIVersions = boundedAPIVersions(state.APIVersions)
 	switch {
 	case state.LastCacheSyncTime == nil:
 		u.ConnectionState.Status = v1alpha1.ConnectionStatusUnknown
 	case state.SyncError == nil:
 		u.ConnectionState.Status = v1alpha1.ConnectionStatusSuccessful
-		synced := metav1.NewTime(*state.LastCacheSyncTime)
+		// Whole seconds, as the API stores it: a finer value never compares equal to the stored one.
+		synced := metav1.NewTime(state.LastCacheSyncTime.Truncate(time.Second))
 		u.Info.CacheInfo = v1alpha1.ClusterCacheInfo{
 			LastCacheSyncTime: &synced,
 			APIsCount:         state.APIsCount,
@@ -108,6 +124,16 @@ func ComputeClusterInfo(state *CacheState, applications int64, now time.Time) St
 		u.ConnectionState.Message = state.SyncError.Error()
 	}
 	return u
+}
+
+// boundedAPIVersions copies versions, or drops a list too large to store: part of it would pass
+// for everything the destination serves.
+func boundedAPIVersions(versions []string) []string {
+	encoded, err := json.Marshal(versions)
+	if err != nil || len(encoded) > maxAPIVersionBytes {
+		return nil
+	}
+	return append([]string(nil), versions...)
 }
 
 // ProbeUpdate returns the status of a connection check: Successful with the version, or Failed
@@ -246,24 +272,36 @@ func (w *StatusWriter) RecordProbe(ctx context.Context, c *v1alpha1.Cluster, ver
 }
 
 // RecordClusterInfo stores a ComputeClusterInfo result. The cache-derived status replaces the
-// connection state, server version and info, as upstream's cluster-info updater does.
+// connection state and info, as upstream's cluster-info updater does, but for what
+// ApplyClusterInfo keeps.
 func (w *StatusWriter) RecordClusterInfo(ctx context.Context, c *v1alpha1.Cluster, u StatusUpdate) (*v1alpha1.Cluster, error) {
 	if IsSynthetic(c) {
 		return nil, errSynthetic
 	}
 	return w.Update(ctx, c.Namespace, c.Name, func(cur *v1alpha1.Cluster) error {
-		applyConnection(cur, u.ConnectionState, u.ServerVersion, true)
-		cur.Status.ServerVersion = u.ServerVersion
-		cur.Status.Info.ApplicationsCount = u.Info.ApplicationsCount
-		cur.Status.Info.APIVersions = u.Info.APIVersions
-		cur.Status.Info.CacheInfo = u.Info.CacheInfo
+		ApplyClusterInfo(cur, u)
 		return nil
 	})
+}
+
+// ApplyClusterInfo sets the status fields of a ComputeClusterInfo result on c. Callers can apply
+// it to a copy to find out whether RecordClusterInfo would write. A version or API list the update
+// does not have stays: renders read them from here, where upstream asks the destination, and an
+// older answer is closer to it than Helm's default. spec.server cannot change, so that answer is
+// this destination's.
+func ApplyClusterInfo(c *v1alpha1.Cluster, u StatusUpdate) {
+	applyConnection(c, u.ConnectionState, u.ServerVersion, true)
+	c.Status.Info.ApplicationsCount = u.Info.ApplicationsCount
+	if len(u.Info.APIVersions) > 0 {
+		c.Status.Info.APIVersions = u.Info.APIVersions
+	}
+	c.Status.Info.CacheInfo = u.Info.CacheInfo
 }
 
 // applyConnection sets the connection state, version and conditions. AttemptedAt is kept when
 // nothing else changed, so periodic writes of an unchanged state are no-ops.
 func applyConnection(c *v1alpha1.Cluster, state v1alpha1.ConnectionState, version string, setVersion bool) {
+	state.Message = truncateConnectionMessage(state.Message)
 	if prev := c.Status.ConnectionState; prev != nil && prev.Status == state.Status && prev.Message == state.Message {
 		state.AttemptedAt = prev.AttemptedAt
 	}
@@ -295,6 +333,19 @@ func applyConnection(c *v1alpha1.Cluster, state v1alpha1.ConnectionState, versio
 	meta.SetStatusCondition(&c.Status.Conditions, failed)
 }
 
+// truncateConnectionMessage returns m as the API stores it: valid UTF-8 (JSON encoding would
+// replace the rest, and the stored message would never equal the next one), cut to
+// maxConnectionMessage bytes on a character boundary. The schema counts characters, so a cut
+// message always fits.
+func truncateConnectionMessage(m string) string {
+	m = strings.ToValidUTF8(m, "\uFFFD")
+	if len(m) <= maxConnectionMessage {
+		return m
+	}
+	const suffix = "... (truncated)"
+	return strings.ToValidUTF8(m[:maxConnectionMessage-len(suffix)], "") + suffix
+}
+
 // RecordVersionLabel maintains cd.patrol.example/kubernetes-version on clusters labeled
 // cd.patrol.example/auto-label-cluster-info=true (REPO-095) with a merge patch of the label. It
 // reports whether a patch was sent.
@@ -302,11 +353,7 @@ func (w *StatusWriter) RecordVersionLabel(ctx context.Context, c *v1alpha1.Clust
 	if IsSynthetic(c) {
 		return false, nil
 	}
-	probe := c.DeepCopy()
-	if probe.Labels == nil {
-		return false, nil
-	}
-	if !AutoLabelKubernetesVersion(probe, version) {
+	if !WantsVersionLabel(c, version) {
 		return false, nil
 	}
 	patch, err := json.Marshal(map[string]any{"metadata": map[string]any{"labels": map[string]string{v1alpha1.LabelKeyClusterKubernetesVersion: version}}})

@@ -2,12 +2,16 @@ package clusters
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
+	"strings"
 	"testing"
 	"time"
+	"unicode/utf8"
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+	"k8s.io/apimachinery/pkg/api/equality"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	"k8s.io/apimachinery/pkg/api/meta"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
@@ -63,6 +67,136 @@ func TestComputeClusterInfo(t *testing.T) {
 			}
 		})
 	}
+}
+
+func TestComputeClusterInfoSyncTimeHasStoredPrecision(t *testing.T) {
+	t.Parallel()
+	synced := time.Date(2026, 10, 13, 10, 0, 0, 123456789, time.UTC)
+	u := ComputeClusterInfo(&CacheState{LastCacheSyncTime: &synced}, 1, synced)
+	require.NotNil(t, u.Info.CacheInfo.LastCacheSyncTime)
+	assert.True(t, u.Info.CacheInfo.LastCacheSyncTime.Time.Equal(synced.Truncate(time.Second)))
+}
+
+// TestComputeClusterInfoBounds: what a destination reports cannot make the API refuse the status,
+// and the connection state with it.
+func TestComputeClusterInfoBounds(t *testing.T) {
+	t.Parallel()
+	now := time.Date(2026, 10, 13, 10, 0, 0, 0, time.UTC)
+	synced := now.Add(-time.Minute)
+	// With its brackets and quotes, this list is exactly the limit.
+	fits := []string{strings.Repeat("a", maxAPIVersionBytes-4)}
+	u := ComputeClusterInfo(&CacheState{ServerVersion: strings.Repeat("v", maxServerVersion), APIVersions: fits, LastCacheSyncTime: &synced}, 0, now)
+	assert.Len(t, u.ServerVersion, maxServerVersion)
+	assert.Len(t, u.Info.APIVersions, 1)
+
+	u = ComputeClusterInfo(&CacheState{
+		ServerVersion: strings.Repeat("v", maxServerVersion+1), APIVersions: []string{fits[0] + "a"}, LastCacheSyncTime: &synced, SyncError: errors.New("unreachable"),
+	}, 0, now)
+	assert.Empty(t, u.ServerVersion)
+	assert.Empty(t, u.Info.APIVersions, "part of the list would pass for all of it")
+	assert.Equal(t, v1alpha1.ConnectionStatusFailed, u.ConnectionState.Status)
+
+	u = ComputeClusterInfo(&CacheState{APIVersions: []string{strings.Repeat("<", maxAPIVersionBytes/2)}, LastCacheSyncTime: &synced}, 0, now)
+	assert.Empty(t, u.Info.APIVersions, "half the limit in raw bytes, three times the limit as stored")
+}
+
+func TestApplyClusterInfo(t *testing.T) {
+	t.Parallel()
+	now := time.Date(2026, 10, 13, 10, 0, 0, 0, time.UTC)
+	synced := now.Add(-time.Minute)
+	state := &CacheState{ServerVersion: "v1.36.0", LastCacheSyncTime: &synced, APIsCount: 40, ResourcesCount: 900, APIVersions: []string{"v1"}}
+	healthy := func() *v1alpha1.Cluster {
+		c := cluster("c", "https://c", func(c *v1alpha1.Cluster) { c.Generation = 3 })
+		ApplyClusterInfo(c, ComputeClusterInfo(state, 2, now))
+		return c
+	}
+
+	t.Run("unchanged", func(t *testing.T) {
+		t.Parallel()
+		c := healthy()
+		before := c.Status.DeepCopy()
+		ApplyClusterInfo(c, ComputeClusterInfo(state, 2, now.Add(time.Hour)))
+		assert.True(t, equality.Semantic.DeepEqual(before, &c.Status), "a later round of the same state changes nothing, attemptedAt included")
+	})
+	t.Run("connected", func(t *testing.T) {
+		t.Parallel()
+		c := healthy()
+		assert.Equal(t, int64(3), c.Status.ObservedGeneration)
+		assert.Equal(t, "v1.36.0", c.Status.ServerVersion)
+		assert.Equal(t, []string{"v1"}, c.Status.Info.APIVersions)
+		assert.Equal(t, int64(2), c.Status.Info.ApplicationsCount)
+		assert.Equal(t, int64(900), c.Status.Info.CacheInfo.ResourcesCount)
+		assert.True(t, meta.IsStatusConditionTrue(c.Status.Conditions, v1alpha1.ConditionReady))
+		assert.True(t, meta.IsStatusConditionFalse(c.Status.Conditions, v1alpha1.ConditionConnectionFailed))
+	})
+	t.Run("failed clears the cache information", func(t *testing.T) {
+		t.Parallel()
+		c := healthy()
+		ApplyClusterInfo(c, ComputeClusterInfo(&CacheState{ServerVersion: "v1.36.0", LastCacheSyncTime: &synced, SyncError: errors.New("refused")}, 2, now))
+		assert.Equal(t, v1alpha1.ConnectionStatusFailed, c.Status.ConnectionState.Status)
+		assert.Equal(t, "refused", c.Status.ConnectionState.Message)
+		assert.Equal(t, v1alpha1.ClusterCacheInfo{}, c.Status.Info.CacheInfo)
+		assert.True(t, meta.IsStatusConditionTrue(c.Status.Conditions, v1alpha1.ConditionConnectionFailed))
+	})
+	t.Run("no cache clears the statistics and keeps what renders read", func(t *testing.T) {
+		t.Parallel()
+		c := healthy()
+		ApplyClusterInfo(c, ComputeClusterInfo(nil, 0, now))
+		assert.Equal(t, v1alpha1.ConnectionStatusUnknown, c.Status.ConnectionState.Status)
+		assert.Equal(t, NoApplicationsMessage, c.Status.ConnectionState.Message)
+		assert.Equal(t, "v1.36.0", c.Status.ServerVersion)
+		assert.Equal(t, []string{"v1"}, c.Status.Info.APIVersions)
+		assert.Equal(t, v1alpha1.ClusterCacheInfo{}, c.Status.Info.CacheInfo)
+		assert.Equal(t, NoApplicationsMessage, meta.FindStatusCondition(c.Status.Conditions, v1alpha1.ConditionReady).Message)
+		assert.Nil(t, meta.FindStatusCondition(c.Status.Conditions, v1alpha1.ConditionConnectionFailed))
+	})
+	t.Run("a cache that has reported nothing keeps what renders read", func(t *testing.T) {
+		t.Parallel()
+		c := healthy()
+		ApplyClusterInfo(c, ComputeClusterInfo(&CacheState{}, 2, now))
+		assert.Equal(t, v1alpha1.ConnectionStatusUnknown, c.Status.ConnectionState.Status)
+		assert.Equal(t, "v1.36.0", c.Status.ServerVersion)
+		assert.Equal(t, []string{"v1"}, c.Status.Info.APIVersions)
+	})
+	t.Run("what a destination reports replaces what was kept", func(t *testing.T) {
+		t.Parallel()
+		c := healthy()
+		ApplyClusterInfo(c, ComputeClusterInfo(nil, 2, now))
+		ApplyClusterInfo(c, ComputeClusterInfo(&CacheState{ServerVersion: "v1.37.0", APIVersions: []string{"v1", "apps/v1"}, LastCacheSyncTime: &synced}, 2, now))
+		assert.Equal(t, "v1.37.0", c.Status.ServerVersion)
+		assert.Equal(t, []string{"v1", "apps/v1"}, c.Status.Info.APIVersions)
+	})
+	t.Run("a long message fits the schema", func(t *testing.T) {
+		t.Parallel()
+		// Multi-byte characters across the cut: bytes are cut, and what is stored stays valid.
+		long := strings.Repeat("é", maxConnectionMessage)
+		failed := func(at time.Time) StatusUpdate {
+			return ComputeClusterInfo(&CacheState{LastCacheSyncTime: &synced, SyncError: errors.New(long)}, 2, at)
+		}
+		c := healthy()
+		ApplyClusterInfo(c, failed(now))
+		msg := c.Status.ConnectionState.Message
+		assert.LessOrEqual(t, len(msg), maxConnectionMessage)
+		assert.True(t, utf8.ValidString(msg))
+		assert.True(t, strings.HasSuffix(msg, "... (truncated)"))
+		assert.Equal(t, msg, meta.FindStatusCondition(c.Status.Conditions, v1alpha1.ConditionReady).Message)
+
+		before := c.Status.DeepCopy()
+		ApplyClusterInfo(c, failed(now.Add(time.Minute)))
+		assert.True(t, equality.Semantic.DeepEqual(before, &c.Status), "the same long error is no change")
+	})
+	t.Run("a message that is not valid UTF-8 is stored as the API will", func(t *testing.T) {
+		t.Parallel()
+		failed := func(at time.Time) StatusUpdate {
+			return ComputeClusterInfo(&CacheState{LastCacheSyncTime: &synced, SyncError: errors.New("verweigert f\xfcr Benutzer")}, 2, at)
+		}
+		c := healthy()
+		ApplyClusterInfo(c, failed(now))
+		assert.Equal(t, "verweigert f\uFFFDr Benutzer", c.Status.ConnectionState.Message)
+		before := c.Status.DeepCopy()
+		ApplyClusterInfo(c, failed(now.Add(time.Minute)))
+		assert.True(t, equality.Semantic.DeepEqual(before, &c.Status), "the same error is no change")
+	})
 }
 
 func TestProbeErrors(t *testing.T) {
@@ -146,6 +280,36 @@ func TestStatusWriterRetriesConflicts(t *testing.T) {
 	require.ErrorIs(t, err, errSynthetic)
 }
 
+// The largest status ComputeClusterInfo lets through is stored: everything a destination decides,
+// in characters JSON takes six bytes for.
+func TestStatusWriterStoresTheLargestStatus(t *testing.T) {
+	cfg := envConfig(t)
+	ctx := context.Background()
+	dyn, err := dynamic.NewForConfig(cfg)
+	require.NoError(t, err)
+	ns := createNamespace(t, cfg, "largest-status")
+	c := cluster("target", "https://target.example", func(c *v1alpha1.Cluster) { c.Namespace = ns })
+	u, err := dyn.Resource(ClusterGVR).Namespace(ns).Create(ctx, toUnstructured(t, c), metav1.CreateOptions{})
+	require.NoError(t, err)
+	require.NoError(t, runtime.DefaultUnstructuredConverter.FromUnstructured(u.Object, c))
+
+	now := time.Now()
+	versions := []string{strings.Repeat("<", (maxAPIVersionBytes-4)/6)}
+	update := ComputeClusterInfo(&CacheState{
+		ServerVersion: strings.Repeat("<", maxServerVersion), APIVersions: versions, LastCacheSyncTime: &now,
+		SyncError: errors.New(strings.Repeat("<", 2*maxConnectionMessage)),
+	}, 0, now)
+	require.Len(t, update.Info.APIVersions, 1)
+	out, err := NewStatusWriter(dyn).RecordClusterInfo(ctx, c, update)
+	require.NoError(t, err)
+	assert.Equal(t, v1alpha1.ConnectionStatusFailed, out.Status.ConnectionState.Status)
+	assert.Len(t, out.Status.Info.APIVersions, 1)
+	// A default etcd refuses more than 1.5 MiB; the one of envtest takes more than that.
+	encoded, err := json.Marshal(out)
+	require.NoError(t, err)
+	assert.Less(t, len(encoded), 3<<19)
+}
+
 // TestStatusWriterEnvtest writes probe results, cluster info and the version label to a real
 // Cluster object (status subresource of the generated CRD).
 func TestStatusWriterEnvtest(t *testing.T) {
@@ -195,6 +359,16 @@ func TestStatusWriterEnvtest(t *testing.T) {
 	again, err := w.RecordClusterInfo(ctx, out, ComputeClusterInfo(&CacheState{
 		ServerVersion: ver, LastCacheSyncTime: &synced, APIsCount: 12, ResourcesCount: 34, APIVersions: []string{"v1"},
 	}, 5, time.Now().Add(time.Minute)))
+	require.NoError(t, err)
+	assert.Equal(t, out.ResourceVersion, again.ResourceVersion)
+
+	// An error that is not valid UTF-8 settles too: JSON would replace those bytes.
+	failed := func(at time.Time) StatusUpdate {
+		return ComputeClusterInfo(&CacheState{ServerVersion: ver, LastCacheSyncTime: &synced, SyncError: errors.New("verweigert f\xfcr Benutzer")}, 5, at)
+	}
+	out, err = w.RecordClusterInfo(ctx, again, failed(time.Now()))
+	require.NoError(t, err)
+	again, err = w.RecordClusterInfo(ctx, out, failed(time.Now().Add(time.Minute)))
 	require.NoError(t, err)
 	assert.Equal(t, out.ResourceVersion, again.ResourceVersion)
 

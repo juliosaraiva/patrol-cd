@@ -18,6 +18,7 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/builder"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/controller"
+	"sigs.k8s.io/controller-runtime/pkg/event"
 	"sigs.k8s.io/controller-runtime/pkg/handler"
 	"sigs.k8s.io/controller-runtime/pkg/manager"
 	"sigs.k8s.io/controller-runtime/pkg/predicate"
@@ -172,6 +173,15 @@ func destinationKeys(server, name string) []string {
 	return out
 }
 
+// clusterChanged drops status-only updates of a Cluster. The controller writes that status itself
+// on its cluster-info interval, and a comparison does not read it, so a latest-level refresh of
+// every Application of the cluster would follow each write for nothing. A new UID passes: after a
+// watch gap the informer reports a delete and a create as one update, with nothing else to tell.
+var clusterChanged = predicate.Or[client.Object](predicate.GenerationChangedPredicate{}, predicate.LabelChangedPredicate{}, predicate.AnnotationChangedPredicate{},
+	predicate.Funcs{UpdateFunc: func(e event.UpdateEvent) bool {
+		return e.ObjectOld != nil && e.ObjectNew != nil && e.ObjectOld.GetUID() != e.ObjectNew.GetUID()
+	}})
+
 // SetupWithManager registers the controller: Applications of allowed namespaces, their
 // Operations, AppProjects, Clusters and Repositories (dependent Applications are refreshed
 // at level latest), and the channel of controller-requested refreshes. IndexFields and
@@ -200,7 +210,7 @@ func (r *Reconciler) SetupWithManager(mgr manager.Manager) error {
 				return nil
 			}
 			return destinationKeys(c.Spec.Server, c.Spec.Name)
-		}))).
+		})), builder.WithPredicates(clusterChanged)).
 		Watches(&v1alpha1.Repository{}, handler.EnqueueRequestsFromMapFunc(r.mapIndexed(indexRepoURL, func(o client.Object) []string {
 			repo, ok := o.(*v1alpha1.Repository)
 			if !ok || repo.Namespace != r.cfg.Namespace {

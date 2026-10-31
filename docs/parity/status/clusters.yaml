@@ -146,23 +146,28 @@ REPO-093:
   notes: List/get/name filtering and messages; registration rejection helper. Settings watching and API wiring are elsewhere.
 
 REPO-094:
-  status: in-progress
-  impl: [internal/clusters/status.go, internal/clusters/registry.go]
+  status: implemented
+  impl: [internal/clusters/status.go, internal/clusters/registry.go, internal/clusters/tuning.go]
   tests:
     - internal/clusters/status_test.go:TestComputeClusterInfo
+    - internal/clusters/status_test.go:TestComputeClusterInfoSyncTimeHasStoredPrecision
+    - internal/clusters/status_test.go:TestComputeClusterInfoBounds
+    - internal/clusters/status_test.go:TestStatusWriterStoresTheLargestStatus
+    - internal/clusters/status_test.go:TestApplyClusterInfo
     - internal/clusters/status_test.go:TestStatusWriterEnvtest
     - internal/clusters/registry_test.go:TestRegistryLookups
+    - internal/clusters/tuning_test.go:TestClusterInfoIntervalFromLookup
   notes: >-
-    Status mapping, application count and status writes. The periodic updater
-    (UPDATE_CLUSTER_INFO_TIMEOUT) and the API attaching info are not implemented here.
+    Status mapping, application count and status writes. The periodic updater is
+    internal/controller/clusterinfo (controller.yaml); the API part is api-clusters-projects.yaml.
 
 REPO-095:
-  status: implemented
+  status: verified
   impl: [internal/clusters/helpers.go, internal/clusters/status.go]
   tests:
     - internal/clusters/helpers_test.go:TestAutoLabelKubernetesVersion
     - internal/clusters/status_test.go:TestStatusWriterEnvtest
-  notes: The controller must call RecordVersionLabel on its cluster-info interval.
+  notes: The controller's cluster-info updater calls RecordVersionLabel (controller.yaml).
 
 REPO-096:
   status: in-progress

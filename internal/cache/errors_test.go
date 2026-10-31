@@ -88,6 +88,14 @@ func TestEnsureSyncedUnreachableCluster(t *testing.T) {
 	require.ErrorIs(t, c.EnsureSynced(context.Background()), ErrClusterUnreachable)
 	assert.True(t, c.GetClusterInfo().LastCacheSyncTime.After(first))
 
+	// An invalidation drops the failure along with the state that failed.
+	c.Invalidate()
+	info = c.GetClusterInfo()
+	assert.False(t, info.Synced)
+	require.NoError(t, info.SyncError)
+	require.ErrorIs(t, c.EnsureSynced(context.Background()), ErrClusterUnreachable)
+	assert.ErrorIs(t, c.GetClusterInfo().SyncError, ErrClusterUnreachable)
+
 	_, err = c.GetManagedLiveObjs(context.Background(), nil, nil)
 	assert.ErrorIs(t, err, ErrNotSynced)
 	_, err = c.IsNamespaced(schema.GroupKind{Kind: "ConfigMap"})
@@ -175,6 +183,21 @@ func TestEnsureSyncedOutlivesCallerContext(t *testing.T) {
 	info := c.GetClusterInfo()
 	assert.True(t, info.Synced)
 	assert.Equal(t, 1, fc.versionRequests(), "the sync that callers gave up on was not restarted")
+}
+
+// An invalidated cache keeps the time of its last sync and reports no error: only Synced tells
+// that it holds nothing yet.
+func TestClusterInfoOfInvalidatedCache(t *testing.T) {
+	t.Parallel()
+	fc := newFakeCluster(t, cmResource)
+	c := fc.start(t, Settings{})
+	require.True(t, c.GetClusterInfo().Synced)
+	c.Invalidate()
+	info := c.GetClusterInfo()
+	assert.False(t, info.Synced)
+	assert.NotNil(t, info.LastCacheSyncTime)
+	assert.NoError(t, info.SyncError)
+	assert.Zero(t, info.APIsCount)
 }
 
 // A caller that joined a sync must not get its result when that sync completed for an epoch

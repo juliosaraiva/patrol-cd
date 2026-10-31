@@ -37,6 +37,7 @@ import (
 	"github.com/juliosaraiva/patrol-cd/internal/clusters"
 	"github.com/juliosaraiva/patrol-cd/internal/compare"
 	"github.com/juliosaraiva/patrol-cd/internal/controller/app"
+	"github.com/juliosaraiva/patrol-cd/internal/controller/clusterinfo"
 	"github.com/juliosaraiva/patrol-cd/internal/controller/core"
 	"github.com/juliosaraiva/patrol-cd/internal/controller/operation"
 	"github.com/juliosaraiva/patrol-cd/internal/controller/sharding"
@@ -91,6 +92,9 @@ type ControllerConfig struct {
 	Identity string
 	// ClusterTuning configures destination cluster clients (nil: defaults).
 	ClusterTuning *clusters.Tuning
+	// ClusterInfoInterval is how often Cluster status is written (0: from
+	// PATROL_UPDATE_CLUSTER_INFO_TIMEOUT, else the default).
+	ClusterInfoInterval time.Duration
 
 	ShutdownTimeout time.Duration
 	Registry        *prometheus.Registry
@@ -119,6 +123,9 @@ func (c *ControllerConfig) Validate() error {
 	}
 	if (c.TreeAPITLS.CertFile == "") != (c.TreeAPITLS.KeyFile == "") {
 		errs = append(errs, errors.New("--tls-cert and --tls-key must be set together"))
+	}
+	if c.ClusterInfoInterval < 0 {
+		errs = append(errs, errors.New("the cluster info interval cannot be negative"))
 	}
 	for name, addr := range map[string]string{"metrics": c.MetricsAddress, "tree API": c.TreeAPIAddress} {
 		if listenerEnabled(addr) {
@@ -441,11 +448,26 @@ func RunController(ctx context.Context, cfg ControllerConfig) error {
 	if err != nil {
 		return err
 	}
-	writer, err := sharding.NewAssignedShardWriter(assigner, lm, clusters.NewStatusWriter(dyn), log)
+	statusWriter := clusters.NewStatusWriter(dyn)
+	writer, err := sharding.NewAssignedShardWriter(assigner, lm, statusWriter, log)
 	if err != nil {
 		return err
 	}
 	shardWriterTrigger = writer.Trigger
+	clusterInfo, err := clusterinfo.New(clusterinfo.Options{
+		Assigner: assigner, Owner: lm, Reader: mgr.GetClient(), Namespace: cfg.Namespace, NamespaceAllowed: matcher.Allowed, Counter: registry, Recorder: statusWriter,
+		CacheState: func(server string) *clusters.CacheState {
+			cc, ok := cacheMgr.Lookup(server)
+			if !ok {
+				return nil
+			}
+			return compare.ClusterCacheState(cc)
+		},
+		Interval: clusterInfoInterval(cfg.ClusterInfoInterval, os.LookupEnv, log), Logger: log,
+	})
+	if err != nil {
+		return err
+	}
 
 	deps := core.Deps{
 		Client: mgr.GetClient(), APIReader: mgr.GetAPIReader(), Recorder: mgr.GetEventRecorder("patrol-controller"),
@@ -598,6 +620,13 @@ func RunController(ctx context.Context, cfg ControllerConfig) error {
 		}},
 		task{name: "shard-leases", run: lm.Run},
 		task{name: "shard-status", run: func(ctx context.Context) error { writer.Run(ctx, shardWriterResync); return nil }},
+		task{name: "cluster-info", run: func(ctx context.Context) error {
+			// Reads go through the manager cache: wait until it is started and synced.
+			if mgr.GetCache().WaitForCacheSync(ctx) {
+				clusterInfo.Run(ctx)
+			}
+			return nil
+		}},
 		task{name: "tree-api", run: func(ctx context.Context) error {
 			return serveInternalHTTP(ctx, internalHTTP{
 				name: "controller tree API", addr: cfg.TreeAPIAddress, handler: treeHandler, tls: cfg.TreeAPITLS,
@@ -773,4 +802,12 @@ func serveInternalHTTP(ctx context.Context, o internalHTTP, started func(net.Add
 		return fmt.Errorf("shutdown %s: %w", o.name, err)
 	}
 	return nil
+}
+
+// clusterInfoInterval is the interval set in the configuration, else the one of the environment.
+func clusterInfoInterval(configured time.Duration, lookup func(string) (string, bool), log *slog.Logger) time.Duration {
+	if configured != 0 {
+		return configured
+	}
+	return clusters.ClusterInfoIntervalFromLookup(lookup, log)
 }

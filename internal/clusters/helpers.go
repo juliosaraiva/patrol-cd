@@ -10,6 +10,8 @@ import (
 	"strings"
 	"time"
 
+	"k8s.io/apimachinery/pkg/util/validation"
+
 	v1alpha1 "github.com/juliosaraiva/patrol-cd/api/v1alpha1"
 )
 
@@ -117,14 +119,18 @@ func ObjectNameForServer(server string) (string, error) {
 // cluster opted in with cd.patrol.example/auto-label-cluster-info=true and the label differs.
 // It reports whether the labels changed; the caller persists them.
 func AutoLabelKubernetesVersion(c *v1alpha1.Cluster, version string) bool {
-	if c == nil || version == "" || c.Labels[v1alpha1.LabelKeyAutoLabelClusterInfo] != "true" {
-		return false
-	}
-	if c.Labels[v1alpha1.LabelKeyClusterKubernetesVersion] == version {
+	if !WantsVersionLabel(c, version) {
 		return false
 	}
 	c.Labels[v1alpha1.LabelKeyClusterKubernetesVersion] = version
 	return true
+}
+
+// WantsVersionLabel reports whether AutoLabelKubernetesVersion would change the labels of c. A
+// version the API would refuse as a label value (a destination reports what it likes) is left out.
+func WantsVersionLabel(c *v1alpha1.Cluster, version string) bool {
+	return c != nil && version != "" && c.Labels[v1alpha1.LabelKeyAutoLabelClusterInfo] == "true" &&
+		c.Labels[v1alpha1.LabelKeyClusterKubernetesVersion] != version && len(validation.IsValidLabelValue(version)) == 0
 }
 
 // ValidateRegistration rejects registering (creating) a cluster for the in-cluster server while

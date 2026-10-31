@@ -118,7 +118,7 @@ var subcommands = map[string]subcommand{
 	},
 	"controller": {
 		settings: settings.ComponentController, kube: true, token: true, profileKey: "controller.profile.enabled",
-		env: concat(envAll, envToken, envProfiler, envClusterTune, envGPG, envSharding),
+		env: concat(envAll, envToken, envProfiler, envClusterTune, envGPG, envSharding, []string{clusters.EnvUpdateClusterInfoTimeout}),
 		listeners: func(fs *pflag.FlagSet) ([]listener, error) {
 			out, err := withMetricsHealthz(fs, nil, lkMetrics, "metrics-port")
 			if err != nil {

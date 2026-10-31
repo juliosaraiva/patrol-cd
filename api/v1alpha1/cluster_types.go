@@ -48,10 +48,12 @@ func init() {
 
 // ClusterSpec is the configuration of a Cluster.
 type ClusterSpec struct {
-	// Server is the URL of the cluster's API server.
+	// Server is the URL of the cluster's API server. It cannot change: the status describes this
+	// destination, so another one needs a new Cluster.
 	// +kubebuilder:validation:MinLength=1
 	// +kubebuilder:validation:MaxLength=2048
 	// +kubebuilder:validation:XValidation:rule="isURL(self) && url(self).getScheme() in ['https', 'http'] && url(self).getHostname() != ''",message="server must be an http(s) URL"
+	// +kubebuilder:validation:XValidation:rule="self == oldSelf",message="server is immutable"
 	Server string `json:"server"`
 	// Name of the cluster, referenced by Application destinations (spec.destination.name).
 	// +kubebuilder:validation:MinLength=1

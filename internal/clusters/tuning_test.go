@@ -1,8 +1,10 @@
 package clusters
 
 import (
+	"bytes"
 	"context"
 	"io"
+	"log/slog"
 	"math"
 	"net/http"
 	"net/http/httptest"
@@ -80,6 +82,34 @@ func TestTuningFromLookupBounds(t *testing.T) {
 			assert.Zero(rt, tu.RetryMax)
 		}
 	})
+}
+
+func TestClusterInfoIntervalFromLookup(t *testing.T) {
+	t.Parallel()
+	tests := []struct {
+		value    string
+		want     time.Duration
+		warnings int
+	}{
+		{value: "", want: 10 * time.Second},
+		{value: "10s", want: 10 * time.Second},
+		{value: "30s", want: 30 * time.Second},
+		{value: "1m", want: time.Minute},
+		{value: "9s", want: 10 * time.Second, warnings: 1},
+		{value: "61s", want: 10 * time.Second, warnings: 1},
+		{value: "30", want: 10 * time.Second, warnings: 1},
+		{value: "soon", want: 10 * time.Second, warnings: 1},
+	}
+	for _, tc := range tests {
+		t.Run(tc.value, func(t *testing.T) {
+			t.Parallel()
+			var logs bytes.Buffer
+			lookup := func(name string) (string, bool) { return tc.value, name == EnvUpdateClusterInfoTimeout }
+			got := ClusterInfoIntervalFromLookup(lookup, slog.New(slog.NewTextHandler(&logs, nil)))
+			assert.Equal(t, tc.want, got)
+			assert.Equal(t, tc.warnings, strings.Count(logs.String(), "level=WARN"))
+		})
+	}
 }
 
 // innerTransport walks client-go wrappers down to the *http.Transport.

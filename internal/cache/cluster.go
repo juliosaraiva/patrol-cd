@@ -1331,8 +1331,10 @@ func (c *Cluster) GetClusterInfo() ClusterInfo {
 	if c.status.attempted {
 		t := c.status.syncTime
 		info.LastCacheSyncTime = &t
-		info.SyncError = c.status.syncErr
-		info.Synced = c.status.syncErr == nil && c.status.epoch == epoch
+		if c.status.epoch == epoch {
+			info.SyncError = c.status.syncErr
+			info.Synced = c.status.syncErr == nil
+		}
 	}
 	c.statusMu.Unlock()
 	info.ActiveWatches = int(c.activeWatches.Load())

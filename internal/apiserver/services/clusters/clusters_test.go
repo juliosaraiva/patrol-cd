@@ -163,6 +163,16 @@ func TestClusterLifecycle(t *testing.T) {
 	_, err = admin.UpdateCluster(ctx, apiclient.ClusterByServer(f.srv.URL), &apiclient.ClusterInput{Name: "x", ResourceVersion: "1"}, "name")
 	assert.Equal(t, http.StatusConflict, apiErr(t, err).StatusCode)
 
+	// A status write moves the resourceVersion, not what a partial update changes: without one
+	// (the UI) the update goes through and the status stays.
+	read := e.clusterObject(f.srv.URL)
+	read.Status.Info.ApplicationsCount = 7
+	require.NoError(t, e.kube.Status().Update(ctx, read))
+	upd, err = admin.UpdateCluster(ctx, apiclient.ClusterByServer(f.srv.URL), &apiclient.ClusterInput{Namespaces: []string{"apps", "web", "ledger"}}, "namespaces")
+	require.NoError(t, err)
+	assert.Equal(t, []string{"apps", "web", "ledger"}, upd.Spec.Namespaces)
+	assert.Equal(t, int64(7), upd.Status.Info.ApplicationsCount)
+
 	// A config update replaces the credentials (unknown Secret keys dropped, REPO-104), and
 	// the connection is checked with the new ones.
 	_, err = admin.UpdateCluster(ctx, apiclient.ClusterByServer(f.srv.URL), input(f, "", "", "wrong-token"), "config")
@@ -418,6 +428,29 @@ func TestClusterDeleteByName(t *testing.T) {
 	assert.Nil(t, e.clusterObject(f1.srv.URL))
 	assert.Nil(t, e.clusterObject(f2.srv.URL+"/"))
 	assert.NotNil(t, e.secret("user-creds"), "unmanaged Secret kept")
+}
+
+// TestUpdateKeepsTheStoredServer: the API normalizes the server it reads (REPO-077), and the CRD
+// refuses a changed one, so an update has to write back what is stored.
+func TestUpdateKeepsTheStoredServer(t *testing.T) {
+	e := newEnv(t, envOptions{})
+	f := newFakeCluster(t, e.cfg, e.clientset, "")
+	f.addToken(goodToken)
+	ctx := context.Background()
+	require.NoError(t, e.kube.Create(ctx, &corev1.Secret{
+		ObjectMeta: metav1.ObjectMeta{Name: "creds", Namespace: e.ns, Labels: map[string]string{v1alpha1.LabelKeySecretType: v1alpha1.LabelValueSecretTypeCluster}},
+		Data:       map[string][]byte{v1alpha1.ClusterSecretKeyBearerToken: []byte(goodToken), v1alpha1.ClusterSecretKeyCAData: f.caPEM},
+	}))
+	stored := f.srv.URL + "/"
+	require.NoError(t, e.kube.Create(ctx, &v1alpha1.Cluster{ObjectMeta: metav1.ObjectMeta{Name: "declarative", Namespace: e.ns}, Spec: v1alpha1.ClusterSpec{
+		Server: stored, Name: "declarative", Config: v1alpha1.ClusterConfig{CredentialsRef: &v1alpha1.LocalSecretReference{Name: "creds"}},
+	}}))
+
+	_, err := e.client("admin").UpdateCluster(ctx, apiclient.ClusterByServer(f.srv.URL), &apiclient.ClusterInput{Labels: map[string]string{"team": "a"}}, "labels")
+	require.NoError(t, err)
+	obj := e.clusterObject(stored)
+	require.NotNil(t, obj, "the stored server keeps its slash")
+	assert.Equal(t, "a", obj.Labels["team"])
 }
 
 // TestClusterRotateAuth covers REPO-103 end to end: the destination accepts only tokens of
