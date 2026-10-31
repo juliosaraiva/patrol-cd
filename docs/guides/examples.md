@@ -111,8 +111,8 @@ a fake GitHub organization and a stub plugin service.
 | `projects/default.yaml` | Permissive `default` project (as Argo CD's built-in one). |
 | `projects/team-a.yaml` | Strict tenant: source repositories, destinations (server and name), no cluster resources, namespaced allow/deny lists, `orphanedResources`, roles with groups, sync windows with time zones, `destinationServiceAccounts`, `sourceNamespaces`. |
 | `projects/signed-commits.yaml` | `sourceIntegrity` with a GnuPG `head` policy. |
-| `scm/github-app.yaml` | `SCMProvider` with a GitHub App (`privateKeySecretRef`), webhook `secretRef`, check-run status reporting, rate limit. |
-| `scm/github-token.yaml` | `SCMProvider` with a token (`tokenSecretRef`), commit statuses. |
+| `scm/github-app.yaml` | `SCMProvider` with a GitHub App (`privateKeySecretRef`), webhook `secretRef`, `statusReporting` (mode `checks`) and `rateLimit` (validated, not wired yet: #235, #236). |
+| `scm/github-token.yaml` | `SCMProvider` with a token (`tokenSecretRef`), `statusReporting` mode `statuses` (validated, not wired yet: #235). |
 | `scm/github-enterprise.yaml` | GitHub Enterprise Server: `apiURL`, `webURL`, `caSecretRef`. |
 | `repositories/github-app.yaml` | `RepositoryCredential` using the SCMProvider's App; `Repository` with `githubApp` and a key in `credentialsRef`. |
 | `repositories/github-enterprise.yaml` | GitHub App credential template for GHES (`enterpriseBaseURL`). |
@@ -134,8 +134,8 @@ a fake GitHub organization and a stub plugin service.
 
 Pull request preview environments with a GitHub App: SCMProvider and repository credentials,
 a `previews` project, a pull request ApplicationSet with `providerRef` (namespace per pull
-request, cleanup when the pull request closes), commit status and pull request comment
-notifications, the App permission list (from
+request, cleanup when the pull request closes), pull request comment notifications (no
+commit status yet: #248), the App permission list (from
 [github-permissions.md](../integrations/github-permissions.md)) and a webhook registration
 checklist. Start with `examples/github/README.md`. Nothing there registers an App or webhook.
 

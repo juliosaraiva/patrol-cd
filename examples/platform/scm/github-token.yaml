@@ -1,5 +1,6 @@
 # GitHub with a (fine-grained) personal access token. Commit statuses work with tokens;
 # check runs do not (GitHub restricts them to Apps), so statusReporting uses "statuses".
+# statusReporting is validated but no component reads it yet (#235): nothing is reported.
 apiVersion: cd.patrol.example/v1alpha1
 kind: SCMProvider
 metadata:

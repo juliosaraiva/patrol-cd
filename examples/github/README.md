@@ -7,10 +7,10 @@ request.
 
 | File | What it does |
 |------|--------------|
-| `01-scmprovider.yaml` | `SCMProvider` for the GitHub App (API, webhook secret, check runs) and a `RepositoryCredential` that clones with App installation tokens. |
+| `01-scmprovider.yaml` | `SCMProvider` for the GitHub App (API, webhook secret) and a `RepositoryCredential` that clones with App installation tokens. Its `statusReporting` block is validated but not wired yet (#235). |
 | `02-appproject-previews.yaml` | `AppProject previews`: one repository, namespaces `guestbook-pr-*` only. |
 | `03-applicationset-previews.yaml` | Pull request generator with `providerRef`: one Application per labelled PR, namespace per PR, cleanup on close. |
-| `04-notifications.yaml` | Notification templates and triggers: commit status + upserted PR comment. Merge into `patrol-notifications-cm`; it only adds keys (the `github` service and `context` stay those of the platform ConfigMap). |
+| `04-notifications.yaml` | Notification templates and triggers: upserted PR comment. The commit status template is replaced by the comment template, so no status is posted yet (#248). Merge into `patrol-notifications-cm`; it only adds keys (the `github` service and `context` stay those of the platform ConfigMap). |
 
 Apply order: the platform settings (`examples/platform/settings`), then these files in
 numeric order. Every Secret contains `REPLACE_ME` placeholders: create the real Secrets out
@@ -31,13 +31,19 @@ GitHub: *Organization settings → Developer settings → GitHub Apps → New Gi
   | Metadata | Read-only | always |
   | Contents | Read-only | cloning, pull request head commits |
   | Pull requests | Read and write | pull request generator (read), PR comments (write) |
-  | Commit statuses | Read and write | `github.status` notifications |
-  | Checks | Read and write | `statusReporting.mode: checks` |
+  | Commit statuses | Read and write | `github.status` notifications (none is posted yet: #248) |
+
+  Checks is not needed: this example sends no `github.checkRun` notification, and the
+  SCMProvider's `statusReporting` reports nothing yet (#235). Once #235 wires it, its
+  `mode: checks` will need Checks: Read and write.
 
 - Subscribe to events: `Push`, `Pull request`.
 - Install the App on *Only select repositories* → `guestbook`. Note the App ID
-  (`appID` in the manifests) and generate a private key (`example-org-github-app`, key
-  `privateKey`; `github-privateKey` in `patrol-notifications-secret`).
+  (`appID` in the manifests) and the installation ID, and generate a private key
+  (`example-org-github-app`, key `privateKey`; `github-privateKey` in
+  `patrol-notifications-secret`).
+- Set `appID` and `installationID` of `service.github` in `patrol-notifications-cm` to this
+  App's values; the notifications are what report sync results to the pull request.
 
 ## 2. Webhook registration checklist
 
@@ -84,9 +90,11 @@ k -n patrol patch configmap patrol-notifications-cm --type merge \
    namespace `guestbook-pr-<number>`, head commit).
 2. Every push to the branch (`synchronize`) changes `head_sha` → the Application's
    `targetRevision` is updated and auto-sync deploys it.
-3. After each sync, `on-preview-deployed`/`on-preview-failed` post a commit status
-   (`patrol-cd/preview`) and update the single PR comment tagged `patrol-preview`; the
-   SCMProvider also reports a check run (`statusReporting`).
+3. Each trigger posts at most once per commit: `on-preview-deployed` when the sync
+   succeeded and the Application is Healthy, `on-preview-failed` when the sync failed. Both
+   update the single PR comment tagged `patrol-preview`. No commit status
+   (`patrol-cd/preview`) is posted yet (#248), and no check run is reported: the
+   SCMProvider's `statusReporting` is not wired yet (#235).
 4. Closing/merging the pull request (or removing the label) removes it from the generator
    output → the Application is deleted → the resources finalizer deletes the workload and
    the `Namespace` rendered by the chart.

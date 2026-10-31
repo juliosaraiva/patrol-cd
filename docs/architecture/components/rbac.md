@@ -26,7 +26,7 @@ no Kubernetes or CRD dependency, and it does not import `api/v1alpha1`.
 
 Out of scope: watching `patrol-rbac-cm` and AppProjects (the API server wires informers to
 this package), token verification and revocation (`internal/auth`), audit records
-(`internal/audit`), and HTTP error mapping (`internal/apiserver`).
+(`internal/apiserver/rest/audit.go`), and HTTP error mapping (`internal/apiserver`).
 
 ## Public API
 

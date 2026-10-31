@@ -5,9 +5,10 @@ registry, fake, conformance, GitHub). Decision record: ADR-0010.
 
 `pkg/scm` is the versioned contract (`ContractVersion = "v1"`) between Patrol components that
 talk to SCM platforms (ApplicationSet SCM Provider and Pull Request generators, webhook
-ingestion, notifications, repository credential resolution, hydrator commit identity) and
-the provider implementations. `pkg/scm/github` is the first-class GitHub provider
-(github.com, GitHub Enterprise Server, GitHub Enterprise Cloud with data residency). The
+ingestion, repository credential resolution) and the provider implementations. Commit
+statuses, check runs and the hydrator commit identity are part of the contract but have no
+caller yet (see "Adapting CRD types (callers)"). `pkg/scm/github` is the first-class GitHub
+provider (github.com, GitHub Enterprise Server, GitHub Enterprise Cloud with data residency). The
 packages do not import `api/v1alpha1`; callers adapt CRD types (see below).
 
 ## Responsibilities
@@ -103,8 +104,8 @@ installations; rate-limit mapping with `RetryAfter`.
 | `Type = "github"`, `New` (factory), `Register(*scm.Registry)`, `NewProvider(ctx, Config) (*Provider, error)` | Construction (no network I/O). |
 | `APIURLs(apiURL) (base, upload string, error)` | Same base-URL rules as go-github `WithEnterpriseURLs` (used upstream): `""`/`https://api.github.com` → github.com; a path ending in `/api/v3` is kept; hosts starting with `api.` (GHE.com data residency `https://api.<tenant>.ghe.com`, uploads host `uploads.<tenant>.ghe.com`) or containing `.api.` keep their path; anything else is a GHES root and gets `/api/v3/` (uploads `/api/uploads/`). Trailing slashes are tolerated; user info, query and fragment are rejected. |
 | `(*Provider)` capability methods | All contract capabilities. Declared capabilities depend on auth: anonymous = read capabilities + webhooks; token = + `commitStatuses`, `credentials`; App = + `checkRuns`, `installations`. Calling a method of an undeclared capability directly also returns `*UnsupportedError` without any request. |
-| `(*Provider).Client() *github.Client` | go-github v88 client with the same auth/pacing/retries/caps, for GitHub-only operations (deployments, PR comments for notifications). |
-| `(*Provider).BotIdentity(ctx)` | `<slug>[bot]` and `<id>+<slug>[bot]@users.noreply.github.com` (hydrator author). |
+| `(*Provider).Client() *github.Client` | go-github v88 client with the same auth/pacing/retries/caps, for GitHub-only operations. No caller yet (notifications use their own client). |
+| `(*Provider).BotIdentity(ctx)` | `<slug>[bot]` and `<id>+<slug>[bot]@users.noreply.github.com`. No caller: the hydrator takes its author from `commit.author.name`/`commit.author.email`. |
 | `WebhookVerifier{}` | Stateless verifier usable without credentials (webhook ingestion). |
 | `GitUsername = "x-access-token"`, header constants | Git over HTTPS user name; `X-GitHub-Event`, `X-GitHub-Delivery`, `X-Hub-Signature-256`. |
 
@@ -217,8 +218,11 @@ GitHub behavior:
 - **Webhook ingestion**: `webhook.github.secret` → `secret`; refresh matching uses
   `Event.Repository.HTMLURL` (git/app matching), `Event.Repository.APIURL` + owner/name (PR
   generators), `Revision`, `TouchedDefaultBranch`, `ChangedFiles`.
-- **Notifications**: commit statuses through `CommitStatusReporter`; check runs through
-  `CheckRunReporter` (App only); deployments and PR comments through `Provider.Client()`.
+- **Notifications**: not a caller. The notifications `github` service has its own GitHub
+  App client (`internal/notifications/services/github.go`). `CommitStatusReporter`,
+  `CheckRunReporter` (App only), `Provider.Client()`, `RevisionResolver` and
+  `BotIdentity` have no caller outside `pkg/scm` yet; `SCMProvider` `spec.statusReporting`
+  is not wired (#235).
 - **Repository credentials**: `CredentialSource.Token` gives `x-access-token` + installation
   token for Git over HTTPS; callers must not persist it.
 
@@ -324,7 +328,8 @@ GitHub behavior:
 - GitHub API metrics (ASET-129): the package provides the per-attempt hook
   (`Config.Observer`, with method, path, status, duration and parsed `X-RateLimit-*`
   values); the Prometheus collectors (`argocd_github_api_*`-equivalent names and the
-  ApplicationSet labels) belong to the ApplicationSet controller / `internal/metrics`.
+  ApplicationSet labels) belong to the ApplicationSet controller (`internal/appset`) and
+  are not implemented yet (#178).
 - Installation discovery uses the per-owner endpoints (organization, then user) instead of
   listing every installation; the repository endpoint (`/repos/{o}/{r}/installation`) is not
   used.

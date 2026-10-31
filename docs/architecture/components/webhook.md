@@ -1,9 +1,14 @@
 # Component: `internal/webhook`
 
-Status: implemented as a library with an HTTP handler; not yet mounted by `patrol-server`
-(`internal/apiserver` wires it). Parity areas: `docs/parity/areas/03-repositories-clusters-webhooks.md`
-(REPO-114..REPO-131) and `06-applicationset.md` (ASET-104..ASET-107). Threat model: T9
-(webhook spoofing), T10 (replay and flood).
+Status: implemented. `patrol-server` mounts the handler at `/api/webhook` and
+`/api/webhook/{provider...}` (`internal/server/server_api.go` builds it,
+`internal/server/server_routes.go` adds them as raw, unauthenticated routes;
+`internal/apiserver/services/webhooks` describes them in `api/openapi/openapi.json`); the
+ApplicationSet controller can serve the same handler on its optional `--webhook-addr`
+listener. The Bitbucket Cloud callback is not given repository credentials yet (#239).
+Parity areas: `docs/parity/areas/03-repositories-clusters-webhooks.md` (REPO-114..REPO-131)
+and `06-applicationset.md` (ASET-104..ASET-107). Threat model: T9 (webhook spoofing), T10
+(replay and flood).
 
 Webhook ingestion turns SCM and registry deliveries into Kubernetes-native refresh
 requests. It re-implements the behavior of Argo CD v3.5.5 `util/webhook` (API server
@@ -33,7 +38,7 @@ delays a refresh.
 Out of scope: parsing `patrol-cm`/`patrol-secret` (`internal/settings`), signature
 algorithms and payload parsing (`pkg/scm/<provider>`), generator evaluation
 (`internal/appset`, consumed through `GeneratorEvaluator`), consuming the annotations
-(controller, ApplicationSet controller), mounting and TLS (`internal/apiserver`).
+(controller, ApplicationSet controller), mounting and TLS (`internal/server`).
 
 ## Public API
 
@@ -83,6 +88,11 @@ algorithms and payload parsing (`pkg/scm/<provider>`), generator evaluation
 
 ### Wiring (API server)
 
+The shipped wiring is `internal/server/server_api.go` (patrol-server) and
+`internal/server/appset.go` (the ApplicationSet controller listener). Neither sets
+`BitbucketCloud` yet (#239), so the Bitbucket Cloud callback runs anonymously; the snippet
+shows the intended configuration.
+
 ```go
 h, err := webhook.NewHandler(webhook.Config{
     Namespace:             ns,
@@ -94,7 +104,7 @@ h, err := webhook.NewHandler(webhook.Config{
     Workers:               params.WebhookParallelismLimit,
     RefreshWorkers:        params.WebhookRefreshWorkers,
     GeneratorEvaluator:    appsetEvaluator,          // internal/appset adapter, optional
-    BitbucketCloud:        webhook.BitbucketCloudOptions{Credentials: repoCredsByURL},
+    BitbucketCloud:        webhook.BitbucketCloudOptions{Credentials: repoCredsByURL}, // not wired yet (#239)
     Registerer:            metricsRegistry,
     Logger:                logger,
 })
@@ -290,7 +300,9 @@ covered by the UUID check, it must be one of `BitbucketCloudOptions.AllowedAPIUR
 → basic auth; otherwise the bearer token (empty: anonymous). The diffstat
 (`<before>..<after>`, renames, every page, old and new paths) replaces the changed-file
 list, and the main branch lookup sets `TouchedDefaultBranch`. Any failure keeps the
-conservative defaults (every path changed, default branch touched). 10s timeout.
+conservative defaults (every path changed, default branch touched). 10s timeout. No
+shipped handler sets `Credentials` yet (#239), so the callback is anonymous and works for
+public repositories only.
 
 ### Metrics
 
@@ -382,6 +394,8 @@ ASET-104..ASET-107. Status: `docs/parity/status/webhook.yaml`.
 1. **One endpoint for Applications and ApplicationSets.** Upstream serves the ApplicationSet
    webhook from the ApplicationSet controller (`:7000/api/webhook`). Patrol's
    `patrol-server /api/webhook` refreshes both, so one SCM webhook suffices (ASET-104).
+   The ApplicationSet controller serves the same handler only when `--webhook-addr` is set
+   (chart `appsetController.webhook.enabled`, off by default).
 2. **ApplicationSet events from every provider.** Upstream's ApplicationSet webhook handles
    GitHub, GitLab and Azure DevOps only; Patrol also refreshes Git generators on Gogs,
    Gitea, Bitbucket Cloud and Bitbucket Server pushes, GitLab tag pushes, and Pull Request
@@ -413,17 +427,24 @@ ASET-104..ASET-107. Status: `docs/parity/status/webhook.yaml`.
     merge patch (and can downgrade a hard refresh requested concurrently); Patrol includes
     the `resourceVersion` read and retries real conflicts. Retries also cover 429 and
     server timeouts.
-12. Matrix evaluation needs `internal/appset` to provide the `GeneratorEvaluator`; until it
-    is wired, templated second children match any value (over-approximation).
+12. Matrix evaluation uses the `GeneratorEvaluator` of `internal/appset`, which both
+    `patrol-server` and the ApplicationSet controller's listener pass in; a handler built
+    without one matches templated second children with any value (over-approximation).
 13. **Payload limit clamped to 25 MiB.** Upstream applies `webhook.maxPayloadSizeMB`
     (default 50 MB) as is. Every `pkg/scm` verifier rejects bodies over 25 MiB (GitHub's
     own delivery cap), so Patrol clamps the setting: the default and any value above 25
     behave as 25 MiB, and the 400 body states the effective limit (`under 25 MB`, upstream
-    `under 50 MB`). Values up to 25 behave as upstream. GHCR uses the same limit.
+    `under 50 MB`). Values up to 25 behave as upstream. GHCR uses the same limit. A body
+    whose `Content-Length` exceeds 64 MiB gets 413 from `patrol-server`'s global body cap
+    before the handler runs; a chunked one reaches the handler and gets its 400.
 14. **Unsigned deliveries when some secret is configured.** Upstream accepts unsigned
     deliveries for each provider without a secret; Patrol rejects them once any webhook
     secret is configured (see SEC-WH-3). `AllowUnsignedPerProvider` restores upstream.
 15. **In-flight body budget** (`503 Webhook server is busy`) is an addition (T10).
+16. **Bitbucket Cloud callback without credentials.** Upstream looks up the repository's
+    credentials for the diffstat and main-branch calls; no shipped Patrol handler passes
+    `BitbucketCloudOptions.Credentials` yet (#239). For a private repository the anonymous
+    call fails and every matching Application is refreshed (REPO-119, `in-progress`).
 
 ## Verification
 

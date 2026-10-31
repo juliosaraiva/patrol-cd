@@ -21,6 +21,8 @@ spec:
     secretRef:
       name: github-app-webhook
       key: secret
+  # statusReporting and rateLimit are validated but no component reads them yet (#235,
+  # #236): no check run is reported, and the API client paces at its defaults.
   statusReporting:
     enabled: true
     # Check runs require GitHub App authentication.
