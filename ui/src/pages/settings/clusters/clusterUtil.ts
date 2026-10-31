@@ -34,6 +34,17 @@ export function isInCluster(cluster: RegisteredCluster): boolean {
   return cluster.inCluster === true || cluster.spec.server === IN_CLUSTER_SERVER;
 }
 
+/** No Cluster object registers it: the server stamps its state on every read and the controller reports nothing for it. */
+export function isImplicit(cluster: RegisteredCluster): boolean {
+  return cluster.inCluster === true;
+}
+
+/** What stands for the last cache sync of a cluster that has none recorded (a failed sync clears it). */
+export function noCacheSyncText(cluster: RegisteredCluster): string {
+  if (isImplicit(cluster)) return 'Not reported';
+  return cluster.status?.connectionState?.status === 'Failed' ? 'Last sync failed' : 'Not synced yet';
+}
+
 export function namespacesSummary(cluster: RegisteredCluster): string {
   const ns = cluster.spec.namespaces ?? [];
   if (ns.length === 0) return 'All namespaces';

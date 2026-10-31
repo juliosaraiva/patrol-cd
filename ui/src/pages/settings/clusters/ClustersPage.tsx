@@ -20,7 +20,7 @@ import { useDocumentTitle } from '../../../lib/useDocumentTitle';
 import { ErrorBanner } from '../../../shell/errors';
 import { LoadingBlock } from '../common/feedback';
 import styles from '../common/common.module.css';
-import { clusterPath, namespacesSummary } from './clusterUtil';
+import { clusterPath, isImplicit, namespacesSummary, noCacheSyncText } from './clusterUtil';
 
 function AddClusterDialog({ onClose }: { onClose: () => void }) {
   const settings = useSettings();
@@ -121,7 +121,7 @@ export function Component() {
       header: 'Applications',
       width: '110px',
       align: 'end',
-      cell: (c) => c.status?.info?.applicationsCount ?? 0,
+      cell: (c) => (isImplicit(c) ? '—' : (c.status?.info?.applicationsCount ?? 0)),
       sortValue: (c) => c.status?.info?.applicationsCount ?? 0,
     },
     {
@@ -130,7 +130,7 @@ export function Component() {
       width: '170px',
       cell: (c) => {
         const cache = c.status?.info?.cacheInfo;
-        if (!cache?.lastCacheSyncTime) return <span className={styles.small}>Not synced</span>;
+        if (!cache?.lastCacheSyncTime) return <span className={styles.small}>{noCacheSyncText(c)}</span>;
         return (
           <span>
             {cache.resourcesCount ?? 0} resources · <Timestamp value={cache.lastCacheSyncTime} />

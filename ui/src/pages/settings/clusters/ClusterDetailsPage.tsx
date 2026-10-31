@@ -29,7 +29,7 @@ import { mapToRows, nonEmpty, RowListEditor, StringListEditor } from '../common/
 import { ActionError, ConfirmDialog, ErrorSummary, LoadingBlock, useFormErrors, type FieldError } from '../common/feedback';
 import styles from '../common/common.module.css';
 import { validateLabelKey, validateLabelValue, validateNamespace } from '../common/validation';
-import { changedClusterFields, clusterUpdateInput, credentialsType, isInCluster, namespacesSummary, type ClusterEditState } from './clusterUtil';
+import { changedClusterFields, clusterUpdateInput, credentialsType, isImplicit, isInCluster, namespacesSummary, noCacheSyncText, type ClusterEditState } from './clusterUtil';
 
 /** Upstream polls cluster details every second; every 5 s keeps status fresh at lower cost. */
 const POLL_MS = 5000;
@@ -223,9 +223,7 @@ export function Component() {
   const apps = info?.applicationsCount ?? 0;
   const ref = { server: data.spec.server };
   const inCluster = isInCluster(data);
-  // No object registers it: the server stamps its state on every read and the controller reports
-  // nothing for it. An object at the same server has neither limit.
-  const implicit = data.inCluster === true;
+  const implicit = isImplicit(data);
 
   return (
     <>
@@ -297,21 +295,13 @@ export function Component() {
           <h2 id="cluster-cache">Applications and cache</h2>
           <KeyValueList
             items={[
-              { key: 'apps', label: 'Applications', value: String(apps) },
-              { key: 'apis', label: 'API groups and kinds cached', value: String(info?.cacheInfo?.apisCount ?? 0) },
-              { key: 'resources', label: 'Resources cached', value: String(info?.cacheInfo?.resourcesCount ?? 0) },
+              { key: 'apps', label: 'Applications', value: implicit ? undefined : String(apps) },
+              { key: 'apis', label: 'API groups and kinds cached', value: implicit ? undefined : String(info?.cacheInfo?.apisCount ?? 0) },
+              { key: 'resources', label: 'Resources cached', value: implicit ? undefined : String(info?.cacheInfo?.resourcesCount ?? 0) },
               {
                 key: 'sync',
                 label: 'Last cache sync',
-                value: info?.cacheInfo?.lastCacheSyncTime ? (
-                  <Timestamp value={info.cacheInfo.lastCacheSyncTime} />
-                ) : implicit ? (
-                  'Not reported'
-                ) : state?.status === 'Failed' ? (
-                  'Last sync failed'
-                ) : (
-                  'Not synced yet'
-                ),
+                value: info?.cacheInfo?.lastCacheSyncTime ? <Timestamp value={info.cacheInfo.lastCacheSyncTime} /> : noCacheSyncText(data),
               },
             ]}
           />

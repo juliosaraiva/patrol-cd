@@ -217,8 +217,9 @@ Impersonation: with `application.sync.impersonation.enabled`, `project.SelectSer
 picks the destination service account; the engine's REST config impersonates it
 (`clusters.ImpersonatingConfig`). Enforced and unmatched → Error "failed to find a matching
 service account to impersonate: …". Engines are cached per (server, user, settings
-fingerprint, Cluster resourceVersion) for 10 minutes (bounded to 1024), dropped by `Forget` on
-cluster credential or spec changes.
+fingerprint, Cluster UID and generation) for 10 minutes (bounded to 1024), dropped by `Forget` on
+cluster credential or spec changes. The key has no resourceVersion: the cluster-info updater
+writes the status on its own schedule, and a REST config is not built from it.
 
 Restart recovery: everything needed to continue is in `Operation.status` (plan with resolved
 revisions, per-task results, progress, retry state). A new controller re-plans from the
@@ -242,10 +243,10 @@ therefore has one writer; the synthetic in-cluster cluster has no object and get
   `CacheInfoWriteInterval` (1 min). Anything else is written at once. `attemptedAt` moves when the
   connection status or message changes: it says since when that state holds, not when it was last
   checked. The implicit in-cluster cluster has no object and the registry stamps its state on every
-  read, so the details page shows no such time for it, and "Not reported" for its last cache sync.
-- **Reactions:** status writes reach no comparison. The Application reconciler's Cluster watch
-  passes a new UID and changes of generation, labels and annotations only, as the ApplicationSet
-  handler does, and the cluster registry sends no event for them.
+  read, so the UI shows no such time for it.
+- **Reactions:** status writes reach no comparison and no sync engine. The Application reconciler's
+  Cluster watch passes a new UID and changes of generation, labels and annotations only, as the
+  ApplicationSet handler does, and the cluster registry sends no event for them.
 - **Application count:** Applications of the namespaces this controller serves whose project
   exists and permits their namespace. A failed list ends the round without writing, because a count
   of zero would be a guess.
@@ -361,8 +362,8 @@ different-by-design.
 - **Delete hooks of an excluded kind** are created and awaited (health read from the object),
   but the `/cleanup` stage only sees hooks in the live-state cache, so they are left behind.
 - **Implicit in-cluster cluster:** no object, so the updater skips it. A default install shows no
-  Application count, API versions or cache information for its main destination, the CLI and UI
-  read 0 and "Not synced" there, and `GET manifests` renders without its API versions. Upstream
+  Application count, API versions or cache information for its main destination, the CLI reads 0
+  there, the UI "Not reported", and `GET manifests` renders without its API versions. Upstream
   walks the local cluster too. Registering a Cluster object for that server is the workaround
   (#246).
 - **Cluster information does not expire.** Upstream's Redis entry lapses after 10 minutes. Here

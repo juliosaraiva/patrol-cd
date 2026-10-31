@@ -8,7 +8,7 @@ import { clusterFixture, clustersFixture } from '../../../mocks/fixtures/setting
 import { settingsStore } from '../../../mocks/handlers/settings';
 import { server } from '../../../mocks/server';
 import { emptyGet, expectToast, findDialog, renderSettings, tableRows } from '../testUtils';
-import { changedClusterFields, clusterPath } from './clusterUtil';
+import { changedClusterFields, clusterPath, IN_CLUSTER_SERVER } from './clusterUtil';
 
 const PROD = 'https://prod-eu.k8s.example.test';
 
@@ -24,10 +24,23 @@ describe('Settings → Clusters list', () => {
     expect(prod).toHaveTextContent('dial tcp 10.0.0.12:443: i/o timeout');
     expect(prod).toHaveTextContent('finance');
     expect(prod).toHaveTextContent('payments, search');
+    expect(prod).toHaveTextContent('Last sync failed');
     expect(prod?.querySelector('[data-status-family="connection"][data-status="Failed"]')).not.toBeNull();
     const local = rows.find((r) => r.textContent?.includes('in-cluster'));
     expect(local).toHaveTextContent('412 resources');
     expect(local).toHaveTextContent('All namespaces');
+  });
+
+  it('claims no counts or cache sync for the implicit cluster', async () => {
+    const implicit = { ...clusterFixture('in-cluster', { server: IN_CLUSTER_SERVER }, { connectionState: { status: 'Failed' } }), inCluster: true };
+    await renderSettings('/settings/clusters', 'Clusters', () => {
+      settingsStore.clusters = [implicit];
+    });
+    await screen.findByRole('table', { name: 'Clusters' });
+    const [row] = tableRows('Clusters');
+    const applications = screen.getAllByRole('columnheader').findIndex((h) => h.textContent === 'Applications');
+    expect(row?.children[applications]).toHaveTextContent('—');
+    expect(row).toHaveTextContent('Not reported');
   });
 
   it('opens details with the keyboard (Enter on a row) using the encoded server URL', async () => {
@@ -82,17 +95,18 @@ describe('Settings → Cluster details', () => {
   });
 
   it.each([
-    { name: 'the implicit cluster, stamped on every read', inCluster: true, status: 'Failed', since: false, sync: 'Not reported' },
-    { name: 'an object at the same server', inCluster: undefined, status: 'Failed', since: true, sync: 'Last sync failed' },
-    { name: 'an object that has not failed', inCluster: undefined, status: 'Unknown', since: true, sync: 'Not synced yet' },
-  ] as const)('claims only what it knows about $name', async ({ inCluster, status, since, sync }) => {
-    const local = 'https://kubernetes.default.svc';
-    await renderSettings(clusterPath(local), 'in-cluster', () => {
+    { name: 'the implicit cluster, stamped on every read', inCluster: true, status: 'Failed', reported: false, sync: 'Not reported' },
+    { name: 'an object at the same server', inCluster: undefined, status: 'Failed', reported: true, sync: 'Last sync failed' },
+    { name: 'an object that has not failed', inCluster: undefined, status: 'Unknown', reported: true, sync: 'Not synced yet' },
+  ] as const)('claims only what it knows about $name', async ({ inCluster, status, reported, sync }) => {
+    await renderSettings(clusterPath(IN_CLUSTER_SERVER), 'in-cluster', () => {
       const connectionState = { status, attemptedAt: '2026-10-15T08:00:00Z' };
-      settingsStore.clusters = [{ ...clusterFixture('in-cluster', { server: local }, { connectionState }), inCluster }];
+      settingsStore.clusters = [{ ...clusterFixture('in-cluster', { server: IN_CLUSTER_SERVER }, { connectionState }), inCluster }];
     });
-    const value = (label: string) => screen.getByText(label).nextElementSibling;
-    expect(value('State since')?.textContent !== '—').toBe(since);
+    const value = (label: string) => screen.getAllByText(label).find((e) => e.tagName === 'DT')?.nextElementSibling;
+    for (const label of ['State since', 'Applications', 'API groups and kinds cached', 'Resources cached']) {
+      expect(value(label)?.textContent !== '—', label).toBe(reported);
+    }
     expect(value('Last cache sync')).toHaveTextContent(sync);
   });
 
