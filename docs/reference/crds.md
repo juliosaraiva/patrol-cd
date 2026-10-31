@@ -164,8 +164,10 @@ constants.
   `awsCodeCommit`, `fake`), `apiURL`, `webURL`, `insecure`, `caSecretRef`, `auth` (at most one of
   `githubApp`, `tokenSecretRef`, `basicAuthSecretRef`), `webhook.secretRef`, `statusReporting`
   (`mode` `statuses` default or `checks`, which requires `type: github` with `auth.githubApp`;
-  `contextPrefix` default `patrol-cd`), `rateLimit`.
+  `contextPrefix` default `patrol-cd`), `rateLimit`. `statusReporting` and `rateLimit` are
+  validated but no component reads them yet (#235, #236).
 - Status: `capabilities`, `conditions` (`Ready`, `ConnectionFailed`), `rateLimit`, `lastCheckedAt`.
+  No component writes the status yet (#236).
 
 ## Annotation and label mapping
 

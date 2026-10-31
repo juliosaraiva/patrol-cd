@@ -6,8 +6,8 @@
 #   producing it, the ApplicationSet deletes the Application, and the resources finalizer
 #   deletes its resources including the namespace,
 # - sync results are reported to the pull request by the notifications in
-#   04-notifications.yaml (subscription annotations below) and as check runs by the
-#   SCMProvider (statusReporting).
+#   04-notifications.yaml (subscription annotations below); the SCMProvider's
+#   statusReporting reports nothing yet (#235).
 # The webhook (README.md) refreshes the generator immediately; requeueAfterSeconds is the
 # polling fallback.
 apiVersion: cd.patrol.example/v1alpha1
